@@ -17,7 +17,7 @@ An empty project that builds, lints, tests and runs in CI, with the package boun
 - Playwright installed, with one smoke test that loads the placeholder page
 - GitHub Actions workflow that runs lint, unit tests, build and the smoke test on every pull request
 - Scripts `dev`, `test`, `lint`, `e2e` and `build` at the root, matching `CLAUDE.md`
-- Node version pinned in `.nvmrc` and `package.json` engines
+- Node version pinned in `.nvmrc`, `.node-version` and `package.json` engines
 
 ## Out of scope
 
