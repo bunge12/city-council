@@ -1,6 +1,7 @@
-import { fnv1a64, generateTerrain, hashTerrain, simInfo, type CommandResult } from "@city-council/sim";
+import { fnv1a64, generateTerrain, hashTerrain, mapSize, simInfo, type CommandResult } from "@city-council/sim";
 import { SimMirror } from "./protocol/mirror";
 import { createWorkerTransport } from "./protocol/transport";
+import { createView, wantsWebGL, type View } from "./render/view";
 
 /** Single player has one player. Multiplayer assigns ids on join. */
 const LOCAL_PLAYER_ID = "local";
@@ -41,6 +42,67 @@ async function sendCommand(type: string, payload: unknown = {}): Promise<Command
   return result;
 }
 
+// The renderer. Terrain is derived from the seed, so the client rebuilds it
+// from the mirror's copy of state and draws it. Nothing here writes state.
+const canvas = document.getElementById("view");
+if (!(canvas instanceof HTMLCanvasElement)) throw new Error("#view canvas is missing from index.html");
+const backendEl = field("render-backend");
+const frameEl = field("render-frame");
+const drawsEl = field("render-draws");
+
+/** What the page reports once the map is on screen. */
+interface RenderStatus {
+  backend: View["backend"];
+  seed: number;
+  terrainMs: number;
+  buildMs: number;
+  /** Milliseconds from navigation start to the first frame with terrain. */
+  readyMs: number;
+}
+
+let status: RenderStatus | null = null;
+
+const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) => {
+  backendEl.textContent = view.backend === "webgpu" ? "WebGPU" : "WebGL 2";
+  let shownSeed: number | null = null;
+  let lastReadout = 0;
+  view.onFrame((stats) => {
+    if (stats.frameMs === 0 || performance.now() - lastReadout < 250) return;
+    lastReadout = performance.now();
+    frameEl.textContent = `${stats.frameMs.toFixed(1)} ms (${stats.fps.toFixed(0)} fps)`;
+    drawsEl.textContent = `${stats.drawCalls}, ${(stats.triangles / 1000).toFixed(0)}k triangles`;
+  });
+  const show = () => {
+    const state = mirror.state;
+    if (!state || state.seed === shownSeed) return;
+    shownSeed = state.seed;
+    const t0 = performance.now();
+    const terrain = generateTerrain(state.seed);
+    const t1 = performance.now();
+    view.showTerrain(terrain);
+    const t2 = performance.now();
+    // A view of the whole map from the south, until camera controls land (issue 07).
+    const size = mapSize(terrain);
+    view.setCamera([size / 2, size * 0.7, size * 1.32], [size / 2, 0, size * 0.47]);
+    requestAnimationFrame(() => {
+      status = {
+        backend: view.backend,
+        seed: state.seed,
+        terrainMs: t1 - t0,
+        buildMs: t2 - t1,
+        readyMs: performance.now(),
+      };
+      document.body.dataset["renderReady"] = "true";
+    });
+  };
+  mirror.subscribe(show);
+  show();
+  return view;
+});
+viewReady.catch((error: unknown) => {
+  backendEl.textContent = `failed: ${String(error)}`;
+});
+
 /** What a terrain check reports. */
 interface TerrainCheck {
   heightsHash: string;
@@ -73,7 +135,13 @@ function terrainCheck(seed: number): TerrainCheck {
 // the mirror and sends commands, the same as any UI would.
 declare global {
   interface Window {
-    cityCouncil: { mirror: SimMirror; sendCommand: typeof sendCommand; terrainCheck: typeof terrainCheck };
+    cityCouncil: {
+      mirror: SimMirror;
+      sendCommand: typeof sendCommand;
+      terrainCheck: typeof terrainCheck;
+      view: Promise<View>;
+      renderStatus: () => RenderStatus | null;
+    };
   }
 }
-window.cityCouncil = { mirror, sendCommand, terrainCheck };
+window.cityCouncil = { mirror, sendCommand, terrainCheck, view: viewReady, renderStatus: () => status };

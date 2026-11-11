@@ -6,8 +6,10 @@ declare const window: {
   cityCouncil: {
     sendCommand(type: string, payload?: unknown): Promise<unknown>;
     mirror: { state: { log: unknown[]; rng: unknown } | null };
+    view: Promise<{ renderer: { setAnimationLoop(callback: null): void } }>;
   };
 };
+declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 async function tick(page: Page): Promise<number> {
   return Number(await page.locator("#sim-tick").textContent());
@@ -54,6 +56,12 @@ test("a NoOp round-trips to a commandResult and lands in the log", async ({ page
 });
 
 test("pause stops the tick and 4x runs four times as fast as 1x", async ({ page }) => {
+  // This measures the worker's tick rate through the page's readout. CI has
+  // no GPU, and software WebGL blocks the main thread for about 600 ms each
+  // frame it presents, which delays the readout and skews the rate. Let the
+  // map finish drawing, then stop the render loop so the page only relays ticks.
+  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 15_000 });
+  await page.evaluate(async () => (await window.cityCouncil.view).renderer.setAnimationLoop(null));
   await setSpeed(page, 0);
   const paused = await tick(page);
   await page.waitForTimeout(1000);
