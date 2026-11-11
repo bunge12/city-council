@@ -1,9 +1,7 @@
-// Value noise on an integer lattice. Lattice values come from an integer hash,
-// and everything after that is add, subtract, multiply, divide and
+// Gradient noise on an integer lattice. Gradients are picked by an integer
+// hash, and everything after that is add, subtract, multiply, divide and
 // Math.floor, which IEEE 754 rounds the same way in every engine
 // (CLAUDE.md rule 6). Lint bans the other Math functions in this folder.
-
-const TWO_POW_32 = 4294967296;
 
 /** Mixes a 32-bit seed with a salt into a new 32-bit seed. */
 export function mixSeed(seed: number, salt: number): number {
@@ -21,8 +19,15 @@ export function hash2(ix: number, iz: number, seed: number): number {
   return (h ^ (h >>> 16)) >>> 0;
 }
 
-function lattice(ix: number, iz: number, seed: number): number {
-  return hash2(ix, iz, seed) / TWO_POW_32;
+const DIAGONAL = Math.sqrt(0.5);
+/** Eight unit gradients, picked per lattice point by its hash. */
+const GRAD_X = [1, DIAGONAL, 0, -DIAGONAL, -1, -DIAGONAL, 0, DIAGONAL];
+const GRAD_Z = [0, DIAGONAL, 1, DIAGONAL, 0, -DIAGONAL, -1, -DIAGONAL];
+
+/** Dot product of a lattice point's gradient with the offset (dx, dz) from it. */
+function corner(ix: number, iz: number, seed: number, dx: number, dz: number): number {
+  const g = hash2(ix, iz, seed) & 7;
+  return (GRAD_X[g] ?? 0) * dx + (GRAD_Z[g] ?? 0) * dz;
 }
 
 /** Smoothstep, 3t^2 - 2t^3. */
@@ -30,35 +35,61 @@ export function fade(t: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** Value noise in [0, 1) at a point given in lattice units. */
-export function valueNoise(x: number, z: number, seed: number): number {
+/**
+ * Quintic fade, 6t^5 - 15t^4 + 10t^3. Its second derivative is continuous
+ * too, so slopes and hillshading show no creases along lattice lines.
+ */
+function fade5(t: number): number {
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+// Each octave turns the lattice by the angle of a 3-4-5 triangle (about 37
+// degrees) and shifts it, so the octaves' lattice lines never line up into
+// visible seams. It is plain multiply and add, so every engine agrees.
+const ROT_COS = 0.8;
+const ROT_SIN = 0.6;
+const OCTAVE_SHIFT = 37.29;
+
+/**
+ * Gradient (Perlin) noise at a point given in lattice units, shifted and
+ * scaled into [0, 1] with 0.5 as its mean. Unlike value noise its slope is
+ * not zero across lattice lines, so hills show no straight seams.
+ */
+export function gradientNoise(x: number, z: number, seed: number): number {
   const ix = Math.floor(x);
   const iz = Math.floor(z);
-  const fx = fade(x - ix);
-  const fz = fade(z - iz);
-  const a = lattice(ix, iz, seed);
-  const b = lattice(ix + 1, iz, seed);
-  const c = lattice(ix, iz + 1, seed);
-  const d = lattice(ix + 1, iz + 1, seed);
+  const dx = x - ix;
+  const dz = z - iz;
+  const fx = fade5(dx);
+  const fz = fade5(dz);
+  const a = corner(ix, iz, seed, dx, dz);
+  const b = corner(ix + 1, iz, seed, dx - 1, dz);
+  const c = corner(ix, iz + 1, seed, dx, dz - 1);
+  const d = corner(ix + 1, iz + 1, seed, dx - 1, dz - 1);
   const top = a + (b - a) * fx;
   const bottom = c + (d - c) * fx;
-  return top + (bottom - top) * fz;
+  // With unit gradients the raw value lies within +-sqrt(1/2).
+  return 0.5 + (top + (bottom - top) * fz) * DIAGONAL;
 }
 
 /**
- * Fractal sum of `octaves` layers of value noise, normalised to [0, 1).
- * Each layer doubles the frequency and multiplies the amplitude by `gain`.
+ * Fractal sum of `octaves` layers of gradient noise, normalised to [0, 1].
+ * Each layer doubles the frequency, turns and shifts the lattice, and
+ * multiplies the amplitude by `gain`.
  */
 export function fbm(x: number, z: number, seed: number, octaves: number, gain: number): number {
   let sum = 0;
   let norm = 0;
   let amp = 1;
-  let freq = 1;
+  let px = x;
+  let pz = z;
   for (let o = 0; o < octaves; o++) {
-    sum += amp * valueNoise(x * freq, z * freq, mixSeed(seed, o + 1));
+    sum += amp * gradientNoise(px, pz, mixSeed(seed, o + 1));
     norm += amp;
     amp *= gain;
-    freq *= 2;
+    const nx = 2 * (px * ROT_COS - pz * ROT_SIN) + OCTAVE_SHIFT;
+    pz = 2 * (px * ROT_SIN + pz * ROT_COS) + OCTAVE_SHIFT;
+    px = nx;
   }
   return sum / norm;
 }
@@ -71,15 +102,18 @@ export function ridged(x: number, z: number, seed: number, octaves: number, gain
   let sum = 0;
   let norm = 0;
   let amp = 1;
-  let freq = 1;
+  let px = x;
+  let pz = z;
   for (let o = 0; o < octaves; o++) {
-    const n = valueNoise(x * freq, z * freq, mixSeed(seed, o + 101));
+    const n = gradientNoise(px, pz, mixSeed(seed, o + 101));
     const fold = 2 * n - 1;
     const r = 1 - (fold < 0 ? -fold : fold);
     sum += amp * r * r;
     norm += amp;
     amp *= gain;
-    freq *= 2;
+    const nx = 2 * (px * ROT_COS - pz * ROT_SIN) + OCTAVE_SHIFT;
+    pz = 2 * (px * ROT_SIN + pz * ROT_COS) + OCTAVE_SHIFT;
+    px = nx;
   }
   return sum / norm;
 }

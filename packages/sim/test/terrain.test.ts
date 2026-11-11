@@ -87,10 +87,10 @@ describe("generateTerrain", () => {
     // A balance that demands more flat land than the first pass gives.
     const strict: typeof TERRAIN_BALANCE = JSON.parse(JSON.stringify(TERRAIN_BALANCE));
     strict.buildable.minShare = 0.6;
-    const first = terrain(7);
+    const first = terrain(20261111);
     expect(first.attempts).toBe(1);
     expect(first.buildableShare).toBeLessThan(0.6);
-    const t = generateTerrain(7, strict);
+    const t = generateTerrain(20261111, strict);
     expect(t.attempts).toBeGreaterThan(1);
     expect(t.buildableShare).toBeGreaterThanOrEqual(0.6);
   });
