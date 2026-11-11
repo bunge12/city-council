@@ -32,3 +32,13 @@ export type {
   SystemTiming,
   ToSimMessage,
 } from "./protocol";
+export {
+  TERRAIN_BALANCE,
+  generateTerrain,
+  hashTerrain,
+  heightAt,
+  isWaterAt,
+  mapSize,
+  slopeAt,
+} from "./terrain/terrain";
+export type { Terrain, TerrainBalance } from "./terrain/terrain";
