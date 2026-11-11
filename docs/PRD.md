@@ -764,6 +764,8 @@ What gets drawn depends on how far out the camera is. Three bands, with a short 
 | District | About 500 m to 3 km | Plain boxes, merged per chunk | Trains and trams only. No cars. | Road surfaces. Traffic shows as colour on the road. |
 | City | Above about 3 km | Flat blocks coloured by zone and density | None | Arterials, highways and rail lines only, as coloured lines |
 
+Camera height is measured from the ground directly below the camera. The thresholds live in `packages/client/src/camera/config.ts`.
+
 Cars vanish early on purpose. From district height a car is smaller than a pixel, and the traffic colour on the road tells the player more than dots would.
 
 The bands also cap the work. At street level only a few chunks are in view, so full detail is affordable. At city level everything is in view, but each chunk is one cheap mesh.

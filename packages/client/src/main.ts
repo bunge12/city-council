@@ -1,6 +1,10 @@
-import { fnv1a64, generateTerrain, hashTerrain, mapSize, simInfo, type CommandResult } from "@city-council/sim";
+import { fnv1a64, generateTerrain, hashTerrain, mapSize, simInfo, type CommandResult, type Terrain } from "@city-council/sim";
+import { Vector3 } from "three/webgpu";
 import { SimMirror } from "./protocol/mirror";
 import { createWorkerTransport } from "./protocol/transport";
+import { createCameraControls, type CameraControls } from "./camera/controls";
+import type { GroundHit } from "./camera/pick";
+import { createCameraRig, type CameraRig } from "./camera/rig";
 import { createView, wantsWebGL, type View } from "./render/view";
 
 /** Single player has one player. Multiplayer assigns ids on join. */
@@ -49,6 +53,20 @@ if (!(canvas instanceof HTMLCanvasElement)) throw new Error("#view canvas is mis
 const backendEl = field("render-backend");
 const frameEl = field("render-frame");
 const drawsEl = field("render-draws");
+const camPositionEl = field("cam-position");
+const camHeightEl = field("cam-height");
+const camBandEl = field("cam-band");
+const cursorEl = field("cursor-world");
+const pickEl = field("pick-world");
+
+/** Sets an element's text only when it changes, so per-frame readouts stay cheap. */
+function show(el: HTMLElement, text: string): void {
+  if (el.textContent !== text) el.textContent = text;
+}
+
+function metres(hit: { x: number; y: number; z: number } | null): string {
+  return hit ? `${hit.x.toFixed(1)}, ${hit.y.toFixed(1)}, ${hit.z.toFixed(1)} m` : "off the map";
+}
 
 /** What the page reports once the map is on screen. */
 interface RenderStatus {
@@ -62,6 +80,23 @@ interface RenderStatus {
 
 let status: RenderStatus | null = null;
 
+/** The camera and what it needs, once the first map is on screen. */
+interface CameraHooks {
+  rig: CameraRig;
+  controls: CameraControls;
+  /** The map the camera is over. Read only. */
+  terrain: Terrain;
+  /** Last ground point clicked, or null for a click off the map. */
+  lastPick: GroundHit | null | undefined;
+  /** Screen point, in CSS pixels, where world point (x, y, z) is drawn. */
+  project(x: number, y: number, z: number): { x: number; y: number };
+}
+
+let resolveCamera: (hooks: CameraHooks) => void = () => undefined;
+const cameraReady = new Promise<CameraHooks>((resolve) => {
+  resolveCamera = resolve;
+});
+
 const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) => {
   backendEl.textContent = view.backend === "webgpu" ? "WebGPU" : "WebGL 2";
   let shownSeed: number | null = null;
@@ -72,7 +107,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     frameEl.textContent = `${stats.frameMs.toFixed(1)} ms (${stats.fps.toFixed(0)} fps)`;
     drawsEl.textContent = `${stats.drawCalls}, ${(stats.triangles / 1000).toFixed(0)}k triangles`;
   });
-  const show = () => {
+  let hooks: CameraHooks | null = null;
+  const showMap = () => {
     const state = mirror.state;
     if (!state || state.seed === shownSeed) return;
     shownSeed = state.seed;
@@ -81,9 +117,16 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     const t1 = performance.now();
     view.showTerrain(terrain);
     const t2 = performance.now();
-    // A view of the whole map from the south, until camera controls land (issue 07).
+    if (hooks) {
+      hooks.terrain = terrain;
+      hooks.rig.setTerrain(terrain);
+    } else {
+      hooks = startCamera(view, canvas, terrain);
+      resolveCamera(hooks);
+    }
+    // Start on a view of the whole map from the south.
     const size = mapSize(terrain);
-    view.setCamera([size / 2, size * 0.7, size * 1.32], [size / 2, 0, size * 0.47]);
+    hooks.rig.setPose([size / 2, size * 0.7, size * 1.32], [size / 2, 0, size * 0.47]);
     requestAnimationFrame(() => {
       status = {
         backend: view.backend,
@@ -95,13 +138,46 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
       document.body.dataset["renderReady"] = "true";
     });
   };
-  mirror.subscribe(show);
-  show();
+  mirror.subscribe(showMap);
+  showMap();
   return view;
 });
 viewReady.catch((error: unknown) => {
   backendEl.textContent = `failed: ${String(error)}`;
 });
+
+/** Builds the camera rig and its input over `terrain`, and the readouts that follow it. */
+function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): CameraHooks {
+  const rig = createCameraRig(view.camera, terrain, () => ({ width: canvas.clientWidth, height: canvas.clientHeight }));
+  const controls = createCameraControls(canvas, rig, view.scene);
+  const v = new Vector3();
+  const hooks: CameraHooks = {
+    rig,
+    controls,
+    terrain,
+    lastPick: undefined,
+    project(x, y, z) {
+      v.set(x, y, z).project(view.camera);
+      return { x: ((v.x + 1) / 2) * canvas.clientWidth, y: ((1 - v.y) / 2) * canvas.clientHeight };
+    },
+  };
+  controls.onPick((hit) => {
+    hooks.lastPick = hit;
+    show(pickEl, metres(hit));
+  });
+  view.onBeforeFrame((seconds) => {
+    controls.update(seconds);
+    const p = view.camera.position;
+    show(camPositionEl, `${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} m`);
+    show(camHeightEl, `${rig.heightAboveGround().toFixed(0)} m`);
+    const band = rig.zoomBand();
+    show(camBandEl, band);
+    document.body.dataset["zoomBand"] = band;
+    const cursor = controls.cursor();
+    show(cursorEl, cursor ? metres(cursor) : "-");
+  });
+  return hooks;
+}
 
 /** What a terrain check reports. */
 interface TerrainCheck {
@@ -140,8 +216,9 @@ declare global {
       sendCommand: typeof sendCommand;
       terrainCheck: typeof terrainCheck;
       view: Promise<View>;
+      camera: Promise<CameraHooks>;
       renderStatus: () => RenderStatus | null;
     };
   }
 }
-window.cityCouncil = { mirror, sendCommand, terrainCheck, view: viewReady, renderStatus: () => status };
+window.cityCouncil = { mirror, sendCommand, terrainCheck, view: viewReady, camera: cameraReady, renderStatus: () => status };
