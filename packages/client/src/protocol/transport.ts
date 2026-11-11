@@ -1,4 +1,5 @@
 import type { FromSimMessage, ToSimMessage } from "@city-council/sim";
+import { isSaveMessage, type FromSaver, type PageSaveTransport, type ToSaver } from "../save/channel";
 
 /**
  * A two-way message channel to or from the sim. Nothing above this knows
@@ -29,27 +30,71 @@ export interface MessagePortLike {
 /**
  * A transport over anything with `postMessage`. Received data is passed on
  * as `Receive` unchecked, so the host side uses `unknown` and parses it.
+ * `accept` picks which received messages this transport sees, so two
+ * channels can share one port.
  */
-export function portTransport<Send, Receive>(port: MessagePortLike): SimTransport<Send, Receive> {
+export function portTransport<Send, Receive>(
+  port: MessagePortLike,
+  accept: (data: unknown) => boolean = () => true,
+): SimTransport<Send, Receive> {
   return {
     send(message, transfer = []) {
       port.postMessage(message, transfer);
     },
     onMessage(handler) {
-      const listener = (event: MessageEvent): void => handler(event.data as Receive);
+      const listener = (event: MessageEvent): void => {
+        if (accept(event.data)) handler(event.data as Receive);
+      };
       port.addEventListener("message", listener);
       return () => port.removeEventListener("message", listener);
     },
   };
 }
 
-/** Starts the sim in a Web Worker and returns the client's end of it. */
-export function createWorkerTransport(): ClientTransport & { terminate(): void } {
+/**
+ * Holds received messages until something listens, then hands them over in
+ * order. The worker loads its save before the host exists, and the client
+ * asks for a snapshot the moment it starts.
+ */
+export function bufferUntilListening<Send, Receive>(inner: SimTransport<Send, Receive>): SimTransport<Send, Receive> {
+  let held: Receive[] | null = [];
+  const handlers = new Set<(message: Receive) => void>();
+  inner.onMessage((message) => {
+    if (held) held.push(message);
+    else for (const handler of handlers) handler(message);
+  });
+  return {
+    send: (message, transfer) => inner.send(message, transfer),
+    onMessage(handler) {
+      handlers.add(handler);
+      if (held) {
+        const queued = held;
+        held = null;
+        for (const message of queued) handler(message);
+      }
+      return () => void handlers.delete(handler);
+    },
+  };
+}
+
+/** The worker's two channels as the page sees them: the sim protocol and saves. */
+export interface WorkerChannels {
+  sim: ClientTransport;
+  saves: PageSaveTransport;
+  terminate(): void;
+}
+
+/** Starts the sim in a Web Worker and returns the page's ends of it. */
+export function createWorkerTransport(): WorkerChannels {
   const worker = new Worker(new URL("./worker.ts", import.meta.url), {
     type: "module",
     name: "sim",
   });
-  return { ...portTransport<ToSimMessage, FromSimMessage>(worker), terminate: () => worker.terminate() };
+  return {
+    sim: portTransport<ToSimMessage, FromSimMessage>(worker, (data) => !isSaveMessage(data)),
+    saves: portTransport<ToSaver, FromSaver>(worker, isSaveMessage),
+    terminate: () => worker.terminate(),
+  };
 }
 
 /**

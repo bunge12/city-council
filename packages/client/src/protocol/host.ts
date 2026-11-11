@@ -4,6 +4,7 @@ import {
   logLength,
   parseToSimMessage,
   readLog,
+  serialize,
   step,
   submit,
   type FromSimMessage,
@@ -49,10 +50,11 @@ export class SimHost {
   /** Absolute log index up to which entries have been read out of state. */
   private logCursor: number;
   /**
-   * Every entry read out of live state, in order. Live state pages out old
-   * entries, so this is the host's full record for saves (issue 08).
+   * The whole activity log, oldest first: entries a loaded save carried plus
+   * every entry read out of live state since. Live state pages out old
+   * entries, so this is the host's full record for saves.
    */
-  readonly fullLog: LogEntry[] = [];
+  readonly fullLog: LogEntry[];
   /** Entries read since the last delta. */
   private unsent: LogEntry[] = [];
   private sentTick: number;
@@ -64,8 +66,16 @@ export class SimHost {
   private owedMs = 0;
   private lastPump: number;
 
-  constructor(state: SimState, transport: HostTransport, now: Clock) {
+  /**
+   * `pagedLog` is the entries that have left live state, as a loaded save
+   * gives them; a new city has none.
+   */
+  constructor(state: SimState, transport: HostTransport, now: Clock, pagedLog: readonly LogEntry[] = []) {
+    if (pagedLog.length !== state.logOffset) {
+      throw new RangeError(`pagedLog has ${pagedLog.length} entries but ${state.logOffset} have left live state`);
+    }
     this.state = state;
+    this.fullLog = [...pagedLog, ...state.log];
     this.transport = transport;
     this.now = now;
     this.logCursor = logLength(state);
@@ -79,6 +89,19 @@ export class SimHost {
   /** Current tick, for tests and the worker's own checks. */
   get tick(): number {
     return this.state.tick;
+  }
+
+  /** Seed of the hosted city. */
+  get seed(): number {
+    return this.state.seed;
+  }
+
+  /**
+   * The city as snapshot bytes, for a save or a city file. Taken between
+   * steps, so it is always a whole tick.
+   */
+  snapshotBytes(): Uint8Array {
+    return serialize(this.state, this.fullLog.slice(0, this.state.logOffset));
   }
 
   private receive(raw: unknown): void {
