@@ -1,4 +1,4 @@
-import { recordEntry } from "./log";
+import { LOG_PAGE_SIZE, recordEntry } from "./log";
 import { SPEEDS, type SimState, type Speed } from "./state";
 
 /**
@@ -75,10 +75,20 @@ function copyPayload(payload: unknown): unknown {
 }
 
 /**
+ * Most commands the queue holds before `submit` refuses more. One step must
+ * not apply more than a log page, or entries would leave live state before
+ * the host reads them after that step.
+ */
+export const MAX_PENDING_COMMANDS = LOG_PAGE_SIZE;
+
+/**
  * Validates a command and queues it to apply at the next `step`. The only
  * way to change city state from outside the sim.
  */
 export function submit(state: SimState, command: Command): CommandResult {
+  if (state.pending.length >= MAX_PENDING_COMMANDS) {
+    return { ok: false, reason: `too many commands this tick, at most ${MAX_PENDING_COMMANDS}` };
+  }
   const result = validateCommand(state, command);
   if (result.ok) enqueue(state, command);
   return result;

@@ -148,7 +148,9 @@ The client only sends commands and receives state. Whether the sim sits in a wor
 
 ### Why this keeps multiplayer cheap
 
-Single player already talks to the sim through a message channel, because the sim is in a worker. Multiplayer swaps that channel for a WebSocket and moves the worker to a server. The client code path is the same. The server is authoritative and sends state deltas, so clients do not need to agree bit for bit and we avoid lockstep.
+Single player already talks to the sim through a message channel, because the sim is in a worker. Multiplayer swaps that channel for a WebSocket and moves the worker to a server. The client code path is the same.
+
+The message types live in `sim` (`protocol.ts`) and both ends import them. Every message carries a protocol version `v`. The client sends `command` and `requestSnapshot`. The sim sends `snapshot`, `delta` and `commandResult`. A delta carries only what changed: in M0 that is the tick, the speed and new log entries, plus the host's per-system timing of its last step for the debug panel. In the client, a `SimTransport` with `send` and `onMessage` hides whether the other end is a worker or a socket, and a `SimMirror` holds the read-only copy of state. The host steps from real time at 10 Hz times the speed and, after a stall, catches up by at most 8 steps and drops the rest of the missed time. The server is authoritative and sends state deltas, so clients do not need to agree bit for bit and we avoid lockstep.
 
 Build tools show a local preview while a command is in flight, and the server's answer confirms or rejects it. That preview is the only client-side prediction we need.
 
@@ -670,7 +672,7 @@ The milestone system is built in M4, where its first jobs are the starting grant
 These are not milestones of their own. Each module adds its piece.
 
 - **Overlays.** Every sim value that affects growth gets an info view. This is how the readable-over-realistic pillar is enforced.
-- **Activity log.** Every command is recorded with who issued it and when. It is the undo stack in single player, and in multiplayer it answers the question of who bulldozed the hospital. Live state keeps the newest 4,096 entries and drops the oldest 1,024 at a time past that. The host reads new entries after each step and keeps the full log in the save, so a replay always has every command.
+- **Activity log.** Every command is recorded with who issued it and when. It is the undo stack in single player, and in multiplayer it answers the question of who bulldozed the hospital. Live state keeps the newest 4,096 entries and drops the oldest 1,024 at a time past that. The host reads new entries after each step and keeps the full log in the save, so a replay always has every command. To make that safe, the sim refuses a command once 1,024 are already queued for the next step, so no single step can push entries out before the host has read them.
 - **Save format versioning.** Each module that adds state bumps the version and ships a migration.
 - **Balance data in files.** Costs, capacities and weights live in JSON, not in code, so tuning does not need a developer.
 - **Scale checkpoints.** Each milestone from M3 on is measured on generated test cities of 50,000, 200,000 and 500,000 residents before it closes.
