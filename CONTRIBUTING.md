@@ -10,7 +10,7 @@ Thanks for looking. This project is built in the open by one person with Claude,
 
 ## Setup
 
-You need Node (current LTS) and pnpm.
+You need Node 22 (the exact version is in `.nvmrc`) and pnpm 10. `corepack enable` picks the pinned pnpm.
 
 ```
 pnpm install

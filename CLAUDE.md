@@ -34,7 +34,7 @@ docs/             PRD and milestone specs
 
 ## Commands
 
-These exist once the first M0 issue has landed.
+`pnpm lint` also runs `scripts/check-lint-rules.mjs`, which proves the boundary, clock and randomness rules still fire.
 
 ```
 pnpm install

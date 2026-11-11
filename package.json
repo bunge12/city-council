@@ -1,0 +1,26 @@
+{
+  "name": "city-council",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.12.0 <23"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @city-council/client dev",
+    "test": "pnpm --filter @city-council/sim test",
+    "lint": "eslint . --max-warnings 0 && node scripts/check-lint-rules.mjs",
+    "typecheck": "tsc -b && tsc -p tsconfig.tooling.json",
+    "build": "pnpm typecheck && pnpm --filter @city-council/client build",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.5",
+    "eslint": "10.14.0",
+    "globals": "17.14.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2"
+  }
+}

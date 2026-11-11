@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/sim"
+    },
+    {
+      "path": "packages/sim/tsconfig.test.json"
+    },
+    {
+      "path": "packages/client"
+    },
+    {
+      "path": "packages/server"
+    }
+  ]
+}
