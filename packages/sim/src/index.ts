@@ -21,6 +21,14 @@ export type { LogEntry } from "./log";
 export { fnv1a64, hashState } from "./hash";
 export { replay } from "./replay";
 export { migrateState } from "./migrate";
+export {
+  SNAPSHOT_FORMAT_VERSION,
+  SnapshotError,
+  deserialize,
+  readSnapshotHeader,
+  serialize,
+} from "./snapshot";
+export type { Snapshot, SnapshotErrorCode, SnapshotHeader } from "./snapshot";
 export { PROTOCOL_VERSION, parseToSimMessage } from "./protocol";
 export type {
   CommandMessage,

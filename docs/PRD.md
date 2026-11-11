@@ -196,6 +196,10 @@ This milestone also builds the parts every later module leans on.
 
 The random generator is xoshiro128**, seeded from the city's 32-bit seed with splitmix32. Its four words of state live in the sim state, so a snapshot carries it.
 
+A snapshot is one byte layout used for local saves, city files and, later, for sending a city to a player who joins. It starts with a 40-byte header: the magic bytes `CITY`, the file format version, the state version (`SNAPSHOT_VERSION`), the seed, the tick, the body length and a 64-bit FNV-1a checksum of the body. The body is a list of named sections, each on an 8-byte boundary. Every typed array in state gets its own section, named by its path, and everything else goes in a JSON section with references to those arrays. A second JSON section holds the log entries that have left live state, so the save keeps the whole activity log. `serialize` and `deserialize` live in `sim`. `deserialize` migrates old state versions up to the current one, and it refuses a save from a newer build, a cut-short save and a damaged one, each with a message a player can read. No compression yet.
+
+In single player the worker loads the most recently saved city from IndexedDB at start, and new cities start from seed 1 until a new-city screen exists. Terrain is rebuilt from the seed. The worker autosaves every 30 seconds, and it also saves when the tab is hidden and when the player presses Save. Each city keeps its latest snapshot and the good one before it. A damaged latest snapshot is reported and the one before it is loaded. A save from a newer version is reported and left untouched, and a new city starts under a new id so nothing writes over it. The page asks for persistent storage and says so when the browser declines.
+
 Speed is part of the sim state and changes only through the `SetSpeed` command, since in multiplayer there is one sim and one speed. While paused the host keeps stepping at the 1x rate: queued commands still apply, including the one that unpauses, but the tick counter and the systems do not move.
 
 No terraforming in v1. The terrain is fixed after generation, which keeps the save small and removes a class of sync problems.
@@ -675,7 +679,7 @@ These are not milestones of their own. Each module adds its piece.
 
 - **Overlays.** Every sim value that affects growth gets an info view. This is how the readable-over-realistic pillar is enforced.
 - **Activity log.** Every command is recorded with who issued it and when. It is the undo stack in single player, and in multiplayer it answers the question of who bulldozed the hospital. Live state keeps the newest 4,096 entries and drops the oldest 1,024 at a time past that. The host reads new entries after each step and keeps the full log in the save, so a replay always has every command. To make that safe, the sim refuses a command once 1,024 are already queued for the next step, so no single step can push entries out before the host has read them.
-- **Save format versioning.** Each module that adds state bumps the version and ships a migration.
+- **Save format versioning.** Each module that adds state bumps `SNAPSHOT_VERSION` and adds a migration to the registry in `packages/sim/src/migrate.ts`, with a test. A change to the byte layout itself bumps `SNAPSHOT_FORMAT_VERSION` instead. Committed snapshot fixtures for each version keep old saves loading.
 - **Balance data in files.** Costs, capacities and weights live in JSON, not in code, so tuning does not need a developer.
 - **Scale checkpoints.** Each milestone from M3 on is measured on generated test cities of 50,000, 200,000 and 500,000 residents before it closes.
 

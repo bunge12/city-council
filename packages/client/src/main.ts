@@ -2,6 +2,8 @@ import { fnv1a64, generateTerrain, hashTerrain, mapSize, simInfo, type CommandRe
 import { Vector3 } from "three/webgpu";
 import { SimMirror } from "./protocol/mirror";
 import { createWorkerTransport } from "./protocol/transport";
+import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
+import type { SaveStatus } from "./save/channel";
 import { createCameraControls, type CameraControls } from "./camera/controls";
 import type { GroundHit } from "./camera/pick";
 import { createCameraRig, type CameraRig } from "./camera/rig";
@@ -14,7 +16,9 @@ const info = simInfo();
 const infoEl = document.getElementById("sim-info");
 if (infoEl) infoEl.textContent = `${info.name}, tick ${info.tickMs} ms`;
 
-const mirror = new SimMirror(createWorkerTransport(), LOCAL_PLAYER_ID);
+const worker = createWorkerTransport();
+const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
+const saves = new SaveClient(worker.saves);
 
 // A plain readout until the UI shell and debug panel land (issue 10).
 function field(id: string): HTMLElement {
@@ -37,6 +41,59 @@ mirror.subscribe(() => {
   timingsEl.textContent = mirror.stats.timings
     .map((t) => `${t.system} ${t.ms.toFixed(3)} ms`)
     .join(", ");
+});
+
+// Saving. The worker loads the latest city and saves it; the page asks for
+// saves and shows how they went.
+const cityEl = field("save-city");
+const saveStatusEl = field("save-status");
+const saveProblemEl = field("save-problem");
+const storageNoteEl = field("storage-note");
+const saveButton = field("save-now");
+
+function clockTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function showNote(el: HTMLElement, text: string | null): void {
+  el.textContent = text ?? "";
+  el.hidden = text === null;
+}
+
+saves.subscribe((status: SaveStatus) => {
+  cityEl.textContent = `${status.city.name}, seed ${status.city.seed} (${status.cities.length} saved)`;
+  const last = status.lastSave;
+  saveStatusEl.textContent = last
+    ? `tick ${last.tick} at ${clockTime(last.savedAt)} (${last.reason})`
+    : `not yet, resumed at tick ${status.loadedTick} from ${status.loadedFrom}`;
+  showNote(saveProblemEl, [status.problem, status.saveError].filter(Boolean).join(" ") || null);
+  document.body.dataset["saveLoaded"] = "true";
+});
+
+/** Saves now and resolves with the worker's status after the write. */
+function saveNow(): Promise<SaveStatus> {
+  return saves.save("manual");
+}
+saveButton.addEventListener("click", () => void saveNow());
+
+// Save when the tab is hidden: the player may be closing it, and a hidden
+// tab may be frozen or discarded without further warning.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") void saves.save("hidden");
+});
+
+let persistence: PersistenceResult | null = null;
+void requestPersistence().then((result) => {
+  persistence = result;
+  document.body.dataset["persistence"] = result;
+  if (result !== "persisted") {
+    showNote(
+      storageNoteEl,
+      result === "declined"
+        ? "This browser did not agree to keep saved cities for good, so it may clear them if disk space runs low."
+        : "This browser cannot promise to keep saved cities, so it may clear them if disk space runs low.",
+    );
+  }
 });
 
 /** Sends a command and shows the sim's answer on the page. */
@@ -214,6 +271,9 @@ declare global {
     cityCouncil: {
       mirror: SimMirror;
       sendCommand: typeof sendCommand;
+      saves: SaveClient;
+      saveNow: typeof saveNow;
+      persistence: () => PersistenceResult | null;
       terrainCheck: typeof terrainCheck;
       view: Promise<View>;
       camera: Promise<CameraHooks>;
@@ -221,4 +281,14 @@ declare global {
     };
   }
 }
-window.cityCouncil = { mirror, sendCommand, terrainCheck, view: viewReady, camera: cameraReady, renderStatus: () => status };
+window.cityCouncil = {
+  mirror,
+  sendCommand,
+  saves,
+  saveNow,
+  persistence: () => persistence,
+  terrainCheck,
+  view: viewReady,
+  camera: cameraReady,
+  renderStatus: () => status,
+};

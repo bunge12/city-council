@@ -24,7 +24,8 @@ const TAG_ARRAY = 7;
 const TAG_OBJECT = 8;
 const TAG_TYPED_ARRAY = 9;
 
-class Fnv64 {
+/** Streaming 64-bit FNV-1a. Internal to the sim: snapshots checksum with it. */
+export class Fnv64 {
   hi = OFFSET_HI;
   lo = OFFSET_LO;
   private readonly scratch = new DataView(new ArrayBuffer(8));
