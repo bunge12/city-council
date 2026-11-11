@@ -20,7 +20,7 @@ pnpm dev
 ## Tests
 
 ```
-pnpm test    sim unit, scenario and replay tests
+pnpm test    sim unit, scenario and replay tests, client protocol tests
 pnpm lint
 pnpm e2e     Playwright walkthroughs
 ```

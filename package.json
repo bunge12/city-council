@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @city-council/client dev",
-    "test": "pnpm --filter @city-council/sim test",
+    "test": "pnpm -r --if-present test",
     "lint": "eslint . --max-warnings 0 && node scripts/check-lint-rules.mjs",
     "typecheck": "tsc -b && tsc -p tsconfig.tooling.json",
     "build": "pnpm typecheck && pnpm --filter @city-council/client build",

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   COMMANDS_SYSTEM,
+  LOG_PAGE_SIZE,
+  MAX_PENDING_COMMANDS,
   SNAPSHOT_VERSION,
   createState,
   nextU32,
@@ -68,6 +70,20 @@ describe("step", () => {
 });
 
 describe("submit", () => {
+  it("refuses commands once a step's worth is queued, so none page out unread", () => {
+    const state = createState(1);
+    expect(MAX_PENDING_COMMANDS).toBeLessThanOrEqual(LOG_PAGE_SIZE);
+    for (let i = 0; i < MAX_PENDING_COMMANDS; i++) {
+      expect(submit(state, cmd("NoOp", {}, i)).ok).toBe(true);
+    }
+    expect(submit(state, cmd("NoOp", {}, MAX_PENDING_COMMANDS))).toEqual({
+      ok: false,
+      reason: `too many commands this tick, at most ${MAX_PENDING_COMMANDS}`,
+    });
+    step(state);
+    expect(submit(state, cmd("NoOp", {}, 0)).ok).toBe(true);
+  });
+
   it("accepts NoOp and applies it on the next tick", () => {
     const state = createState(1);
     expect(submit(state, cmd("NoOp"))).toEqual({ ok: true });

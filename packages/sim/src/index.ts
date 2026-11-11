@@ -11,7 +11,7 @@ export function simInfo(): { name: string; tickMs: number } {
 
 export { SNAPSHOT_VERSION, SPEEDS, createState } from "./state";
 export type { SimState, Speed } from "./state";
-export { COMMANDS, submit, validateCommand } from "./commands";
+export { COMMANDS, MAX_PENDING_COMMANDS, submit, validateCommand } from "./commands";
 export type { Command, CommandDef, CommandResult } from "./commands";
 export { COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
 export type { System, SystemTimer } from "./step";
@@ -21,3 +21,14 @@ export type { LogEntry } from "./log";
 export { fnv1a64, hashState } from "./hash";
 export { replay } from "./replay";
 export { migrateState } from "./migrate";
+export { PROTOCOL_VERSION, parseToSimMessage } from "./protocol";
+export type {
+  CommandMessage,
+  CommandResultMessage,
+  DeltaMessage,
+  FromSimMessage,
+  RequestSnapshotMessage,
+  SnapshotMessage,
+  SystemTiming,
+  ToSimMessage,
+} from "./protocol";

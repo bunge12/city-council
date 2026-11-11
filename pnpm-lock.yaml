@@ -39,6 +39,9 @@ importers:
       vite:
         specifier: 8.3.8
         version: 8.3.8(@types/node@22.20.5)
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@22.20.5)(vite@8.3.8(@types/node@22.20.5))
 
   packages/server: {}
 
