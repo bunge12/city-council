@@ -1,0 +1,41 @@
+{
+  "_about": "Terrain generation parameters. Lengths are metres. Slopes are rise over run. No prices here, so no source years.",
+  "samples": 750,
+  "spacing": 16,
+  "waterShare": 0.2,
+  "coastTilt": 0.6,
+  "lowland": {
+    "wavelength": 3200,
+    "octaves": 5,
+    "gain": 0.5,
+    "relief": 70
+  },
+  "mountains": {
+    "maskWavelength": 4800,
+    "maskOctaves": 3,
+    "maskFrom": 0.55,
+    "maskTo": 0.8,
+    "ridgeWavelength": 1600,
+    "ridgeOctaves": 4,
+    "ridgeGain": 0.5,
+    "relief": 420
+  },
+  "erosion": {
+    "iterations": 10,
+    "talusSlope": 0.45,
+    "rate": 0.5
+  },
+  "buildable": {
+    "maxSlope": 0.1,
+    "minShare": 0.45,
+    "maxAttempts": 6,
+    "reliefScalePerAttempt": 0.7
+  },
+  "resources": {
+    "wavelength": 1400,
+    "octaves": 2,
+    "fertile": { "threshold": 0.5, "maxSlope": 0.06, "maxHeightAboveWater": 50 },
+    "forest": { "threshold": 0.55, "maxSlope": 0.35, "maxHeightAboveWater": 350 },
+    "ore": { "threshold": 0.55, "minMountain": 0.25 }
+  }
+}

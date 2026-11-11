@@ -1,4 +1,4 @@
-// Proves the rule-1/3/4 lint rules still fire. Each case lints a snippet as if
+// Proves the rule-1/3/4/6 lint rules still fire. Each case lints a snippet as if
 // it lived at `file` and checks which rule reports it. Run by `pnpm lint`.
 import { ESLint } from "eslint";
 
@@ -14,6 +14,15 @@ const cases = [
   ["packages/sim/src/x.ts", "export const a = performance.now();", "no-restricted-properties"],
   ["packages/sim/src/x.ts", "setTimeout(() => undefined, 1);", "no-restricted-globals"],
   ["packages/sim/src/x.ts", "setInterval(() => undefined, 1);", "no-restricted-globals"],
+  ["packages/sim/src/terrain/x.ts", "export const a = Math.sin(1);", "no-restricted-properties"],
+  ["packages/sim/src/terrain/x.ts", "export const a = Math.pow(2, 3);", "no-restricted-properties"],
+  ["packages/sim/src/terrain/x.ts", "export const a = Math.exp(1);", "no-restricted-properties"],
+  ["packages/sim/src/terrain/x.ts", "export const a = Math.log(2);", "no-restricted-properties"],
+  ["packages/sim/src/terrain/x.ts", "const { cos } = Math;\nexport const a = cos(1);", "no-restricted-properties"],
+  ["packages/sim/src/terrain/x.ts", "export const a = (n: number) => n ** 2;", "no-restricted-syntax"],
+  ["packages/sim/src/terrain/x.ts", "export const a = Math.random();", "no-restricted-properties"],
+  ["packages/sim/src/terrain/x.ts", "export const a = Date.now();", "no-restricted-properties"],
+  ["packages/sim/src/terrain/x.ts", "export const a = [Math.sqrt(2), Math.floor(1.5), Math.imul(3, 4)];", null],
   ["packages/client/src/x.ts", 'import { simInfo } from "@city-council/sim";\nexport const a = [simInfo, Math.random()];', null],
 ];
 

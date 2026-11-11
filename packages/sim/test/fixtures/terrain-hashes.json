@@ -1,0 +1,8 @@
+{
+  "_about": "Terrain hashes for committed seeds. Node (Vitest) and the browser (Playwright) must both produce these. If a change to terrain generation is meant to change the maps, update them and say why in the pull request.",
+  "seeds": [
+    { "seed": 1, "heights": "a795ac4bc1a33b24", "terrain": "3358e203c8b4dc68" },
+    { "seed": 42, "heights": "1fee0207d3951db4", "terrain": "d826855b33bb0ed9" },
+    { "seed": 20261111, "heights": "afe88c919333d451", "terrain": "7c14ff8d8979c6dd" }
+  ]
+}

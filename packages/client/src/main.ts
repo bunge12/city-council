@@ -1,4 +1,4 @@
-import { simInfo, type CommandResult } from "@city-council/sim";
+import { fnv1a64, generateTerrain, hashTerrain, simInfo, type CommandResult } from "@city-council/sim";
 import { SimMirror } from "./protocol/mirror";
 import { createWorkerTransport } from "./protocol/transport";
 
@@ -41,11 +41,39 @@ async function sendCommand(type: string, payload: unknown = {}): Promise<Command
   return result;
 }
 
+/** What a terrain check reports. */
+interface TerrainCheck {
+  heightsHash: string;
+  terrainHash: string;
+  buildableShare: number;
+  attempts: number;
+  ms: number;
+}
+
+/**
+ * Generates terrain for `seed` in this browser and hashes it, so Playwright
+ * can compare the result with the hashes Node produces. Only on demand: the
+ * renderer (issue 06) decides where terrain is built for play.
+ */
+function terrainCheck(seed: number): TerrainCheck {
+  const start = performance.now();
+  const terrain = generateTerrain(seed);
+  const ms = performance.now() - start;
+  const bytes = new Uint8Array(terrain.heights.buffer, terrain.heights.byteOffset, terrain.heights.byteLength);
+  return {
+    heightsHash: fnv1a64(bytes),
+    terrainHash: hashTerrain(terrain),
+    buildableShare: terrain.buildableShare,
+    attempts: terrain.attempts,
+    ms,
+  };
+}
+
 // For Playwright and the console until issue 10 adds controls. It only reads
 // the mirror and sends commands, the same as any UI would.
 declare global {
   interface Window {
-    cityCouncil: { mirror: SimMirror; sendCommand: typeof sendCommand };
+    cityCouncil: { mirror: SimMirror; sendCommand: typeof sendCommand; terrainCheck: typeof terrainCheck };
   }
 }
-window.cityCouncil = { mirror, sendCommand };
+window.cityCouncil = { mirror, sendCommand, terrainCheck };
