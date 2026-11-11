@@ -4,8 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>City Council</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #b7cfe0; font: 13px/1.4 system-ui, sans-serif; }
+      #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+      main { position: fixed; top: 8px; left: 8px; padding: 8px 12px; background: rgb(255 255 255 / 0.85); border-radius: 6px; color: #1d2733; max-width: 360px; }
+      main h1 { font-size: 16px; margin: 0 0 4px; }
+      main p { margin: 0 0 6px; }
+      main dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+      main dt { font-weight: 600; }
+      main dd { margin: 0; font-variant-numeric: tabular-nums; }
+    </style>
   </head>
   <body>
+    <canvas id="view"></canvas>
     <main>
       <h1>City Council</h1>
       <p id="sim-info">Loading sim…</p>
@@ -20,6 +31,12 @@
         <dd id="sim-timings">-</dd>
         <dt>Last command</dt>
         <dd id="sim-last-result">none</dd>
+        <dt>Renderer</dt>
+        <dd id="render-backend">starting</dd>
+        <dt>Frame</dt>
+        <dd id="render-frame">-</dd>
+        <dt>Draw calls</dt>
+        <dd id="render-draws">-</dd>
       </dl>
     </main>
     <script type="module" src="/src/main.ts"></script>

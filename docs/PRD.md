@@ -130,7 +130,7 @@ The client only sends commands and receives state. Whether the sim sits in a wor
 | --- | --- | --- |
 | Language | TypeScript, strict mode | One language across sim, client and server. slop-newyork uses plain JS modules, which is fine for a demo but not for a sim this size. |
 | Build | Vite, pnpm workspace | Fast dev server, worker bundling built in |
-| Rendering | three.js `WebGPURenderer` with TSL shaders, pinned to a release | Same renderer as [slop-newyork](https://github.com/mrdoob/slop-newyork/). It falls back to WebGL 2 where WebGPU is missing. slop-newyork loads the unpinned dev build from a CDN. We pin a version. |
+| Rendering | three.js `WebGPURenderer` with TSL shaders, pinned to `three@0.187.0` (exact, from npm) | Same renderer as [slop-newyork](https://github.com/mrdoob/slop-newyork/). It falls back to WebGL 2 where WebGPU is missing, and `?webgl` forces the fallback. slop-newyork loads the unpinned dev build from a CDN. We pin a version. |
 | UI | React over the canvas, Zustand for UI state | Panels, budget tables and toolbars are ordinary web UI |
 | Sim runtime | Web Worker in single player, Node on the server | Same package, two hosts |
 | Local saves | IndexedDB | No backend needed until multiplayer |
