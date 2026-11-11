@@ -1,0 +1,15 @@
+{
+  "description": "Two players send NoOp and SetSpeed, including a pause with commands while paused.",
+  "seed": 2026,
+  "untilTick": 20,
+  "log": [
+    { "tick": 0, "seq": 1, "playerId": "p1", "type": "NoOp", "payload": {} },
+    { "tick": 3, "seq": 2, "playerId": "p1", "type": "SetSpeed", "payload": { "speed": 2 } },
+    { "tick": 5, "seq": 1, "playerId": "p2", "type": "SetSpeed", "payload": { "speed": 0 } },
+    { "tick": 5, "seq": 2, "playerId": "p2", "type": "NoOp", "payload": { "note": "while paused" } },
+    { "tick": 5, "seq": 3, "playerId": "p1", "type": "SetSpeed", "payload": { "speed": 4 } },
+    { "tick": 12, "seq": 4, "playerId": "p1", "type": "NoOp", "payload": {} },
+    { "tick": 12, "seq": 3, "playerId": "p2", "type": "SetSpeed", "payload": { "speed": 1 } }
+  ],
+  "hash": "31f85db549997bfa"
+}
