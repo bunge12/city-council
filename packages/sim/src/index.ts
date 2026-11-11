@@ -8,3 +8,11 @@ export const TICK_MS = 100;
 export function simInfo(): { name: string; tickMs: number } {
   return { name: "city-council sim", tickMs: TICK_MS };
 }
+
+export { SNAPSHOT_VERSION, SPEEDS, createState } from "./state";
+export type { SimState, Speed } from "./state";
+export { COMMANDS, submit, validateCommand } from "./commands";
+export type { Command, CommandDef, CommandResult } from "./commands";
+export { COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
+export type { System, SystemTimer } from "./step";
+export { RNG_WORDS, nextFloat, nextInt, nextU32, seedRng } from "./rng";
