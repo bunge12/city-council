@@ -23,6 +23,8 @@ describe("createState", () => {
     expect(state).toMatchObject({ version: SNAPSHOT_VERSION, tick: 0, seed: 42, speed: 1 });
     expect(state.rng).toBeInstanceOf(Uint32Array);
     expect(state.pending).toEqual([]);
+    expect(state.log).toEqual([]);
+    expect(state.logOffset).toBe(0);
   });
 
   it("rejects seeds that are not 32-bit unsigned integers", () => {

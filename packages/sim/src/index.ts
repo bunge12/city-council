@@ -16,3 +16,8 @@ export type { Command, CommandDef, CommandResult } from "./commands";
 export { COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
 export type { System, SystemTimer } from "./step";
 export { RNG_WORDS, nextFloat, nextInt, nextU32, seedRng } from "./rng";
+export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, logLength, readLog } from "./log";
+export type { LogEntry } from "./log";
+export { fnv1a64, hashState } from "./hash";
+export { replay } from "./replay";
+export { migrateState } from "./migrate";

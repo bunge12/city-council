@@ -27,3 +27,6 @@ A city survives a page reload, and the format can change later without breaking 
 - [ ] Playwright test: run for a few seconds, reload, and the tick resumes from the saved value with the activity log intact
 - [ ] A snapshot with an unknown newer version is refused with a clear message and does not overwrite anything
 - [ ] A corrupted snapshot is detected and reported, and the previous good save is kept
+- [ ] Follow-up from issue 03: the activity log (`log`, `logOffset`) and the entries the host has read out of live state survive a round trip, and the full log still replays to the saved hash
+
+Issue 03 already bumped `SNAPSHOT_VERSION` to 2 and added `migrateState` in `packages/sim/src/migrate.ts` with a version 1 to 2 step. Build the migration registry on that.

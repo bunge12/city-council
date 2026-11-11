@@ -1,11 +1,12 @@
 import type { Command } from "./commands";
+import type { LogEntry } from "./log";
 import { seedRng } from "./rng";
 
 /**
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_VERSION = 2;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -28,6 +29,13 @@ export interface SimState {
   speed: Speed;
   /** Commands accepted by `submit`, applied in order at the next `step`. */
   pending: Command[];
+  /**
+   * Activity log: every applied command, oldest first. Capped at
+   * LOG_LIVE_LIMIT entries; older ones leave live state a page at a time.
+   */
+  log: LogEntry[];
+  /** How many entries have left live state. `log[0]` is entry `logOffset`. */
+  logOffset: number;
 }
 
 /** A new city from a 32-bit unsigned integer seed. */
@@ -42,5 +50,7 @@ export function createState(seed: number): SimState {
     rng: seedRng(seed),
     speed: 1,
     pending: [],
+    log: [],
+    logOffset: 0,
   };
 }

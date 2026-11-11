@@ -6,6 +6,6 @@
     "emitDeclarationOnly": true,
     "types": []
   },
-  "include": ["test"],
+  "include": ["test", "test/**/*.json"],
   "references": [{ "path": "." }]
 }

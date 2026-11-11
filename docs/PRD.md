@@ -670,7 +670,7 @@ The milestone system is built in M4, where its first jobs are the starting grant
 These are not milestones of their own. Each module adds its piece.
 
 - **Overlays.** Every sim value that affects growth gets an info view. This is how the readable-over-realistic pillar is enforced.
-- **Activity log.** Every command is recorded with who issued it and when. It is the undo stack in single player, and in multiplayer it answers the question of who bulldozed the hospital.
+- **Activity log.** Every command is recorded with who issued it and when. It is the undo stack in single player, and in multiplayer it answers the question of who bulldozed the hospital. Live state keeps the newest 4,096 entries and drops the oldest 1,024 at a time past that. The host reads new entries after each step and keeps the full log in the save, so a replay always has every command.
 - **Save format versioning.** Each module that adds state bumps the version and ships a migration.
 - **Balance data in files.** Costs, capacities and weights live in JSON, not in code, so tuning does not need a developer.
 - **Scale checkpoints.** Each milestone from M3 on is measured on generated test cities of 50,000, 200,000 and 500,000 residents before it closes.
@@ -769,7 +769,7 @@ Overlays work in every band. In the city band the map reads much like an info vi
 ### Testing
 
 - **Unit tests on sim systems.** Given this state and this command, expect that state. They run headless in Vitest.
-- **Replay tests.** A recorded command log plus a seed must produce the same state hash on every run. This catches accidental nondeterminism and most regressions.
+- **Replay tests.** A recorded command log plus a seed must produce the same state hash on every run. This catches accidental nondeterminism and most regressions. The hash is 64-bit FNV-1a over every field of state, typed arrays as raw bytes, object keys in sorted order.
 - **Scenario tests.** Scripted cities that assert outcomes. A city with no jobs must lose population. A bus line beside a jammed road must take riders.
 - **Soak test.** A bot that plays for an hour of game time at 4x and reports tick time and memory.
 - **Playwright walkthroughs.** One per milestone exit test, with screenshots attached to the pull request.

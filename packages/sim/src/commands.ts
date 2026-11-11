@@ -1,3 +1,4 @@
+import { recordEntry } from "./log";
 import { SPEEDS, type SimState, type Speed } from "./state";
 
 /**
@@ -79,27 +80,43 @@ function copyPayload(payload: unknown): unknown {
  */
 export function submit(state: SimState, command: Command): CommandResult {
   const result = validateCommand(state, command);
-  if (result.ok) {
-    state.pending.push({
-      seq: command.seq,
-      playerId: command.playerId,
-      type: command.type,
-      payload: copyPayload(command.payload),
-    });
-  }
+  if (result.ok) enqueue(state, command);
   return result;
 }
 
 /**
- * Applies queued commands in the order they were submitted. Each is checked
- * again first, because an earlier command in the same tick may have made it
- * invalid. Those are dropped.
+ * Queues a command without checking it. Internal to the sim: replay uses it
+ * for log entries, which `applyPending` checks again anyway.
+ */
+export function enqueue(state: SimState, command: Command): void {
+  state.pending.push({
+    seq: command.seq,
+    playerId: command.playerId,
+    type: command.type,
+    payload: copyPayload(command.payload),
+  });
+}
+
+/**
+ * Applies queued commands in the order they were submitted and records each
+ * one in the activity log. Each is checked again first, because an earlier
+ * command in the same tick may have made it invalid. Those are dropped and
+ * not recorded.
  */
 export function applyPending(state: SimState): void {
   const queue = state.pending;
   state.pending = [];
   for (const command of queue) {
     const def = COMMANDS[command.type];
-    if (def && validateCommand(state, command).ok) def.apply(state, command);
+    if (def && validateCommand(state, command).ok) {
+      def.apply(state, command);
+      recordEntry(state, {
+        tick: state.tick,
+        seq: command.seq,
+        playerId: command.playerId,
+        type: command.type,
+        payload: command.payload,
+      });
+    }
   }
 }
