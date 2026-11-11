@@ -40,10 +40,15 @@ export interface View {
   renderer: WebGPURenderer;
   scene: Scene;
   camera: PerspectiveCamera;
-  /** Places the camera at `position`, looking at `target`, both in world metres. */
+  /**
+   * Places the camera at `position`, looking at `target`, both in world
+   * metres. Raw: bypasses the camera rig and its limits. For tests.
+   */
   setCamera(position: readonly [number, number, number], target: readonly [number, number, number]): void;
   /** Builds the terrain chunks and water for a map, replacing any already shown. */
   showTerrain(terrain: Terrain): void;
+  /** Called before each frame is drawn, with the seconds since the last one. */
+  onBeforeFrame(listener: (seconds: number) => void): void;
   /** Called after each frame with the latest stats. */
   onFrame(listener: (stats: FrameStats) => void): void;
   /** Chunks drawn at each level of detail in the last frame, nearest level first. */
@@ -158,12 +163,15 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   }
   window.addEventListener("resize", resize);
 
+  const before: ((seconds: number) => void)[] = [];
   const listeners: ((stats: FrameStats) => void)[] = [];
   const gaps = new Float64Array(FRAME_TIME_WINDOW);
   let gapCount = 0;
   let gapSum = 0;
   let last = -1;
   renderer.setAnimationLoop((time: number) => {
+    const seconds = last >= 0 ? (time - last) / 1000 : 0;
+    for (const b of before) b(seconds);
     renderer.render(scene, camera);
     if (last >= 0) {
       const slot = gapCount % FRAME_TIME_WINDOW;
@@ -190,6 +198,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     camera,
     setCamera,
     showTerrain,
+    onBeforeFrame: (b) => before.push(b),
     onFrame: (l) => listeners.push(l),
     lodCounts() {
       const counts = TERRAIN_LODS.map(() => 0);
