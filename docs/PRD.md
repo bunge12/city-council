@@ -192,6 +192,10 @@ This milestone also builds the parts every later module leans on.
 - A debug panel that shows tick time per system
 - Download a city as a file and import it back, so a free player can move browsers or keep a backup
 
+The random generator is xoshiro128**, seeded from the city's 32-bit seed with splitmix32. Its four words of state live in the sim state, so a snapshot carries it.
+
+Speed is part of the sim state and changes only through the `SetSpeed` command, since in multiplayer there is one sim and one speed. While paused the host keeps stepping at the 1x rate: queued commands still apply, including the one that unpauses, but the tick counter and the systems do not move.
+
 No terraforming in v1. The terrain is fixed after generation, which keeps the save small and removes a class of sync problems.
 
 ### M1 Road networks
