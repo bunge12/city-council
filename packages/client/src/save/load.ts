@@ -1,11 +1,11 @@
-// Picks the city the worker starts with: the most recently saved one, or a
-// new city when there is none or it cannot be opened. A save that cannot be
+// Picks the city the worker starts with: the one most recently opened,
+// imported or saved, or a new city when there is none or it cannot be opened. A save that cannot be
 // opened is never written over.
 
 import { SnapshotError, createState, deserialize, type LogEntry, type SimState } from "@city-council/sim";
 import { NEW_CITY_NAME, NEW_CITY_SEED } from "./config";
 import type { LoadedFrom } from "./channel";
-import type { CityMeta, CityStore } from "./store";
+import { lastOpened, type CityMeta, type CityStore } from "./store";
 
 export interface OpenedCity {
   id: string;
@@ -37,7 +37,8 @@ export function newCityFallback(problem: string | null, makeId: () => string = r
 }
 
 /**
- * Opens the most recently saved city. If its latest snapshot is damaged,
+ * Opens the city most recently opened or imported, or for saves that never
+ * recorded that, the most recently saved one. If its latest snapshot is damaged,
  * falls back to the one before it. If it was written by a newer version of
  * the game, or both snapshots are damaged, it is left as it is and a new
  * city starts under a new id, so nothing overwrites it.
@@ -46,7 +47,9 @@ export async function openLatestCity(
   store: CityStore,
   makeId: () => string = randomId,
 ): Promise<OpenedCity> {
-  const [meta] = await store.list();
+  const cities = await store.list();
+  // Ties go to the most recently saved, which `list` puts first.
+  const meta = cities.reduce<CityMeta | undefined>((best, c) => (!best || lastOpened(c) > lastOpened(best) ? c : best), undefined);
   if (!meta) return newCityFallback(null, makeId);
   return openCity(store, meta, makeId);
 }

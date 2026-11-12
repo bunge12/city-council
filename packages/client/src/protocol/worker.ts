@@ -1,5 +1,6 @@
 // Web Worker entry. Opens the saved city, hosts it, drives it from the
-// worker's clock and saves it on an interval and when the page asks.
+// worker's clock and saves it on an interval and when the page asks. City
+// file downloads and imports go through the saver too.
 import { AUTOSAVE_INTERVAL_MS } from "../save/config";
 import { isSaveMessage } from "../save/channel";
 import { newCityFallback, openLatestCity, type OpenedCity } from "../save/load";
@@ -39,9 +40,7 @@ async function start(): Promise<void> {
   });
   setInterval(() => host.pump(), PUMP_INTERVAL_MS);
   setInterval(() => void saver.save("autosave"), AUTOSAVE_INTERVAL_MS);
-  // A new city is saved at once so it is in the list from the start.
-  if (city.from === "new city" && store) await saver.save("new city");
-  else await saver.announce();
+  await saver.start();
 }
 
 void start();

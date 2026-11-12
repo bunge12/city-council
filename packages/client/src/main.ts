@@ -1,9 +1,21 @@
-import { fnv1a64, generateTerrain, hashTerrain, mapSize, simInfo, type CommandResult, type Terrain } from "@city-council/sim";
+import {
+  deserialize,
+  fnv1a64,
+  generateTerrain,
+  hashState,
+  hashTerrain,
+  mapSize,
+  simInfo,
+  type CommandResult,
+  type Terrain,
+} from "@city-council/sim";
 import { Vector3 } from "three/webgpu";
 import { SimMirror } from "./protocol/mirror";
 import { createWorkerTransport } from "./protocol/transport";
 import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
 import type { SaveStatus } from "./save/channel";
+import { wantsExportReminder } from "./save/city-file";
+import { EXPORT_REMINDER_INTERVAL_MS } from "./save/config";
 import { createCameraControls, type CameraControls } from "./camera/controls";
 import type { GroundHit } from "./camera/pick";
 import { createCameraRig, type CameraRig } from "./camera/rig";
@@ -81,6 +93,106 @@ saveButton.addEventListener("click", () => void saveNow());
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") void saves.save("hidden");
 });
+
+// City files. The worker writes the file bytes and checks imported ones; the
+// page only hands bytes to and from the browser's file handling.
+const downloadButton = field("download-city");
+const importInput = field("import-file");
+if (!(importInput instanceof HTMLInputElement)) throw new Error("#import-file must be an input");
+const fileNoteEl = field("file-note");
+const fileProblemEl = field("file-problem");
+const reminderEl = field("export-reminder");
+const reminderTextEl = field("export-reminder-text");
+
+/** What a download wrote, for the page and Playwright. */
+interface DownloadedCity {
+  fileName: string;
+  tick: number;
+  /** `hashState` of the city in the file. */
+  hash: string;
+}
+
+/** Downloads the running city as a `.city` file named after it. */
+async function downloadCity(): Promise<DownloadedCity> {
+  const result = await saves.exportCity();
+  if (!result.ok) {
+    showNote(fileProblemEl, result.error);
+    throw new Error(result.error);
+  }
+  const { fileName, tick, bytes } = result;
+  const hash = hashState(deserialize(new Uint8Array(bytes)).state);
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  // The browser has the file by the time this runs.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  showNote(fileProblemEl, null);
+  showNote(fileNoteEl, `Downloaded ${fileName} at tick ${tick}.`);
+  reminderEl.hidden = true;
+  return { fileName, tick, hash };
+}
+
+const IMPORTED_NOTE_KEY = "city-council:imported";
+
+/**
+ * Imports a city file as a new city and opens it by reloading the page; the
+ * worker opens the most recently imported city. A file that is not a good
+ * city is reported and nothing changes.
+ */
+async function importCityFile(file: File): Promise<void> {
+  showNote(fileProblemEl, null);
+  const result = await saves.importCity(file.name, await file.arrayBuffer());
+  if (!result.ok) {
+    showNote(fileProblemEl, result.error);
+    return;
+  }
+  try {
+    sessionStorage.setItem(IMPORTED_NOTE_KEY, `Imported "${result.city.name}" from ${file.name}.`);
+  } catch {
+    // The note is a nicety.
+  }
+  location.reload();
+}
+
+downloadButton.addEventListener("click", () => void downloadCity().catch(() => undefined));
+field("reminder-download").addEventListener("click", () => void downloadCity().catch(() => undefined));
+importInput.addEventListener("change", () => {
+  const file = importInput.files?.[0];
+  // Clear it so picking the same file again still fires `change`.
+  importInput.value = "";
+  if (file) void importCityFile(file);
+});
+
+try {
+  const imported = sessionStorage.getItem(IMPORTED_NOTE_KEY);
+  sessionStorage.removeItem(IMPORTED_NOTE_KEY);
+  showNote(fileNoteEl, imported);
+} catch {
+  // As above.
+}
+
+// A gentle reminder to download a copy now and then, since the browser may
+// clear saved cities. "Not now" hides it until the page is next opened.
+let reminderDismissed = false;
+function updateReminder(): void {
+  const status = saves.status;
+  const city = status?.cities.find((c) => c.id === status.city.id);
+  const show = !reminderDismissed && city !== undefined && wantsExportReminder(city, Date.now(), EXPORT_REMINDER_INTERVAL_MS);
+  if (show && city) {
+    reminderTextEl.textContent =
+      `You have not downloaded a copy of "${city.name}" for a while. ` +
+      "The browser can clear saved cities, so a file is the copy to keep.";
+  }
+  reminderEl.hidden = !show;
+}
+field("reminder-later").addEventListener("click", () => {
+  reminderDismissed = true;
+  updateReminder();
+});
+saves.subscribe(updateReminder);
+setInterval(updateReminder, 60_000);
 
 let persistence: PersistenceResult | null = null;
 void requestPersistence().then((result) => {
@@ -273,6 +385,7 @@ declare global {
       sendCommand: typeof sendCommand;
       saves: SaveClient;
       saveNow: typeof saveNow;
+      downloadCity: typeof downloadCity;
       persistence: () => PersistenceResult | null;
       terrainCheck: typeof terrainCheck;
       view: Promise<View>;
@@ -286,6 +399,7 @@ window.cityCouncil = {
   sendCommand,
   saves,
   saveNow,
+  downloadCity,
   persistence: () => persistence,
   terrainCheck,
   view: viewReady,

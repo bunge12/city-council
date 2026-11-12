@@ -1,7 +1,16 @@
-// The page's side of saving: asks the worker to save and keeps the latest
-// status for the UI. It never touches state or IndexedDB itself.
+// The page's side of saving: asks the worker to save, to write a city file
+// and to take one in, and keeps the latest status for the UI. It never
+// touches state or IndexedDB itself.
 
-import { SAVES_CHANNEL, type PageSaveTransport, type SaveReason, type SaveStatus } from "./channel";
+import {
+  SAVES_CHANNEL,
+  type ExportReply,
+  type FromSaver,
+  type ImportReply,
+  type PageSaveTransport,
+  type SaveReason,
+  type SaveStatus,
+} from "./channel";
 
 type Listener = (status: SaveStatus) => void;
 
@@ -9,17 +18,18 @@ export class SaveClient {
   private readonly transport: PageSaveTransport;
   private current: SaveStatus | null = null;
   private nextRequest = 1;
-  private readonly waiting = new Map<number, (status: SaveStatus) => void>();
+  private readonly waiting = new Map<number, (message: FromSaver) => void>();
   private readonly listeners = new Set<Listener>();
 
   constructor(transport: PageSaveTransport) {
     this.transport = transport;
     transport.onMessage((message) => {
-      if (message.type !== "status") return;
-      this.current = message.status;
-      for (const listener of this.listeners) listener(message.status);
+      if (message.type === "status") {
+        this.current = message.status;
+        for (const listener of this.listeners) listener(message.status);
+      }
       if (message.requestId !== null) {
-        this.waiting.get(message.requestId)?.(message.status);
+        this.waiting.get(message.requestId)?.(message);
         this.waiting.delete(message.requestId);
       }
     });
@@ -37,10 +47,37 @@ export class SaveClient {
 
   /** Asks the worker to save now. Resolves with the status after the write. */
   save(reason: SaveReason): Promise<SaveStatus> {
-    const requestId = this.nextRequest++;
-    return new Promise((resolve) => {
-      this.waiting.set(requestId, resolve);
+    return this.ask<SaveStatus>((requestId) => {
       this.transport.send({ channel: SAVES_CHANNEL, type: "save", reason, requestId });
+    }, (m) => (m.type === "status" ? m.status : null));
+  }
+
+  /** Asks the worker for the running city as city file bytes. */
+  exportCity(): Promise<ExportReply["result"]> {
+    return this.ask((requestId) => {
+      this.transport.send({ channel: SAVES_CHANNEL, type: "export", requestId });
+    }, (m) => (m.type === "exported" ? m.result : null));
+  }
+
+  /**
+   * Hands a city file to the worker, which checks it and stores it as a new
+   * city to open next. `bytes` is given up to the worker.
+   */
+  importCity(fileName: string, bytes: ArrayBuffer): Promise<ImportReply["result"]> {
+    return this.ask((requestId) => {
+      this.transport.send({ channel: SAVES_CHANNEL, type: "import", requestId, fileName, bytes }, [bytes]);
+    }, (m) => (m.type === "imported" ? m.result : null));
+  }
+
+  private ask<T>(send: (requestId: number) => void, pick: (message: FromSaver) => T | null): Promise<T> {
+    const requestId = this.nextRequest++;
+    return new Promise((resolve, reject) => {
+      this.waiting.set(requestId, (message) => {
+        const value = pick(message);
+        if (value === null) reject(new Error(`unexpected ${message.type} answer to request ${requestId}`));
+        else resolve(value);
+      });
+      send(requestId);
     });
   }
 }

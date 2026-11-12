@@ -14,6 +14,24 @@ export interface CityMeta {
   tick: number;
   /** Wall time of the last save, in milliseconds since 1970. */
   savedAt: number;
+  /**
+   * Wall time the city was first stored. Saves from before city files have
+   * none until their next save.
+   */
+  createdAt?: number;
+  /**
+   * Wall time the city was last opened or imported. The worker opens the
+   * city with the latest one, so an imported city is opened even if the tab
+   * that imported it saves its old city on the way out.
+   */
+  openedAt?: number;
+  /** Wall time the city was last downloaded as a file, if ever. */
+  exportedAt?: number;
+}
+
+/** When the city was last chosen to run: opened, imported or else saved. */
+export function lastOpened(meta: CityMeta): number {
+  return meta.openedAt ?? meta.savedAt;
 }
 
 /** A city's stored snapshots. */
@@ -102,12 +120,16 @@ export class CityStore {
   /**
    * Stores `bytes` as the city's latest snapshot and updates its list entry,
    * in one transaction. The old latest becomes the previous one if it is
-   * good; if it is damaged, the previous good one is kept instead.
+   * good; if it is damaged, the previous good one is kept instead. Fields
+   * `meta` leaves out keep their stored values, and `createdAt` is set on
+   * the first save.
    */
   async save(meta: CityMeta, bytes: Uint8Array): Promise<void> {
     const tx = this.db.transaction([CITIES, SNAPSHOTS], "readwrite");
     const finished = done(tx);
     const snapshots = tx.objectStore(SNAPSHOTS);
+    const cities = tx.objectStore(CITIES);
+    const oldMeta = (await request(cities.get(meta.id))) as CityMeta | undefined;
     const old = (await request(snapshots.get(meta.id))) as SnapshotRecord | undefined;
     const record: SnapshotRecord = {
       id: meta.id,
@@ -115,7 +137,32 @@ export class CityStore {
       previous: isGood(old?.latest) ? (old?.latest ?? null) : (old?.previous ?? null),
     };
     snapshots.put(record);
-    tx.objectStore(CITIES).put({ ...meta });
+    cities.put({ createdAt: meta.savedAt, ...oldMeta, ...meta });
+    await finished;
+  }
+
+  /**
+   * Stores a city under a new id, as an import does. Refuses an id that is
+   * already taken, so an import can never write over a city.
+   */
+  async add(meta: CityMeta, bytes: Uint8Array): Promise<void> {
+    const tx = this.db.transaction([CITIES, SNAPSHOTS], "readwrite");
+    const finished = done(tx);
+    const cities = tx.objectStore(CITIES);
+    const snapshots = tx.objectStore(SNAPSHOTS);
+    // `add` fails on an existing key, which aborts the whole transaction.
+    cities.add({ createdAt: meta.savedAt, ...meta });
+    snapshots.add({ id: meta.id, latest: ownBuffer(bytes), previous: null } satisfies SnapshotRecord);
+    await finished;
+  }
+
+  /** Merges `fields` into a city's list entry. Does nothing if there is no such city. */
+  async touch(id: string, fields: Pick<CityMeta, "openedAt" | "exportedAt">): Promise<void> {
+    const tx = this.db.transaction(CITIES, "readwrite");
+    const finished = done(tx);
+    const cities = tx.objectStore(CITIES);
+    const old = (await request(cities.get(id))) as CityMeta | undefined;
+    if (old) cities.put({ ...old, ...fields });
     await finished;
   }
 

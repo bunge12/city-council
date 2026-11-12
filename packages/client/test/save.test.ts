@@ -16,6 +16,7 @@ import {
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { bufferUntilListening, memoryTransportPair, type SimTransport } from "../src/protocol/transport";
 import { SAVES_CHANNEL, parseSaveRequest, type FromSaver, type SaveStatus } from "../src/save/channel";
+import { cityFileName, cityNameFromFile, uniqueCityName, wantsExportReminder } from "../src/save/city-file";
 import { NEW_CITY_SEED } from "../src/save/config";
 import { openLatestCity } from "../src/save/load";
 import { Saver } from "../src/save/saver";
@@ -63,8 +64,26 @@ describe("CityStore", () => {
     const snapshots = await store.read("a");
     expect(deserialize(snapshots?.latest ?? new Uint8Array()).state.tick).toBe(30);
     expect(deserialize(snapshots?.previous ?? new Uint8Array()).state.tick).toBe(20);
-    expect((await store.list())[0]).toEqual(meta("a", 30, 30));
+    expect((await store.list())[0]).toEqual({ ...meta("a", 30, 30), createdAt: 10 });
     expect(await store.read("missing")).toBeNull();
+  });
+
+  it("keeps list fields a save leaves out, and records when a city was first stored", async () => {
+    const store = await openStore();
+    await store.save(meta("a", 1, 100), snapshotAt(1));
+    await store.touch("a", { exportedAt: 150, openedAt: 120 });
+    await store.save(meta("a", 2, 200), snapshotAt(2));
+    expect((await store.list())[0]).toEqual({ ...meta("a", 2, 200), createdAt: 100, exportedAt: 150, openedAt: 120 });
+    await store.touch("missing", { openedAt: 1 });
+    expect(await store.list()).toHaveLength(1);
+  });
+
+  it("refuses to add a city under an id that is taken", async () => {
+    const store = await openStore();
+    await store.save(meta("a", 1, 100), snapshotAt(1));
+    await expect(store.add(meta("a", 9, 900), snapshotAt(9))).rejects.toBeTruthy();
+    expect((await store.list())[0]?.tick).toBe(1);
+    expect(deserialize((await store.read("a"))?.latest ?? new Uint8Array()).state.tick).toBe(1);
   });
 
   it("does not let a damaged latest snapshot push out the good one before it", async () => {
@@ -93,6 +112,15 @@ describe("openLatestCity", () => {
     const city = await openLatestCity(store, nextId);
     expect(city).toMatchObject({ id: "recent", name: "Riverside", from: "latest save", problem: null });
     expect(city.state.tick).toBe(77);
+  });
+
+  it("opens the most recently opened city, not the most recently saved", async () => {
+    const store = await openStore();
+    await store.save(meta("imported", 5, 10), snapshotAt(5));
+    await store.touch("imported", { openedAt: 50 });
+    // The tab that imported it saves its old city on the way out.
+    await store.save({ ...meta("old", 9, 60), openedAt: 1 }, snapshotAt(9));
+    expect((await openLatestCity(store, nextId)).id).toBe("imported");
   });
 
   it("reports a damaged latest save and goes back to the previous good one", async () => {
@@ -149,7 +177,7 @@ async function hostCity(store: CityStore, wall = { now: 1_000 }) {
   let now = 0;
   const host = new SimHost(city.state, sim.host, () => now, city.pagedLog);
   const statuses: SaveStatus[] = [];
-  saves.page.onMessage((m) => statuses.push(m.status));
+  saves.page.onMessage((m) => m.type === "status" && statuses.push(m.status));
   const saver = new Saver({
     store,
     host,
@@ -158,9 +186,11 @@ async function hostCity(store: CityStore, wall = { now: 1_000 }) {
     loadedFrom: city.from,
     problem: city.problem,
     wallClock: () => wall.now,
+    makeId: nextId,
   });
   const messages: FromSimMessage[] = [];
   sim.client.onMessage((m) => messages.push(m));
+  await saver.start();
   const run = (ms: number) => {
     for (let t = 0; t < ms; t += PUMP_INTERVAL_MS) {
       now += PUMP_INTERVAL_MS;
@@ -246,6 +276,7 @@ describe("saving and loading a hosted city", () => {
     const answer = new Promise<FromSaver>((resolve) => saves.page.onMessage((m) => m.requestId === 7 && resolve(m)));
     saves.page.send({ channel: SAVES_CHANNEL, type: "save", reason: "hidden", requestId: 7 });
     const message = await answer;
+    if (message.type !== "status") throw new Error("expected a status");
     expect(message.status.lastSave).toMatchObject({ tick: 3, reason: "hidden" });
     expect(message.status.cities).toHaveLength(1);
   });
@@ -256,6 +287,141 @@ describe("saving and loading a hosted city", () => {
     store.close();
     await saver.save("manual");
     expect(statuses.at(-1)?.saveError).toMatch(/^Saving failed:/);
+  });
+});
+
+/** Sends an export or import request and waits for its reply. */
+function ask(saves: ReturnType<typeof pair<FromSaver>>, message: Record<string, unknown> & { requestId: number }) {
+  return new Promise<FromSaver>((resolve) => {
+    const off = saves.page.onMessage((m) => {
+      if (m.requestId !== message.requestId || m.type === "status") return;
+      off();
+      resolve(m);
+    });
+    saves.page.send({ channel: SAVES_CHANNEL, ...message });
+  });
+}
+
+async function exported(saves: ReturnType<typeof pair<FromSaver>>, requestId: number) {
+  const reply = await ask(saves, { type: "export", requestId });
+  if (reply.type !== "exported" || !reply.result.ok) throw new Error(`export failed: ${JSON.stringify(reply)}`);
+  return reply.result;
+}
+
+async function imported(saves: ReturnType<typeof pair<FromSaver>>, requestId: number, fileName: string, bytes: Uint8Array) {
+  const reply = await ask(saves, { type: "import", requestId, fileName, bytes: bytes.slice().buffer });
+  if (reply.type !== "imported") throw new Error("expected an import reply");
+  return reply.result;
+}
+
+const hashOf = (bytes: ArrayBuffer | Uint8Array) => hashState(deserialize(new Uint8Array(bytes)).state);
+
+describe("city files", () => {
+  it("names files after the city, and cities after the file", () => {
+    expect(cityFileName("Riverside")).toBe("Riverside.city");
+    expect(cityFileName('North/South: "Twin" Cities?')).toBe("North-South- -Twin- Cities-.city");
+    expect(cityFileName("  ..  ")).toBe("city.city");
+    expect(cityNameFromFile("Riverside.city")).toBe("Riverside");
+    expect(cityNameFromFile("Riverside.CITY")).toBe("Riverside");
+    expect(cityNameFromFile("backup.bin")).toBe("backup.bin");
+    expect(cityNameFromFile(".city")).toBe("Imported city");
+    expect(uniqueCityName("Riverside", ["Harbour"])).toBe("Riverside");
+    expect(uniqueCityName("Riverside", ["Riverside", "Riverside 2"])).toBe("Riverside 3");
+  });
+
+  it("reminds after the interval since the last download, or since the city was made", () => {
+    const day = 86_400_000;
+    const city = { id: "a", name: "a", seed: 1, tick: 0, savedAt: 10 * day };
+    expect(wantsExportReminder(city, 20 * day, day)).toBe(false); // nothing to count from yet
+    expect(wantsExportReminder({ ...city, createdAt: 9 * day }, 9.5 * day, day)).toBe(false);
+    expect(wantsExportReminder({ ...city, createdAt: 9 * day }, 10 * day, day)).toBe(true);
+    expect(wantsExportReminder({ ...city, createdAt: 1 * day, exportedAt: 9.5 * day }, 10 * day, day)).toBe(false);
+  });
+
+  it("downloads the running city with the same hash and records when", async () => {
+    const store = await openStore();
+    const wall = { now: 1_000 };
+    const { saves, run, command, host, city } = await hostCity(store, wall);
+    command(1);
+    run(700);
+    wall.now = 5_000;
+    const file = await exported(saves, 1);
+    expect(file.fileName).toBe("New city.city");
+    expect(file.tick).toBe(host.tick);
+    expect(hashOf(file.bytes)).toBe(hashOf(host.snapshotBytes()));
+    const meta = (await store.list()).find((c) => c.id === city.id);
+    expect(meta).toMatchObject({ exportedAt: 5_000, createdAt: 1_000 });
+  });
+
+  it("downloads even when local saves are not available", async () => {
+    const city = await openLatestCity(await openStore(), nextId);
+    const saves = pair<FromSaver>();
+    const host = new SimHost(city.state, memoryTransportPair().host, () => 0, city.pagedLog);
+    new Saver({ store: null, host, transport: saves.worker, city, loadedFrom: city.from, problem: null, wallClock: () => 0 });
+    expect(hashOf((await exported(saves, 1)).bytes)).toBe(hashOf(host.snapshotBytes()));
+  });
+
+  it("imports a file as a new city that opens next, with the same hash", async () => {
+    const store = await openStore();
+    const wall = { now: 1_000 };
+    const first = await hostCity(store, wall);
+    first.command(1, "NoOp", { note: "export me" });
+    first.run(1_200);
+    const file = await exported(first.saves, 1);
+
+    // Another city is running and saving when the file comes back.
+    wall.now = 2_000;
+    const result = await imported(first.saves, 2, "My town.city", new Uint8Array(file.bytes));
+    if (!result.ok) throw new Error(result.error);
+    expect(result.city).toMatchObject({ name: "My town", tick: file.tick, openedAt: 2_000, exportedAt: 2_000 });
+    expect(result.city.id).not.toBe(first.city.id);
+    wall.now = 3_000;
+    await first.saver.save("hidden");
+
+    const second = await hostCity(store, wall);
+    expect(second.city).toMatchObject({ id: result.city.id, name: "My town", from: "latest save" });
+    expect(hashOf(second.host.snapshotBytes())).toBe(hashOf(file.bytes));
+    expect(second.host.fullLog.map((e) => e.type)).toEqual(["NoOp"]);
+  });
+
+  it("imports the same file twice as two separate cities", async () => {
+    const store = await openStore();
+    const { saves } = await hostCity(store);
+    const file = new Uint8Array((await exported(saves, 1)).bytes);
+    const a = await imported(saves, 2, "Harbour.city", file);
+    const b = await imported(saves, 3, "Harbour.city", file);
+    if (!a.ok || !b.ok) throw new Error("import failed");
+    expect(a.city.id).not.toBe(b.city.id);
+    expect([a.city.name, b.city.name]).toEqual(["Harbour", "Harbour 2"]);
+    expect(await store.list()).toHaveLength(3);
+    expect(hashOf((await store.read(a.city.id))?.latest ?? new Uint8Array())).toBe(hashOf(file));
+    expect(hashOf((await store.read(b.city.id))?.latest ?? new Uint8Array())).toBe(hashOf(file));
+  });
+
+  it.each([
+    ["not a city", new TextEncoder().encode("hello, this is a text file"), /not a City Council save/],
+    ["empty", new Uint8Array(), /not a City Council save/],
+    ["truncated", "truncated", /cut short/],
+    ["damaged", "damaged", /This file is damaged/],
+    ["newer", "newer", /newer version of the game/],
+  ] as const)("refuses a file that is %s and changes nothing", async (_, input, error) => {
+    const store = await openStore();
+    const { saves, statuses } = await hostCity(store);
+    const good = new Uint8Array((await exported(saves, 1)).bytes);
+    const bytes =
+      input === "truncated" ? good.slice(0, good.length - 40)
+      : input === "damaged" ? damaged(good)
+      : input === "newer" ? newer(good)
+      : input;
+    const listBefore = await store.list();
+    const statusesBefore = statuses.length;
+    const result = await imported(saves, 2, "Riverside.city", bytes);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^Could not import "Riverside\.city"\./);
+    expect(result.error).toMatch(error);
+    expect(await store.list()).toEqual(listBefore);
+    expect(statuses.length).toBe(statusesBefore);
   });
 });
 
@@ -273,6 +439,10 @@ describe("worker plumbing", () => {
 
   it("parses only well-formed save requests", () => {
     expect(parseSaveRequest({ channel: "saves", type: "save", reason: "manual", requestId: 1 })).not.toBeNull();
+    expect(parseSaveRequest({ channel: "saves", type: "export", requestId: 1 })).not.toBeNull();
+    expect(parseSaveRequest({ channel: "saves", type: "import", requestId: 1, fileName: "a.city", bytes: new ArrayBuffer(4) })).not.toBeNull();
+    expect(parseSaveRequest({ channel: "saves", type: "import", requestId: 1, fileName: "a.city", bytes: "nope" })).toBeNull();
+    expect(parseSaveRequest({ channel: "saves", type: "export" })).toBeNull();
     expect(parseSaveRequest({ channel: "saves", type: "save", reason: "whenever", requestId: 1 })).toBeNull();
     expect(parseSaveRequest({ v: 1, type: "requestSnapshot" })).toBeNull();
   });
