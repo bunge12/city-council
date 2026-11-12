@@ -1,9 +1,10 @@
 name: CI
 
+# Runs on pull requests only. main requires branches to be up to date before
+# merging, so a passing PR is already the merged result, and deploy.yml builds
+# and walks through every push to main.
 on:
   pull_request:
-  push:
-    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
