@@ -176,9 +176,25 @@ test("the page asks to keep storage and says so when the browser declines", asyn
   }
 });
 
-// The tamper tests open the city again in a second tab rather than reloading,
-// because a reload hides the first tab, and the save that triggers could
-// replace the snapshot the test just changed.
+// The tamper tests close the tab that ran the city before changing its save,
+// then open it again in a new tab. A tab left running would autosave the
+// city every 30 seconds, and a reload saves it as the tab hides; either
+// could replace the snapshot the test just changed.
+
+/**
+ * Closes `page`, so its worker stops saving, and tampers with city `id`
+ * from a blank page on the same origin that does not run the game.
+ */
+async function closeAndTamper(page: Page, id: string, edit: "flip" | "newer"): Promise<number[]> {
+  const context = page.context();
+  await page.close();
+  const blank = await context.newPage();
+  await blank.route("**/blank", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>blank</title>" }));
+  await blank.goto("/blank");
+  const bytes = await tamper(blank, id, edit);
+  await blank.close();
+  return bytes;
+}
 
 test("a damaged save is reported and the previous good save is loaded", async ({ page: first }) => {
   const page = first;
@@ -191,9 +207,10 @@ test("a damaged save is reported and the previous good save is loaded", async ({
   await setSpeed(page, 0);
   await page.evaluate(() => window.cityCouncil.saveNow());
   const { city } = await status(page);
-  await tamper(page, city.id, "flip");
+  const context = page.context();
+  await closeAndTamper(page, city.id, "flip");
 
-  const second = await page.context().newPage();
+  const second = await context.newPage();
   await open(second);
   const after = await status(second);
   expect(after.city.id).toBe(city.id);
@@ -211,9 +228,10 @@ test("a save from a newer version is refused and left untouched", async ({ page:
   await open(page);
   const { city } = await status(page);
   await page.evaluate(() => window.cityCouncil.saveNow());
-  const stored = await tamper(page, city.id, "newer");
+  const context = page.context();
+  const stored = await closeAndTamper(page, city.id, "newer");
 
-  const second = await page.context().newPage();
+  const second = await context.newPage();
   await open(second);
   const after = await status(second);
   expect(after.loadedFrom).toBe("new city");
