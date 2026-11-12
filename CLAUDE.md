@@ -51,6 +51,7 @@ pnpm build
 
 - One issue is one pull request. Keep it small enough to finish and test in one session.
 - Name the branch after the change, for example `m0-terrain-generation`.
+- Rebase your changes from `main` before opening a PR, the repo has branch protection rules and code needs to be up to date.
 - A pull request needs passing unit tests, a passing replay test, and a Playwright walkthrough with screenshots for anything a player can see.
 - Every pull request that changes what users see in the browser gets browser evidence for the feature it changes. Publish the evidence as a Claude Artifact and post its link as a comment on the pull request. Back-end and simulation-only changes need no evidence.
 - If a decision in the PRD changes, update `docs/PRD.md` in the same pull request.
