@@ -11,7 +11,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides whether the full check needs to run. A pull request that only
+  # touches Markdown files skips it. The check job is skipped through `if:`
+  # rather than `paths-ignore`, because GitHub reports a skipped job as passing
+  # and a required check that never starts would block the merge.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The pull request merge commit and its two parents.
+          fetch-depth: 2
+      - id: diff
+        run: |
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          echo "Changed files:"
+          echo "$changed"
+          if echo "$changed" | grep -qv '\.md$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Only Markdown files changed, skipping the check."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   check:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
