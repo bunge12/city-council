@@ -185,6 +185,8 @@ There are no dates on these, by choice. The order is the plan, and nobody has be
 
 The world unit is one metre. The map is a 12 km square with a heightmap at 16 m resolution, which is 750 × 750 samples. A 4 km map cannot hold 500,000 people at a believable density. A seed generates height, water level, and resource masks for fertile land, forest and ore. Layered noise with an erosion pass is enough for v1.
 
+The ground is coloured by height and slope only. The resource masks are not painted on it; a resources overlay will show them. Forest shows as decorative trees, and open lowland gets grass tufts near the camera. Decoration is placed from the seed by the client, so it is the same on every load and for every player. It is not sim state and nothing in the game reads it.
+
 This milestone also builds the parts every later module leans on.
 
 - The command bus and the worker message protocol

@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`decoration placement > hashes cells to fixed values 1`] = `
+[
+  2655144677,
+  1537865041,
+  3284176336,
+]
+`;

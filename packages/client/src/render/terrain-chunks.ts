@@ -157,19 +157,3 @@ export function buildChunk(terrain: Terrain, ci: number, cj: number, segments: n
 
   return { positions, normals, surfaceHeights, indices, surfaceVertices: surface };
 }
-
-/**
- * Packs the resource masks into an RGBA texture, one texel per height
- * sample: red fertile, green forest, blue ore. Alpha is unused.
- */
-export function resourceTexels(terrain: Terrain): Uint8Array {
-  const count = terrain.samples * terrain.samples;
-  const out = new Uint8Array(count * 4);
-  for (let k = 0; k < count; k++) {
-    out[k * 4] = (terrain.fertile[k] ?? 0) * 255;
-    out[k * 4 + 1] = (terrain.forest[k] ?? 0) * 255;
-    out[k * 4 + 2] = (terrain.ore[k] ?? 0) * 255;
-    out[k * 4 + 3] = 255;
-  }
-  return out;
-}

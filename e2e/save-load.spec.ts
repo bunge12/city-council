@@ -29,6 +29,7 @@ declare const document: {
   dispatchEvent(event: unknown): boolean;
 };
 declare const Event: new (type: string) => unknown;
+declare function addEventListener(type: string, listener: (e: { stopImmediatePropagation(): void }) => void, options: { capture: boolean }): void;
 declare const indexedDB: {
   open(name: string): { result: IdbDb; onsuccess: (() => void) | null; onerror: (() => void) | null };
 };
@@ -187,6 +188,12 @@ test("the page asks to keep storage and says so when the browser declines", asyn
  */
 async function closeAndTamper(page: Page, id: string, edit: "flip" | "newer"): Promise<number[]> {
   const context = page.context();
+  // Closing the tab hides it, and the page saves on hide. Whether that save
+  // lands before the worker dies is a race, and when it does it pushes the
+  // snapshot the test expects out of "previous". Stop it reaching the page.
+  await page.evaluate(() =>
+    addEventListener("visibilitychange", (e) => e.stopImmediatePropagation(), { capture: true }),
+  );
   await page.close();
   const blank = await context.newPage();
   await blank.route("**/blank", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>blank</title>" }));

@@ -4,7 +4,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { generateTerrain, heightAt, type Terrain } from "@city-council/sim";
 import { CHUNK_SIZE, MAP_BASE_HEIGHT, SKIRT_FLARE, TERRAIN_LODS } from "../src/render/config";
-import { buildChunk, chunksPerSide, resourceTexels, type ChunkGeometry } from "../src/render/terrain-chunks";
+import { buildChunk, chunksPerSide, type ChunkGeometry } from "../src/render/terrain-chunks";
 
 let terrain: Terrain;
 beforeAll(() => {
@@ -137,13 +137,5 @@ describe("terrain chunks", () => {
       const ny = (u[1] ?? 0) * (w[0] ?? 0) - (u[0] ?? 0) * (w[1] ?? 0);
       expect(ny).toBeGreaterThan(0);
     }
-  });
-
-  it("packs the resource masks one texel per sample", () => {
-    const texels = resourceTexels(terrain);
-    expect(texels.length).toBe(terrain.samples * terrain.samples * 4);
-    const k = terrain.forest.indexOf(1);
-    expect(k).toBeGreaterThanOrEqual(0);
-    expect(texels[k * 4 + 1]).toBe(255);
   });
 });
