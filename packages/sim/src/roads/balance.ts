@@ -27,6 +27,8 @@ export interface RoadTypeBalance {
   /** Metres, kerb to kerb. */
   width: number;
   zonable: boolean;
+  /** Whether a player can build it. Highway is in the data before it is buildable. */
+  buildable: boolean;
   /** Steepest grade allowed, rise over run. */
   maxSlope: number;
   /** Tightest curve allowed, metres. */
@@ -35,8 +37,23 @@ export interface RoadTypeBalance {
   upkeepPerMetrePerYear: BalancePrice;
 }
 
+/** How the sim checks a road before it builds one. */
+export interface RoadBuildBalance {
+  /** Positions are rounded to multiples of this, in metres. */
+  gridStep: number;
+  /** An end this close to an existing node, in metres, joins that node. */
+  mergeDistance: number;
+  /** Shortest segment, in metres. */
+  minLength: number;
+  /** Narrowest angle between two segments that meet at a node, in degrees. */
+  minAngleDegrees: number;
+  /** Most metres between two ground samples along a road. */
+  groundSampleStep: number;
+}
+
 export interface RoadBalance {
   escalation: { toYear: number; annualFactor: number; source: string; sourceUrl?: string; sourceYear: number };
+  build: RoadBuildBalance;
   types: RoadTypeBalance[];
 }
 
@@ -49,7 +66,8 @@ export interface RoadType extends Omit<RoadTypeBalance, "buildCostPerMetre" | "u
 }
 
 const NUMBER_FIELDS = ["lanes", "speedKmh", "capacityPerLane", "width", "maxSlope", "minCurveRadius"] as const;
-const BOOLEAN_FIELDS = ["oneWay", "zonable"] as const;
+const BOOLEAN_FIELDS = ["oneWay", "zonable", "buildable"] as const;
+const BUILD_FIELDS = ["gridStep", "mergeDistance", "minLength", "minAngleDegrees", "groundSampleStep"] as const;
 const PRICE_FIELDS = ["buildCostPerMetre", "upkeepPerMetrePerYear"] as const;
 /** Segments store the type in a Uint8Array. */
 const MAX_TYPES = 256;
@@ -60,6 +78,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isPositive(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isPowerOfTwo(value: number): boolean {
+  if (!Number.isInteger(value) || value < 1) return false;
+  let v = value;
+  while (v > 1) {
+    if (v % 2 !== 0) return false;
+    v /= 2;
+  }
+  return true;
 }
 
 function isYear(value: unknown): value is number {
@@ -99,6 +127,21 @@ export function checkRoadBalance(data: unknown): string[] {
     if (!isPositive(escalation["annualFactor"])) errors.push("escalation.annualFactor must be a positive number");
     if (!isYear(escalation["sourceYear"])) errors.push("escalation.sourceYear is missing");
     if (typeof escalation["source"] !== "string" || escalation["source"] === "") errors.push("escalation.source is missing");
+  }
+  const build = data["build"];
+  if (!isRecord(build)) {
+    errors.push("build is missing");
+  } else {
+    for (const field of BUILD_FIELDS) {
+      if (!isPositive(build[field])) errors.push(`build.${field} must be a positive number`);
+    }
+    if (isPositive(build["minAngleDegrees"]) && (build["minAngleDegrees"] as number) >= 180) {
+      errors.push("build.minAngleDegrees must be under 180");
+    }
+    // Positions are whole multiples of the step, so it must divide a metre
+    // into a power of two for them to be exact in a float64.
+    const step = build["gridStep"];
+    if (isPositive(step) && !isPowerOfTwo(1 / step)) errors.push("build.gridStep must be 1 over a power of two");
   }
   const types = data["types"];
   if (!Array.isArray(types) || types.length === 0) return [...errors, "types must be a non-empty list"];
@@ -163,3 +206,6 @@ export function roadTypeIndex(id: string): number {
   if (index < 0) throw new RangeError(`no road type "${id}"`);
   return index;
 }
+
+/** How the sim checks a road before it builds one. Checked with the types above. */
+export const ROAD_BUILD: RoadBuildBalance = ROAD_BALANCE.build;
