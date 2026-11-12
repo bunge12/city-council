@@ -199,14 +199,10 @@ describe("BuildRoad refuses", () => {
     expect(build(state, road([4500, 4500], [4300, 4500 - 0.577 * 200]))).toEqual({ ok: true });
   });
 
-  it("a road that crosses another, until intersections land", () => {
+  it("a road that runs along another from a point that is not one of its nodes", () => {
     const state = ok();
-    const crosses = "The road crosses another road, and intersections are not available yet";
-    expect(rejection(state, road([4350, 4400], [4350, 4600]))).toBe(crosses);
-    // Ending on the middle of a segment is meeting it too.
-    expect(rejection(state, road([4350, 4400], [4350, 4500]))).toBe(crosses);
-    // Running along it from a point that is not one of its nodes.
-    expect(rejection(state, road([4100, 4500], [4300, 4500]))).toBe(crosses);
+    expect(rejection(state, road([4100, 4500], [4300, 4500]))).toMatch(/too shallow an angle/);
+    expect(rejection(state, road([4100, 4500], [4600, 4500]))).toBe("The road runs along another road");
   });
 
   it("a road over water", () => {
@@ -272,7 +268,7 @@ describe("a city saved and reloaded mid-build", () => {
     const crossing = road([4350, 4400], [4350, 4600]);
     const diagonal = road([4200, 4500], [4500.5, 4801]);
     for (const state of [live, loaded]) {
-      expect(rejection(state, crossing)).toMatch(/crosses another road/);
+      expect(build(state, crossing)).toEqual({ ok: true });
       expect(build(state, diagonal)).toEqual({ ok: true });
     }
     expect(hashState(loaded)).toBe(hashState(live));

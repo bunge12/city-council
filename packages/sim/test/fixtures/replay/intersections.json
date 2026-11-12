@@ -1,0 +1,15 @@
+{
+  "description": "Two players build a street grid on flat ground. Roads cross, end on the body of others as T-junctions, run through three parallel streets in one command, and cross one 2 m from an existing node, which moves the crossing to that node.",
+  "seed": 2026,
+  "untilTick": 12,
+  "log": [
+    { "tick": 0, "seq": 1, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4200, "z": 4500 }, "to": { "x": 4600, "z": 4500 }, "type": "avenue" } },
+    { "tick": 0, "seq": 1, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 4200, "z": 4620.4 }, "to": { "x": 4600, "z": 4610 }, "type": "street" } },
+    { "tick": 1, "seq": 2, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4200, "z": 4740 }, "to": { "x": 4600, "z": 4760.6 }, "type": "street" } },
+    { "tick": 3, "seq": 2, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 4310.3, "z": 4420.7 }, "to": { "x": 4370.1, "z": 4830.9 }, "type": "street" } },
+    { "tick": 3, "seq": 3, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4500, "z": 4500 }, "to": { "x": 4510, "z": 4612.5 }, "type": "oneWay" } },
+    { "tick": 6, "seq": 4, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4442, "z": 4440 }, "to": { "x": 4562, "z": 4560 }, "type": "street" } },
+    { "tick": 8, "seq": 3, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 4432, "z": 4420 }, "to": { "x": 4432, "z": 4900 }, "type": "street" } }
+  ],
+  "hash": "55b064187981054c"
+}

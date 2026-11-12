@@ -56,7 +56,7 @@ export type { Terrain, TerrainBalance } from "./terrain/terrain";
 export { ROAD_BALANCE, ROAD_BUILD, ROAD_TYPES, roadTypeIndex } from "./roads/balance";
 export type { BalancePrice, RoadBalance, RoadBuildBalance, RoadType, RoadTypeBalance } from "./roads/balance";
 export { planStraightRoad, snapToGrid } from "./roads/build";
-export type { BuildPoint, BuildRoadPayload, RoadPlan, RoadPlanResult } from "./roads/build";
+export type { BuildPoint, BuildRoadPayload, PlanStop, RoadPlan, RoadPlanResult } from "./roads/build";
 export {
   LEVEL_BRIDGE,
   LEVEL_ELEVATED,
