@@ -2,12 +2,16 @@
 // and the list in the debug panel, so the list cannot drift from the keys.
 
 import type { Speed } from "@city-council/sim";
+import type { ToolRoadType } from "../tools/road-tool";
 
 export type ShortcutAction =
   | { kind: "speed"; speed: Speed }
   | { kind: "togglePause" }
   | { kind: "toggleDebug" }
-  | { kind: "toggleLog" };
+  | { kind: "toggleLog" }
+  | { kind: "roadTool" }
+  | { kind: "roadType"; type: ToolRoadType }
+  | { kind: "escape" };
 
 export interface Shortcut {
   /** `KeyboardEvent.code` values that trigger it. */
@@ -25,6 +29,16 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["Digit3", "Numpad3"], label: "3", description: "speed 4x", action: { kind: "speed", speed: 4 } },
   { codes: ["Backquote"], label: "`", description: "show or hide this panel", action: { kind: "toggleDebug" } },
   { codes: ["KeyL"], label: "L", description: "show or hide the activity log", action: { kind: "toggleLog" } },
+  { codes: ["KeyB"], label: "B", description: "road tool on or off", action: { kind: "roadTool" } },
+  { codes: ["KeyZ"], label: "Z", description: "draw streets", action: { kind: "roadType", type: "street" } },
+  { codes: ["KeyX"], label: "X", description: "draw avenues", action: { kind: "roadType", type: "avenue" } },
+  { codes: ["KeyC"], label: "C", description: "draw one-way roads", action: { kind: "roadType", type: "oneWay" } },
+  {
+    codes: ["Escape"],
+    label: "Esc",
+    description: "drop the road being drawn, or leave the tool",
+    action: { kind: "escape" },
+  },
 ];
 
 /** Camera keys, handled by the camera controls. Listed so the panel shows every key. */
@@ -34,6 +48,7 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "R F", description: "tilt" },
   { label: "+ -", description: "zoom" },
   { label: "Drag, right-drag, wheel", description: "pan, orbit, zoom" },
+  { label: "Click, right-click", description: "with the road tool: start or end a road, drop it" },
 ];
 
 /** The parts of a key event the shortcut handler looks at. */

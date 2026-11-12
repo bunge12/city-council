@@ -30,11 +30,19 @@ export interface HostStats {
  * everything may have changed. A delta names the 500 m chunks, as
  * `cj * CHUNKS_PER_SIDE + ci` ascending, whose roads changed, and the node
  * and segment ids whose rows it carried, ascending; all empty when no road
- * changed.
+ * changed. `steps` is how many sim steps the delta covers: after one or
+ * more, every command the host had queued before it has been applied or
+ * dropped.
  */
 export type MirrorUpdate =
   | { kind: "snapshot" }
-  | { kind: "delta"; roadChunks: readonly number[]; roadNodes: readonly number[]; roadSegs: readonly number[] };
+  | {
+      kind: "delta";
+      roadChunks: readonly number[];
+      roadNodes: readonly number[];
+      roadSegs: readonly number[];
+      steps: number;
+    };
 
 type Listener = (update: MirrorUpdate) => void;
 
@@ -161,7 +169,7 @@ export class SimMirror {
       state.logOffset += LOG_PAGE_SIZE;
     }
     this.hostStats = { timings: delta.timings };
-    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs });
+    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs, steps: delta.steps });
   }
 
   /** Out of step with the host. Drop deltas until a snapshot resets us. */

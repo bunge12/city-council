@@ -2,10 +2,12 @@ import { StrictMode, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import type { Speed } from "@city-council/sim";
 import { ActivityLog } from "./ActivityLog";
+import { BuildBar } from "./BuildBar";
 import { CityMenu } from "./CityMenu";
 import { DebugPanel } from "./DebugPanel";
 import { ServicesContext, useServices, useSim } from "./hooks";
 import { Notes } from "./Notes";
+import { RoadReadout } from "./RoadReadout";
 import type { AppServices } from "./services";
 import { shortcutFor, toggledSpeed } from "./shortcuts";
 import { toggleDebug, toggleLog } from "./store";
@@ -14,7 +16,7 @@ import "./ui.css";
 
 /** Turns key presses into shortcut actions. Speed keys send `SetSpeed`, like the buttons. */
 function useShortcuts(): void {
-  const { sendCommand } = useServices();
+  const { sendCommand, roadTool } = useServices();
   const speed = useSim((s) => s?.speed ?? null);
   const lastRunning = useRef<Speed>(1);
   const current = useRef<Speed | null>(null);
@@ -50,11 +52,20 @@ function useShortcuts(): void {
         case "toggleLog":
           toggleLog();
           return;
+        case "roadTool":
+          roadTool.toggle();
+          return;
+        case "roadType":
+          roadTool.pickType(action.type);
+          return;
+        case "escape":
+          roadTool.escape();
+          return;
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [sendCommand]);
+  }, [sendCommand, roadTool]);
 }
 
 function Shell() {
@@ -70,6 +81,8 @@ function Shell() {
         <DebugPanel />
         <ActivityLog />
       </div>
+      <BuildBar />
+      <RoadReadout />
     </>
   );
 }

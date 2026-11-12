@@ -382,3 +382,79 @@ kbd {
     --bar-height: 96px;
   }
 }
+
+/* The build toolbar, centred along the bottom edge. */
+.build-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+}
+
+.build-bar .tools,
+.build-bar .road-types {
+  display: flex;
+  gap: 4px;
+}
+
+.build-bar .hint {
+  margin: 0;
+  flex-basis: 100%;
+  text-align: center;
+}
+
+.build-bar button kbd {
+  margin-left: 4px;
+}
+
+.build-bar button[aria-pressed="true"] kbd {
+  background: rgb(255 255 255 / 0.2);
+  border-color: rgb(255 255 255 / 0.5);
+  color: inherit;
+}
+
+.road-note {
+  margin: 0;
+  flex-basis: 100%;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--bad-bg);
+  color: var(--bad-ink);
+  text-align: center;
+}
+
+/* Next to the cursor while a road is drawn. Clicks pass through to the map. */
+.road-readout {
+  position: absolute;
+  max-width: 280px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  font-size: 13px;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.road-readout .reason {
+  white-space: normal;
+  min-width: 200px;
+}
+
+.road-readout.refused {
+  border-color: #d9827c;
+  background: var(--bad-bg);
+  color: var(--bad-ink);
+}
+
+.road-readout .junctions {
+  color: var(--ink-soft);
+}

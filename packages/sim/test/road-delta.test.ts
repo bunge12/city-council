@@ -3,12 +3,14 @@ import {
   CHUNKS_PER_SIDE,
   CHUNK_SIZE,
   applyRoadDelta,
+  buildRoadIndex,
   createState,
   drainRoadChanges,
   encodeRoadDelta,
   hashState,
   mergeRoadChanges,
   recordRoadChanges,
+  roadIndexOf,
   step,
   submit,
   type RoadChanges,
@@ -62,6 +64,23 @@ describe("road change recording", () => {
       churnNetwork(net, 100 + round, 1 + (round % 7));
       sync(net, copy);
       expect(arrays(copy)).toEqual(arrays(net));
+    }
+  });
+
+  it("keeps a spatial index the copy already has equal to one built from scratch", () => {
+    const net = createRoadNetwork();
+    growNetwork(net, 3, 200);
+    const copy = cloneNetwork(net);
+    // The client asks its copy a spatial query before any delta lands.
+    const index = roadIndexOf(copy);
+    recordRoadChanges(net);
+    for (let round = 0; round < 100; round++) {
+      churnNetwork(net, 300 + round, 1 + (round % 5));
+      sync(net, copy);
+      const fresh = buildRoadIndex(copy);
+      expect(roadIndexOf(copy)).toBe(index);
+      expect(index.nodeCells).toEqual(fresh.nodeCells);
+      expect(index.segCells).toEqual(fresh.segCells);
     }
   });
 

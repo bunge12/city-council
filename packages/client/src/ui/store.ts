@@ -4,8 +4,9 @@
 // `useSim` (hooks.ts) and change it only by sending commands.
 
 import { create } from "zustand";
+import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tools/road-tool";
 
-export interface UiState {
+export interface UiState extends RoadToolState {
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
@@ -32,6 +33,7 @@ export const useUi = create<UiState>(() => ({
   storageNote: null,
   reminderDismissed: false,
   busy: false,
+  ...INITIAL_ROAD_TOOL,
 }));
 
 export function toggleDebug(): void {
@@ -86,4 +88,25 @@ export function setViewReadout(next: Partial<ViewReadout>): void {
       return;
     }
   }
+}
+
+/**
+ * What the road tool shows next to the cursor: the pointer in CSS pixels
+ * over the canvas and the preview there, or null when the tool shows
+ * nothing. Updated every frame the pointer or the preview changes, so it is
+ * its own store and only the readout re-renders.
+ */
+export interface RoadHover {
+  x: number;
+  y: number;
+  preview: RoadPreview | null;
+}
+
+export const useRoadHover = create<{ hover: RoadHover | null }>(() => ({ hover: null }));
+
+export function setRoadHover(hover: RoadHover | null): void {
+  const current = useRoadHover.getState().hover;
+  if (current === hover) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview) return;
+  useRoadHover.setState({ hover });
 }

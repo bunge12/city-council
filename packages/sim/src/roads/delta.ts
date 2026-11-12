@@ -31,7 +31,15 @@ import {
   type AnyTypedArray,
   type RoadNetwork,
 } from "./network";
-import { chunkOfNode, forSegmentChunks } from "./spatial";
+import {
+  chunkOfNode,
+  existingRoadIndex,
+  forSegmentChunks,
+  indexNode,
+  indexSegment,
+  unindexNode,
+  unindexSegment,
+} from "./spatial";
 
 type NodeKey = (typeof NODE_ARRAYS)[number];
 type SegKey = (typeof SEG_ARRAYS)[number];
@@ -233,10 +241,22 @@ export function applyRoadDelta(net: RoadNetwork, delta: RoadDelta): number[] | s
   if (problem) return problem;
   const chunks = new Set<number>();
   touchedChunks(net, delta.nodeIds.filter((id) => id < nodeIdLimit(net)), delta.segIds.filter((id) => id < segmentIdLimit(net)), chunks);
+  // Rows are copied in place, past the observer hooks, so a spatial index
+  // the client already has is brought up to date here: changed rows come
+  // out as they were and go back in as they are.
+  const index = existingRoadIndex(net);
+  if (index) {
+    for (const seg of delta.segIds) if (isSegment(net, seg)) unindexSegment(index, seg);
+    for (const node of delta.nodeIds) if (isNode(net, node)) unindexNode(index, node);
+  }
   scatter(net, NODE_ARRAYS, delta.nodeLimit, delta.nodeIds, delta.nodes);
   scatter(net, SEG_ARRAYS, delta.segLimit, delta.segIds, delta.segs);
   if (delta.nodeFree) net.nodeFree = delta.nodeFree.slice();
   if (delta.segFree) net.segFree = delta.segFree.slice();
+  if (index) {
+    for (const node of delta.nodeIds) if (isNode(net, node)) indexNode(index, node);
+    for (const seg of delta.segIds) if (isSegment(net, seg)) indexSegment(index, seg);
+  }
   touchedChunks(net, delta.nodeIds, delta.segIds, chunks);
   return [...chunks].sort((a, b) => a - b);
 }

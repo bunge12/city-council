@@ -3,7 +3,8 @@
 //
 // Mouse: left drag pans (the ground under the cursor follows it), right or
 // middle drag orbits, wheel zooms towards the cursor, a left click picks the
-// ground. Keyboard: WASD or arrows pan, Q and E turn, R and F tilt, + and -
+// ground and a right click without a drag is reported too, so a tool can
+// use it to cancel. Keyboard: WASD or arrows pan, Q and E turn, R and F tilt, + and -
 // zoom on the screen centre.
 
 import { Mesh, MeshBasicNodeMaterial, RingGeometry, type Scene } from "three/webgpu";
@@ -16,12 +17,19 @@ export interface CameraControls {
   update(seconds: number): void;
   /** The ground under the pointer as of the last update, or null. */
   cursor(): GroundHit | null;
-  /** Called with the ground point of each click, or null for a click on sky. */
+  /** The pointer over the canvas in CSS pixels, or null when it is elsewhere. */
+  pointer(): { x: number; y: number } | null;
+  /**
+   * Called with the ground point of each click, or null for a click on sky.
+   * A press that ends a drag is not a click.
+   */
   onPick(listener: (hit: GroundHit | null) => void): void;
+  /** Called for each right click that did not orbit the camera. */
+  onRightClick(listener: () => void): void;
   dispose(): void;
 }
 
-type Drag = { kind: "pan" | "orbit"; startX: number; startY: number; lastX: number; lastY: number; moved: boolean };
+type Drag = { kind: "pan" | "orbit"; button: number; startX: number; startY: number; lastX: number; lastY: number; moved: boolean };
 
 const KEYS: Record<string, string> = {
   KeyW: "forward",
@@ -45,6 +53,7 @@ const KEYS: Record<string, string> = {
 export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, scene: Scene): CameraControls {
   const held = new Set<string>();
   const pickListeners: ((hit: GroundHit | null) => void)[] = [];
+  const rightClickListeners: (() => void)[] = [];
   let drag: Drag | null = null;
   /** Pointer position over the canvas, in CSS pixels, or null when it is elsewhere. */
   let pointer: { x: number; y: number } | null = null;
@@ -72,7 +81,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     if (!kind) return;
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
-    drag = { kind, startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, moved: false };
+    drag = { kind, button: e.button, startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, moved: false };
     if (kind === "pan") rig.grab(p.x, p.y);
   }
 
@@ -91,7 +100,9 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
 
   function onPointerUp(e: PointerEvent): void {
     if (!drag) return;
-    const wasClick = drag.kind === "pan" && !drag.moved;
+    const released = e.type === "pointerup";
+    const wasClick = released && drag.kind === "pan" && !drag.moved;
+    const wasRightClick = released && drag.kind === "orbit" && drag.button === 2 && !drag.moved;
     drag = null;
     if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
     if (wasClick) {
@@ -99,6 +110,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
       const hit = rig.pickGround(p.x, p.y);
       for (const l of pickListeners) l(hit);
     }
+    if (wasRightClick) for (const l of rightClickListeners) l();
   }
 
   function onPointerLeave(): void {
@@ -186,7 +198,9 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   return {
     update,
     cursor: () => cursorHit,
+    pointer: () => pointer,
     onPick: (l) => pickListeners.push(l),
+    onRightClick: (l) => rightClickListeners.push(l),
     dispose() {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
