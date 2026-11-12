@@ -16,8 +16,13 @@ export type LoadedFrom = "latest save" | "previous save" | "new city";
 
 /** The page's view of saving, sent by the worker after every change. */
 export interface SaveStatus {
-  /** The running city. */
+  /** The running city, or when `openElsewhere` is true the city this tab could not run. */
   city: { id: string; name: string; seed: number };
+  /**
+   * True when another tab is running `city`, so this tab runs nothing: no
+   * sim, no saves. The player can start or open a different city here.
+   */
+  openElsewhere: boolean;
   loadedFrom: LoadedFrom;
   /** Tick the city resumed at. */
   loadedTick: number;

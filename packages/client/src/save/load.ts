@@ -53,12 +53,19 @@ export function newCityFallback(problem: string | null, makeId: () => string = r
  * falls back to the one before it. If it was written by a newer version of
  * the game, or both snapshots are damaged, it is left as it is and a new
  * city starts under a new id, so nothing overwrites it.
+ *
+ * `preferredId` is the city this tab ran last. When it is still saved it is
+ * opened in place of the most recently opened one, so a reload keeps a tab
+ * on its own city whatever other tabs have opened since.
  */
 export async function openLatestCity(
   store: CityStore,
   makeId: () => string = randomId,
+  preferredId: string | null = null,
 ): Promise<OpenedCity> {
   const cities = await store.list();
+  const preferred = preferredId === null ? undefined : cities.find((c) => c.id === preferredId);
+  if (preferred) return openCity(store, preferred, makeId);
   // Ties go to the most recently saved, which `list` puts first.
   const meta = cities.reduce<CityMeta | undefined>((best, c) => (!best || lastOpened(c) > lastOpened(best) ? c : best), undefined);
   if (!meta) return newCityFallback(null, makeId);

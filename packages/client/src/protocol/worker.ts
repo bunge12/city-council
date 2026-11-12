@@ -4,6 +4,7 @@
 import { AUTOSAVE_INTERVAL_MS } from "../save/config";
 import { isSaveMessage } from "../save/channel";
 import { newCityFallback, openLatestCity, type OpenedCity } from "../save/load";
+import { cityFromWorkerName, claimCity } from "../save/lock";
 import { Saver } from "../save/saver";
 import { CityStore } from "../save/store";
 import { PUMP_INTERVAL_MS, SimHost } from "./host";
@@ -22,17 +23,21 @@ async function start(): Promise<void> {
   let city: OpenedCity;
   try {
     store = await CityStore.open();
-    city = await openLatestCity(store);
+    city = await openLatestCity(store, undefined, cityFromWorkerName(self.name));
   } catch (error) {
     storeError = `saved cities could not be opened (${error instanceof Error ? error.message : String(error)})`;
     city = newCityFallback(`Saved cities could not be opened, so a new city was started. ${storeError}.`);
   }
 
-  const host = new SimHost(city.state, simTransport, () => performance.now(), city.pagedLog, LOCAL_PLAYER_ID);
+  // One tab per city: without the lock this worker hosts nothing, and the
+  // page offers a different city. The sim transport then stays unanswered.
+  const mine = await claimCity(city.id, navigator.locks);
+  const host = mine ? new SimHost(city.state, simTransport, () => performance.now(), city.pagedLog, LOCAL_PLAYER_ID) : null;
   const saver = new Saver({
     store,
     ...(storeError === undefined ? {} : { storeError }),
     host,
+    elsewhere: { seed: city.state.seed, tick: city.state.tick },
     transport: saveTransport,
     city: { id: city.id, name: city.name },
     logPagesStored: city.logPagesStored,
@@ -40,8 +45,10 @@ async function start(): Promise<void> {
     problem: city.problem,
     wallClock: () => Date.now(),
   });
-  setInterval(() => host.pump(), PUMP_INTERVAL_MS);
-  setInterval(() => void saver.save("autosave"), AUTOSAVE_INTERVAL_MS);
+  if (host) {
+    setInterval(() => host.pump(), PUMP_INTERVAL_MS);
+    setInterval(() => void saver.save("autosave"), AUTOSAVE_INTERVAL_MS);
+  }
   await saver.start();
 }
 

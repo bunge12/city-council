@@ -20,6 +20,7 @@ import { SAVES_CHANNEL, parseSaveRequest, type FromSaver, type SaveStatus } from
 import { cityFileName, cityNameFromFile, uniqueCityName, wantsExportReminder } from "../src/save/city-file";
 import { NEW_CITY_SEED } from "../src/save/config";
 import { openLatestCity } from "../src/save/load";
+import { cityFromWorkerName, cityLockName, claimCity, workerName, type LockManagerLike } from "../src/save/lock";
 import { Saver } from "../src/save/saver";
 import { CityStore, type CityMeta } from "../src/save/store";
 
@@ -615,5 +616,113 @@ describe("worker plumbing", () => {
     const state = createState(1);
     state.logOffset = 3;
     expect(() => new SimHost(state, memoryTransportPair().host, () => 0, [])).toThrow(/pagedLog has 0 entries/);
+  });
+});
+
+/** Web Locks as far as `claimCity` uses them: one holder per name, the rest wait in line. */
+function fakeLocks(): LockManagerLike & { release(name: string): void } {
+  const held = new Map<string, () => void>();
+  const waiting = new Map<string, (() => void)[]>();
+  return {
+    request(name, { signal }, callback) {
+      return new Promise((resolve, reject) => {
+        const run = () => {
+          const done = new Promise<void>((free) => held.set(name, free));
+          void Promise.race([callback(), done]).then(resolve);
+        };
+        if (!held.has(name)) return run();
+        const queue = waiting.get(name) ?? [];
+        waiting.set(name, queue);
+        queue.push(run);
+        signal.addEventListener("abort", () => {
+          queue.splice(queue.indexOf(run), 1);
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    },
+    release(name) {
+      held.get(name)?.();
+      held.delete(name);
+      waiting.get(name)?.shift()?.();
+    },
+  };
+}
+
+describe("one tab per city", () => {
+  it("gives the city to the first worker and refuses the second", async () => {
+    const locks = fakeLocks();
+    expect(await claimCity("a", locks, 20)).toBe(true);
+    expect(await claimCity("a", locks, 20)).toBe(false);
+    // Another city is free.
+    expect(await claimCity("b", locks, 20)).toBe(true);
+  });
+
+  it("waits out a holder that is on its way out, as after a reload", async () => {
+    const locks = fakeLocks();
+    expect(await claimCity("a", locks, 20)).toBe(true);
+    const second = claimCity("a", locks, 5_000);
+    locks.release(cityLockName("a"));
+    expect(await second).toBe(true);
+  });
+
+  it("runs unguarded where the browser has no locks, or they fail", async () => {
+    expect(await claimCity("a", undefined)).toBe(true);
+    const broken: LockManagerLike = { request: () => Promise.reject(new DOMException("no", "SecurityError")) };
+    expect(await claimCity("a", broken, 20)).toBe(true);
+  });
+
+  it("carries the tab's city to the worker in its name", () => {
+    expect(cityFromWorkerName(workerName("abc-123"))).toBe("abc-123");
+    expect(cityFromWorkerName(workerName(null))).toBeNull();
+    expect(cityFromWorkerName("something else")).toBeNull();
+  });
+
+  it("opens the city the tab asks for, and the most recently opened one when that is gone", async () => {
+    const store = await openStore();
+    await store.save({ ...meta("a", 10, 1), openedAt: 1 }, snapshotAt(10));
+    await store.save({ ...meta("b", 20, 2), openedAt: 2 }, snapshotAt(20));
+    expect((await openLatestCity(store, nextId, "a")).id).toBe("a");
+    expect((await openLatestCity(store, nextId, "gone")).id).toBe("b");
+    expect((await openLatestCity(store, nextId)).id).toBe("b");
+  });
+
+  it("saves nothing and marks nothing from a tab the city is not running in", async () => {
+    const store = await openStore();
+    const first = await hostCity(store);
+    first.run(1000);
+    await first.saver.save("manual");
+    const before = await store.read(first.city.id);
+    const listed = await store.list();
+
+    const saves = pair<FromSaver>();
+    const replies: FromSaver[] = [];
+    saves.page.onMessage((m) => replies.push(m));
+    const blocked = new Saver({
+      store,
+      host: null,
+      elsewhere: { seed: 4, tick: 9 },
+      transport: saves.worker,
+      city: { id: first.city.id, name: first.city.name },
+      loadedFrom: "latest save",
+      problem: null,
+      wallClock: () => 9_000,
+      makeId: nextId,
+    });
+    await blocked.start();
+    await blocked.save("autosave");
+    await blocked.exportCity(7);
+    expect(await store.read(first.city.id)).toEqual(before);
+    expect(await store.list()).toEqual(listed);
+    const status = replies.findLast((m) => m.type === "status");
+    expect(status?.type === "status" && status.status).toMatchObject({ openElsewhere: true, saveError: null, lastSave: null });
+    const exported = replies.find((m) => m.type === "exported");
+    expect(exported?.type === "exported" && exported.result).toMatchObject({ ok: false });
+
+    // It can still start another city, which is stored and left for the reload.
+    await blocked.newCity("Second", 77, 8);
+    const switched = replies.find((m) => m.type === "switched");
+    expect(switched?.type === "switched" && switched.result.ok).toBe(true);
+    expect((await store.list()).map((c) => c.name)).toContain("Second");
+    expect(await store.read(first.city.id)).toEqual(before);
   });
 });

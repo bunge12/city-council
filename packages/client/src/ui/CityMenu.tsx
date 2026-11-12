@@ -60,8 +60,9 @@ export function CityMenu() {
   const busy = useUi((s) => s.busy);
   const status = useSaveStatus();
 
+  const elsewhere = status?.openElsewhere ?? false;
   const last = status?.lastSave;
-  const saveText = !status
+  const saveText = !status || elsewhere
     ? "-"
     : last
       ? `tick ${last.tick} at ${clockTime(last.savedAt)} (${last.reason})`
@@ -73,14 +74,18 @@ export function CityMenu() {
       <dl>
         <dt>Running</dt>
         <dd id="save-city">
-          {status ? `${status.city.name}, seed ${status.city.seed} (${status.cities.length} saved)` : "loading"}
+          {!status
+            ? "loading"
+            : elsewhere
+              ? `nothing, "${status.city.name}" is open in another tab (${status.cities.length} saved)`
+              : `${status.city.name}, seed ${status.city.seed} (${status.cities.length} saved)`}
         </dd>
         <dt>Saved</dt>
         <dd id="save-status">{saveText}</dd>
       </dl>
       <div className="actions">
-        <button type="button" onClick={() => void saveNow()}>Save</button>
-        <button id="download-city" type="button" onClick={() => void downloadCity().catch(() => undefined)}>
+        <button type="button" disabled={elsewhere} onClick={() => void saveNow()}>Save</button>
+        <button id="download-city" type="button" disabled={elsewhere} onClick={() => void downloadCity().catch(() => undefined)}>
           Download
         </button>
         <label className="button">
@@ -112,7 +117,7 @@ export function CityMenu() {
                 seed {c.seed}, tick {c.tick}, saved {savedWhen(c.savedAt)}
               </span>
               {running ? (
-                <span className="running">open now</span>
+                <span className="running">{elsewhere ? "open in another tab" : "open now"}</span>
               ) : (
                 <button type="button" disabled={busy} aria-label={`Open ${c.name}`} onClick={() => void openCity(c.id)}>
                   Open

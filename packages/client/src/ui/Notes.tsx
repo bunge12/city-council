@@ -33,12 +33,25 @@ export function Notes() {
   const now = useMinuteClock();
 
   const saveProblem = status ? [status.problem, status.saveError].filter(Boolean).join(" ") || null : null;
-  const city = status?.cities.find((c) => c.id === status.city.id);
+  const elsewhere = status?.openElsewhere ?? false;
+  const city = elsewhere ? undefined : status?.cities.find((c) => c.id === status.city.id);
   // A save status that arrives after the minute tick still counts from now.
   const reminder = !dismissed && city !== undefined && wantsExportReminder(city, Math.max(now, Date.now()), EXPORT_REMINDER_INTERVAL_MS);
 
   return (
     <section className="notes" aria-label="Notes">
+      <div id="open-elsewhere" className="note problem" role="alert" hidden={!elsewhere}>
+        <span>
+          {status && elsewhere
+            ? `"${status.city.name}" is open in another tab. Two tabs cannot run the same city, ` +
+              "because each would save over the other. Close the other tab and try again, " +
+              "or start or open a different city in the City menu."
+            : null}
+        </span>
+        <div className="actions">
+          <button type="button" onClick={() => location.reload()}>Try again</button>
+        </div>
+      </div>
       <Note id="save-problem" text={saveProblem} problem />
       <Note id="storage-note" text={storageNote} />
       <Note id="file-problem" text={fileProblem} problem />
