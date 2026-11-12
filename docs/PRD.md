@@ -249,6 +249,37 @@ The player paints cells with a zone type. v1 has five, each at three densities.
 
 A building is a rectangle of same-zone cells from 1 × 1 up to 6 × 6, with a level from 1 to 3. The grower picks a free lot beside a road, picks a footprint that fits, and spawns a building when demand for that zone is positive. Meshes are generated boxes with a few roof and facade variants per zone and level, drawn with instancing.
 
+#### Residential building types
+
+Each residential zone spawns its own kinds of housing, and the size of the lot decides which kind. A lot is a rectangle of free cells with the same zone and density, fronting a road. Width runs along the road and depth runs back from it.
+
+Lots are counted in cells, and a cell is 8 m on a side. A 2 × 4 lot is 16 m by 32 m, a 4 × 4 lot is 32 m by 32 m, and the largest, 6 × 6, is 48 m by 48 m, or about 2,300 m².
+
+| Zone | Building | Lot, width × depth in cells | Residents |
+| --- | --- | --- | --- |
+| R1 | Single family home | 1 to 2 wide, 2 to 4 deep | 1 to 4 |
+| R1 | Duplex, triplex or fourplex | 3 wide, 3 to 5 deep | 8 to 16 |
+| R2 | Townhomes, a row of one to five | 1 to 5 wide, 2 to 3 deep | 4 to 20, at 4 per home |
+| R2 | Low-rise to mid-rise apartments | 3 to 4 wide, 4 to 6 deep | 50 on the smallest lot, rising to 100 |
+| R3 | Low tower | 4 × 4 up to 4 × 6 | 300 to about 550 |
+| R3 | High tower | 5 × 5 up to 6 × 6 | about 600 up to 1,000 |
+
+The lot sizes are my starting proposal. The resident numbers are fixed by design.
+
+How the grower chooses:
+
+1. It finds the free zoned cells beside a road and takes the largest lot that fits a building type for that zone.
+2. The lot's shape picks the type. In R1 a wide lot gets a plex and a narrow one gets a house. In R2 a shallow lot gets townhomes and a deep one gets apartments. In R3 a bigger lot gets a taller tower.
+3. Within a type, residents scale with lot area between the low and high figure. For a single family home the number is drawn per building, so a street of houses holds households of different sizes.
+
+So the player shapes housing through how they lay out blocks and how deep they paint. Shallow R2 strips along a street become townhomes. A deep R2 block becomes apartments. An R3 lot smaller than 4 × 4 is too small for a tower and stays empty, and the zoning overlay marks it so the player can see why.
+
+Per cell, this runs from about 0.3 residents for a house, through about 4 to 6 for apartments, to about 20 to 28 for towers. A city of houses alone tops out far below 500,000 on this map, which is intended.
+
+**Note on tower height.** A residential tower's floor plate is around 750 m², which fits a 48 m lot with room for a podium. At that size, 1,000 residents takes roughly 55 storeys. That is the top of the range, and most R3 buildings should sit well below it.
+
+**Note on large commercial and industrial lots, to settle in the M2 spec.** The 6 × 6 cap is fine for housing and offices but too small for a big-box store, a mall or a large factory, and zoning is only six cells deep. The proposed fix is a through-lot. When a block between two parallel roads carries the same zone and density on both sides, the grower may merge the two back-to-back strips into one lot up to 12 cells deep, which is 96 m. Large commercial and industrial buildings may then use lots up to 12 × 12 cells. Zoning depth stays at six cells.
+
 Removing a road removes its cells and their buildings. The pops inside are displaced and look for a new home or job.
 
 #### Art direction
@@ -308,7 +339,7 @@ A pop is a block of people who share a home building, a workplace and a profile.
 | Has children | yes or no | Schools and childcare in M8 |
 | Satisfaction | 0 to 100 | Whether the pop stays, demand, land value. Specified in M8. |
 
-Pop size is what makes 500,000 residents affordable. A house is one small pop. A high-rise tower is a handful of pops of up to 100 people each, split by where they work. A full-size city is then between about 40,000 and 150,000 pops, more when it is mostly houses and fewer when it is mostly towers. Either fits in a small typed array, and traffic works on zones and not on pops.
+Pop size is what makes 500,000 residents affordable. A house is one small pop. A plex or a townhome row is a few pops. A tower of 1,000 residents is ten or more pops of up to 100 people each, split by where they work. A full-size city is then between about 40,000 and 150,000 pops, more when it is mostly houses and fewer when it is mostly towers. Either fits in a small typed array, and traffic works on zones and not on pops.
 
 #### What each zone supplies
 
@@ -384,8 +415,8 @@ So low density roughly breaks even and the dense core carries the city, as in re
 | Density | Tax per cell | Net after its share of roads and services |
 | --- | --- | --- |
 | 1 | 1x | About zero. Slightly negative on long cul-de-sacs and wide roads. |
-| 2 | About 4x | Clearly positive |
-| 3 | About 12x | The city's main income, but only where transit and services keep it full |
+| 2 | About 10x | Clearly positive |
+| 3 | About 50x | The city's main income, but only where transit and services keep it full |
 
 This comes from the cost model and not from a penalty on suburbs. Upkeep is charged per metre of road and per service building, and tax is collected per resident and per job. A suburb simply has few taxpayers per metre of road. A compact low-density grid can still pay for itself, and a sprawling one cannot.
 
@@ -836,6 +867,8 @@ The repo is MIT licensed, the same licence three.js uses. It is the simplest for
 - [x] How many hours of play should an empty map to 500,000 residents take? It sets growth rates, prices against income, and milestone spacing.
 - [x] Where does the repo live and what is it called, and where is the free game hosted? The local game is static files, so GitHub Pages or Cloudflare Pages would do.
 - [x] At launch, who may host an online city while billing does not exist? The doc says invited hosts only.
+- [ ] Jobs per building are not set for commercial, office, industrial and mixed. Residents per building now are, so jobs need the same table before M3.
+- [ ] Are the proposed lot sizes for each housing type right? See the table under M2.
 
 ## Sources
 
