@@ -30,47 +30,49 @@ export function BuildBar() {
 
   return (
     <section className="panel build-bar" id="build-bar" aria-label="Build">
-      <div className="tools" role="group" aria-label="Tools">
-        <button
-          type="button"
-          id="road-tool"
-          aria-pressed={active}
-          disabled={!ready}
-          title="Road tool (B)"
-          onClick={() => roadTool.toggle()}
-        >
-          Road <kbd>B</kbd>
-        </button>
-      </div>
-      <div className="road-types" role="group" aria-label="Road type">
-        {TOOL_ROAD_TYPES.map((id) => (
+      <div className="controls">
+        <div className="tools" role="group" aria-label="Tools">
           <button
-            key={id}
             type="button"
-            id={`road-type-${id}`}
-            aria-pressed={active && roadType === id}
+            id="road-tool"
+            aria-pressed={active}
             disabled={!ready}
-            title={`${typeName(id)} (${TYPE_KEYS[id] ?? ""})`}
-            onClick={() => roadTool.pickType(id)}
+            title="Road tool (B)"
+            onClick={() => roadTool.toggle()}
           >
-            {typeName(id)} <kbd>{TYPE_KEYS[id]}</kbd>
+            Road <kbd>B</kbd>
           </button>
-        ))}
-      </div>
-      <div className="guides" role="group" aria-label="Guides">
-        <span className="group-label">Snap</span>
-        {GUIDES.map((g) => (
-          <button
-            key={g.id}
-            type="button"
-            id={`guide-${g.id}`}
-            aria-pressed={guides[g.id]}
-            title={g.title}
-            onClick={() => roadTool.toggleGuide(g.id)}
-          >
-            {g.label}
-          </button>
-        ))}
+        </div>
+        <div className="road-types" role="group" aria-label="Road type">
+          {TOOL_ROAD_TYPES.map((id) => (
+            <button
+              key={id}
+              type="button"
+              id={`road-type-${id}`}
+              aria-pressed={active && roadType === id}
+              disabled={!ready}
+              title={`${typeName(id)} (${TYPE_KEYS[id] ?? ""})`}
+              onClick={() => roadTool.pickType(id)}
+            >
+              {typeName(id)} <kbd>{TYPE_KEYS[id]}</kbd>
+            </button>
+          ))}
+        </div>
+        <div className="guides" role="group" aria-label="Guides">
+          <span className="group-label">Snap</span>
+          {GUIDES.map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              id={`guide-${g.id}`}
+              aria-pressed={guides[g.id]}
+              title={g.title}
+              onClick={() => roadTool.toggleGuide(g.id)}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
       </div>
       <p className="hint" id="road-hint">
         {hint}

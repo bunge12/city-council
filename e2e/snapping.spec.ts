@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
-import { SEED, groundAt } from "./road-fixtures";
+import { SEED, buildRoads, groundAt } from "./road-fixtures";
 
 // Issue M1-08: snapping. A player draws a block of four streets with every
 // click up to 10 pixels off where they aim, and gets four nodes and right
@@ -43,14 +43,26 @@ test.setTimeout(120_000);
 
 const terrain = generateTerrain(SEED);
 
-async function openEmptyCity(page: Page): Promise<void> {
+/** An empty city on the fixture seed, as a city file. */
+function emptyCity(): Buffer {
+  return Buffer.from(serialize(createState(SEED)));
+}
+
+/** A city with one street west to east, from (4220, 4600) to (4524, 4600), as a city file. */
+function streetCity(): Buffer {
+  const state = createState(SEED);
+  buildRoads(state, [[[4220, 4600], [4524, 4600], "street"]]);
+  return Buffer.from(serialize(state));
+}
+
+async function openCity(page: Page, bytes: Buffer = emptyCity()): Promise<void> {
   await page.goto("/?webgl");
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles({
-    name: "Empty.city",
+    name: "Snapping.city",
     mimeType: "application/octet-stream",
-    buffer: Buffer.from(serialize(createState(SEED))),
+    buffer: bytes,
   });
   await loaded;
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
@@ -151,7 +163,7 @@ const MISS: [number, number][] = [
 ];
 
 test("draws a square block with clicks up to 10 pixels off target", async ({ page }, testInfo) => {
-  await openEmptyCity(page);
+  await openCity(page);
   const g = groundAt(4350, 4610);
   await setPose(page, [4350, g + 170, 4740], [4350, g, 4610]);
   // Close enough that 10 px is well under half a cell, as a player zooms in to place a block.
@@ -209,25 +221,21 @@ test("draws a square block with clicks up to 10 pixels off target", async ({ pag
   await attach(page, testInfo, "a block of four streets with right angles");
 });
 
-test("angle, length, segment, node and grid snaps each show their marker", async ({ page }, testInfo) => {
-  await openEmptyCity(page);
+/** Opens the one-street city over its east end, with the road tool on. Returns the east end. */
+async function overStreet(page: Page): Promise<NodeInfo> {
+  await openCity(page, streetCity());
   const g = groundAt(4400, 4640);
   await setPose(page, [4400, g + 380, 4920], [4400, g, 4640]);
   // At this zoom 3 degrees off at 99 m, about 5 m, is inside the 14 px reach of a 90 degree snap.
   expect(14 * (await metresPerPixel(page, 4524, 4650))).toBeGreaterThan(5.5);
   await page.locator("#road-tool").click();
-  // A street west to east.
-  await click(page, 4220, 4600);
-  await click(page, 4524, 4600);
-  await expect.poll(() => logLength(page)).toBe(1);
   const end = (await nodes(page)).find((n) => n.x > 4500);
   if (!end) throw new Error("no east end");
+  return end;
+}
 
-  // Node marker: the cursor near the east end, before a road starts.
-  const node = await hover(page, end.x, end.z, [9, -5]);
-  expect(node?.kind).toBe("node");
-  await expect(page.locator("body")).toHaveAttribute("data-snap", "node");
-  await attach(page, testInfo, "node marker");
+test("a road 3 degrees off square snaps to 90 with its markers and readout, and the guides switch off", async ({ page }, testInfo) => {
+  const end = await overStreet(page);
 
   // From the east end, a road 3 degrees off square: it snaps to 90 and shows the right-angle marker.
   await click(page, end.x, end.z, [4, 3]);
@@ -262,6 +270,15 @@ test("angle, length, segment, node and grid snaps each show their marker", async
   await page.keyboard.up("Alt");
   expect((await hover(page, off3.x, off3.z))?.kind).toBe("angle");
   await page.keyboard.press("Escape");
+});
+
+test("node, segment and grid snaps show their markers, and a segment snap makes a T-junction", async ({ page }, testInfo) => {
+  const end = await overStreet(page);
+
+  // Node marker: the cursor near the east end, before a road starts.
+  expect((await hover(page, end.x, end.z, [9, -5]))?.kind).toBe("node");
+  await expect(page.locator("body")).toHaveAttribute("data-snap", "node");
+  await attach(page, testInfo, "node marker");
 
   // A road from open ground north of the street, ending on it near square: a T-junction on the street.
   const tx = 4372.6;
