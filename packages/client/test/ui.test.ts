@@ -5,6 +5,7 @@ import { gameDate } from "@city-council/sim";
 import { formatGameDate, formatMoneyShort, formatSpeed } from "../src/ui/format";
 import { TickRateMeter } from "../src/ui/rate";
 import { parseSeed, randomSeed } from "../src/ui/seed";
+import { TOOL_ROAD_TYPES } from "../src/tools/road-tool";
 import { SHORTCUTS, shortcutFor, toggledSpeed, type KeyPress } from "../src/ui/shortcuts";
 import { setViewReadout, useViewReadout } from "../src/ui/store";
 
@@ -99,6 +100,18 @@ describe("shortcuts", () => {
     expect(shortcutFor(press("Space"))).toEqual({ kind: "togglePause" });
     expect(shortcutFor(press("Backquote"))).toEqual({ kind: "toggleDebug" });
     expect(shortcutFor(press("KeyL"))).toEqual({ kind: "toggleLog" });
+  });
+
+  it("maps B to the road tool, Z X C to the road types and Escape to cancel", () => {
+    expect(shortcutFor(press("KeyB"))).toEqual({ kind: "roadTool" });
+    expect(shortcutFor(press("KeyZ"))).toEqual({ kind: "roadType", type: "street" });
+    expect(shortcutFor(press("KeyX"))).toEqual({ kind: "roadType", type: "avenue" });
+    expect(shortcutFor(press("KeyC"))).toEqual({ kind: "roadType", type: "oneWay" });
+    expect(shortcutFor(press("Escape"))).toEqual({ kind: "escape" });
+    expect(shortcutFor(press("Escape", { targetTag: "INPUT" }))).toBeNull();
+    // Every type the tool offers has a key.
+    const types = SHORTCUTS.flatMap((s) => (s.action.kind === "roadType" ? [s.action.type] : []));
+    expect(types).toEqual([...TOOL_ROAD_TYPES]);
   });
 
   it("leaves typing, modified keys, repeats and the camera keys alone", () => {

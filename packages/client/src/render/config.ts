@@ -156,3 +156,27 @@ export const ROADS = {
   /** Side of a cell in the road mask that decoration checks, metres. */
   maskCell: 2,
 } as const;
+
+/**
+ * How the road tool draws its previews. Colours are sRGB hex. The preview
+ * is drawn over the terrain, not into it, so a hill cannot hide it.
+ */
+export const ROAD_PREVIEW = {
+  colours: {
+    /** A road the sim would build. */
+    ok: 0x4da3ff,
+    /** A road the sim would refuse. */
+    refused: 0xe0453a,
+    /** Sent, waiting for the sim. */
+    pending: 0xb9c6d3,
+    /** Where the road would meet another. */
+    junction: 0xffd23a,
+  },
+  opacity: 0.72,
+  /** Metres above the ground. */
+  lift: 0.6,
+  /** Junction markers: radius as a share of the road width, sides, and extra height. */
+  junctionScale: 0.75,
+  junctionSides: 20,
+  junctionLift: 0.1,
+} as const;

@@ -5,6 +5,7 @@ import {
   hashState,
   hashTerrain,
   mapSize,
+  snapToGrid,
   type CommandResult,
   type Terrain,
 } from "@city-council/sim";
@@ -18,9 +19,12 @@ import { createCameraControls, type CameraControls } from "./camera/controls";
 import type { GroundHit } from "./camera/pick";
 import { createCameraRig, type CameraRig } from "./camera/rig";
 import { createView, wantsWebGL, type View } from "./render/view";
+import { createRoadPreviewLayer } from "./render/road-preview";
+import type { PreviewShape } from "./render/road-preview-geometry";
+import { RoadToolController, type RoadPreview } from "./tools/road-tool";
 import { mountUi } from "./ui/App";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import { setViewReadout, useUi } from "./ui/store";
+import { setRoadHover, setViewReadout, useUi } from "./ui/store";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
 const TAB_CITY_KEY = "city-council:city";
@@ -179,7 +183,28 @@ void requestPersistence().then((result) => {
   }
 });
 
-const services: AppServices = { mirror, saves, sendCommand, saveNow, downloadCity, importCityFile, newCity, openCity };
+/** The map on screen, once there is one. The road tool checks previews against it. */
+let shownTerrain: Terrain | null = null;
+
+const roadTool = new RoadToolController({
+  get: () => useUi.getState(),
+  set: (patch) => useUi.setState(patch),
+  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain } : null),
+  send: (payload) => sendCommand("BuildRoad", payload),
+});
+mirror.subscribe((update) => roadTool.mirrorUpdated(update));
+
+const services: AppServices = {
+  mirror,
+  saves,
+  sendCommand,
+  saveNow,
+  downloadCity,
+  importCityFile,
+  newCity,
+  openCity,
+  roadTool,
+};
 const uiRoot = document.getElementById("ui");
 if (!uiRoot) throw new Error("#ui is missing from index.html");
 mountUi(uiRoot, services);
@@ -241,6 +266,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     shownSeed = state.seed;
     const t0 = performance.now();
     const terrain = generateTerrain(state.seed);
+    shownTerrain = terrain;
     const t1 = performance.now();
     view.showTerrain(terrain);
     const t2 = performance.now();
@@ -311,6 +337,37 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   controls.onPick((hit) => {
     hooks.lastPick = hit;
     setViewReadout({ pick: metres(hit) });
+    roadTool.click(hit);
+  });
+  controls.onRightClick(() => roadTool.cancel());
+  const previews = createRoadPreviewLayer(view.scene, () => hooks.terrain);
+  // The live preview, worked out again only when what it depends on changes.
+  let mirrorVersion = 0;
+  mirror.subscribe(() => mirrorVersion++);
+  let previewKey = "";
+  let preview: RoadPreview | null = null;
+  const livePreview = (cursor: GroundHit | null): RoadPreview | null => {
+    const ui = useUi.getState();
+    const start = ui.roadStart;
+    const end = cursor ? { x: snapToGrid(cursor.x), z: snapToGrid(cursor.z) } : null;
+    const key =
+      ui.tool === "road" && start && end
+        ? `${start.x},${start.z},${end.x},${end.z},${ui.roadType},${mirrorVersion}`
+        : "";
+    if (key !== previewKey) {
+      previewKey = key;
+      preview = key === "" ? null : roadTool.preview(end);
+    }
+    return preview;
+  };
+  const shapeOf = (p: RoadPreview, look: PreviewShape["look"]): PreviewShape => ({
+    ax: p.from.x,
+    az: p.from.z,
+    bx: p.to.x,
+    bz: p.to.z,
+    width: p.type.width,
+    look,
+    junctions: look === "refused" ? [] : p.junctions,
   });
   view.onBeforeFrame((seconds) => {
     controls.update(seconds);
@@ -319,6 +376,12 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     document.body.dataset["zoomBand"] = band;
     view.setZoomBand(band);
     const cursor = controls.cursor();
+    const live = livePreview(cursor);
+    const shapes = useUi.getState().roadPending.map((p) => shapeOf(p.preview, "pending"));
+    if (live) shapes.push(shapeOf(live, live.ok ? "ok" : "refused"));
+    previews.show(shapes);
+    const pointer = controls.pointer();
+    setRoadHover(live && pointer ? { x: pointer.x, y: pointer.y, preview: live } : null);
     setViewReadout({
       camPosition: `${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} m`,
       camHeight: `${rig.heightAboveGround().toFixed(0)} m`,

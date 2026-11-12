@@ -240,6 +240,15 @@ export function roadIndexOf(net: RoadNetwork): RoadIndex {
   return index;
 }
 
+/**
+ * The index of `net` if one has been built, or null. For code that changes a
+ * network without the functions in network.ts, such as `applyRoadDelta`, so
+ * it can keep an existing index current without building one nobody asked for.
+ */
+export function existingRoadIndex(net: RoadNetwork): RoadIndex | null {
+  return live.get(net) ?? null;
+}
+
 // ---- Queries ----
 
 function checkPoint(x: number, z: number): void {

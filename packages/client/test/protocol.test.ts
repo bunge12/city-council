@@ -295,9 +295,9 @@ describe("road deltas", () => {
     tick();
     mirror.requestSnapshot();
     expect(updates).toEqual([
-      { kind: "delta", roadChunks: [chunk(4200, 4510)], roadNodes: [0, 1], roadSegs: [0] },
-      { kind: "delta", roadChunks: [], roadNodes: [], roadSegs: [] },
-      { kind: "delta", roadChunks: [chunk(4300, 4450), chunk(4300, 4550)], roadNodes: [2, 3], roadSegs: [1] },
+      { kind: "delta", roadChunks: [chunk(4200, 4510)], roadNodes: [0, 1], roadSegs: [0], steps: 1 },
+      { kind: "delta", roadChunks: [], roadNodes: [], roadSegs: [], steps: 1 },
+      { kind: "delta", roadChunks: [chunk(4300, 4450), chunk(4300, 4550)], roadNodes: [2, 3], roadSegs: [1], steps: 1 },
       { kind: "snapshot" },
     ]);
   });
