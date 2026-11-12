@@ -62,8 +62,11 @@ export interface RoadIndex {
   readonly segCells: number[][];
 }
 
+/** The grid an index lays over its network, without the cell lists. */
+type Grid = Pick<RoadIndex, "net" | "cellsPerSide" | "cellSize">;
+
 /** Grid column or row holding coordinate `v`, with off-map values in the edge cell. */
-function cellOf(index: RoadIndex, v: number): number {
+function cellOf(index: Grid, v: number): number {
   const c = Math.floor(v / index.cellSize);
   return c < 0 ? 0 : c >= index.cellsPerSide ? index.cellsPerSide - 1 : c;
 }
@@ -122,7 +125,7 @@ export function segmentTouchesBox(
 }
 
 /** Calls `visit` with each cell index segment `seg` touches. */
-function forSegmentCells(index: RoadIndex, seg: number, visit: (cell: number) => void): void {
+function forSegmentCells(index: Grid, seg: number, visit: (cell: number) => void): void {
   const { net, cellsPerSide: n, cellSize: size } = index;
   const a = net.segA[seg] ?? NONE;
   const b = net.segB[seg] ?? NONE;
@@ -152,8 +155,22 @@ function forSegmentCells(index: RoadIndex, seg: number, visit: (cell: number) =>
   }
 }
 
-function nodeCell(index: RoadIndex, node: number): number {
+function nodeCell(index: Grid, node: number): number {
   return cellOf(index, index.net.nodeZ[node] ?? 0) * index.cellsPerSide + cellOf(index, index.net.nodeX[node] ?? 0);
+}
+
+/**
+ * The 500 m chunk node `node` is in, as `cj * CHUNKS_PER_SIDE + ci`, with
+ * off-map positions in the nearest edge chunk. The same cell the index files
+ * it under.
+ */
+export function chunkOfNode(net: RoadNetwork, node: number): number {
+  return nodeCell({ net, cellsPerSide: CHUNKS_PER_SIDE, cellSize: CHUNK_SIZE }, node);
+}
+
+/** Calls `visit` with each 500 m chunk segment `seg` touches: the cells the index files it under. */
+export function forSegmentChunks(net: RoadNetwork, seg: number, visit: (chunk: number) => void): void {
+  forSegmentCells({ net, cellsPerSide: CHUNKS_PER_SIDE, cellSize: CHUNK_SIZE }, seg, visit);
 }
 
 /** Adds live node `node` to the index. */

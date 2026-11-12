@@ -85,7 +85,7 @@ export interface RoadNetwork {
   segFree: Int32Array;
 }
 
-type AnyTypedArray = Float64Array | Int32Array | Uint8Array;
+export type AnyTypedArray = Float64Array | Int32Array | Uint8Array;
 
 /**
  * Derived data that follows a network: the spatial index, later the routing
@@ -145,7 +145,7 @@ export function capacityOf(array: AnyTypedArray): number {
  * has room and otherwise copies into one of double the capacity. Elements
  * past the old length are whatever the buffer holds; callers write them.
  */
-function resized<T extends AnyTypedArray>(array: T, length: number): T {
+export function resized<T extends AnyTypedArray>(array: T, length: number): T {
   const Type = array.constructor as new (bufferOrLength: ArrayBufferLike | number, offset?: number, length?: number) => T;
   const capacity = capacityOf(array);
   if (length <= capacity) return new Type(array.buffer, array.byteOffset, length);
@@ -184,8 +184,10 @@ export function segmentCount(net: RoadNetwork): number {
   return net.segFlags.length - net.segFree.length;
 }
 
-const NODE_ARRAYS = ["nodeX", "nodeZ", "nodeHeight", "nodeFlags", "nodeFirstSeg"] as const;
-const SEG_ARRAYS = [
+/** The per-node arrays, every one indexed by node id. */
+export const NODE_ARRAYS = ["nodeX", "nodeZ", "nodeHeight", "nodeFlags", "nodeFirstSeg"] as const;
+/** The per-segment arrays, every one indexed by segment id. */
+export const SEG_ARRAYS = [
   "segA",
   "segB",
   "segNextA",

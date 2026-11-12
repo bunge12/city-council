@@ -2,16 +2,21 @@ import {
   LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
   TICK_MS,
+  drainRoadChanges,
+  encodeRoadDelta,
   logLength,
+  mergeRoadChanges,
   parseToSimMessage,
   prepareDerived,
   readLog,
+  recordRoadChanges,
   serialize,
   serializeDetached,
   step,
   submit,
   type FromSimMessage,
   type LogEntry,
+  type RoadChanges,
   type SimState,
   type SystemTimer,
   type SystemTiming,
@@ -61,6 +66,10 @@ export class SimHost {
   readonly fullLog: LogEntry[];
   /** Entries read since the last delta. */
   private unsent: LogEntry[] = [];
+  /** Road ids changed since the last delta. */
+  private unsentRoads: RoadChanges | null = null;
+  /** `seq` of the next delta. */
+  private deltaSeq = 0;
   private sentTick: number;
   private sentSpeed: number;
   private sentLogFrom: number;
@@ -93,6 +102,9 @@ export class SimHost {
     }
     this.state = state;
     prepareDerived(state);
+    // From here on every road change is recorded. Earlier ones reach a
+    // client in the snapshot it asks for first.
+    recordRoadChanges(state.roads);
     this.fullLog = [...pagedLog, ...state.log];
     this.transport = transport;
     this.now = now;
@@ -214,26 +226,37 @@ export class SimHost {
       this.fullLog.push(entry);
       this.unsent.push(entry);
     }
+    this.unsentRoads = mergeRoadChanges(this.unsentRoads, drainRoadChanges(this.state.roads));
   }
 
   private flushDelta(): void {
     const changed =
       this.unsent.length > 0 ||
+      this.unsentRoads !== null ||
       this.state.tick !== this.sentTick ||
       this.state.speed !== this.sentSpeed;
     if (!changed) return;
     const log = this.unsent;
-    this.send({
+    // Rows are read now, after every step since the last delta, so an id
+    // removed and reused in between goes out once, as what it is now.
+    const roads = this.unsentRoads ? encodeRoadDelta(this.state.roads, this.unsentRoads) : undefined;
+    const delta: FromSimMessage = {
       v: PROTOCOL_VERSION,
       type: "delta",
+      seq: this.deltaSeq,
       tick: this.state.tick,
       speed: this.state.speed,
       logFrom: this.sentLogFrom,
       log,
+      ...(roads ? { roads } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
-    });
+    };
+    // The rows are fresh arrays, so a worker can move them.
+    this.transport.send(delta, roads ? typedArrayBuffers(roads) : []);
+    this.deltaSeq++;
     this.unsent = [];
+    this.unsentRoads = null;
     this.sentTick = this.state.tick;
     this.sentSpeed = this.state.speed;
     this.sentLogFrom += log.length;
@@ -249,7 +272,7 @@ export class SimHost {
     // second time by postMessage.
     const state = structuredClone(this.state);
     this.transport.send(
-      { v: PROTOCOL_VERSION, type: "snapshot", state, logFrom: this.logCursor },
+      { v: PROTOCOL_VERSION, type: "snapshot", state, logFrom: this.logCursor, deltaSeq: this.deltaSeq },
       typedArrayBuffers(state),
     );
   }

@@ -6,6 +6,7 @@ import {
   LOG_LIVE_LIMIT,
   LOG_PAGE_SIZE,
   MAX_PENDING_COMMANDS,
+  PROTOCOL_VERSION,
   SNAPSHOT_VERSION,
   createState,
   deserialize,
@@ -201,7 +202,7 @@ async function hostCity(store: CityStore, wall = { now: 1_000 }) {
     }
   };
   const command = (seq: number, type = "NoOp", payload: unknown = {}) =>
-    sim.client.send({ v: 1, type: "command", command: { seq, playerId: "p1", type, payload } });
+    sim.client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq, playerId: "p1", type, payload } });
   return { city, host, saver, saves, statuses, run, command, messages };
 }
 
@@ -590,11 +591,11 @@ describe("worker plumbing", () => {
   it("holds messages until something listens", () => {
     const { client, host } = memoryTransportPair();
     const buffered = bufferUntilListening(host);
-    client.send({ v: 1, type: "requestSnapshot" });
-    client.send({ v: 1, type: "requestSnapshot" });
+    client.send({ v: PROTOCOL_VERSION, type: "requestSnapshot" });
+    client.send({ v: PROTOCOL_VERSION, type: "requestSnapshot" });
     const seen: unknown[] = [];
     buffered.onMessage((m) => seen.push(m));
-    client.send({ v: 1, type: "command", command: { seq: 1, playerId: "p", type: "NoOp", payload: {} } });
+    client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq: 1, playerId: "p", type: "NoOp", payload: {} } });
     expect(seen.map((m) => (m as { type: string }).type)).toEqual(["requestSnapshot", "requestSnapshot", "command"]);
   });
 
@@ -609,7 +610,7 @@ describe("worker plumbing", () => {
     expect(parseSaveRequest({ channel: "saves", type: "new", requestId: 1, name: "a", seed: "3" })).toBeNull();
     expect(parseSaveRequest({ channel: "saves", type: "open", requestId: 1, id: "a" })).not.toBeNull();
     expect(parseSaveRequest({ channel: "saves", type: "open", requestId: 1 })).toBeNull();
-    expect(parseSaveRequest({ v: 1, type: "requestSnapshot" })).toBeNull();
+    expect(parseSaveRequest({ v: PROTOCOL_VERSION, type: "requestSnapshot" })).toBeNull();
   });
 
   it("refuses a host whose paged log does not match the state", () => {

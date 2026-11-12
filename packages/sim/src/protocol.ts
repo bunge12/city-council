@@ -5,10 +5,11 @@
 
 import type { Command, CommandResult } from "./commands";
 import type { LogEntry } from "./log";
+import type { RoadDelta } from "./roads/delta";
 import type { SimState, Speed } from "./state";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 // ---- Client to sim ----
 
@@ -30,14 +31,16 @@ export type ToSimMessage = CommandMessage | RequestSnapshotMessage;
 // ---- Sim to client ----
 
 /**
- * The whole state at one tick. A client replaces its copy with this. `logFrom`
- * is the absolute log index the next delta's entries start at.
+ * The whole state at one tick, the whole road network included. A client
+ * replaces its copy with this. `logFrom` is the absolute log index the next
+ * delta's entries start at, and `deltaSeq` is the next delta's `seq`.
  */
 export interface SnapshotMessage {
   v: typeof PROTOCOL_VERSION;
   type: "snapshot";
   state: SimState;
   logFrom: number;
+  deltaSeq: number;
 }
 
 /**
@@ -51,17 +54,21 @@ export interface SystemTiming {
 }
 
 /**
- * What changed since the previous delta or snapshot. In M0 that is the tick,
- * the speed and new log entries. `logFrom` is the absolute log index of
- * `log[0]`, so a client can spot a gap and ask for a snapshot.
+ * What changed since the previous delta or snapshot: the tick, the speed,
+ * new log entries and changed road rows. `seq` counts deltas from 0 and
+ * `logFrom` is the absolute log index of `log[0]`, so a client that misses
+ * one can tell and ask for a snapshot.
  */
 export interface DeltaMessage {
   v: typeof PROTOCOL_VERSION;
   type: "delta";
+  seq: number;
   tick: number;
   speed: Speed;
   logFrom: number;
   log: LogEntry[];
+  /** Road rows added, changed or removed. Left out when no road changed. */
+  roads?: RoadDelta;
   /** Steps the host ran since the previous delta, paused steps included. */
   steps: number;
   /** Per-system time of the most recent step, in `step` order. */
