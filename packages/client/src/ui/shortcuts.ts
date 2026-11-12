@@ -49,6 +49,7 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "+ -", description: "zoom" },
   { label: "Drag, right-drag, wheel", description: "pan, orbit, zoom" },
   { label: "Click, right-click", description: "with the road tool: start or end a road, drop it" },
+  { label: "Hold Alt", description: "with the road tool: draw free-hand, without guides" },
 ];
 
 /** The parts of a key event the shortcut handler looks at. */

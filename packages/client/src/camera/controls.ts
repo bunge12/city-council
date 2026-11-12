@@ -19,6 +19,8 @@ export interface CameraControls {
   cursor(): GroundHit | null;
   /** The pointer over the canvas in CSS pixels, or null when it is elsewhere. */
   pointer(): { x: number; y: number } | null;
+  /** Whether Alt is held: the road tool draws free-hand while it is. */
+  altHeld(): boolean;
   /**
    * Called with the ground point of each click, or null for a click on sky.
    * A press that ends a drag is not a click.
@@ -58,6 +60,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   /** Pointer position over the canvas, in CSS pixels, or null when it is elsewhere. */
   let pointer: { x: number; y: number } | null = null;
   let cursorHit: GroundHit | null = null;
+  let alt = false;
 
   const marker = new Mesh(
     new RingGeometry(0.55, 1, 32).rotateX(-Math.PI / 2),
@@ -88,6 +91,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   function onPointerMove(e: PointerEvent): void {
     const p = local(e);
     pointer = p;
+    alt = e.altKey;
     if (!drag) return;
     if (Math.abs(p.x - drag.startX) > CLICK_SLOP || Math.abs(p.y - drag.startY) > CLICK_SLOP) drag.moved = true;
     if (drag.moved) {
@@ -99,6 +103,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   }
 
   function onPointerUp(e: PointerEvent): void {
+    alt = e.altKey;
     if (!drag) return;
     const released = e.type === "pointerup";
     const wasClick = released && drag.kind === "pan" && !drag.moved;
@@ -131,6 +136,12 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   }
 
   function onKeyDown(e: KeyboardEvent): void {
+    if (e.key === "Alt") {
+      alt = true;
+      // Otherwise some browsers move focus to their menu bar on release.
+      e.preventDefault();
+      return;
+    }
     const action = KEYS[e.code];
     if (!action || typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
     held.add(action);
@@ -138,12 +149,18 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   }
 
   function onKeyUp(e: KeyboardEvent): void {
+    if (e.key === "Alt") {
+      alt = false;
+      e.preventDefault();
+      return;
+    }
     const action = KEYS[e.code];
     if (action) held.delete(action);
   }
 
   function onBlur(): void {
     held.clear();
+    alt = false;
   }
 
   const noMenu = (e: Event) => e.preventDefault();
@@ -199,6 +216,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     update,
     cursor: () => cursorHit,
     pointer: () => pointer,
+    altHeld: () => alt,
     onPick: (l) => pickListeners.push(l),
     onRightClick: (l) => rightClickListeners.push(l),
     dispose() {

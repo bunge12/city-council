@@ -399,9 +399,19 @@ kbd {
 }
 
 .build-bar .tools,
-.build-bar .road-types {
+.build-bar .road-types,
+.build-bar .guides {
   display: flex;
   gap: 4px;
+}
+
+.build-bar .guides {
+  align-items: center;
+}
+
+.build-bar .group-label {
+  color: var(--ink-soft);
+  font-size: 12px;
 }
 
 .build-bar .hint {
@@ -455,6 +465,7 @@ kbd {
   color: var(--bad-ink);
 }
 
+.road-readout .angle,
 .road-readout .junctions {
   color: var(--ink-soft);
 }

@@ -1,0 +1,44 @@
+// Settings for the drawing tools: how near the cursor must be for each snap
+// to catch, and the steps the guides snap to. Feel, not game balance, so it
+// lives in the client rather than under packages/sim/balance.
+//
+// Distances in pixels are CSS pixels on screen, turned into metres at the
+// cursor each frame, so a snap feels the same in every zoom band.
+
+export const SNAP = {
+  /** An existing node catches the cursor this near. */
+  nodePx: 16,
+  /** A point on an existing segment catches the cursor this near. */
+  segmentPx: 12,
+  /** The point where the road would meet a segment at a right angle catches the cursor this near. */
+  perpendicularPx: 14,
+  /** The strong angle steps: straight on, 45 and 90 degrees. They catch from further away and win when close. */
+  strongAngleStep: 45,
+  strongAnglePx: 14,
+  /** The lighter angle steps. */
+  lightAngleStep: 15,
+  lightAnglePx: 6,
+  /**
+   * Length snap step, metres. One M2 zoning cell, so a road's frontage holds
+   * a whole number of cells. If M2 changes the cell size, change it here.
+   */
+  cellSize: 8,
+} as const;
+
+/** The guides the road tool offers, in toolbar order. Issue M1-19 appends guide lines and parallel offset. */
+export const GUIDES = [
+  { id: "angle", label: "Angle", title: "Snap to 90, 45 and 15 degree steps from the road you start on" },
+  { id: "length", label: "Length", title: `Snap the length to whole ${SNAP.cellSize} m cells` },
+  { id: "grid", label: "Grid", title: "Snap to the 16 m terrain grid" },
+] as const;
+
+export type GuideId = (typeof GUIDES)[number]["id"];
+
+/** Which guides are on. */
+export type GuideToggles = Record<GuideId, boolean>;
+
+/** Angle and length on, the terrain grid off. */
+export const DEFAULT_GUIDES: GuideToggles = { angle: true, length: true, grid: false };
+
+/** How the key that, held, suspends every guide for a free-hand segment is written. The camera controls track it. */
+export const FREE_HAND_KEY_LABEL = "Alt";
