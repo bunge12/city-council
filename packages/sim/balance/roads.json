@@ -7,9 +7,18 @@
     "sourceUrl": "https://enotrans.org/?p=72173",
     "sourceYear": 2025
   },
+  "build": {
+    "_about": "How the sim checks a road before it builds one. Lengths are metres, angles degrees. Starting values to tune.",
+    "gridStep": 0.125,
+    "mergeDistance": 4,
+    "minLength": 10,
+    "minAngleDegrees": 25,
+    "groundSampleStep": 8
+  },
   "types": [
     {
       "id": "street",
+      "buildable": true,
       "name": "Street",
       "lanes": 2,
       "oneWay": false,
@@ -35,6 +44,7 @@
     },
     {
       "id": "avenue",
+      "buildable": true,
       "name": "Avenue",
       "lanes": 4,
       "oneWay": false,
@@ -59,6 +69,7 @@
     },
     {
       "id": "oneWay",
+      "buildable": true,
       "name": "One-way",
       "lanes": 2,
       "oneWay": true,
@@ -83,6 +94,7 @@
     },
     {
       "id": "highway",
+      "buildable": false,
       "name": "Highway",
       "lanes": 6,
       "oneWay": false,
