@@ -56,6 +56,9 @@ export interface ViewReadout {
   zoomBand: string;
   cursor: string;
   pick: string;
+  /** Road meshes drawn, and how many chunks the last road change rebuilt. */
+  roads: string;
+  roadRebuilds: string;
 }
 
 export const useViewReadout = create<ViewReadout>(() => ({
@@ -67,6 +70,8 @@ export const useViewReadout = create<ViewReadout>(() => ({
   zoomBand: "-",
   cursor: "-",
   pick: "none",
+  roads: "-",
+  roadRebuilds: "-",
 }));
 
 /**

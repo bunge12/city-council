@@ -79,3 +79,80 @@ export const DECOR = {
     drawDistance: 650,
   },
 } as const;
+
+/**
+ * Roads on screen. Presentation only: widths and lane counts come from the
+ * sim's road types in `packages/sim/balance/roads.json`; this sets how they
+ * look. Colours are sRGB hex.
+ */
+export const ROADS = {
+  /** Most metres between two cross-sections along a road, so it follows the ground. */
+  sampleStep: 8,
+  /**
+   * Longest a junction may cut back a road, in metres. A corner that would
+   * need more, which only very sharp angles do, is bevelled instead. The
+   * renderer also uses it to find the chunks a changed junction reaches.
+   */
+  maxTrim: 80,
+  /** A reflex corner is mitred when the miter point is within this many half-widths of the node, and bevelled otherwise. */
+  miterLimit: 2.5,
+  /**
+   * How far road surfaces sit above the terrain mesh, in metres: `base`
+   * plus `perMetre` for each metre from the camera. The terrain's coarser
+   * levels of detail cut corners the road does not, and depth precision
+   * falls with distance, so the gap grows with distance. Applied in the
+   * vertex shader, so it costs no rebuild when the camera moves.
+   */
+  lift: { base: 0.25, perMetre: 0.0012 },
+  /** Extra height of lane markings over the surface, in metres. */
+  markingLift: 0.06,
+  /** Surface colour by road type id. */
+  surface: {
+    street: 0x6d6f73,
+    avenue: 0x4f5156,
+    oneWay: 0x657284,
+    highway: 0x45474b,
+  } as Readonly<Record<string, number>>,
+  /** Surface colour of a type not listed above. */
+  surfaceDefault: 0x6d6f73,
+  markings: {
+    white: 0xe4e4dc,
+    yellow: 0xe0b83c,
+    /** Width of a painted line, metres. */
+    width: 0.18,
+    /** Gap between the two lines of a double centre line, metres. */
+    doubleGap: 0.25,
+    /** Dashed lines: paint and gap lengths, metres. */
+    dash: 3,
+    gap: 6,
+    /** How far a solid edge line sits in from the kerb, metres. */
+    edgeInset: 0.4,
+    /** One-way arrows: metres between arrows, and the arrow's shaft and head. */
+    arrowSpacing: 36,
+    arrowShaft: { length: 3, width: 0.35 },
+    arrowHead: { length: 2.2, width: 1.5 },
+  },
+  /**
+   * The city band draws only these types, as lines of a fixed screen
+   * width. `perMetre` is the line's half-width for each metre from the
+   * camera; a line is never thinner than the road.
+   */
+  cityLines: {
+    colours: { avenue: 0xf2a43a, highway: 0xe0563a } as Readonly<Record<string, number>>,
+    perMetre: 0.0013,
+    /**
+     * Most metres between two points along a line. Coarser than the surface:
+     * the city band starts 3 km up, where the lift is several metres.
+     */
+    sampleStep: 40,
+    /** Sides of the cap that rounds a line's joint at a node. */
+    capSides: 8,
+  },
+  /**
+   * Trees and grass are not placed within this many metres of a road's
+   * edge. Trees get more room, since their crowns spread.
+   */
+  decorClearance: { trees: 3, grass: 0.5 },
+  /** Side of a cell in the road mask that decoration checks, metres. */
+  maskCell: 2,
+} as const;

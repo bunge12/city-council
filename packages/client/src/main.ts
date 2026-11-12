@@ -9,7 +9,7 @@ import {
   type Terrain,
 } from "@city-council/sim";
 import { Vector3 } from "three/webgpu";
-import { SimMirror } from "./protocol/mirror";
+import { SimMirror, type MirrorUpdate } from "./protocol/mirror";
 import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { createWorkerTransport } from "./protocol/transport";
 import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
@@ -265,8 +265,28 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
       document.body.dataset["renderReady"] = "true";
     });
   };
-  mirror.subscribe(showMap);
+  // Roads come from the mirror alone: a snapshot draws them all, a delta
+  // redraws the chunks its changed rows touch.
+  const showRoads = (update: MirrorUpdate) => {
+    const state = mirror.state;
+    if (!state) return;
+    if (update.kind === "snapshot") view.showRoads(state.roads);
+    else if (update.roadNodes.length > 0 || update.roadSegs.length > 0) view.updateRoads(update.roadNodes, update.roadSegs);
+    else return;
+    const roads = view.roadStats();
+    if (roads) {
+      setViewReadout({
+        roads: `${roads.segmentPieces} segment pieces in ${roads.chunks} chunks`,
+        roadRebuilds: `${roads.lastRebuilt} last, ${roads.totalRebuilt} total, ${roads.lastBuildMs.toFixed(1)} ms`,
+      });
+    }
+  };
+  mirror.subscribe((update) => {
+    showMap();
+    showRoads(update);
+  });
   showMap();
+  if (mirror.state) showRoads({ kind: "snapshot" });
   return view;
 });
 viewReady.catch((error: unknown) => {
@@ -297,6 +317,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const p = view.camera.position;
     const band = rig.zoomBand();
     document.body.dataset["zoomBand"] = band;
+    view.setZoomBand(band);
     const cursor = controls.cursor();
     setViewReadout({
       camPosition: `${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} m`,

@@ -1,6 +1,8 @@
 // Decoration on screen: trees and grass tufts as instanced low-poly meshes,
 // one set per terrain chunk, built the first time a chunk comes near the
 // camera and hidden again when it is far. Placement comes from decor.ts.
+// Nothing stands where a road is: the road layer gives each chunk a mask,
+// and a chunk whose mask changes is built again.
 
 import {
   BufferAttribute,
@@ -18,7 +20,8 @@ import {
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { Terrain } from "@city-council/sim";
 import { DECOR } from "./config";
-import { DECOR_STRIDE, placeDecor, type DecorInstances } from "./decor";
+import { DECOR_STRIDE, placeDecor, withoutDropped, type DecorInstances } from "./decor";
+import { MASK_GRASS, MASK_TREES, masked } from "./road-geometry";
 import { chunkCentre, chunksPerSide } from "./terrain-chunks";
 
 /**
@@ -120,6 +123,12 @@ export interface DecorLayer {
   update(eye: Vector3): void;
   /** Instances drawn last update: trees and grass tufts. */
   counts(): { trees: number; grass: number };
+  /**
+   * Checks the road mask of each of `chunks` again and drops any built
+   * decoration whose mask changed, so the next update builds it anew.
+   * Returns the chunks dropped.
+   */
+  refresh(chunks: Iterable<number>): number[];
   dispose(): void;
 }
 
@@ -129,10 +138,31 @@ interface ChunkSlot {
   grass: Group | null;
   treeCount: number;
   grassCount: number;
+  /** Fingerprint of the road mask the decoration was built with. */
+  maskKey: string;
+}
+
+/** A short fingerprint of a mask, to tell whether it changed. */
+function maskKey(mask: Uint8Array | null): string {
+  if (!mask) return "";
+  let h = 0x811c9dc5;
+  let set = 0;
+  for (let k = 0; k < mask.length; k++) {
+    const v = mask[k] ?? 0;
+    if (v === 0) continue;
+    set++;
+    h = Math.imul(h ^ k, 0x01000193);
+    h = Math.imul(h ^ v, 0x01000193);
+  }
+  return `${set}:${(h >>> 0).toString(16)}`;
 }
 
 /** Builds the decoration layer for `terrain` under `parent`. Nothing is placed until `update`. */
-export function createDecorLayer(terrain: Terrain, parent: Object3D): DecorLayer {
+export function createDecorLayer(
+  terrain: Terrain,
+  parent: Object3D,
+  roadMask: (chunk: number) => Uint8Array | null = () => null,
+): DecorLayer {
   const geometries = {
     broadleaf: broadleafGeometry(),
     conifer: coniferGeometry(),
@@ -152,7 +182,14 @@ export function createDecorLayer(terrain: Terrain, parent: Object3D): DecorLayer
   for (let cj = 0; cj < per; cj++) {
     for (let ci = 0; ci < per; ci++) {
       const c = chunkCentre(ci, cj);
-      slots.push({ centre: new Vector3(c.x, terrain.waterLevel, c.z), trees: null, grass: null, treeCount: 0, grassCount: 0 });
+      slots.push({
+        centre: new Vector3(c.x, terrain.waterLevel, c.z),
+        trees: null,
+        grass: null,
+        treeCount: 0,
+        grassCount: 0,
+        maskKey: "",
+      });
     }
   }
 
@@ -187,7 +224,15 @@ export function createDecorLayer(terrain: Terrain, parent: Object3D): DecorLayer
   }
 
   function build(slot: ChunkSlot, index: number): void {
-    const decor = placeDecor(terrain, index % per, Math.floor(index / per));
+    const placed = placeDecor(terrain, index % per, Math.floor(index / per));
+    const mask = roadMask(index);
+    const off = (bit: number) => (x: number, z: number) => masked(mask, index, x, z, bit);
+    const decor = {
+      broadleaf: withoutDropped(placed.broadleaf, off(MASK_TREES)),
+      conifer: withoutDropped(placed.conifer, off(MASK_TREES)),
+      grass: withoutDropped(placed.grass, off(MASK_GRASS)),
+    };
+    slot.maskKey = maskKey(mask);
     const trees = new Group();
     const grass = new Group();
     for (const m of [instanced("broadleaf", decor.broadleaf, 1), instanced("conifer", decor.conifer, 1)]) {
@@ -205,6 +250,18 @@ export function createDecorLayer(terrain: Terrain, parent: Object3D): DecorLayer
   }
 
   let shown = { trees: 0, grass: 0 };
+
+  function drop(slot: ChunkSlot): void {
+    for (const group of [slot.trees, slot.grass]) {
+      if (!group) continue;
+      group.removeFromParent();
+      group.traverse((o) => {
+        if (o instanceof InstancedMesh) o.dispose();
+      });
+    }
+    slot.trees = null;
+    slot.grass = null;
+  }
 
   return {
     update(eye) {
@@ -227,6 +284,17 @@ export function createDecorLayer(terrain: Terrain, parent: Object3D): DecorLayer
       shown = next;
     },
     counts: () => shown,
+    refresh(chunks) {
+      const dropped: number[] = [];
+      for (const c of chunks) {
+        const slot = slots[c];
+        if (!slot?.trees) continue;
+        if (maskKey(roadMask(c)) === slot.maskKey) continue;
+        drop(slot);
+        dropped.push(c);
+      }
+      return dropped;
+    },
     dispose() {
       parent.remove(root);
       for (const g of Object.values(geometries)) g.dispose();

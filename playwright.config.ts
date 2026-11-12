@@ -38,8 +38,23 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: "walkthrough.spec.ts",
+      testIgnore: ["walkthrough.spec.ts", "roads.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // Road rendering (issue M1-06), on WebGPU and on WebGL 2, compared
+      // with the same screenshots. Headed for the same reasons as the
+      // walkthrough, against the dev server. It starts after the chromium
+      // project, since software WebGPU takes most of a CI runner's CPU.
+      name: "roads",
+      testMatch: "roads.spec.ts",
+      dependencies: remoteBase ? [] : ["chromium"],
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: "chromium",
+        headless: false,
+        launchOptions: { args: webGpuArgs },
+      },
     },
     {
       // The M0 exit test, on the built client, on WebGPU and on WebGL 2.
@@ -52,7 +67,7 @@ export default defineConfig({
       // another test then misses key presses. So the walkthrough starts
       // after the other projects finish. Against a public address it runs
       // alone.
-      dependencies: remoteBase ? [] : ["chromium"],
+      dependencies: remoteBase ? [] : ["roads"],
       use: {
         ...devices["Desktop Chrome"],
         channel: "chromium",

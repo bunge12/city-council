@@ -28,10 +28,13 @@ export interface HostStats {
 /**
  * What a snapshot or delta changed. A snapshot replaces the whole copy, so
  * everything may have changed. A delta names the 500 m chunks, as
- * `cj * CHUNKS_PER_SIDE + ci` ascending, whose roads changed; empty when no
- * road did.
+ * `cj * CHUNKS_PER_SIDE + ci` ascending, whose roads changed, and the node
+ * and segment ids whose rows it carried, ascending; all empty when no road
+ * changed.
  */
-export type MirrorUpdate = { kind: "snapshot" } | { kind: "delta"; roadChunks: readonly number[] };
+export type MirrorUpdate =
+  | { kind: "snapshot" }
+  | { kind: "delta"; roadChunks: readonly number[]; roadNodes: readonly number[]; roadSegs: readonly number[] };
 
 type Listener = (update: MirrorUpdate) => void;
 
@@ -132,6 +135,8 @@ export class SimMirror {
     }
     // Roads first: a delta whose rows do not fit the copy changes nothing.
     let roadChunks: readonly number[] = [];
+    let roadNodes: readonly number[] = [];
+    let roadSegs: readonly number[] = [];
     if (delta.roads) {
       const applied = applyRoadDelta(state.roads, delta.roads);
       if (typeof applied === "string") {
@@ -139,6 +144,8 @@ export class SimMirror {
         return;
       }
       roadChunks = applied;
+      roadNodes = [...delta.roads.nodeIds];
+      roadSegs = [...delta.roads.segIds];
     }
     this.deltaSeq++;
     state.tick = delta.tick;
@@ -154,7 +161,7 @@ export class SimMirror {
       state.logOffset += LOG_PAGE_SIZE;
     }
     this.hostStats = { timings: delta.timings };
-    this.notify({ kind: "delta", roadChunks });
+    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs });
   }
 
   /** Out of step with the host. Drop deltas until a snapshot resets us. */

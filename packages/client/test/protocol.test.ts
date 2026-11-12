@@ -284,7 +284,7 @@ describe("road deltas", () => {
     expect(deltas.every((d) => d.type === "delta" && (d.roads === undefined) === !("roads" in d))).toBe(true);
   });
 
-  it("tells listeners which chunks changed", async () => {
+  it("tells listeners which chunks and rows changed", async () => {
     const { mirror, updates, tick } = roadSetup();
     const chunk = (x: number, z: number) => Math.floor(z / CHUNK_SIZE) * CHUNKS_PER_SIDE + Math.floor(x / CHUNK_SIZE);
     // Inside one chunk, then across the line z = 4500 between two.
@@ -295,9 +295,9 @@ describe("road deltas", () => {
     tick();
     mirror.requestSnapshot();
     expect(updates).toEqual([
-      { kind: "delta", roadChunks: [chunk(4200, 4510)] },
-      { kind: "delta", roadChunks: [] },
-      { kind: "delta", roadChunks: [chunk(4300, 4450), chunk(4300, 4550)] },
+      { kind: "delta", roadChunks: [chunk(4200, 4510)], roadNodes: [0, 1], roadSegs: [0] },
+      { kind: "delta", roadChunks: [], roadNodes: [], roadSegs: [] },
+      { kind: "delta", roadChunks: [chunk(4300, 4450), chunk(4300, 4550)], roadNodes: [2, 3], roadSegs: [1] },
       { kind: "snapshot" },
     ]);
   });
