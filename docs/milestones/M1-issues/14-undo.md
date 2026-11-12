@@ -36,3 +36,5 @@ A player can take back their last road change, and only their own.
 ## Notes
 
 The PRD says undo is per player and only works while the result is still valid. Decide here whether a refused undo stays at the top of the history or is dropped so the player can reach the step before it, and record the choice in the PRD.
+
+Issue 20 adds `BuildRoadGrid`, which builds many roads under one log entry and must undo in one step. Shape the undo record so one entry can hold any number of added segments and splits. Then issue 20 needs no snapshot bump.
