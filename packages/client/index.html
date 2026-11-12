@@ -17,7 +17,12 @@
       main .note { margin: 6px 0 0; padding: 4px 6px; border-radius: 4px; font-size: 12px; background: #fff4d6; color: #5a4300; }
       main .note.problem { background: #fde2e1; color: #7a1712; }
       main .note[hidden] { display: none; }
-      main button { font: inherit; padding: 1px 8px; margin-left: 6px; }
+      main button, main label.button { font: inherit; padding: 1px 8px; margin-left: 6px; }
+      main button.first { margin-left: 0; }
+      main label.button { display: inline-block; border: 1px solid #767676; border-radius: 3px; background: #efefef; cursor: pointer; }
+      main label.button:focus-within { outline: 2px solid #1d6fd6; }
+      main label.button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+      main .note button { margin: 4px 6px 0 0; }
     </style>
   </head>
   <body>
@@ -38,6 +43,11 @@
         <dd id="save-city">loading</dd>
         <dt>Saved</dt>
         <dd><span id="save-status">-</span><button id="save-now" type="button">Save</button></dd>
+        <dt>City file</dt>
+        <dd>
+          <button id="download-city" type="button" class="first">Download</button>
+          <label class="button">Import<input id="import-file" type="file" accept=".city" /></label>
+        </dd>
         <dt>Last command</dt>
         <dd id="sim-last-result">none</dd>
         <dt>Renderer</dt>
@@ -59,6 +69,12 @@
       </dl>
       <p id="save-problem" class="note problem" role="alert" hidden></p>
       <p id="storage-note" class="note" role="status" hidden></p>
+      <p id="file-problem" class="note problem" role="alert" hidden></p>
+      <p id="file-note" class="note" role="status" hidden></p>
+      <div id="export-reminder" class="note" role="status" hidden>
+        <span id="export-reminder-text"></span><br />
+        <button id="reminder-download" type="button">Download a copy</button><button id="reminder-later" type="button">Not now</button>
+      </div>
       <p class="keys">Drag to pan, right-drag to orbit, wheel to zoom. Keys: WASD pan, Q E turn, R F tilt, + - zoom.</p>
     </main>
     <script type="module" src="/src/main.ts"></script>

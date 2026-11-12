@@ -43,7 +43,27 @@ export interface SaveRequest {
   requestId: number;
 }
 
-export type ToSaver = SaveRequest;
+/** Page to worker: write the running city out as file bytes. */
+export interface ExportRequest {
+  channel: typeof SAVES_CHANNEL;
+  type: "export";
+  requestId: number;
+}
+
+/**
+ * Page to worker: check a city file and store it as a new city, then mark it
+ * to be opened next. Nothing is stored if the file is not a good city.
+ */
+export interface ImportRequest {
+  channel: typeof SAVES_CHANNEL;
+  type: "import";
+  requestId: number;
+  /** The name of the file the player picked; the city is named after it. */
+  fileName: string;
+  bytes: ArrayBuffer;
+}
+
+export type ToSaver = SaveRequest | ExportRequest | ImportRequest;
 
 /** Worker to page. */
 export interface StatusMessage {
@@ -54,7 +74,23 @@ export interface StatusMessage {
   requestId: number | null;
 }
 
-export type FromSaver = StatusMessage;
+/** Worker to page: the answer to an `ExportRequest`. */
+export interface ExportReply {
+  channel: typeof SAVES_CHANNEL;
+  type: "exported";
+  requestId: number;
+  result: { ok: true; fileName: string; tick: number; bytes: ArrayBuffer } | { ok: false; error: string };
+}
+
+/** Worker to page: the answer to an `ImportRequest`. */
+export interface ImportReply {
+  channel: typeof SAVES_CHANNEL;
+  type: "imported";
+  requestId: number;
+  result: { ok: true; city: CityMeta } | { ok: false; error: string };
+}
+
+export type FromSaver = StatusMessage | ExportReply | ImportReply;
 
 export type PageSaveTransport = SimTransport<ToSaver, FromSaver>;
 export type WorkerSaveTransport = SimTransport<FromSaver, unknown>;
@@ -64,12 +100,25 @@ export function isSaveMessage(data: unknown): boolean {
 }
 
 /** Checks a message the worker received on the saves channel. */
-export function parseSaveRequest(raw: unknown): SaveRequest | null {
+export function parseSaveRequest(raw: unknown): ToSaver | null {
   if (!isSaveMessage(raw)) return null;
   const message = raw as Record<string, unknown>;
-  const reasons: readonly unknown[] = ["manual", "autosave", "hidden", "new city"];
-  if (message["type"] !== "save" || !reasons.includes(message["reason"])) return null;
   const requestId = message["requestId"];
   if (typeof requestId !== "number") return null;
-  return { channel: SAVES_CHANNEL, type: "save", reason: message["reason"] as SaveReason, requestId };
+  switch (message["type"]) {
+    case "save": {
+      const reasons: readonly unknown[] = ["manual", "autosave", "hidden", "new city"];
+      if (!reasons.includes(message["reason"])) return null;
+      return { channel: SAVES_CHANNEL, type: "save", reason: message["reason"] as SaveReason, requestId };
+    }
+    case "export":
+      return { channel: SAVES_CHANNEL, type: "export", requestId };
+    case "import": {
+      const { fileName, bytes } = message;
+      if (typeof fileName !== "string" || !(bytes instanceof ArrayBuffer)) return null;
+      return { channel: SAVES_CHANNEL, type: "import", requestId, fileName, bytes };
+    }
+    default:
+      return null;
+  }
 }
