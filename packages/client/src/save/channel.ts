@@ -9,7 +9,7 @@ import type { SimTransport } from "../protocol/transport";
 export const SAVES_CHANNEL = "saves";
 
 /** What prompted a save. */
-export type SaveReason = "manual" | "autosave" | "hidden" | "new city";
+export type SaveReason = "manual" | "autosave" | "hidden" | "new city" | "switching city";
 
 /** Where the running city came from when the worker started. */
 export type LoadedFrom = "latest save" | "previous save" | "new city";
@@ -63,7 +63,31 @@ export interface ImportRequest {
   bytes: ArrayBuffer;
 }
 
-export type ToSaver = SaveRequest | ExportRequest | ImportRequest;
+/**
+ * Page to worker: store a new city made from `seed` and mark it to be opened
+ * next. The running city is saved first.
+ */
+export interface NewCityRequest {
+  channel: typeof SAVES_CHANNEL;
+  type: "new";
+  requestId: number;
+  /** The name to give it; made unique if a city already has it. */
+  name: string;
+  seed: number;
+}
+
+/**
+ * Page to worker: mark the saved city `id` to be opened next. The running
+ * city is saved first.
+ */
+export interface OpenCityRequest {
+  channel: typeof SAVES_CHANNEL;
+  type: "open";
+  requestId: number;
+  id: string;
+}
+
+export type ToSaver = SaveRequest | ExportRequest | ImportRequest | NewCityRequest | OpenCityRequest;
 
 /** Worker to page. */
 export interface StatusMessage {
@@ -90,7 +114,18 @@ export interface ImportReply {
   result: { ok: true; city: CityMeta } | { ok: false; error: string };
 }
 
-export type FromSaver = StatusMessage | ExportReply | ImportReply;
+/**
+ * Worker to page: the answer to a `NewCityRequest` or `OpenCityRequest`. On
+ * success the page reloads, and the worker then opens `city`.
+ */
+export interface SwitchReply {
+  channel: typeof SAVES_CHANNEL;
+  type: "switched";
+  requestId: number;
+  result: { ok: true; city: CityMeta } | { ok: false; error: string };
+}
+
+export type FromSaver = StatusMessage | ExportReply | ImportReply | SwitchReply;
 
 export type PageSaveTransport = SimTransport<ToSaver, FromSaver>;
 export type WorkerSaveTransport = SimTransport<FromSaver, unknown>;
@@ -107,7 +142,7 @@ export function parseSaveRequest(raw: unknown): ToSaver | null {
   if (typeof requestId !== "number") return null;
   switch (message["type"]) {
     case "save": {
-      const reasons: readonly unknown[] = ["manual", "autosave", "hidden", "new city"];
+      const reasons: readonly unknown[] = ["manual", "autosave", "hidden", "new city", "switching city"];
       if (!reasons.includes(message["reason"])) return null;
       return { channel: SAVES_CHANNEL, type: "save", reason: message["reason"] as SaveReason, requestId };
     }
@@ -117,6 +152,16 @@ export function parseSaveRequest(raw: unknown): ToSaver | null {
       const { fileName, bytes } = message;
       if (typeof fileName !== "string" || !(bytes instanceof ArrayBuffer)) return null;
       return { channel: SAVES_CHANNEL, type: "import", requestId, fileName, bytes };
+    }
+    case "new": {
+      const { name, seed } = message;
+      if (typeof name !== "string" || typeof seed !== "number") return null;
+      return { channel: SAVES_CHANNEL, type: "new", requestId, name, seed };
+    }
+    case "open": {
+      const { id } = message;
+      if (typeof id !== "string") return null;
+      return { channel: SAVES_CHANNEL, type: "open", requestId, id };
     }
     default:
       return null;

@@ -128,7 +128,8 @@ test("a city resumes from the saved tick after a reload, with its activity log",
   // the reload's own hidden-tab save lands.
   await setSpeed(page, 0);
   const savedTick = await tick(page);
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "City" }).click();
+  await page.getByRole("region", { name: "City menu" }).getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator("#save-status")).toContainText(`tick ${savedTick} at`);
   await expect(page.locator("#save-status")).toContainText("(manual)");
   const logBefore = await page.evaluate(() => window.cityCouncil.mirror.state?.log);

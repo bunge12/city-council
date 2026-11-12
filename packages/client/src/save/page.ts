@@ -10,6 +10,7 @@ import {
   type PageSaveTransport,
   type SaveReason,
   type SaveStatus,
+  type SwitchReply,
 } from "./channel";
 
 type Listener = (status: SaveStatus) => void;
@@ -67,6 +68,20 @@ export class SaveClient {
     return this.ask((requestId) => {
       this.transport.send({ channel: SAVES_CHANNEL, type: "import", requestId, fileName, bytes }, [bytes]);
     }, (m) => (m.type === "imported" ? m.result : null));
+  }
+
+  /** Asks the worker to store a new city from `seed`, to open next. */
+  newCity(name: string, seed: number): Promise<SwitchReply["result"]> {
+    return this.ask((requestId) => {
+      this.transport.send({ channel: SAVES_CHANNEL, type: "new", requestId, name, seed });
+    }, (m) => (m.type === "switched" ? m.result : null));
+  }
+
+  /** Asks the worker to mark saved city `id` to open next. */
+  openCity(id: string): Promise<SwitchReply["result"]> {
+    return this.ask((requestId) => {
+      this.transport.send({ channel: SAVES_CHANNEL, type: "open", requestId, id });
+    }, (m) => (m.type === "switched" ? m.result : null));
   }
 
   private ask<T>(send: (requestId: number) => void, pick: (message: FromSaver) => T | null): Promise<T> {

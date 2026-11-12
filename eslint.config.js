@@ -12,6 +12,26 @@ const NO_TIMERS = "No timers inside packages/sim. The sim advances on a fixed ti
 const NO_MATH_RANDOM =
   "No Math.random in packages/sim. Use the seeded generator in state. See CLAUDE.md rule 4.";
 
+const UI_IS_A_VIEW =
+  "UI components read sim state through the SimMirror's read-only copy and change it only by sending commands. See CLAUDE.md rules 2 and 8.";
+
+/** Sim exports that make, write or step a state. UI components may not import them. */
+const UI_WRITES_STATE = [
+  "SimState",
+  "createState",
+  "submit",
+  "step",
+  "replay",
+  "migrateState",
+  "deserialize",
+  "serialize",
+  "seedRng",
+  "nextU32",
+  "nextInt",
+  "nextFloat",
+  "COMMANDS",
+];
+
 const INEXACT_MATH =
   "Terrain code uses only +, -, *, /, Math.sqrt, Math.floor and integer operations, which round the same in every engine. See CLAUDE.md rule 6.";
 
@@ -119,6 +139,39 @@ export default tseslint.config(
             {
               group: ["@city-council/sim/*", "**/sim", "**/sim/**", "!@city-council/sim"],
               message: SIM_ENTRY_ONLY,
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // Rule 2 and 8: the UI is a view. Components read state through the
+  // mirror's read-only copy and change it only by sending commands, so they
+  // may not import the writable state type, anything that makes or steps a
+  // state, or the worker's host and save code. This block repeats the entry
+  // rule because a later no-restricted-imports setting replaces an earlier one.
+  {
+    files: ["packages/client/src/ui/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@city-council/sim",
+              importNames: UI_WRITES_STATE,
+              message: UI_IS_A_VIEW,
+            },
+          ],
+          patterns: [
+            {
+              group: ["@city-council/sim/*", "**/sim", "**/sim/**", "!@city-council/sim"],
+              message: SIM_ENTRY_ONLY,
+            },
+            {
+              group: ["**/protocol/host", "**/protocol/worker", "**/save/saver", "**/save/store", "**/save/load"],
+              message: UI_IS_A_VIEW,
             },
           ],
         },

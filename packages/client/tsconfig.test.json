@@ -5,6 +5,7 @@
     "outDir": "dist/test-types",
     "emitDeclarationOnly": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
     "types": ["vite/client"]
   },
   "include": ["test"],

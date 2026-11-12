@@ -5,7 +5,6 @@ import {
   hashState,
   hashTerrain,
   mapSize,
-  simInfo,
   type CommandResult,
   type Terrain,
 } from "@city-council/sim";
@@ -14,71 +13,22 @@ import { SimMirror } from "./protocol/mirror";
 import { createWorkerTransport } from "./protocol/transport";
 import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
 import type { SaveStatus } from "./save/channel";
-import { wantsExportReminder } from "./save/city-file";
-import { EXPORT_REMINDER_INTERVAL_MS } from "./save/config";
 import { createCameraControls, type CameraControls } from "./camera/controls";
 import type { GroundHit } from "./camera/pick";
 import { createCameraRig, type CameraRig } from "./camera/rig";
 import { createView, wantsWebGL, type View } from "./render/view";
+import { mountUi } from "./ui/App";
+import type { AppServices, DownloadedCity } from "./ui/services";
+import { setViewReadout, useUi } from "./ui/store";
 
 /** Single player has one player. Multiplayer assigns ids on join. */
 const LOCAL_PLAYER_ID = "local";
-
-const info = simInfo();
-const infoEl = document.getElementById("sim-info");
-if (infoEl) infoEl.textContent = `${info.name}, tick ${info.tickMs} ms`;
 
 const worker = createWorkerTransport();
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
 const saves = new SaveClient(worker.saves);
 
-// A plain readout until the UI shell and debug panel land (issue 10).
-function field(id: string): HTMLElement {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`#${id} is missing from index.html`);
-  return el;
-}
-const tickEl = field("sim-tick");
-const speedEl = field("sim-speed");
-const logEl = field("sim-log-length");
-const timingsEl = field("sim-timings");
-const resultEl = field("sim-last-result");
-
-mirror.subscribe(() => {
-  const state = mirror.state;
-  if (!state) return;
-  tickEl.textContent = String(state.tick);
-  speedEl.textContent = state.speed === 0 ? "paused" : `${state.speed}x`;
-  logEl.textContent = String(state.logOffset + state.log.length);
-  timingsEl.textContent = mirror.stats.timings
-    .map((t) => `${t.system} ${t.ms.toFixed(3)} ms`)
-    .join(", ");
-});
-
-// Saving. The worker loads the latest city and saves it; the page asks for
-// saves and shows how they went.
-const cityEl = field("save-city");
-const saveStatusEl = field("save-status");
-const saveProblemEl = field("save-problem");
-const storageNoteEl = field("storage-note");
-const saveButton = field("save-now");
-
-function clockTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function showNote(el: HTMLElement, text: string | null): void {
-  el.textContent = text ?? "";
-  el.hidden = text === null;
-}
-
-saves.subscribe((status: SaveStatus) => {
-  cityEl.textContent = `${status.city.name}, seed ${status.city.seed} (${status.cities.length} saved)`;
-  const last = status.lastSave;
-  saveStatusEl.textContent = last
-    ? `tick ${last.tick} at ${clockTime(last.savedAt)} (${last.reason})`
-    : `not yet, resumed at tick ${status.loadedTick} from ${status.loadedFrom}`;
-  showNote(saveProblemEl, [status.problem, status.saveError].filter(Boolean).join(" ") || null);
+saves.subscribe(() => {
   document.body.dataset["saveLoaded"] = "true";
 });
 
@@ -86,7 +36,6 @@ saves.subscribe((status: SaveStatus) => {
 function saveNow(): Promise<SaveStatus> {
   return saves.save("manual");
 }
-saveButton.addEventListener("click", () => void saveNow());
 
 // Save when the tab is hidden: the player may be closing it, and a hidden
 // tab may be frozen or discarded without further warning.
@@ -94,29 +43,21 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") void saves.save("hidden");
 });
 
+/** Sends a command and records the sim's answer for the activity log. */
+async function sendCommand(type: string, payload: unknown = {}): Promise<CommandResult> {
+  const result = await mirror.sendCommand(type, payload);
+  useUi.setState({ lastCommand: result.ok ? `${type}: ok` : `${type}: refused, ${result.reason}` });
+  return result;
+}
+
 // City files. The worker writes the file bytes and checks imported ones; the
 // page only hands bytes to and from the browser's file handling.
-const downloadButton = field("download-city");
-const importInput = field("import-file");
-if (!(importInput instanceof HTMLInputElement)) throw new Error("#import-file must be an input");
-const fileNoteEl = field("file-note");
-const fileProblemEl = field("file-problem");
-const reminderEl = field("export-reminder");
-const reminderTextEl = field("export-reminder-text");
-
-/** What a download wrote, for the page and Playwright. */
-interface DownloadedCity {
-  fileName: string;
-  tick: number;
-  /** `hashState` of the city in the file. */
-  hash: string;
-}
 
 /** Downloads the running city as a `.city` file named after it. */
 async function downloadCity(): Promise<DownloadedCity> {
   const result = await saves.exportCity();
   if (!result.ok) {
-    showNote(fileProblemEl, result.error);
+    useUi.setState({ fileProblem: result.error });
     throw new Error(result.error);
   }
   const { fileName, tick, bytes } = result;
@@ -128,110 +69,97 @@ async function downloadCity(): Promise<DownloadedCity> {
   link.click();
   // The browser has the file by the time this runs.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  showNote(fileProblemEl, null);
-  showNote(fileNoteEl, `Downloaded ${fileName} at tick ${tick}.`);
-  reminderEl.hidden = true;
+  useUi.setState({ fileProblem: null, fileNote: `Downloaded ${fileName} at tick ${tick}.` });
   return { fileName, tick, hash };
 }
 
-const IMPORTED_NOTE_KEY = "city-council:imported";
+/** A note to show after the reload that opens another city. */
+const RELOAD_NOTE_KEY = "city-council:imported";
 
 /**
- * Imports a city file as a new city and opens it by reloading the page; the
- * worker opens the most recently imported city. A file that is not a good
- * city is reported and nothing changes.
+ * Opens the city the worker has just marked to open next, by reloading the
+ * page, with `note` shown once it has. The worker opens the most recently
+ * opened city.
  */
-async function importCityFile(file: File): Promise<void> {
-  showNote(fileProblemEl, null);
-  const result = await saves.importCity(file.name, await file.arrayBuffer());
-  if (!result.ok) {
-    showNote(fileProblemEl, result.error);
-    return;
-  }
+function reloadInto(note: string): void {
   try {
-    sessionStorage.setItem(IMPORTED_NOTE_KEY, `Imported "${result.city.name}" from ${file.name}.`);
+    sessionStorage.setItem(RELOAD_NOTE_KEY, note);
   } catch {
     // The note is a nicety.
   }
   location.reload();
 }
 
-downloadButton.addEventListener("click", () => void downloadCity().catch(() => undefined));
-field("reminder-download").addEventListener("click", () => void downloadCity().catch(() => undefined));
-importInput.addEventListener("change", () => {
-  const file = importInput.files?.[0];
-  // Clear it so picking the same file again still fires `change`.
-  importInput.value = "";
-  if (file) void importCityFile(file);
-});
+/**
+ * Imports a city file as a new city and opens it. A file that is not a good
+ * city is reported and nothing changes.
+ */
+async function importCityFile(file: File): Promise<void> {
+  useUi.setState({ fileProblem: null, busy: true });
+  const result = await saves.importCity(file.name, await file.arrayBuffer());
+  if (!result.ok) {
+    useUi.setState({ fileProblem: result.error, busy: false });
+    return;
+  }
+  reloadInto(`Imported "${result.city.name}" from ${file.name}.`);
+}
+
+/** Saves the running city, starts a new one from `seed` and opens it. */
+async function newCity(name: string, seed: number): Promise<void> {
+  useUi.setState({ fileProblem: null, busy: true });
+  const result = await saves.newCity(name, seed);
+  if (!result.ok) {
+    useUi.setState({ fileProblem: result.error, busy: false });
+    return;
+  }
+  reloadInto(`Started "${result.city.name}" from seed ${result.city.seed}.`);
+}
+
+/** Saves the running city and opens saved city `id`. */
+async function openCity(id: string): Promise<void> {
+  useUi.setState({ fileProblem: null, busy: true });
+  const result = await saves.openCity(id);
+  if (!result.ok) {
+    useUi.setState({ fileProblem: result.error, busy: false });
+    return;
+  }
+  reloadInto(`Opened "${result.city.name}" at tick ${result.city.tick}.`);
+}
 
 try {
-  const imported = sessionStorage.getItem(IMPORTED_NOTE_KEY);
-  sessionStorage.removeItem(IMPORTED_NOTE_KEY);
-  showNote(fileNoteEl, imported);
+  const note = sessionStorage.getItem(RELOAD_NOTE_KEY);
+  sessionStorage.removeItem(RELOAD_NOTE_KEY);
+  useUi.setState({ fileNote: note });
 } catch {
   // As above.
 }
 
-// A gentle reminder to download a copy now and then, since the browser may
-// clear saved cities. "Not now" hides it until the page is next opened.
-let reminderDismissed = false;
-function updateReminder(): void {
-  const status = saves.status;
-  const city = status?.cities.find((c) => c.id === status.city.id);
-  const show = !reminderDismissed && city !== undefined && wantsExportReminder(city, Date.now(), EXPORT_REMINDER_INTERVAL_MS);
-  if (show && city) {
-    reminderTextEl.textContent =
-      `You have not downloaded a copy of "${city.name}" for a while. ` +
-      "The browser can clear saved cities, so a file is the copy to keep.";
-  }
-  reminderEl.hidden = !show;
-}
-field("reminder-later").addEventListener("click", () => {
-  reminderDismissed = true;
-  updateReminder();
-});
-saves.subscribe(updateReminder);
-setInterval(updateReminder, 60_000);
+// `?debug` opens the debug panel at load, for walkthroughs and bug reports.
+if (new URLSearchParams(location.search).has("debug")) useUi.setState({ debugOpen: true });
 
 let persistence: PersistenceResult | null = null;
 void requestPersistence().then((result) => {
   persistence = result;
   document.body.dataset["persistence"] = result;
   if (result !== "persisted") {
-    showNote(
-      storageNoteEl,
-      result === "declined"
-        ? "This browser did not agree to keep saved cities for good, so it may clear them if disk space runs low."
-        : "This browser cannot promise to keep saved cities, so it may clear them if disk space runs low.",
-    );
+    useUi.setState({
+      storageNote:
+        result === "declined"
+          ? "This browser did not agree to keep saved cities for good, so it may clear them if disk space runs low."
+          : "This browser cannot promise to keep saved cities, so it may clear them if disk space runs low.",
+    });
   }
 });
 
-/** Sends a command and shows the sim's answer on the page. */
-async function sendCommand(type: string, payload: unknown = {}): Promise<CommandResult> {
-  const result = await mirror.sendCommand(type, payload);
-  resultEl.textContent = result.ok ? `${type}: ok` : `${type}: refused, ${result.reason}`;
-  return result;
-}
+const services: AppServices = { mirror, saves, sendCommand, saveNow, downloadCity, importCityFile, newCity, openCity };
+const uiRoot = document.getElementById("ui");
+if (!uiRoot) throw new Error("#ui is missing from index.html");
+mountUi(uiRoot, services);
 
 // The renderer. Terrain is derived from the seed, so the client rebuilds it
 // from the mirror's copy of state and draws it. Nothing here writes state.
 const canvas = document.getElementById("view");
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error("#view canvas is missing from index.html");
-const backendEl = field("render-backend");
-const frameEl = field("render-frame");
-const drawsEl = field("render-draws");
-const camPositionEl = field("cam-position");
-const camHeightEl = field("cam-height");
-const camBandEl = field("cam-band");
-const cursorEl = field("cursor-world");
-const pickEl = field("pick-world");
-
-/** Sets an element's text only when it changes, so per-frame readouts stay cheap. */
-function show(el: HTMLElement, text: string): void {
-  if (el.textContent !== text) el.textContent = text;
-}
 
 function metres(hit: { x: number; y: number; z: number } | null): string {
   return hit ? `${hit.x.toFixed(1)}, ${hit.y.toFixed(1)}, ${hit.z.toFixed(1)} m` : "off the map";
@@ -267,14 +195,16 @@ const cameraReady = new Promise<CameraHooks>((resolve) => {
 });
 
 const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) => {
-  backendEl.textContent = view.backend === "webgpu" ? "WebGPU" : "WebGL 2";
+  setViewReadout({ backend: view.backend === "webgpu" ? "WebGPU" : "WebGL 2" });
   let shownSeed: number | null = null;
   let lastReadout = 0;
   view.onFrame((stats) => {
     if (stats.frameMs === 0 || performance.now() - lastReadout < 250) return;
     lastReadout = performance.now();
-    frameEl.textContent = `${stats.frameMs.toFixed(1)} ms (${stats.fps.toFixed(0)} fps)`;
-    drawsEl.textContent = `${stats.drawCalls}, ${(stats.triangles / 1000).toFixed(0)}k triangles`;
+    setViewReadout({
+      frame: `${stats.frameMs.toFixed(1)} ms (${stats.fps.toFixed(0)} fps)`,
+      draws: `${stats.drawCalls}, ${(stats.triangles / 1000).toFixed(0)}k triangles`,
+    });
   });
   let hooks: CameraHooks | null = null;
   const showMap = () => {
@@ -312,7 +242,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   return view;
 });
 viewReady.catch((error: unknown) => {
-  backendEl.textContent = `failed: ${String(error)}`;
+  setViewReadout({ backend: `failed: ${String(error)}` });
 });
 
 /** Builds the camera rig and its input over `terrain`, and the readouts that follow it. */
@@ -332,18 +262,20 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   };
   controls.onPick((hit) => {
     hooks.lastPick = hit;
-    show(pickEl, metres(hit));
+    setViewReadout({ pick: metres(hit) });
   });
   view.onBeforeFrame((seconds) => {
     controls.update(seconds);
     const p = view.camera.position;
-    show(camPositionEl, `${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} m`);
-    show(camHeightEl, `${rig.heightAboveGround().toFixed(0)} m`);
     const band = rig.zoomBand();
-    show(camBandEl, band);
     document.body.dataset["zoomBand"] = band;
     const cursor = controls.cursor();
-    show(cursorEl, cursor ? metres(cursor) : "-");
+    setViewReadout({
+      camPosition: `${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} m`,
+      camHeight: `${rig.heightAboveGround().toFixed(0)} m`,
+      zoomBand: band,
+      cursor: cursor ? metres(cursor) : "-",
+    });
   });
   return hooks;
 }
@@ -359,8 +291,7 @@ interface TerrainCheck {
 
 /**
  * Generates terrain for `seed` in this browser and hashes it, so Playwright
- * can compare the result with the hashes Node produces. Only on demand: the
- * renderer (issue 06) decides where terrain is built for play.
+ * can compare the result with the hashes Node produces.
  */
 function terrainCheck(seed: number): TerrainCheck {
   const start = performance.now();
@@ -376,8 +307,8 @@ function terrainCheck(seed: number): TerrainCheck {
   };
 }
 
-// For Playwright and the console until issue 10 adds controls. It only reads
-// the mirror and sends commands, the same as any UI would.
+// For Playwright and the console. It only reads the mirror and sends
+// commands, the same as the UI does.
 declare global {
   interface Window {
     cityCouncil: {
