@@ -32,6 +32,8 @@ pnpm soak    one hour of game time at 4x, headless; writes packages/client/soak-
 BASE_URL=https://bunge12.github.io/city-council/ pnpm e2e --project walkthrough
 ```
 
+`e2e/roads.spec.ts` checks road rendering in its own `roads` project, also headed, against the dev server. It draws a fixture city on WebGPU and with `?webgl` and compares both with the same baseline screenshots in `e2e/roads.spec.ts-snapshots/`. If you change how roads look on purpose, refresh them with `xvfb-run -a pnpm e2e --project roads --update-snapshots` and say why in the pull request.
+
 The replay tests feed a recorded command log and a seed to the sim and compare a hash of the final state. If one fails after your change, the sim has become nondeterministic or its behaviour changed. Both need an explanation in the pull request.
 
 Fixtures live in `packages/sim/test/fixtures/replay/`. Each holds a seed, a log, the tick to replay to and the expected hash. When a change to the sim is meant to change the result, the failing test prints the new hash. Put it in the fixture and say why in the pull request.
