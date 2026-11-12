@@ -1,5 +1,6 @@
 // The renderer: three.js WebGPURenderer with the WebGL 2 backend as the
-// fallback, a fixed-daylight scene, the chunked terrain and the water plane.
+// fallback, a fixed-daylight scene, the chunked terrain, the water plane and
+// the decorative trees and grass.
 //
 // The render loop runs on the browser's frame clock and never waits on the
 // sim. It reads the mirror; it does not drive the sim.
@@ -20,6 +21,7 @@ import {
 } from "three/webgpu";
 import { mapSize, type Terrain } from "@city-council/sim";
 import { FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, TERRAIN_LODS } from "./config";
+import { createDecorLayer, type DecorLayer } from "./decor-meshes";
 import { buildChunk, chunkCentre, chunksPerSide } from "./terrain-chunks";
 import { SURFACE_HEIGHT_ATTRIBUTE, createTerrainMaterial } from "./terrain-material";
 
@@ -53,6 +55,8 @@ export interface View {
   onFrame(listener: (stats: FrameStats) => void): void;
   /** Chunks drawn at each level of detail in the last frame, nearest level first. */
   lodCounts(): number[];
+  /** Trees and grass tufts drawn in the last frame. */
+  decorCounts(): { trees: number; grass: number };
 }
 
 /** True when the page asks for the WebGL 2 backend with `?webgl`. */
@@ -85,7 +89,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   scene.add(sun);
   scene.add(new HemisphereLight(0xdfeaf5, 0x5a5040, 1.1));
 
-  let terrainRoot: { lods: LOD[]; dispose: () => void } | null = null;
+  let terrainRoot: { lods: LOD[]; decor: DecorLayer; dispose: () => void } | null = null;
 
   function showTerrain(terrain: Terrain): void {
     terrainRoot?.dispose();
@@ -136,9 +140,13 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     water.renderOrder = 1;
     scene.add(water);
 
+    const decor = createDecorLayer(terrain, scene);
+
     terrainRoot = {
       lods,
+      decor,
       dispose() {
+        decor.dispose();
         for (const lod of lods) scene.remove(lod);
         scene.remove(water);
         for (const g of geometries) g.dispose();
@@ -172,6 +180,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   renderer.setAnimationLoop((time: number) => {
     const seconds = last >= 0 ? (time - last) / 1000 : 0;
     for (const b of before) b(seconds);
+    terrainRoot?.decor.update(camera.position);
     renderer.render(scene, camera);
     if (last >= 0) {
       const slot = gapCount % FRAME_TIME_WINDOW;
@@ -208,5 +217,6 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       }
       return counts;
     },
+    decorCounts: () => terrainRoot?.decor.counts() ?? { trees: 0, grass: 0 },
   };
 }
