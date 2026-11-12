@@ -4,6 +4,8 @@ A city builder that runs in a desktop browser. Free-form roads, zoning along the
 
 One person builds it with Claude, in the open.
 
+Play the current build at <https://bunge12.github.io/city-council/>. It is redeployed on every merge to `main`.
+
 ## Where it stands
 
 It is early. You can fly around a generated map, but you cannot build anything yet.
@@ -54,6 +56,7 @@ Then open the address Vite prints. Add `?webgl` to the address to force the WebG
 pnpm test    unit, scenario and replay tests
 pnpm lint
 pnpm e2e     Playwright walkthroughs
+pnpm soak    one hour of game time at 4x, reporting tick time and memory
 pnpm build
 ```
 
