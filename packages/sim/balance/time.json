@@ -1,0 +1,6 @@
+{
+  "_about": "Game time. A day is 100 ticks, 10 seconds at 1x, as the PRD suggests under Economy. Tuned once M4 is playable. No prices here, so no source years.",
+  "ticksPerDay": 100,
+  "monthDays": [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31],
+  "firstYear": 1
+}

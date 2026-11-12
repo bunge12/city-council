@@ -191,7 +191,7 @@ This milestone also builds the parts every later module leans on.
 - The snapshot format, with save and load to IndexedDB
 - The tick loop with speed controls for pause, 1x, 2x and 4x
 - Camera with orbit, pan and zoom, plus ground picking
-- A debug panel that shows tick time per system
+- A debug panel that shows tick time per system, toggled with the backquote key. The UI shell is React over the canvas, with Zustand for UI state only; components read sim state through the `SimMirror` and a lint rule stops them importing anything that writes state
 - Download a city as a file and import it back, so a free player can move browsers or keep a backup
 
 The random generator is xoshiro128**, seeded from the city's 32-bit seed with splitmix32. Its four words of state live in the sim state, so a snapshot carries it.
@@ -452,7 +452,7 @@ Construction is instant in v1, and the full price is charged at the click. Const
 
 The treasury cannot go below a small overdraft. Past that, building and zoning commands fail with a clear message, and upkeep keeps running. There is no game over in v1. A broke city shrinks until it balances.
 
-Game time needs a starting value. I suggest one game day per 10 seconds at 1x, so a month is five minutes and a budget cycle fits in a play session. We tune this once M4 is playable.
+Game time starts at one game day per 10 seconds at 1x, which is 100 ticks, so a month is about five minutes and a budget cycle fits in a play session. The calendar has 365-day years with no leap years and starts on 1 January, Year 1. The date is worked out from the tick alone (`gameDate` in `sim`, numbers in `balance/time.json`), so every host shows the same date. We tune the day length once M4 is playable.
 
 **Pacing.** The target is 500,000 residents after about three weeks of playing one to two hours a day. That is roughly 30 hours of play, or about 17,000 new residents per hour, when demand is healthy. At one game year per hour it is about 30 game years. Growth is never guaranteed. It follows demand, so a badly run city grows slower or shrinks.
 

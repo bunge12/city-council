@@ -425,6 +425,81 @@ describe("city files", () => {
   });
 });
 
+async function switched(saves: ReturnType<typeof pair<FromSaver>>, request: Record<string, unknown> & { requestId: number }) {
+  const reply = await ask(saves, request);
+  if (reply.type !== "switched") throw new Error("expected a switched reply");
+  return reply.result;
+}
+
+describe("switching cities from the city menu", () => {
+  it("saves the running city and stores a new city from a seed that opens next", async () => {
+    const store = await openStore();
+    const wall = { now: 1_000 };
+    const first = await hostCity(store, wall);
+    first.run(800);
+    const tickBefore = first.host.tick;
+    wall.now = 2_000;
+    const result = await switched(first.saves, { type: "new", requestId: 1, name: "  Harbour  ", seed: 4242 });
+    if (!result.ok) throw new Error(result.error);
+    expect(result.city).toMatchObject({ name: "Harbour", seed: 4242, tick: 0, openedAt: 2_000 });
+    const list = await store.list();
+    expect(list.find((c) => c.id === first.city.id)?.tick).toBe(tickBefore);
+    // The tab closing saves the old city again on its way out.
+    wall.now = 3_000;
+    await first.saver.save("hidden");
+
+    const second = await hostCity(store, wall);
+    expect(second.city).toMatchObject({ id: result.city.id, name: "Harbour", from: "latest save" });
+    expect(second.host.seed).toBe(4242);
+    expect(second.host.tick).toBe(0);
+    expect(hashOf(second.host.snapshotBytes())).toBe(hashState(createState(4242)));
+  });
+
+  it("names a new city uniquely and refuses a seed that is not a 32-bit integer", async () => {
+    const store = await openStore();
+    const { saves } = await hostCity(store);
+    const a = await switched(saves, { type: "new", requestId: 1, name: "New city", seed: 1 });
+    const b = await switched(saves, { type: "new", requestId: 2, name: "", seed: 2 });
+    if (!a.ok || !b.ok) throw new Error("new city failed");
+    expect([a.city.name, b.city.name]).toEqual(["New city 2", "New city 3"]);
+    const listBefore = await store.list();
+    for (const seed of [-1, 2 ** 32, 1.5]) {
+      const bad = await switched(saves, { type: "new", requestId: 3, name: "Bad", seed });
+      expect(bad.ok).toBe(false);
+      if (!bad.ok) expect(bad.error).toMatch(/^Could not start a new city: seed must be an integer/);
+    }
+    expect((await store.list()).map((c) => c.id).sort()).toEqual(listBefore.map((c) => c.id).sort());
+  });
+
+  it("opens a saved city next, and refuses one that is not saved", async () => {
+    const store = await openStore();
+    const wall = { now: 1_000 };
+    const first = await hostCity(store, wall);
+    wall.now = 2_000;
+    const made = await switched(first.saves, { type: "new", requestId: 1, name: "Harbour", seed: 9 });
+    if (!made.ok) throw new Error(made.error);
+    const second = await hostCity(store, wall);
+    expect(second.city.id).toBe(made.city.id);
+
+    wall.now = 3_000;
+    const back = await switched(second.saves, { type: "open", requestId: 1, id: first.city.id });
+    expect(back).toMatchObject({ ok: true, city: { id: first.city.id, openedAt: 3_000 } });
+    expect((await hostCity(store, wall)).city.id).toBe(first.city.id);
+
+    const missing = await switched(second.saves, { type: "open", requestId: 2, id: "nope" });
+    expect(missing).toEqual({ ok: false, error: "Could not open the city: it is no longer saved in this browser." });
+  });
+
+  it("refuses to switch when local saves are not available", async () => {
+    const city = await openLatestCity(await openStore(), nextId);
+    const saves = pair<FromSaver>();
+    const host = new SimHost(city.state, memoryTransportPair().host, () => 0, city.pagedLog);
+    new Saver({ store: null, storeError: "no IndexedDB", host, transport: saves.worker, city, loadedFrom: city.from, problem: null, wallClock: () => 0 });
+    expect(await switched(saves, { type: "new", requestId: 1, name: "x", seed: 1 })).toEqual({ ok: false, error: "Could not start a new city. no IndexedDB." });
+    expect(await switched(saves, { type: "open", requestId: 2, id: "x" })).toEqual({ ok: false, error: "Could not open the city. no IndexedDB." });
+  });
+});
+
 describe("worker plumbing", () => {
   it("holds messages until something listens", () => {
     const { client, host } = memoryTransportPair();
@@ -444,6 +519,10 @@ describe("worker plumbing", () => {
     expect(parseSaveRequest({ channel: "saves", type: "import", requestId: 1, fileName: "a.city", bytes: "nope" })).toBeNull();
     expect(parseSaveRequest({ channel: "saves", type: "export" })).toBeNull();
     expect(parseSaveRequest({ channel: "saves", type: "save", reason: "whenever", requestId: 1 })).toBeNull();
+    expect(parseSaveRequest({ channel: "saves", type: "new", requestId: 1, name: "a", seed: 3 })).not.toBeNull();
+    expect(parseSaveRequest({ channel: "saves", type: "new", requestId: 1, name: "a", seed: "3" })).toBeNull();
+    expect(parseSaveRequest({ channel: "saves", type: "open", requestId: 1, id: "a" })).not.toBeNull();
+    expect(parseSaveRequest({ channel: "saves", type: "open", requestId: 1 })).toBeNull();
     expect(parseSaveRequest({ v: 1, type: "requestSnapshot" })).toBeNull();
   });
 

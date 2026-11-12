@@ -3,7 +3,7 @@
 // so the snapshot is taken there and written straight to IndexedDB without
 // a trip through the page.
 
-import { SnapshotError, deserialize, type Snapshot } from "@city-council/sim";
+import { SnapshotError, createState, deserialize, serialize, type Snapshot } from "@city-council/sim";
 import type { SimHost } from "../protocol/host";
 import {
   SAVES_CHANNEL,
@@ -13,6 +13,7 @@ import {
   type LoadedFrom,
   type SaveReason,
   type SaveStatus,
+  type SwitchReply,
   type WorkerSaveTransport,
 } from "./channel";
 import { cityFileName, cityNameFromFile, uniqueCityName } from "./city-file";
@@ -68,6 +69,12 @@ export class Saver {
           return;
         case "import":
           void this.importCity(request.fileName, new Uint8Array(request.bytes), request.requestId);
+          return;
+        case "new":
+          void this.newCity(request.name, request.seed, request.requestId);
+          return;
+        case "open":
+          void this.openCity(request.id, request.requestId);
           return;
       }
     });
@@ -164,6 +171,81 @@ export class Saver {
   }
 
   /**
+   * Stores a new city made from `seed` under a new id, marked to open next,
+   * after saving the running city. The running city is left as it is; the
+   * page reloads to open the new one.
+   */
+  newCity(name: string, seed: number, requestId: number): Promise<void> {
+    void this.save("switching city");
+    return this.enqueue(async () => {
+      const { store, storeError, wallClock } = this.options;
+      const refuse = (error: string): void =>
+        this.reply({ channel: SAVES_CHANNEL, type: "switched", requestId, result: { ok: false, error } });
+      let bytes: Uint8Array;
+      try {
+        bytes = serialize(createState(seed), []);
+      } catch (error) {
+        refuse(`Could not start a new city: ${message(error)}.`);
+        return;
+      }
+      if (!store) {
+        refuse(`Could not start a new city. ${storeError ?? "Saving is not available in this browser"}.`);
+        return;
+      }
+      try {
+        const taken = (await store.list()).map((c) => c.name);
+        const now = wallClock();
+        const city = {
+          id: (this.options.makeId ?? (() => crypto.randomUUID()))(),
+          name: uniqueCityName(name.trim() || "New city", taken),
+          seed,
+          tick: 0,
+          savedAt: now,
+          createdAt: now,
+          openedAt: now,
+        };
+        await store.add(city, bytes);
+        await this.refreshList();
+        this.reply({ channel: SAVES_CHANNEL, type: "switched", requestId, result: { ok: true, city } });
+        this.send(null);
+      } catch (error) {
+        refuse(`Could not start a new city: it could not be stored: ${message(error)}.`);
+      }
+    });
+  }
+
+  /**
+   * Marks saved city `id` to open next, after saving the running city. The
+   * page reloads to open it.
+   */
+  openCity(id: string, requestId: number): Promise<void> {
+    void this.save("switching city");
+    return this.enqueue(async () => {
+      const { store, storeError, wallClock } = this.options;
+      const refuse = (error: string): void =>
+        this.reply({ channel: SAVES_CHANNEL, type: "switched", requestId, result: { ok: false, error } });
+      if (!store) {
+        refuse(`Could not open the city. ${storeError ?? "Saving is not available in this browser"}.`);
+        return;
+      }
+      try {
+        const city = (await store.list()).find((c) => c.id === id);
+        if (!city) {
+          refuse("Could not open the city: it is no longer saved in this browser.");
+          return;
+        }
+        const openedAt = wallClock();
+        await store.touch(id, { openedAt });
+        await this.refreshList();
+        this.reply({ channel: SAVES_CHANNEL, type: "switched", requestId, result: { ok: true, city: { ...city, openedAt } } });
+        this.send(null);
+      } catch (error) {
+        refuse(`Could not open the city: ${message(error)}.`);
+      }
+    });
+  }
+
+  /**
    * Runs once the city is hosted. A new city is saved at once so it is in
    * the list from the start. The city is then marked as the one to open next
    * time, so a save of another city from a tab closing elsewhere, such as
@@ -233,7 +315,7 @@ export class Saver {
     this.options.transport.send({ channel: SAVES_CHANNEL, type: "status", status: this.status, requestId });
   }
 
-  private reply(message: ExportReply | ImportReply, transfer: Transferable[] = []): void {
+  private reply(message: ExportReply | ImportReply | SwitchReply, transfer: Transferable[] = []): void {
     this.options.transport.send(message, transfer);
   }
 }

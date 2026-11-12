@@ -1,4 +1,4 @@
-// Proves the rule-1/3/4/6 lint rules still fire. Each case lints a snippet as if
+// Proves the rule-1/2/3/4/6 lint rules still fire. Each case lints a snippet as if
 // it lived at `file` and checks which rule reports it. Run by `pnpm lint`.
 import { ESLint } from "eslint";
 
@@ -24,6 +24,14 @@ const cases = [
   ["packages/sim/src/terrain/x.ts", "export const a = Date.now();", "no-restricted-properties"],
   ["packages/sim/src/terrain/x.ts", "export const a = [Math.sqrt(2), Math.floor(1.5), Math.imul(3, 4)];", null],
   ["packages/client/src/x.ts", 'import { simInfo } from "@city-council/sim";\nexport const a = [simInfo, Math.random()];', null],
+  // Rules 2 and 8: UI components never import the writable state or code that writes it.
+  ["packages/client/src/ui/x.tsx", 'import type { SimState } from "@city-council/sim";\nexport type A = SimState;', "no-restricted-imports"],
+  ["packages/client/src/ui/x.tsx", 'import { createState } from "@city-council/sim";\nexport const a = createState;', "no-restricted-imports"],
+  ["packages/client/src/ui/x.tsx", 'import { submit } from "@city-council/sim";\nexport const a = submit;', "no-restricted-imports"],
+  ["packages/client/src/ui/x.tsx", 'import { SimHost } from "../protocol/host";\nexport const a = SimHost;', "no-restricted-imports"],
+  ["packages/client/src/ui/x.tsx", 'import { CityStore } from "../save/store";\nexport const a = CityStore;', "no-restricted-imports"],
+  ["packages/client/src/ui/x.tsx", 'import { a } from "../../../sim/src/state";\nexport { a };', "no-restricted-imports"],
+  ["packages/client/src/ui/x.tsx", 'import { gameDate, type Speed } from "@city-council/sim";\nexport const a: [typeof gameDate, Speed] = [gameDate, 1];', null],
 ];
 
 const eslint = new ESLint();

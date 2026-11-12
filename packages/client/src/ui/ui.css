@@ -1,0 +1,384 @@
+/* The UI shell over the canvas. Clean and legible, nothing more until later
+   milestones need it. The root lets clicks through to the map; panels take
+   them back. */
+
+:root {
+  --ink: #1d2733;
+  --ink-soft: #4a5866;
+  --panel: rgb(255 255 255 / 0.92);
+  --line: #c9d3dc;
+  --accent: #1d6fd6;
+  --accent-ink: #ffffff;
+  --warn-bg: #fff4d6;
+  --warn-ink: #5a4300;
+  --bad-bg: #fde2e1;
+  --bad-ink: #7a1712;
+  --bar-height: 44px;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  color: var(--ink);
+}
+
+#ui [hidden] {
+  display: none !important;
+}
+
+#ui button,
+#ui input,
+#ui label.button {
+  font: inherit;
+}
+
+#ui button,
+#ui label.button {
+  padding: 3px 10px;
+  border: 1px solid #8a96a3;
+  border-radius: 4px;
+  background: #f4f6f8;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+#ui button:hover:not(:disabled),
+#ui label.button:hover {
+  background: #e6ebf0;
+}
+
+#ui button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+#ui button:focus-visible,
+#ui label.button:focus-within,
+#ui input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#ui button[aria-pressed="true"],
+#ui button[aria-expanded="true"],
+#ui button[aria-pressed="true"]:hover:not(:disabled),
+#ui button[aria-expanded="true"]:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+#ui label.button {
+  display: inline-block;
+  position: relative;
+}
+
+#ui label.button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.top-bar {
+  pointer-events: auto;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--bar-height);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.top-bar h1 {
+  font-size: 15px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.top-bar .city-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.top-bar .game-date {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
+.top-bar .speeds,
+.top-bar .panels {
+  display: flex;
+  gap: 4px;
+}
+
+.top-bar .speeds button {
+  min-width: 44px;
+}
+
+.top-bar .panels {
+  margin-left: auto;
+}
+
+.left-column,
+.right-column {
+  position: absolute;
+  top: calc(var(--bar-height) + 8px);
+  width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - var(--bar-height) - 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.left-column {
+  left: 8px;
+}
+
+.right-column {
+  right: 8px;
+  overflow-y: auto;
+}
+
+.panel,
+.note {
+  pointer-events: auto;
+}
+
+.panel {
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow-y: auto;
+}
+
+.panel h2 {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+.panel h3 {
+  font-size: 13px;
+  margin: 10px 0 4px;
+}
+
+.panel dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+}
+
+.panel dt {
+  font-weight: 600;
+}
+
+.panel dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.panel .actions,
+.note .actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.hint {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notes:not(:has(> :not([hidden]))) {
+  display: none;
+}
+
+.note {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+.note.problem {
+  background: var(--bad-bg);
+  color: var(--bad-ink);
+}
+
+.timings ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.timings .budget {
+  height: 6px;
+  margin: 3px 0;
+  background: #e1e7ec;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.timings .bar {
+  height: 100%;
+  min-width: 2px;
+  background: #2e8b57;
+}
+
+.timings .bar.over {
+  background: #c0392b;
+}
+
+.keys {
+  font-size: 12px;
+}
+
+.keys > div {
+  display: contents;
+}
+
+kbd {
+  font: 11px/1.4 ui-monospace, monospace;
+  padding: 0 4px;
+  border: 1px solid #a9b4be;
+  border-radius: 3px;
+  background: #f4f6f8;
+}
+
+.city-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.city-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 8px;
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+
+.city-list .name {
+  font-weight: 600;
+}
+
+.city-list .meta {
+  grid-column: 1;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.city-list button,
+.city-list .running {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.city-list .running {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.new-city {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.new-city h3,
+.new-city .hint,
+.new-city button[type="submit"] {
+  grid-column: 1 / -1;
+}
+
+.new-city button[type="submit"] {
+  justify-self: start;
+}
+
+.new-city .row {
+  display: flex;
+  gap: 4px;
+}
+
+.new-city input {
+  min-width: 0;
+  flex: 1;
+  padding: 2px 6px;
+  border: 1px solid #8a96a3;
+  border-radius: 4px;
+}
+
+.new-city input[aria-invalid="true"] {
+  border-color: var(--bad-ink);
+}
+
+.activity-log table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.activity-log th {
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.activity-log td {
+  padding: 2px 4px 2px 0;
+  vertical-align: top;
+}
+
+.activity-log .num {
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-log .payload {
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .top-bar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 6px 12px;
+    gap: 6px 10px;
+  }
+
+  .top-bar .panels {
+    margin-left: 0;
+  }
+
+  :root {
+    --bar-height: 96px;
+  }
+}
