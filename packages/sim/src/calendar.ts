@@ -2,7 +2,7 @@
 // host and client shows the same date for the same tick. Integer arithmetic
 // only. Years have 365 days and no leap years.
 
-import balance from "../balance/time.json";
+import balance from "../balance/time.json" with { type: "json" };
 
 /** Game time settings, as stored in `balance/time.json`. */
 export type TimeBalance = typeof balance;

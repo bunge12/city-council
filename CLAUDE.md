@@ -42,6 +42,7 @@ pnpm dev        run the client with the sim in a worker
 pnpm test       unit, scenario and replay tests for the sim
 pnpm lint       includes the package boundary rule
 pnpm e2e        Playwright walkthroughs
+pnpm soak       sim host at 4x for one game hour, reports tick time and memory
 pnpm build
 ```
 

@@ -87,6 +87,24 @@ describe("replay", () => {
     expect(state.log).toEqual(fixture.log.filter((e) => e.tick < 12));
   });
 
+  it("applies entries at untilTick when they leave the city paused there, as a paused save has them", () => {
+    const live = createState(5);
+    while (live.tick < 30) {
+      if (live.tick === 10) submit(live, cmd("p1", 1, "NoOp"));
+      step(live);
+    }
+    submit(live, cmd("p1", 2, "SetSpeed", { speed: 0 }));
+    step(live);
+    submit(live, cmd("p1", 3, "NoOp", { note: "while paused" }));
+    for (let i = 0; i < 4; i++) step(live);
+    expect(live).toMatchObject({ tick: 30, speed: 0 });
+    expect(live.log.map((e) => e.tick)).toEqual([10, 30, 30]);
+
+    const replayed = replay(5, live.log, 30);
+    expect(replayed).toMatchObject({ tick: 30, speed: 0 });
+    expect(hashState(replayed)).toBe(hashState(live));
+  });
+
   it("depends on the seed", () => {
     expect(hashState(replay(1, fixture.log, 20))).not.toBe(hashState(replay(2, fixture.log, 20)));
   });
