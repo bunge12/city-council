@@ -10,6 +10,7 @@ import {
 } from "@city-council/sim";
 import { Vector3 } from "three/webgpu";
 import { SimMirror } from "./protocol/mirror";
+import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { createWorkerTransport } from "./protocol/transport";
 import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
 import type { SaveStatus } from "./save/channel";
@@ -20,9 +21,6 @@ import { createView, wantsWebGL, type View } from "./render/view";
 import { mountUi } from "./ui/App";
 import type { AppServices, DownloadedCity } from "./ui/services";
 import { setViewReadout, useUi } from "./ui/store";
-
-/** Single player has one player. Multiplayer assigns ids on join. */
-const LOCAL_PLAYER_ID = "local";
 
 const worker = createWorkerTransport();
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);

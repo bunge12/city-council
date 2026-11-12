@@ -4,6 +4,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { describe, expect, it } from "vitest";
 import {
   LOG_LIVE_LIMIT,
+  LOG_PAGE_SIZE,
   MAX_PENDING_COMMANDS,
   SNAPSHOT_VERSION,
   createState,
@@ -183,6 +184,7 @@ async function hostCity(store: CityStore, wall = { now: 1_000 }) {
     host,
     transport: saves.worker,
     city: { id: city.id, name: city.name },
+    logPagesStored: city.logPagesStored,
     loadedFrom: city.from,
     problem: city.problem,
     wallClock: () => wall.now,
@@ -257,6 +259,89 @@ describe("saving and loading a hosted city", () => {
     const { state } = deserialize(bytes);
     expect(state.logOffset).toBeGreaterThan(0);
     expect(hashState(replay(state.seed, second.host.fullLog, state.tick))).toBe(hashState(state));
+  });
+
+  /** Sends full queues of NoOps until `pages` log pages have left live state. */
+  function fillPages(city: Awaited<ReturnType<typeof hostCity>>, pages: number, from = 1): number {
+    let seq = from;
+    while (city.host.fullLog.length < LOG_LIVE_LIMIT + 1 + (pages - 1) * LOG_PAGE_SIZE) {
+      for (let i = 0; i < MAX_PENDING_COMMANDS; i++) city.command(seq++);
+      city.run(100);
+    }
+    return seq;
+  }
+
+  it("writes each log page once, and a save holds only the live part of the log", async () => {
+    const store = await openStore();
+    const city = await hostCity(store);
+    const seq = fillPages(city, 1);
+    await city.saver.save("autosave");
+    const first = (await store.read(city.city.id))?.latest ?? new Uint8Array();
+    expect(deserialize(first)).toMatchObject({ logDetached: true, pagedLog: [] });
+    expect(deserialize(first).state.logOffset).toBe(LOG_PAGE_SIZE);
+    const page0 = await store.readLogPages(city.city.id, 1);
+    expect(page0?.[0]?.entries).toEqual(city.host.fullLog.slice(0, LOG_PAGE_SIZE));
+
+    // Two more pages leave live state. The save is no bigger for it, and
+    // the next save hands the store only the two new pages.
+    fillPages(city, 3, seq);
+    const written: number[] = [];
+    const save = store.save.bind(store);
+    store.save = (meta, bytes, pages = []) => {
+      written.push(...pages.map((p) => p.index));
+      return save(meta, bytes, pages);
+    };
+    await city.saver.save("autosave");
+    await city.saver.save("autosave");
+    expect(written).toEqual([1, 2]);
+    const third = (await store.read(city.city.id))?.latest ?? new Uint8Array();
+    expect(deserialize(third).state.logOffset).toBe(3 * LOG_PAGE_SIZE);
+    expect(third.byteLength).toBeLessThan(first.byteLength * 1.1);
+    expect(third.byteLength).toBeLessThan(city.host.snapshotBytes().byteLength / 1.5);
+
+    const again = await hostCity(store);
+    expect(again.city.from).toBe("latest save");
+    expect(again.city.logPagesStored).toBe(3);
+    expect(again.host.fullLog).toEqual(city.host.fullLog);
+  });
+
+  it("goes back to the save before when a log page is missing", async () => {
+    const store = await openStore();
+    const city = await hostCity(store);
+    const seq = fillPages(city, 1);
+    await city.saver.save("autosave");
+    const goodTick = city.host.tick;
+    const goodLog = structuredClone(city.host.fullLog);
+    fillPages(city, 2, seq);
+    await city.saver.save("autosave");
+    // Lose page 1, which only the latest save needs.
+    const read = store.readLogPages.bind(store);
+    store.readLogPages = async (id, count) => (count > 1 ? null : read(id, count));
+
+    const again = await hostCity(store);
+    expect(again.city.from).toBe("previous save");
+    expect(again.city.problem).toMatch(/part of its activity log is missing/);
+    expect(again.host.tick).toBe(goodTick);
+    expect(again.host.fullLog).toEqual(goodLog);
+  });
+
+  it("opens a save that still has its paged log inside, and moves it to pages on the next save", async () => {
+    const store = await openStore();
+    const city = await hostCity(store);
+    fillPages(city, 2);
+    // As a build from before log pages wrote it, and as an imported file is stored.
+    await store.save(meta(city.city.id, city.host.tick, 5_000, city.city.name), city.host.snapshotBytes());
+
+    const again = await hostCity(store);
+    expect(again.city.logPagesStored).toBe(0);
+    expect(again.host.fullLog).toEqual(city.host.fullLog);
+    await again.saver.save("manual");
+    expect(deserialize((await store.read(city.city.id))?.latest ?? new Uint8Array()).logDetached).toBe(true);
+    expect(await store.readLogPages(city.city.id, 2)).toHaveLength(2);
+
+    const third = await hostCity(store);
+    expect(third.city.logPagesStored).toBe(2);
+    expect(third.host.fullLog).toEqual(city.host.fullLog);
   });
 
   it("serialises saves so the latest one is written last", async () => {

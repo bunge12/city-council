@@ -1,9 +1,15 @@
-// Saved cities in IndexedDB. Two object stores: "cities" holds a small
-// record per city for the list, "snapshots" holds the bytes. Each city keeps
+// Saved cities in IndexedDB. Three object stores: "cities" holds a small
+// record per city for the list, "snapshots" holds the bytes and "logPages"
+// holds the activity log entries that have left live state. Each city keeps
 // its latest snapshot and the one before it, so a damaged latest save still
 // leaves a good one to go back to.
+//
+// A log page is written once, when its entries leave live state, and never
+// changed. A snapshot then holds only the live part of the log, so the cost
+// of a save does not grow with the age of the city. Both of a city's
+// snapshots read the same pages: the older one just needs fewer of them.
 
-import { readSnapshotHeader } from "@city-council/sim";
+import { readSnapshotHeader, type LogEntry } from "@city-council/sim";
 import { SAVE_DB_NAME } from "./config";
 
 /** One saved city, as the list shows it. */
@@ -47,9 +53,22 @@ interface SnapshotRecord {
   previous: ArrayBuffer | null;
 }
 
-const DB_VERSION = 1;
+/** A run of log entries that left live state together. */
+export interface LogPage {
+  /** Position of the page in the city's log: page `i` starts at entry `i` times the page size. */
+  index: number;
+  entries: LogEntry[];
+}
+
+interface LogPageRecord extends LogPage {
+  city: string;
+}
+
+// Version 2 adds the "logPages" store.
+const DB_VERSION = 2;
 const CITIES = "cities";
 const SNAPSHOTS = "snapshots";
+const LOG_PAGES = "logPages";
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -95,6 +114,7 @@ export class CityStore {
       const db = req.result;
       if (!db.objectStoreNames.contains(CITIES)) db.createObjectStore(CITIES, { keyPath: "id" });
       if (!db.objectStoreNames.contains(SNAPSHOTS)) db.createObjectStore(SNAPSHOTS, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(LOG_PAGES)) db.createObjectStore(LOG_PAGES, { keyPath: ["city", "index"] });
     };
     return new CityStore(await request(req));
   }
@@ -122,10 +142,12 @@ export class CityStore {
    * in one transaction. The old latest becomes the previous one if it is
    * good; if it is damaged, the previous good one is kept instead. Fields
    * `meta` leaves out keep their stored values, and `createdAt` is set on
-   * the first save.
+   * the first save. `pages` are log pages the snapshot counts on that are
+   * not stored yet; they are written in the same transaction, so a stored
+   * snapshot never points at a page that is missing.
    */
-  async save(meta: CityMeta, bytes: Uint8Array): Promise<void> {
-    const tx = this.db.transaction([CITIES, SNAPSHOTS], "readwrite");
+  async save(meta: CityMeta, bytes: Uint8Array, pages: readonly LogPage[] = []): Promise<void> {
+    const tx = this.db.transaction([CITIES, SNAPSHOTS, LOG_PAGES], "readwrite");
     const finished = done(tx);
     const snapshots = tx.objectStore(SNAPSHOTS);
     const cities = tx.objectStore(CITIES);
@@ -138,7 +160,32 @@ export class CityStore {
     };
     snapshots.put(record);
     cities.put({ createdAt: meta.savedAt, ...oldMeta, ...meta });
+    const logPages = tx.objectStore(LOG_PAGES);
+    for (const page of pages) {
+      logPages.put({ city: meta.id, index: page.index, entries: page.entries } satisfies LogPageRecord);
+    }
     await finished;
+  }
+
+  /**
+   * The first `count` log pages of a city, in order, or null if any of them
+   * is not stored.
+   */
+  async readLogPages(id: string, count: number): Promise<LogPage[] | null> {
+    if (count === 0) return [];
+    const tx = this.db.transaction(LOG_PAGES, "readonly");
+    const logPages = tx.objectStore(LOG_PAGES);
+    const requests: Promise<LogPageRecord | undefined>[] = [];
+    for (let index = 0; index < count; index++) {
+      requests.push(request(logPages.get([id, index])) as Promise<LogPageRecord | undefined>);
+    }
+    const records = await Promise.all(requests);
+    const pages: LogPage[] = [];
+    for (const record of records) {
+      if (!record) return null;
+      pages.push({ index: record.index, entries: record.entries });
+    }
+    return pages;
   }
 
   /**

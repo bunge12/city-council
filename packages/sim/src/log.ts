@@ -51,3 +51,18 @@ export function readLog(state: SimState, from: number): LogEntry[] {
   }
   return state.log.slice(from - state.logOffset);
 }
+
+/**
+ * Whether `value` has the shape of a log entry. For a host that keeps
+ * paged-out entries in its own storage and reads them back.
+ */
+export function isLogEntry(value: unknown): value is LogEntry {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    Number.isSafeInteger(entry["tick"]) &&
+    Number.isSafeInteger(entry["seq"]) &&
+    typeof entry["playerId"] === "string" &&
+    typeof entry["type"] === "string"
+  );
+}

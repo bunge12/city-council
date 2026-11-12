@@ -7,6 +7,7 @@ import { newCityFallback, openLatestCity, type OpenedCity } from "../save/load";
 import { Saver } from "../save/saver";
 import { CityStore } from "../save/store";
 import { PUMP_INTERVAL_MS, SimHost } from "./host";
+import { LOCAL_PLAYER_ID } from "./player";
 import { bufferUntilListening, portTransport, type MessagePortLike } from "./transport";
 
 const port = self as unknown as MessagePortLike;
@@ -27,13 +28,14 @@ async function start(): Promise<void> {
     city = newCityFallback(`Saved cities could not be opened, so a new city was started. ${storeError}.`);
   }
 
-  const host = new SimHost(city.state, simTransport, () => performance.now(), city.pagedLog);
+  const host = new SimHost(city.state, simTransport, () => performance.now(), city.pagedLog, LOCAL_PLAYER_ID);
   const saver = new Saver({
     store,
     ...(storeError === undefined ? {} : { storeError }),
     host,
     transport: saveTransport,
     city: { id: city.id, name: city.name },
+    logPagesStored: city.logPagesStored,
     loadedFrom: city.from,
     problem: city.problem,
     wallClock: () => Date.now(),

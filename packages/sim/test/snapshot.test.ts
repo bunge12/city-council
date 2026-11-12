@@ -14,6 +14,7 @@ import {
   readSnapshotHeader,
   replay,
   serialize,
+  serializeDetached,
   step,
   submit,
   type LogEntry,
@@ -123,8 +124,10 @@ describe("serialize and deserialize", () => {
   it("writes a header that can be read without decoding the rest", () => {
     const state = busyState(77);
     const header = readSnapshotHeader(serialize(state));
+    // A snapshot that carries its paged log is written as format 1, which
+    // builds from before detached logs still read.
     expect(header).toEqual({
-      formatVersion: SNAPSHOT_FORMAT_VERSION,
+      formatVersion: 1,
       stateVersion: SNAPSHOT_VERSION,
       seed: 77,
       tick: state.tick,
@@ -168,6 +171,45 @@ describe("the activity log across a save", () => {
     const fullLog = [...back.pagedLog, ...back.state.log];
     expect(fullLog).toEqual(read);
     expect(hashState(replay(back.state.seed, fullLog, back.state.tick))).toBe(hash);
+  });
+});
+
+describe("a snapshot written without its paged log", () => {
+  /** A city with entries paged out of live state, and the entries a host would have read. */
+  function pagedCity(): { state: SimState; fullLog: LogEntry[] } {
+    const state = createState(21);
+    const fullLog: LogEntry[] = [];
+    let seq = 0;
+    while (state.logOffset === 0) {
+      for (let i = 0; i < MAX_PENDING_COMMANDS; i++) submit(state, { seq: seq++, playerId: "a", type: "NoOp", payload: { i } });
+      step(state);
+      fullLog.push(...readLog(state, fullLog.length));
+    }
+    return { state, fullLog };
+  }
+
+  it("comes back to the same hash and says its log is elsewhere", () => {
+    const { state } = pagedCity();
+    const back = deserialize(serializeDetached(state));
+    expect(back.logDetached).toBe(true);
+    expect(back.pagedLog).toEqual([]);
+    expect(back.state.logOffset).toBe(state.logOffset);
+    expect(hashState(back.state)).toBe(hashState(state));
+    expect(back.header.formatVersion).toBe(SNAPSHOT_FORMAT_VERSION);
+  });
+
+  it("does not grow with the entries that have left live state", () => {
+    const { state, fullLog } = pagedCity();
+    const detached = serializeDetached(state).byteLength;
+    const whole = serialize(state, fullLog.slice(0, state.logOffset)).byteLength;
+    expect(whole - detached).toBeGreaterThan(state.logOffset * 50);
+    expect(deserialize(serialize(state, fullLog.slice(0, state.logOffset))).logDetached).toBe(false);
+  });
+
+  it("is refused in the old layout, where the paged log is required", () => {
+    const bytes = serializeDetached(pagedCity().state);
+    new DataView(bytes.buffer).setUint16(4, 1, true);
+    expect(refusal(bytes).code).toBe("corrupt");
   });
 });
 
@@ -262,7 +304,7 @@ describe("snapshots that are refused", () => {
     new DataView(bytes.buffer).setUint16(4, SNAPSHOT_FORMAT_VERSION + 1, true);
     const error = refusal(bytes);
     expect(error.code).toBe("newer-version");
-    expect(error.message).toMatch(/file format 2/);
+    expect(error.message).toContain(`file format ${SNAPSHOT_FORMAT_VERSION + 1}`);
   });
 
   it("refuses bytes that are not a snapshot", () => {

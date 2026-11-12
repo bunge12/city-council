@@ -188,6 +188,25 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   });
 });
 
+describe("a host that knows who is on its connection", () => {
+  it("stamps that player on every command, whatever id the message claims", () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    const host = new SimHost(createState(3), hostEnd, () => now, [], "local");
+    client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq: 1, playerId: "someone else", type: "NoOp", payload: {} } });
+    client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq: 2, playerId: "", type: "NoOp", payload: {} } });
+    now += 100;
+    host.pump();
+    expect(received.filter((m) => m.type === "commandResult")).toEqual([
+      { v: PROTOCOL_VERSION, type: "commandResult", seq: 1, playerId: "local", result: { ok: true } },
+      { v: PROTOCOL_VERSION, type: "commandResult", seq: 2, playerId: "local", result: { ok: true } },
+    ]);
+    expect(host.fullLog.map((e) => e.playerId)).toEqual(["local", "local"]);
+  });
+});
+
 describe("a host resumed from its own save", () => {
   // Drives a host for `ms` of real time from `from`, sending commands that
   // depend only on the time, enough of them to page entries out of live

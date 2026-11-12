@@ -29,17 +29,25 @@
 // stored as UTF-16 code units, so every string comes back exactly, the same
 // units `hashState` reads.
 //
+// Format version 2 allows a snapshot with no "pagedLog" section: one whose
+// paged-out entries are kept somewhere else, by whoever wrote it. A local
+// save is written that way, so a save does not write the whole log again
+// each time. Nothing else differs, and a snapshot that carries its paged
+// log is still written as version 1, which older builds read.
+//
 // Typed array data is written in the platform's byte order. Every engine the
 // game targets is little endian, as `hashState` already assumes.
 
 import { Fnv64 } from "./hash";
-import type { LogEntry } from "./log";
+import { isLogEntry, type LogEntry } from "./log";
 import { migrateState } from "./migrate";
 import { RNG_WORDS } from "./rng";
 import { SNAPSHOT_VERSION, SPEEDS, type SimState } from "./state";
 
-/** Version of the byte layout above. Bump on any change to it. */
-export const SNAPSHOT_FORMAT_VERSION = 1;
+/** Newest version of the byte layout above this build reads. Bump on any change to it. */
+export const SNAPSHOT_FORMAT_VERSION = 2;
+/** The layout version in which the paged log is always inside the snapshot. */
+const FORMAT_LOG_INSIDE = 1;
 
 /** "CITY" in ASCII. */
 const MAGIC = [0x43, 0x49, 0x54, 0x59] as const;
@@ -80,9 +88,16 @@ export interface Snapshot {
   state: SimState;
   /**
    * Log entries that left live state, oldest first. Entry `i` has absolute
-   * index `i`, so this followed by `state.log` is the whole log.
+   * index `i`, so this followed by `state.log` is the whole log. Empty when
+   * `logDetached` is true.
    */
   pagedLog: LogEntry[];
+  /**
+   * True when the snapshot was written without its paged log. The first
+   * `state.logOffset` entries are then wherever the writer keeps them, and
+   * the caller must supply them to have the whole log.
+   */
+  logDetached: boolean;
 }
 
 type TypedArray =
@@ -267,7 +282,21 @@ function isUint32(n: unknown): n is number {
  * `state.logOffset` entries. The state is only read.
  */
 export function serialize(state: SimState, pagedLog: readonly LogEntry[] = []): Uint8Array {
-  if (pagedLog.length !== state.logOffset) {
+  return write(state, pagedLog);
+}
+
+/**
+ * Writes `state` as snapshot bytes without the entries that have left live
+ * state. For a host that stores those itself, once each, so that the cost
+ * of a save does not grow with the length of the log. Whoever reads the
+ * bytes back must supply the first `state.logOffset` entries.
+ */
+export function serializeDetached(state: SimState): Uint8Array {
+  return write(state, null);
+}
+
+function write(state: SimState, pagedLog: readonly LogEntry[] | null): Uint8Array {
+  if (pagedLog !== null && pagedLog.length !== state.logOffset) {
     throw new RangeError(
       `serialize: pagedLog has ${pagedLog.length} entries but ${state.logOffset} have left live state`,
     );
@@ -282,7 +311,8 @@ export function serialize(state: SimState, pagedLog: readonly LogEntry[] = []): 
 
   const arrays: Section[] = [];
   const fields = encodeJson(state, "", arrays);
-  const sections = [jsonSection("state", fields), jsonSection("pagedLog", encodeJson(pagedLog, "pagedLog", arrays)), ...arrays];
+  const logSections = pagedLog === null ? [] : [jsonSection("pagedLog", encodeJson(pagedLog, "pagedLog", arrays))];
+  const sections = [jsonSection("state", fields), ...logSections, ...arrays];
 
   let bodyLength = 0;
   for (const section of sections) {
@@ -307,7 +337,8 @@ export function serialize(state: SimState, pagedLog: readonly LogEntry[] = []): 
   }
 
   out.set(MAGIC, 0);
-  view.setUint16(4, SNAPSHOT_FORMAT_VERSION, true);
+  // The oldest layout version that can hold this snapshot.
+  view.setUint16(4, pagedLog === null ? SNAPSHOT_FORMAT_VERSION : FORMAT_LOG_INSIDE, true);
   view.setUint16(6, state.version, true);
   view.setUint32(8, state.seed, true);
   view.setUint32(12, sections.length, true);
@@ -410,15 +441,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function checkLogEntry(entry: unknown, where: string): void {
-  if (
-    !isRecord(entry) ||
-    !Number.isSafeInteger(entry["tick"]) ||
-    !Number.isSafeInteger(entry["seq"]) ||
-    typeof entry["playerId"] !== "string" ||
-    typeof entry["type"] !== "string"
-  ) {
-    throw corrupt(`${where} is not a log entry`);
-  }
+  if (!isLogEntry(entry)) throw corrupt(`${where} is not a log entry`);
 }
 
 /**
@@ -438,7 +461,7 @@ function checkPendingCommand(command: unknown, where: string): void {
 }
 
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
-function checkState(state: Record<string, unknown>, pagedLog: unknown[], header: SnapshotHeader): void {
+function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
   const { tick, seed, rng, speed, pending, log, logOffset } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");
   if (!isUint32(seed)) throw corrupt("its seed is not a 32-bit integer");
@@ -446,10 +469,11 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[], header:
   if (!(rng instanceof Uint32Array) || rng.length !== RNG_WORDS) throw corrupt("its random generator is malformed");
   if (!(SPEEDS as readonly unknown[]).includes(speed)) throw corrupt(`its speed ${String(speed)} is not a game speed`);
   if (!Array.isArray(pending) || !Array.isArray(log)) throw corrupt("its command queue or log is not a list");
-  if (!Number.isSafeInteger(logOffset) || logOffset !== pagedLog.length) {
+  if (!Number.isSafeInteger(logOffset) || (logOffset as number) < 0) throw corrupt("its log offset is not a whole number");
+  if (pagedLog !== null && logOffset !== pagedLog.length) {
     throw corrupt("its log offset does not match the entries saved with it");
   }
-  pagedLog.forEach((entry, i) => checkLogEntry(entry, `paged log entry ${i}`));
+  pagedLog?.forEach((entry, i) => checkLogEntry(entry, `paged log entry ${i}`));
   log.forEach((entry, i) => checkLogEntry(entry, `log entry ${i}`));
   pending.forEach((command, i) => checkPendingCommand(command, `queued command ${i}`));
 }
@@ -472,13 +496,15 @@ export function deserialize(bytes: Uint8Array): Snapshot {
   }
   const fields = json.get("state");
   const paged = json.get("pagedLog");
-  if (fields === undefined || paged === undefined) throw corrupt("a required section is missing");
+  // Only the newer layout may leave the paged log out.
+  const logDetached = paged === undefined && header.formatVersion > FORMAT_LOG_INSIDE;
+  if (fields === undefined || (paged === undefined && !logDetached)) throw corrupt("a required section is missing");
   const raw = decodeJson(fields, arrays);
-  const pagedLog = decodeJson(paged, arrays);
+  const pagedLog = paged === undefined ? null : decodeJson(paged, arrays);
   if (!isRecord(raw) || raw["version"] !== header.stateVersion) {
     throw corrupt("its state does not match its header");
   }
-  if (!Array.isArray(pagedLog)) throw corrupt("its paged log is not a list");
+  if (pagedLog !== null && !Array.isArray(pagedLog)) throw corrupt("its paged log is not a list");
   let state: SimState;
   try {
     state = migrateState(raw as { version: number } & Record<string, unknown>);
@@ -486,5 +512,5 @@ export function deserialize(bytes: Uint8Array): Snapshot {
     throw corrupt(`it could not be upgraded (${error instanceof Error ? error.message : String(error)})`);
   }
   checkState(state as unknown as Record<string, unknown>, pagedLog, header);
-  return { header, state, pagedLog: pagedLog as LogEntry[] };
+  return { header, state, pagedLog: (pagedLog ?? []) as LogEntry[], logDetached };
 }

@@ -4,7 +4,7 @@
 // a trip through the page.
 
 import { SnapshotError, createState, deserialize, serialize, type Snapshot } from "@city-council/sim";
-import type { SimHost } from "../protocol/host";
+import type { LocalSave, SimHost } from "../protocol/host";
 import {
   SAVES_CHANNEL,
   parseSaveRequest,
@@ -27,6 +27,8 @@ export interface SaverOptions {
   host: SimHost;
   transport: WorkerSaveTransport;
   city: { id: string; name: string };
+  /** Log pages of the city already in the store. A new or imported city has none. */
+  logPagesStored?: number;
   loadedFrom: LoadedFrom;
   problem: string | null;
   /** Wall clock, for the last-saved time. */
@@ -44,9 +46,12 @@ export class Saver {
   private status: SaveStatus;
   /** Saves run one at a time, in the order asked, so the latest is written last. */
   private queue: Promise<void> = Promise.resolve();
+  /** Log pages of the city in the store. Pages are written once, with the first save that needs them. */
+  private logPagesStored: number;
 
   constructor(options: SaverOptions) {
     this.options = options;
+    this.logPagesStored = options.logPagesStored ?? 0;
     const { host, city, loadedFrom, problem } = options;
     this.status = {
       city: { ...city, seed: host.seed },
@@ -266,34 +271,39 @@ export class Saver {
 
   /**
    * Snapshots the city now and writes it. The snapshot is taken when this
-   * is called, between steps, so a save is always a whole tick.
+   * is called, between steps, so a save is always a whole tick. It holds
+   * the live part of the log only; entries that have left live state go
+   * out as pages, each written once.
    */
   save(reason: SaveReason, requestId: number | null = null): Promise<void> {
     const { host } = this.options;
     const tick = host.tick;
-    let bytes: Uint8Array | null = null;
+    let save: LocalSave | null = null;
     let snapshotError: string | null = null;
     try {
-      bytes = host.snapshotBytes();
+      save = host.saveBytes(this.logPagesStored);
     } catch (error) {
       snapshotError = String(error);
     }
-    return this.enqueue(() => this.write(reason, tick, bytes, snapshotError, requestId));
+    return this.enqueue(() => this.write(reason, tick, save, snapshotError, requestId));
   }
 
   private async write(
     reason: SaveReason,
     tick: number,
-    bytes: Uint8Array | null,
+    save: LocalSave | null,
     snapshotError: string | null,
     requestId: number | null,
   ): Promise<void> {
     const { store, storeError, city, host, wallClock } = this.options;
     try {
       if (!store) throw new Error(storeError ?? "saving is not available in this browser");
-      if (!bytes) throw new Error(snapshotError ?? "the city could not be written out");
+      if (!save) throw new Error(snapshotError ?? "the city could not be written out");
       const savedAt = wallClock();
-      await store.save({ id: city.id, name: city.name, seed: host.seed, tick, savedAt }, bytes);
+      await store.save({ id: city.id, name: city.name, seed: host.seed, tick, savedAt }, save.bytes, save.pages);
+      // Only now are the pages known to be stored. A save queued before this
+      // one finished carries the same pages again, which is harmless.
+      this.logPagesStored = Math.max(this.logPagesStored, save.pageCount);
       this.status = { ...this.status, lastSave: { tick, savedAt, reason }, saveError: null };
       await this.refreshList();
     } catch (error) {
