@@ -54,3 +54,22 @@ export function createState(seed: number): SimState {
     logOffset: 0,
   };
 }
+
+/**
+ * A deep copy of `state`. State holds only plain objects, arrays, typed
+ * arrays and primitives (CLAUDE.md rule 7), so that is all this copies.
+ */
+export function cloneState(state: SimState): SimState {
+  return cloneValue(state) as SimState;
+}
+
+function cloneValue(value: unknown): unknown {
+  if (ArrayBuffer.isView(value)) return (value as Uint8Array).slice();
+  if (Array.isArray(value)) return value.map(cloneValue);
+  if (typeof value === "object" && value !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) out[key] = cloneValue(child);
+    return out;
+  }
+  return value;
+}

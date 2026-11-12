@@ -134,6 +134,7 @@ The client only sends commands and receives state. Whether the sim sits in a wor
 | UI | React over the canvas, Zustand for UI state | Panels, budget tables and toolbars are ordinary web UI |
 | Sim runtime | Web Worker in single player, Node on the server | Same package, two hosts |
 | Local saves | IndexedDB | No backend needed until multiplayer |
+| Static hosting | GitHub Pages, deployed by a workflow on every push to `main` | Free, next to the repo, no extra account. It cannot set response headers, which matters only if we want `SharedArrayBuffer` (see M0). |
 | Server | Node with WebSockets, one room per city | See the multiplayer section for the hosting options |
 | Tests | Vitest for sim, Playwright for client walkthroughs | The sim is headless, so most tests need no browser |
 
@@ -162,7 +163,7 @@ Your list put Map & Zoning first. I split it. With free-form roads, zoning cells
 
 | # | Milestone | Depends on | Exit test |
 | --- | --- | --- | --- |
-| M0 | Foundation and terrain | none | A seeded map renders with camera controls. The sim runs in a worker, accepts a no-op command, and the state saves and reloads from IndexedDB. |
+| M0 ✓ | Foundation and terrain | none | A seeded map renders with camera controls. The sim runs in a worker, accepts a no-op command, and the state saves and reloads from IndexedDB. |
 | M1 | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
 | M2 | Zoning and buildings | M1 | Paint R, C, I, O, and M on cells along roads. Buildings appear on zoned cells at a fixed rate and disappear when the road is removed. Each zone can have a level 1-3 which indicates density & impact |
 | M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. |
@@ -207,6 +208,12 @@ A city file is the snapshot bytes unchanged, in one file named after the city wi
 Speed is part of the sim state and changes only through the `SetSpeed` command, since in multiplayer there is one sim and one speed. While paused the host keeps stepping at the 1x rate: queued commands still apply, including the one that unpauses, but the tick counter and the systems do not move.
 
 No terraforming in v1. The terrain is fixed after generation, which keeps the save small and removes a class of sync problems.
+
+The game is served from GitHub Pages at <https://bunge12.github.io/city-council/>. A workflow builds the client on every push to `main`, publishes it, and runs the M0 walkthrough against the public address. The build uses relative asset paths, so the same files work at a site root and under the repository path. Cloudflare Pages was the alternative. We would move there only for a response header Pages cannot send. Saves live in the origin's IndexedDB, and on Pages every project of the same GitHub account shares the `bunge12.github.io` origin, so the database name `city-council` must stay unique among them.
+
+`SharedArrayBuffer` is not used. The worker sends deltas and moves snapshot buffers with `postMessage` transfer, which costs little at M0 sizes. Shared memory needs the page to be cross-origin isolated, which takes two response headers (COOP and COEP) that GitHub Pages cannot set. If a later module wants it, most likely M5 for traffic assignment in background workers, the choice is between a service worker that adds the headers (it costs one reload on the first visit) and a move to Cloudflare Pages with a `_headers` file. That decision waits until something needs shared memory.
+
+M0 exit numbers, measured by the walkthrough on the production build. Cold load to an interactive map on a throttled 25 Mbit/s line with 20 ms latency, with the HTTP cache off: about 1.0 s from navigation start to the first frame with terrain, on both WebGPU and WebGL 2, and under 2 s measured from outside the page. The soak run (`pnpm soak`) hosts a city at 4x for one hour of game time, 36,000 ticks with a NoOp every 4 ticks: no step near the 20 ms budget (worst about 1 to 2 ms), heap back to about 11 MB after GC, and a replay of the 9,000-entry log gives the live city's hash.
 
 Terrain is gradient noise on an integer hash: a lowland layer tilted toward a sea on one of eight sides, ridged mountains under a noise mask, and a thermal erosion pass. The water surface sits at the height that leaves 20 percent of the map under water. If less than 45 percent of the map is dry and no steeper than 10 percent, the relief is scaled down and the map shaped again. These numbers live in `packages/sim/balance/terrain.json`. The code in `packages/sim/src/terrain/` uses only exact operations, and lint bans the other `Math` functions there. The same seeds hash the same in Node, Chromium and JavaScriptCore, so the save stores only the seed and the fallback of saving the heightmap is not needed.
 
@@ -837,7 +844,7 @@ Overlays work in every band. In the city band the map reads much like an info vi
 
 One person builds this with Claude, in a public repository that others can join once the project is announced. That shapes how the work is organised.
 
-The repository is [bunge12/city-council](https://github.com/bunge12/city-council). The project owner also hosts the only public copy of the game. Where its static files are served from is chosen in M0.
+The repository is [bunge12/city-council](https://github.com/bunge12/city-council). The project owner also hosts the only public copy of the game. Its static files are served from GitHub Pages (see M0).
 
 - **Milestones stay small.** Each one is cut into pull requests that a single session can finish and test. The module order above is also the order of work, with no parallel tracks to coordinate.
 - **The repo explains itself.** This doc lives in the repo as the project map, each milestone gets a short spec beside it, and a CONTRIBUTING file covers setup, the command-in and state-out rule, and how to run the replay tests. A newcomer or a fresh Claude session can then start without a briefing.

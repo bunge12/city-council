@@ -12,7 +12,8 @@
     "lint": "eslint . --max-warnings 0 && node scripts/check-lint-rules.mjs && node scripts/check-node-version.mjs",
     "typecheck": "tsc -b && tsc -p tsconfig.tooling.json",
     "build": "pnpm typecheck && pnpm --filter @city-council/client build",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "soak": "pnpm --filter @city-council/client soak"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

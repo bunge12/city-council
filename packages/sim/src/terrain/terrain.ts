@@ -6,7 +6,7 @@
 // Math.sqrt, Math.floor and integer operations (CLAUDE.md rule 6). Lint bans
 // the rest of Math here.
 
-import balance from "../../balance/terrain.json";
+import balance from "../../balance/terrain.json" with { type: "json" };
 import { hashState } from "../hash";
 import { fade, fbm, mixSeed, ridged } from "./noise";
 

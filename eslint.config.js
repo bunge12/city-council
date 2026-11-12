@@ -184,7 +184,14 @@ export default tseslint.config(
     languageOptions: { globals: globals.browser },
   },
   {
-    files: ["packages/server/**/*.{ts,js}", "*.{js,ts}", "e2e/**/*.ts", "scripts/**/*.{js,mjs}"],
+    files: [
+      "packages/server/**/*.{ts,js}",
+      "packages/client/soak/**/*.ts",
+      "packages/client/vitest.soak.config.ts",
+      "*.{js,ts}",
+      "e2e/**/*.ts",
+      "scripts/**/*.{js,mjs}",
+    ],
     languageOptions: { globals: globals.node },
   },
 );

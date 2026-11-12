@@ -23,6 +23,13 @@ pnpm dev
 pnpm test    sim unit, scenario and replay tests, client protocol tests
 pnpm lint
 pnpm e2e     Playwright walkthroughs
+pnpm soak    one hour of game time at 4x, headless; writes packages/client/soak-report.json
+```
+
+`e2e/walkthrough.spec.ts` is the M0 exit test. It runs in its own Playwright project against a production build, once on WebGPU and once with `?webgl`, and saves a screenshot of each step under `walkthrough-screenshots/`. It opens a real browser window, because headless Chromium cannot show a WebGPU canvas. On Linux without a display, run the e2e suite under `xvfb-run -a`. To check the deployed game, point the walkthrough at it:
+
+```
+BASE_URL=https://bunge12.github.io/city-council/ pnpm e2e --project walkthrough
 ```
 
 The replay tests feed a recorded command log and a seed to the sim and compare a hash of the final state. If one fails after your change, the sim has become nondeterministic or its behaviour changed. Both need an explanation in the pull request.
