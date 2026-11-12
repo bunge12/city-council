@@ -71,6 +71,8 @@ export {
   SEG_ALIVE,
 } from "./roads/network";
 export type { RoadNetwork } from "./roads/network";
+export { applyRoadDelta, drainRoadChanges, encodeRoadDelta, mergeRoadChanges, recordRoadChanges } from "./roads/delta";
+export type { RoadChanges, RoadDelta } from "./roads/delta";
 export { CHUNKS_PER_SIDE, CHUNK_SIZE } from "./chunks";
 export { prepareDerived } from "./derived";
 export {
@@ -79,6 +81,8 @@ export {
   NETWORKS_RAIL,
   NETWORKS_ROAD,
   buildRoadIndex,
+  chunkOfNode,
+  forSegmentChunks,
   indexNode,
   indexSegment,
   nearestNode,

@@ -2,17 +2,22 @@
 // fake clock: the same SimHost the worker runs, with no worker.
 import { describe, expect, it } from "vitest";
 import {
+  CHUNKS_PER_SIDE,
+  CHUNK_SIZE,
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
   PROTOCOL_VERSION,
   createState,
   deserialize,
   hashState,
+  nextFloat,
+  nextInt,
   replay,
+  seedRng,
   type FromSimMessage,
 } from "@city-council/sim";
 import { MAX_CATCH_UP_STEPS, PUMP_INTERVAL_MS, SimHost, typedArrayBuffers } from "../src/protocol/host";
-import { SimMirror } from "../src/protocol/mirror";
+import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
 import { memoryTransportPair } from "../src/protocol/transport";
 
 function setup(seed = 7) {
@@ -121,7 +126,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["log", "logFrom", "speed", "steps", "tick", "timings", "type", "v"].sort(),
+      ["log", "logFrom", "seq", "speed", "steps", "tick", "timings", "type", "v"].sort(),
     );
   });
 
@@ -175,6 +180,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     (mirror as unknown as { receive(m: FromSimMessage): void }).receive({
       v: PROTOCOL_VERSION,
       type: "delta",
+      seq: 0,
       tick: 3,
       speed: 1,
       logFrom: 99,
@@ -185,6 +191,165 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(mirror.state?.tick).toBe(0);
     expect(received.length).toBe(before + 1);
     expect(received.at(-1)?.type).toBe("snapshot");
+  });
+});
+
+describe("road deltas", () => {
+  // Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000).
+  // The sim's build-road tests check it is still there.
+  const FLAT = { x0: 4100, z0: 4400, x1: 4700, z1: 5000 };
+  const TYPES = ["street", "avenue", "oneway"];
+
+  /** A host and mirror where the test picks which host messages reach the mirror. */
+  function roadSetup() {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    let drop: (m: FromSimMessage) => boolean = () => false;
+    // Sit between the host and the mirror so a test can lose a message.
+    const filtered: typeof client = {
+      send: (m, t) => client.send(m, t),
+      onMessage: (handler) =>
+        client.onMessage((m) => {
+          received.push(m);
+          if (!drop(m)) handler(m);
+        }),
+    };
+    let now = 0;
+    const host = new SimHost(createState(2026), hostEnd, () => now);
+    const mirror = new SimMirror(filtered, "p1");
+    const updates: MirrorUpdate[] = [];
+    mirror.subscribe((u) => updates.push(u));
+    const tick = () => {
+      for (let t = 0; t < 100; t += PUMP_INTERVAL_MS) {
+        now += PUMP_INTERVAL_MS;
+        host.pump();
+      }
+    };
+    /** The host's network now, from a snapshot that goes only to the test. */
+    const hostRoads = () => {
+      const before = drop;
+      drop = () => true;
+      filtered.send({ v: PROTOCOL_VERSION, type: "requestSnapshot" });
+      drop = before;
+      const snap = received.at(-1);
+      if (snap?.type !== "snapshot") throw new Error("no snapshot");
+      return snap.state.roads;
+    };
+    return { mirror, received, updates, tick, hostRoads, setDrop: (f: typeof drop) => (drop = f) };
+  }
+
+  const arrays = (net: unknown) =>
+    Object.fromEntries(Object.entries(net as object).map(([k, a]) => [k, Array.from(a as ArrayLike<number>)]));
+
+  const road = (from: [number, number], to: [number, number], type = "street") => ({
+    from: { x: from[0], z: from[1] },
+    to: { x: to[0], z: to[1] },
+    type,
+  });
+
+  it("keeps the mirror's network equal to the sim's through 1,000 ticks of random road commands", () => {
+    const { mirror, tick, hostRoads } = roadSetup();
+    const rng = seedRng(31);
+    const point = (): [number, number] => {
+      // Mostly inside the flat square, where roads are accepted and cross.
+      if (nextFloat(rng) < 0.85) {
+        return [FLAT.x0 + nextFloat(rng) * (FLAT.x1 - FLAT.x0), FLAT.z0 + nextFloat(rng) * (FLAT.z1 - FLAT.z0)];
+      }
+      return [nextFloat(rng) * 12_000, nextFloat(rng) * 12_000];
+    };
+    for (let t = 0; t < 1000; t++) {
+      const commands = nextInt(rng, 3);
+      for (let i = 0; i < commands; i++) {
+        void mirror.sendCommand("BuildRoad", road(point(), point(), TYPES[nextInt(rng, 3)]));
+      }
+      tick();
+      if (t % 250 === 249) expect(arrays(mirror.state?.roads)).toEqual(arrays(hostRoads()));
+    }
+    const roads = hostRoads();
+    expect(arrays(mirror.state?.roads)).toEqual(arrays(roads));
+    // Enough happened for this to mean something: splits removed and reused ids.
+    expect(roads.segFlags.length).toBeGreaterThan(200);
+    expect(mirror.state?.tick).toBe(1000);
+  });
+
+  it("adds no road data to a delta on a tick with no road changes", async () => {
+    const { mirror, received, tick } = roadSetup();
+    await mirror.sendCommand("NoOp");
+    tick();
+    await mirror.sendCommand("BuildRoad", road([4200, 4500], [4600, 4500]));
+    tick();
+    tick();
+    const deltas = received.filter((m) => m.type === "delta");
+    expect(deltas.map((d) => d.roads !== undefined)).toEqual([false, true, false]);
+    expect(deltas.every((d) => d.type === "delta" && (d.roads === undefined) === !("roads" in d))).toBe(true);
+  });
+
+  it("tells listeners which chunks changed", async () => {
+    const { mirror, updates, tick } = roadSetup();
+    const chunk = (x: number, z: number) => Math.floor(z / CHUNK_SIZE) * CHUNKS_PER_SIDE + Math.floor(x / CHUNK_SIZE);
+    // Inside one chunk, then across the line z = 4500 between two.
+    await mirror.sendCommand("BuildRoad", road([4200, 4510], [4200, 4590]));
+    tick();
+    tick();
+    await mirror.sendCommand("BuildRoad", road([4300, 4450], [4300, 4550]));
+    tick();
+    mirror.requestSnapshot();
+    expect(updates).toEqual([
+      { kind: "delta", roadChunks: [chunk(4200, 4510)] },
+      { kind: "delta", roadChunks: [] },
+      { kind: "delta", roadChunks: [chunk(4300, 4450), chunk(4300, 4550)] },
+      { kind: "snapshot" },
+    ]);
+  });
+
+  it("spots a missed delta, asks for a snapshot and catches up", async () => {
+    const { mirror, received, tick, hostRoads, setDrop } = roadSetup();
+    await mirror.sendCommand("BuildRoad", road([4200, 4500], [4600, 4500]));
+    tick();
+    // Lose the delta that carries the second road.
+    let lost = false;
+    setDrop((m) => {
+      if (lost || m.type !== "delta" || !m.roads) return false;
+      lost = true;
+      return true;
+    });
+    await mirror.sendCommand("BuildRoad", road([4400, 4420], [4400, 4900]));
+    tick();
+    expect(lost).toBe(true);
+    setDrop(() => false);
+    const before = received.filter((m) => m.type === "snapshot").length;
+    tick();
+    expect(received.filter((m) => m.type === "snapshot").length).toBe(before + 1);
+    tick();
+    expect(arrays(mirror.state?.roads)).toEqual(arrays(hostRoads()));
+    expect(mirror.state?.roads.segFlags.length).toBe(4);
+  });
+
+  it("delivers a segment removed and its id reused in the same tick as the new segment", async () => {
+    const { mirror, received, tick, hostRoads } = roadSetup();
+    await mirror.sendCommand("BuildRoad", road([4200, 4500], [4600, 4500]));
+    tick();
+    const old = { a: mirror.state?.roads.segA[0], b: mirror.state?.roads.segB[0] };
+    // Crossing it splits segment 0: it is removed and its first piece takes id 0.
+    await mirror.sendCommand("BuildRoad", road([4400, 4420], [4400, 4900]));
+    tick();
+    const delta = received.filter((m) => m.type === "delta").at(-1);
+    expect(delta?.type === "delta" && Array.from(delta.roads?.segIds ?? [])).toContain(0);
+    const roads = hostRoads();
+    expect({ a: roads.segA[0], b: roads.segB[0] }).not.toEqual(old);
+    expect(mirror.state?.roads.segA[0]).toBe(roads.segA[0]);
+    expect(mirror.state?.roads.segB[0]).toBe(roads.segB[0]);
+    expect(mirror.state?.roads.segLength[0]).toBe(roads.segLength[0]);
+    expect(arrays(mirror.state?.roads)).toEqual(arrays(roads));
+  });
+
+  it("carries the whole network in a snapshot", async () => {
+    const { mirror, tick, hostRoads } = roadSetup();
+    await mirror.sendCommand("BuildRoad", road([4200, 4500], [4600, 4500]));
+    tick();
+    mirror.requestSnapshot();
+    expect(arrays(mirror.state?.roads)).toEqual(arrays(hostRoads()));
+    expect(mirror.state?.roads.segFlags.length).toBe(1);
   });
 });
 

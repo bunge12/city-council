@@ -2,6 +2,7 @@ import {
   LOG_LIVE_LIMIT,
   LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
+  applyRoadDelta,
   type CommandResult,
   type FromSimMessage,
   type SimState,
@@ -24,7 +25,15 @@ export interface HostStats {
   timings: readonly SystemTiming[];
 }
 
-type Listener = () => void;
+/**
+ * What a snapshot or delta changed. A snapshot replaces the whole copy, so
+ * everything may have changed. A delta names the 500 m chunks, as
+ * `cj * CHUNKS_PER_SIDE + ci` ascending, whose roads changed; empty when no
+ * road did.
+ */
+export type MirrorUpdate = { kind: "snapshot" } | { kind: "delta"; roadChunks: readonly number[] };
+
+type Listener = (update: MirrorUpdate) => void;
 
 /**
  * The client's read-only copy of sim state. It requests a snapshot when
@@ -37,6 +46,8 @@ export class SimMirror {
   private readonly playerId: string;
   private current: SimState | null = null;
   private logFrom = 0;
+  /** `seq` of the next delta that lines up with the copy. */
+  private deltaSeq = 0;
   private nextSeq = 1;
   private readonly waiting = new Map<number, (result: CommandResult) => void>();
   private readonly listeners = new Set<Listener>();
@@ -59,7 +70,10 @@ export class SimMirror {
     return this.hostStats;
   }
 
-  /** Calls `listener` after every snapshot or delta. Returns an unsubscribe. */
+  /**
+   * Calls `listener` after every snapshot or delta, with what it changed.
+   * Returns an unsubscribe.
+   */
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
@@ -92,8 +106,9 @@ export class SimMirror {
       case "snapshot":
         this.current = message.state;
         this.logFrom = message.logFrom;
+        this.deltaSeq = message.deltaSeq;
         this.awaitingSnapshot = false;
-        this.notify();
+        this.notify({ kind: "snapshot" });
         return;
       case "delta":
         this.applyDelta(message);
@@ -111,11 +126,21 @@ export class SimMirror {
   private applyDelta(delta: Extract<FromSimMessage, { type: "delta" }>): void {
     const state = this.current;
     if (state === null) return;
-    if (delta.logFrom !== this.logFrom || delta.tick < state.tick) {
-      // Out of step with the host. Drop deltas until a snapshot resets us.
-      if (!this.awaitingSnapshot) this.requestSnapshot();
+    if (delta.seq !== this.deltaSeq || delta.logFrom !== this.logFrom || delta.tick < state.tick) {
+      this.outOfStep();
       return;
     }
+    // Roads first: a delta whose rows do not fit the copy changes nothing.
+    let roadChunks: readonly number[] = [];
+    if (delta.roads) {
+      const applied = applyRoadDelta(state.roads, delta.roads);
+      if (typeof applied === "string") {
+        this.outOfStep();
+        return;
+      }
+      roadChunks = applied;
+    }
+    this.deltaSeq++;
     state.tick = delta.tick;
     state.speed = delta.speed;
     // Any step drains the host's queue, so queued commands from the
@@ -129,10 +154,15 @@ export class SimMirror {
       state.logOffset += LOG_PAGE_SIZE;
     }
     this.hostStats = { timings: delta.timings };
-    this.notify();
+    this.notify({ kind: "delta", roadChunks });
   }
 
-  private notify(): void {
-    for (const listener of this.listeners) listener();
+  /** Out of step with the host. Drop deltas until a snapshot resets us. */
+  private outOfStep(): void {
+    if (!this.awaitingSnapshot) this.requestSnapshot();
+  }
+
+  private notify(update: MirrorUpdate): void {
+    for (const listener of this.listeners) listener(update);
   }
 }
