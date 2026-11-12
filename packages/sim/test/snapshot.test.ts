@@ -22,6 +22,8 @@ import {
 } from "../src/index";
 import v1Fixture from "./fixtures/snapshots/v1.json";
 import v2Fixture from "./fixtures/snapshots/v2.json";
+import v3Fixture from "./fixtures/snapshots/v3.json";
+import { addNode, addSegment, createRoadNetwork, removeSegment, segmentsAt } from "../src/roads/network";
 
 function fromHex(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
@@ -273,19 +275,73 @@ describe("committed snapshots", () => {
       pending: [],
       log: [],
       logOffset: 0,
+      roads: createRoadNetwork(),
     });
   });
 
-  it("loads the version 2 fixture to its recorded hash", () => {
-    const { state } = deserialize(fromHex(v2Fixture.hex));
-    expect(hashState(state)).toBe(v2Fixture.hash);
+  it("loads the version 2 fixture as a version 3 city with no roads", () => {
+    const { state, header } = deserialize(fromHex(v2Fixture.hex));
+    expect(header.stateVersion).toBe(2);
+    expect(state.version).toBe(3);
+    const { roads, ...rest } = state;
+    expect(roads).toEqual(createRoadNetwork());
+    // Everything the version 2 save held comes back unchanged.
+    expect(hashState({ ...rest, version: 2 })).toBe(v2Fixture.hash);
   });
 
-  it("still writes the version 2 fixture byte for byte", () => {
+  it("loads the version 3 fixture to its recorded hash", () => {
+    const { state, header } = deserialize(fromHex(v3Fixture.hex));
+    expect(header.stateVersion).toBe(3);
+    expect(hashState(state)).toBe(v3Fixture.hash);
+    expect(segmentsAt(state.roads, 1)).toHaveLength(2);
+    expect(Array.from(state.roads.segFree)).toEqual([1]);
+    expect(Array.from(state.roads.nodeFree)).toEqual([4]);
+  });
+
+  it("still writes the version 3 fixture byte for byte", () => {
     // If this fails the byte layout changed: bump SNAPSHOT_FORMAT_VERSION and
     // keep reading the old layout, or explain in the pull request why not.
-    const { state } = deserialize(fromHex(v2Fixture.hex));
-    expect(toHex(serialize(state))).toBe(v2Fixture.hex);
+    const { state } = deserialize(fromHex(v3Fixture.hex));
+    expect(toHex(serialize(state))).toBe(v3Fixture.hex);
+  });
+});
+
+describe("snapshots with a road network", () => {
+  function withRoads(): SimState {
+    const state = busyState(3);
+    const r = state.roads;
+    const a = addNode(r, 10, 20, 5, true);
+    const b = addNode(r, 110, 20, 6);
+    const c = addNode(r, 110, 220, 7.5);
+    addSegment(r, a, b, { type: 0 });
+    const gone = addSegment(r, b, c, { type: 1, cx: 200, cz: 100 });
+    addSegment(r, a, c, { type: 2, level: 1 });
+    removeSegment(r, gone);
+    // Spare capacity behind the arrays must not reach the save or the hash.
+    for (let i = 0; i < 20; i++) addNode(r, i, i, 0);
+    return state;
+  }
+
+  it("serialises, deserialises and hashes the same", () => {
+    const state = withRoads();
+    const { state: back } = deserialize(serialize(state));
+    expect(hashState(back)).toBe(hashState(state));
+    expect(back.roads).toEqual(state.roads);
+    expect(toHex(serialize(back))).toBe(toHex(serialize(state)));
+  });
+
+  it("refuses a save whose road network is malformed", () => {
+    const state = withRoads();
+    state.roads.segA[0] = 99;
+    const error = refusal(serialize(state));
+    expect(error.code).toBe("corrupt");
+    expect(error.message).toMatch(/road network is malformed/);
+  });
+
+  it("refuses a save whose road arrays differ in length", () => {
+    const state = withRoads();
+    state.roads.nodeX = state.roads.nodeX.slice(1);
+    expect(refusal(serialize(state)).message).toMatch(/node arrays differ in length/);
   });
 });
 

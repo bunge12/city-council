@@ -1,12 +1,13 @@
 import type { Command } from "./commands";
 import type { LogEntry } from "./log";
 import { seedRng } from "./rng";
+import { createRoadNetwork, type RoadNetwork } from "./roads/network";
 
 /**
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -36,6 +37,8 @@ export interface SimState {
   log: LogEntry[];
   /** How many entries have left live state. `log[0]` is entry `logOffset`. */
   logOffset: number;
+  /** The road graph: road, rail and path nodes and segments. */
+  roads: RoadNetwork;
 }
 
 /** A new city from a 32-bit unsigned integer seed. */
@@ -52,6 +55,7 @@ export function createState(seed: number): SimState {
     pending: [],
     log: [],
     logOffset: 0,
+    roads: createRoadNetwork(),
   };
 }
 
@@ -64,6 +68,7 @@ export function cloneState(state: SimState): SimState {
 }
 
 function cloneValue(value: unknown): unknown {
+  // slice() copies only the view, not spare capacity behind it.
   if (ArrayBuffer.isView(value)) return (value as Uint8Array).slice();
   if (Array.isArray(value)) return value.map(cloneValue);
   if (typeof value === "object" && value !== null) {

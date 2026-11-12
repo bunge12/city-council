@@ -53,3 +53,19 @@ export {
   slopeAt,
 } from "./terrain/terrain";
 export type { Terrain, TerrainBalance } from "./terrain/terrain";
+export { ROAD_BALANCE, ROAD_TYPES, roadTypeIndex } from "./roads/balance";
+export type { BalancePrice, RoadBalance, RoadType, RoadTypeBalance } from "./roads/balance";
+export {
+  LEVEL_BRIDGE,
+  LEVEL_ELEVATED,
+  LEVEL_GROUND,
+  LEVEL_TUNNEL,
+  NETWORK_PATH,
+  NETWORK_RAIL,
+  NETWORK_ROAD,
+  NODE_ALIVE,
+  NODE_FIXED,
+  NONE,
+  SEG_ALIVE,
+} from "./roads/network";
+export type { RoadNetwork } from "./roads/network";

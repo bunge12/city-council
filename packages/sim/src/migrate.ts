@@ -1,3 +1,4 @@
+import { createRoadNetwork } from "./roads/network";
 import { SNAPSHOT_VERSION, type SimState } from "./state";
 
 type Migration = (old: Record<string, unknown>) => Record<string, unknown>;
@@ -6,6 +7,8 @@ type Migration = (old: Record<string, unknown>) => Record<string, unknown>;
 const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 2 adds the activity log.
   1: (old) => ({ ...old, version: 2, log: [], logOffset: 0 }),
+  // Version 3 adds the road graph, empty.
+  2: (old) => ({ ...old, version: 3, roads: createRoadNetwork() }),
 };
 
 /**
