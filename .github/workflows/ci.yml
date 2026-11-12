@@ -25,6 +25,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm soak
+      - run: pnpm bench
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
       # The M0 walkthrough runs headed (see playwright.config.ts), so give it a display.
@@ -36,6 +37,7 @@ jobs:
           path: |
             walkthrough-screenshots
             packages/client/soak-report.json
+            packages/sim/bench-results
           retention-days: 30
       - uses: actions/upload-artifact@v4
         if: failure()

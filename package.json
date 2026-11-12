@@ -13,7 +13,8 @@
     "typecheck": "tsc -b && tsc -p tsconfig.tooling.json",
     "build": "pnpm typecheck && pnpm --filter @city-council/client build",
     "e2e": "playwright test",
-    "soak": "pnpm --filter @city-council/client soak"
+    "soak": "pnpm --filter @city-council/client soak",
+    "bench": "pnpm --filter @city-council/sim bench"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -146,6 +146,7 @@ The client only sends commands and receives state. Whether the sim sits in a wor
 4. **Flat data.** Roads, cells, buildings and pops live in typed arrays indexed by id, not in object graphs. Snapshots are then a handful of buffers that copy to a worker, a file or a socket with no serialisation step.
 5. **State is serialisable at every tick.** No closures, class instances or DOM references in sim state. Save, load and join-in-progress all use the same snapshot format.
 6. **The client is a view.** It keeps a read-only copy of state, applies deltas, and interpolates for smooth motion. Cars on screen are drawn by the client along routes the sim has already assigned. The sim does not move them.
+7. **Derived data is rebuilt, never saved.** Some structures are only a faster way to read state: the road spatial index, and from issue 15 the routing graph. They live outside `SimState`, in a cache keyed by the state object they come from, and are never saved, hashed or sent. Each is built from the graph arrays the first time it is asked for, then kept current by the functions that change the graph. A city loaded from a save, cloned or replayed is a new object, so it builds its own. A host calls `prepareDerived` after it creates or loads a city, so the rebuild lands at load and not inside a tick. A derived structure must give the same answers whether it was kept current through a city's whole history or built a moment ago, and every structure has a test that proves it. Every list inside one stays sorted by id and every query breaks ties by the lower id, so nothing depends on the order changes arrived in.
 
 ### Why this keeps multiplayer cheap
 
@@ -238,7 +239,7 @@ The build tool needs most of the work here.
 - Slope limits against terrain, and automatic bridges over water above a height
 - Upgrade in place, bulldoze, and a cost preview before the click
 
-The sim side stores the graph in typed arrays and keeps a spatial index for snapping and picking. It also derives a routing graph with one edge per direction per segment. That is enough for pops and aggregate traffic, so we do not model individual lanes.
+The sim side stores the graph in typed arrays and keeps a spatial index for snapping and picking. The index is a grid with one cell per 500 m chunk, the grid the renderer uses. Each cell lists the nodes inside it and the segments that touch it, and positions off the map fall in the nearest edge cell. It answers three queries, each with a network type filter: the nearest node within a radius, the nearest point on any segment within a radius, and every segment that touches a box. The queries are pure functions exported from the sim entry, so the client runs the same ones on its read-only copy. On a 30,000 segment network a nearest-segment query averages about 0.006 ms at a 50 m radius and 0.02 ms at 250 m, and rebuilding the whole index takes about 13 ms (`pnpm bench`, on the development container). It also derives a routing graph with one edge per direction per segment. That is enough for pops and aggregate traffic, so we do not model individual lanes.
 
 The map has two or three fixed highway connections at its edge. They are where new residents and outside trade arrive.
 
@@ -826,6 +827,7 @@ Overlays work in every band. In the city band the map reads much like an info vi
 - **Replay tests.** A recorded command log plus a seed must produce the same state hash on every run. This catches accidental nondeterminism and most regressions. The hash is 64-bit FNV-1a over every field of state, typed arrays as raw bytes, object keys in sorted order.
 - **Scenario tests.** Scripted cities that assert outcomes. A city with no jobs must lose population. A bus line beside a jammed road must take riders.
 - **Soak test.** A bot that plays for an hour of game time at 4x and reports tick time and memory.
+- **Benchmarks.** `pnpm bench` times hot sim queries on the M1 scale network and fails when one passes its target. CI runs it and keeps the report.
 - **Playwright walkthroughs.** One per milestone exit test, with screenshots attached to the pull request.
 - **Balance checks.** A script that runs a standard city for ten game years and prints population, treasury and average commute, so a tuning change shows its effect.
 

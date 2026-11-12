@@ -87,6 +87,30 @@ export interface RoadNetwork {
 
 type AnyTypedArray = Float64Array | Int32Array | Uint8Array;
 
+/**
+ * Derived data that follows a network: the spatial index, later the routing
+ * graph. Told after a node or segment is added and before one is removed,
+ * while its fields still hold their values.
+ */
+export interface NetworkObserver {
+  nodeAdded(id: number): void;
+  nodeRemoving(id: number): void;
+  segmentAdded(id: number): void;
+  segmentRemoving(id: number): void;
+}
+
+// Observers by network object. Not state: a network loaded, cloned or
+// replayed is a new object with none, and its derived data is rebuilt from
+// the arrays. A WeakMap, so a network nobody holds takes its observers with it.
+const observers = new WeakMap<RoadNetwork, NetworkObserver[]>();
+
+/** Tells `observer` about every later change to `net` made through this module. */
+export function observeNetwork(net: RoadNetwork, observer: NetworkObserver): void {
+  const list = observers.get(net);
+  if (list) list.push(observer);
+  else observers.set(net, [observer]);
+}
+
 /** A network with no nodes or segments. */
 export function createRoadNetwork(): RoadNetwork {
   return {
@@ -212,6 +236,7 @@ export function addNode(net: RoadNetwork, x: number, z: number, height: number, 
   net.nodeHeight[id] = height;
   net.nodeFlags[id] = NODE_ALIVE | (fixed ? NODE_FIXED : 0);
   net.nodeFirstSeg[id] = NONE;
+  for (const observer of observers.get(net) ?? []) observer.nodeAdded(id);
   return id;
 }
 
@@ -223,6 +248,7 @@ export function removeNode(net: RoadNetwork, id: number): void {
   if (!isNode(net, id)) throw new RangeError(`node ${id} does not exist`);
   if (((net.nodeFlags[id] ?? 0) & NODE_FIXED) !== 0) throw new RangeError(`node ${id} is fixed`);
   if (net.nodeFirstSeg[id] !== NONE) throw new RangeError(`node ${id} still has segments`);
+  for (const observer of observers.get(net) ?? []) observer.nodeRemoving(id);
   release(net, "nodeFree", NODE_ARRAYS, id);
 }
 
@@ -305,6 +331,7 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   net.nodeFirstSeg[a] = id;
   net.segNextB[id] = net.nodeFirstSeg[b] ?? NONE;
   net.nodeFirstSeg[b] = id;
+  for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
   return id;
 }
 
@@ -337,6 +364,7 @@ export function removeSegment(net: RoadNetwork, id: number): void {
   if (!isSegment(net, id)) throw new RangeError(`segment ${id} does not exist`);
   unlink(net, id, net.segA[id] ?? NONE);
   unlink(net, id, net.segB[id] ?? NONE);
+  for (const observer of observers.get(net) ?? []) observer.segmentRemoving(id);
   release(net, "segFree", SEG_ARRAYS, id);
 }
 

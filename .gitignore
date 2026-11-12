@@ -6,3 +6,4 @@ playwright-report/
 .DS_Store
 soak-report.json
 walkthrough-screenshots/
+bench-results/
