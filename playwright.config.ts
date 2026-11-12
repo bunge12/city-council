@@ -48,6 +48,11 @@ export default defineConfig({
       // WebGPU canvas. On Linux without a display, run it under `xvfb-run`.
       name: "walkthrough",
       testMatch: "walkthrough.spec.ts",
+      // Software WebGPU takes most of a CI runner's CPU, and a page in
+      // another test then misses key presses. So the walkthrough starts
+      // after the other projects finish. Against a public address it runs
+      // alone.
+      dependencies: remoteBase ? [] : ["chromium"],
       use: {
         ...devices["Desktop Chrome"],
         channel: "chromium",
