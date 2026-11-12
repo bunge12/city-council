@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { SNAPSHOT_VERSION, createState, hashState, migrateState } from "../src/index";
+import { createRoadNetwork } from "../src/roads/network";
 
 describe("migrateState", () => {
-  it("upgrades a version 1 state by adding an empty activity log", () => {
+  it("upgrades a version 1 state by adding an empty activity log and an empty road network", () => {
     const v1 = {
       version: 1,
       tick: 42,
@@ -12,8 +13,18 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(2);
-    expect(state).toEqual({ ...v1, version: 2, log: [], logOffset: 0 });
+    expect(SNAPSHOT_VERSION).toBe(3);
+    expect(state).toEqual({ ...v1, version: 3, log: [], logOffset: 0, roads: createRoadNetwork() });
+    expect(() => hashState(state)).not.toThrow();
+  });
+
+  it("upgrades a version 2 state by adding an empty road network", () => {
+    const { roads, ...rest } = createState(9);
+    const v2 = { ...rest, version: 2 };
+    const state = migrateState(v2);
+    expect(state).toEqual({ ...v2, version: 3, roads });
+    expect(state.roads.nodeFlags.length).toBe(0);
+    expect(state.roads.segFlags.length).toBe(0);
     expect(() => hashState(state)).not.toThrow();
   });
 

@@ -260,6 +260,8 @@ describe("a host resumed from its own save", () => {
 describe("snapshot transfer", () => {
   it("lists the state's typed array buffers so a worker can move them", () => {
     const state = createState(3);
-    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer]);
+    const roadBuffers = Object.values(state.roads).map((array) => array.buffer);
+    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers]);
+    expect(roadBuffers.length).toBeGreaterThan(10);
   });
 });
