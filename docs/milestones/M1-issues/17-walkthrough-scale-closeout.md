@@ -1,6 +1,6 @@
 # M1-17: M1 walkthrough, scale check and close-out
 
-Milestone: M1 Road networks. Spec: [M1.md](../M1.md). Depends on: all other M1 issues, 18 included.
+Milestone: M1 Road networks. Spec: [M1.md](../M1.md). Depends on: all other M1 issues, 18 to 21 included.
 
 ## Goal
 
@@ -8,10 +8,10 @@ The M1 exit test runs automatically, the network holds up at full size, and the 
 
 ## Scope
 
-- One Playwright walkthrough that performs the eleven exit test steps in M1.md, on the WebGPU path where the CI browser supports it and on `?webgl`
+- One Playwright walkthrough that performs the thirteen exit test steps in M1.md, on the WebGPU path where the CI browser supports it and on `?webgl`
 - Screenshots from the walkthrough saved as CI artifacts and published as browser evidence on the pull request
 - A script that generates a 30,000 segment network through commands, with a mix of grids, curves and bridges
-- On that network, measure and record: time to apply one `BuildRoad` that crosses ten segments, time for a cross-map route, block update time after one `BuildRoad`, worker time per tick against the 20 ms budget, frame time in each zoom band, snapshot size and tab memory
+- On that network, measure and record: time to apply one `BuildRoad` that crosses ten segments, time to apply one `BuildRoadGrid` at the cap, time for a cross-map route, block update time after one `BuildRoad`, worker time per tick against the 20 ms budget, frame time in each zoom band, snapshot size and tab memory
 - A save and resume test: run a scripted session straight through, and separately save and reload half way. The final hashes must match
 - The soak script from M0 extended to build and bulldoze roads while it runs
 - Check the three things M7 needs: segments carry a network type, segments carry a vertical level, and curve and slope limits come from the road type. A test builds a segment of each network type through the internal functions and routes with the filter

@@ -165,7 +165,7 @@ Your list put Map & Zoning first. I split it. With free-form roads, zoning cells
 | # | Milestone | Depends on | Exit test |
 | --- | --- | --- | --- |
 | M0 ✓ | Foundation and terrain | none | A seeded map renders with camera controls. The sim runs in a worker, accepts a no-op command, and the state saves and reloads from IndexedDB. |
-| M1 | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
+| M1 | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Angle guides hold a road at 90 degrees, and the grid tool lays out a block grid in one action. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
 | M2 | Zoning and buildings | M1 | Paint R, C, I, O, and M on cells along roads. Buildings appear on zoned cells at a fixed rate and disappear when the road is removed. Each zone can have a level 1-3 which indicates density & impact |
 | M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. |
 | M4 | Economy | M3 | Taxes, upkeep and construction costs hit one treasury. A monthly budget panel balances. Running out of money blocks building. Allow borrowing. Demolishing an occupied building charges compensation. Property and business taxes and development charges work. The first population milestones unlock density 2 and pay grants. |
@@ -250,6 +250,35 @@ The build tool needs most of the work here.
 **The road tool.** A click sets the start and a second click sends `BuildRoad`; Escape or a right-click drops the road being drawn, and Escape with nothing drawn leaves the tool. B turns the tool on and off, and Z, X and C pick street, avenue and one-way. Clicks are rounded to the build grid before they are sent, so the command and the log carry the point the preview showed. A press that ends a camera drag is not a click. The preview runs `planStraightRoad`, the function the sim validates `BuildRoad` with, on the mirror's copy of the roads, so it shows what the sim would build: the ends where they would join, the road's real width, a marker at every junction it would form, and its length and cost, the length times the type's price, in the short money format. A road the sim would refuse turns red and shows the reason next to the cursor, and a click on it sends nothing. A sent road stays on screen until the answer comes back: a refusal removes it and shows the reason, and an acceptance keeps it until the first delta from a step after it, which carries the real road. A server answers later than the worker, and the tool does not change for it. Tool state lives in the UI store and never touches sim state. The mirror copies road rows in place, past the network's observer hooks, so `applyRoadDelta` keeps a spatial index the copy already has current itself.
 
 By zoom band: the street band draws surfaces, lane markings and one-way arrows; the district band draws plain surfaces, coloured by type; the city band draws avenues and highways only, as orange and red lines of a fixed width on screen. The bands switch without the fade the zoom band table below describes; that waits until there is more on the map to fade.
+
+#### Angle and spacing guides
+
+Free-form roads make tidy layouts hard without help, so the road tool guides the cursor while leaving it free to ignore the guide.
+
+| Guide | What it does |
+| --- | --- |
+| Angle snap | A road started from another road or a node snaps to 90 and 45 degrees from it, with lighter snaps at 15 degree steps. A right-angle marker shows when it is square. |
+| Guide lines | Faint lines run perpendicular and parallel from nearby roads and nodes. The cursor snaps to them, so a new street lines up with one two blocks away. |
+| Parallel offset | Drawing beside an existing road snaps to offsets that zone cleanly. The main one is twelve cells between roads, which is two back-to-back strips of six with no gap. |
+| Length snap | Segment length snaps to multiples of 8 m, so zoning cells fit the frontage exactly. |
+| Readout | The cursor shows the angle to the source road and the length in metres and in cells. |
+
+Each guide has a toggle in the toolbar, and holding one key suspends them all for a free-hand segment.
+
+#### Grid tool
+
+The grid tool lays out a whole street grid in one action.
+
+1. Drag out a rectangle. Started on an existing road, it takes that road's angle. Started on open ground, it can be rotated.
+2. Set the block size in cells, by default twelve deep, and the road type.
+3. A preview shows every street, the total cost, and anything in the way.
+4. Confirm, and the streets are built and joined to the roads they touch.
+
+The grid bends to what is there. Streets stop at water and at slopes too steep to build, and the preview marks those cuts before the click. If the rectangle covers existing buildings, the preview shows the eminent domain cost.
+
+One grid is one command. It costs the sum of its streets, it is validated as a whole, and one undo removes it. That matters in multiplayer, where a half-built grid would be a mess for everyone else.
+
+The guides come first in M1, since ordinary road drawing needs them. The grid tool follows once straight roads and intersections are solid.
 
 The sim side stores the graph in typed arrays and keeps a spatial index for snapping and picking. The index is a grid with one cell per 500 m chunk, the grid the renderer uses. Each cell lists the nodes inside it and the segments that touch it, and positions off the map fall in the nearest edge cell. It answers three queries, each with a network type filter: the nearest node within a radius, the nearest point on any segment within a radius, and every segment that touches a box. The queries are pure functions exported from the sim entry, so the client runs the same ones on its read-only copy. On a 30,000 segment network a nearest-segment query averages about 0.006 ms at a 50 m radius and 0.02 ms at 250 m, and rebuilding the whole index takes about 13 ms (`pnpm bench`, on the development container). It also derives a routing graph with one edge per direction per segment. That is enough for pops and aggregate traffic, so we do not model individual lanes.
 
