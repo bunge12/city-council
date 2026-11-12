@@ -1,5 +1,6 @@
 import type { FromSimMessage, ToSimMessage } from "@city-council/sim";
 import { isSaveMessage, type FromSaver, type PageSaveTransport, type ToSaver } from "../save/channel";
+import { workerName } from "../save/lock";
 
 /**
  * A two-way message channel to or from the sim. Nothing above this knows
@@ -84,11 +85,16 @@ export interface WorkerChannels {
   terminate(): void;
 }
 
-/** Starts the sim in a Web Worker and returns the page's ends of it. */
-export function createWorkerTransport(): WorkerChannels {
+/**
+ * Starts the sim in a Web Worker and returns the page's ends of it.
+ * `cityId` is the city this tab last ran, which the worker opens if it is
+ * still saved. It travels in the worker's name, so the worker has it before
+ * any message arrives.
+ */
+export function createWorkerTransport(cityId: string | null = null): WorkerChannels {
   const worker = new Worker(new URL("./worker.ts", import.meta.url), {
     type: "module",
-    name: "sim",
+    name: workerName(cityId),
   });
   return {
     sim: portTransport<ToSimMessage, FromSimMessage>(worker, (data) => !isSaveMessage(data)),

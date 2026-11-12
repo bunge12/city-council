@@ -108,6 +108,25 @@ describe("submit", () => {
     expect(submit(state, cmd("__proto__")).ok).toBe(false);
   });
 
+  it("rejects a type that is not a string, even one that reads as a command name", () => {
+    const state = createState(1);
+    for (const type of [["NoOp"], { toString: () => "NoOp" }, 7, null, undefined]) {
+      const result = submit(state, { seq: 1, playerId: "p1", type: type as unknown as string, payload: {} });
+      expect(result).toEqual({ ok: false, reason: "type must be a string" });
+    }
+    expect(state.pending).toEqual([]);
+  });
+
+  it("refuses a payload JSON cannot hold instead of throwing", () => {
+    const state = createState(1);
+    const loop: Record<string, unknown> = {};
+    loop["self"] = loop;
+    for (const payload of [{ big: 1n }, loop]) {
+      expect(submit(state, cmd("NoOp", payload))).toEqual({ ok: false, reason: "payload must be plain JSON data" });
+    }
+    expect(state.pending).toEqual([]);
+  });
+
   it("rejects a command without a player id", () => {
     const state = createState(1);
     const result = submit(state, { seq: 1, playerId: "", type: "NoOp", payload: {} });

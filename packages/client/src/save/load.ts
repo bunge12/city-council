@@ -2,7 +2,15 @@
 // imported or saved, or a new city when there is none or it cannot be opened. A save that cannot be
 // opened is never written over.
 
-import { SnapshotError, createState, deserialize, type LogEntry, type SimState } from "@city-council/sim";
+import {
+  LOG_PAGE_SIZE,
+  SnapshotError,
+  createState,
+  deserialize,
+  isLogEntry,
+  type LogEntry,
+  type SimState,
+} from "@city-council/sim";
 import { NEW_CITY_NAME, NEW_CITY_SEED } from "./config";
 import type { LoadedFrom } from "./channel";
 import { lastOpened, type CityMeta, type CityStore } from "./store";
@@ -12,6 +20,8 @@ export interface OpenedCity {
   name: string;
   state: SimState;
   pagedLog: LogEntry[];
+  /** Log pages of this city already in the store, which a save need not write again. */
+  logPagesStored: number;
   from: LoadedFrom;
   /** A message for the player when loading did not go to plan. */
   problem: string | null;
@@ -31,6 +41,7 @@ export function newCityFallback(problem: string | null, makeId: () => string = r
     name: NEW_CITY_NAME,
     state: createState(NEW_CITY_SEED),
     pagedLog: [],
+    logPagesStored: 0,
     from: "new city",
     problem,
   };
@@ -42,32 +53,68 @@ export function newCityFallback(problem: string | null, makeId: () => string = r
  * falls back to the one before it. If it was written by a newer version of
  * the game, or both snapshots are damaged, it is left as it is and a new
  * city starts under a new id, so nothing overwrites it.
+ *
+ * `preferredId` is the city this tab ran last. When it is still saved it is
+ * opened in place of the most recently opened one, so a reload keeps a tab
+ * on its own city whatever other tabs have opened since.
  */
 export async function openLatestCity(
   store: CityStore,
   makeId: () => string = randomId,
+  preferredId: string | null = null,
 ): Promise<OpenedCity> {
   const cities = await store.list();
+  const preferred = preferredId === null ? undefined : cities.find((c) => c.id === preferredId);
+  if (preferred) return openCity(store, preferred, makeId);
   // Ties go to the most recently saved, which `list` puts first.
   const meta = cities.reduce<CityMeta | undefined>((best, c) => (!best || lastOpened(c) > lastOpened(best) ? c : best), undefined);
   if (!meta) return newCityFallback(null, makeId);
   return openCity(store, meta, makeId);
 }
 
+interface Decoded {
+  state: SimState;
+  pagedLog: LogEntry[];
+  logPagesStored: number;
+}
+
+/**
+ * Decodes stored snapshot bytes and, when the snapshot was saved without
+ * its paged log, reads those entries from the city's log pages. A snapshot
+ * whose pages are missing or malformed is refused like any damaged save.
+ */
+async function decode(store: CityStore, id: string, bytes: Uint8Array): Promise<Decoded> {
+  const snapshot = deserialize(bytes);
+  if (!snapshot.logDetached) return { state: snapshot.state, pagedLog: snapshot.pagedLog, logPagesStored: 0 };
+  const { logOffset } = snapshot.state;
+  const damaged = (what: string) => new SnapshotError("corrupt", `This save is damaged: ${what}.`);
+  if (logOffset % LOG_PAGE_SIZE !== 0) throw damaged("its log offset is not a whole number of pages");
+  const count = logOffset / LOG_PAGE_SIZE;
+  const pages = await store.readLogPages(id, count);
+  if (!pages) throw damaged("part of its activity log is missing");
+  const pagedLog: LogEntry[] = [];
+  for (const page of pages) {
+    if (!Array.isArray(page.entries) || page.entries.length !== LOG_PAGE_SIZE || !page.entries.every(isLogEntry)) {
+      throw damaged(`page ${page.index} of its activity log is malformed`);
+    }
+    for (const entry of page.entries) pagedLog.push(entry);
+  }
+  return { state: snapshot.state, pagedLog, logPagesStored: count };
+}
+
 async function openCity(store: CityStore, meta: CityMeta, makeId: () => string): Promise<OpenedCity> {
   const left = `"${meta.name}" was left as it is, and a new city was started.`;
   const snapshots = await store.read(meta.id);
   if (!snapshots) return newCityFallback(`The save of "${meta.name}" is missing. ${left}`, makeId);
-  const opened = (snapshot: ReturnType<typeof deserialize>, from: LoadedFrom, problem: string | null) => ({
+  const opened = (snapshot: Decoded, from: LoadedFrom, problem: string | null) => ({
     id: meta.id,
     name: meta.name,
-    state: snapshot.state,
-    pagedLog: snapshot.pagedLog,
+    ...snapshot,
     from,
     problem,
   });
   try {
-    return opened(deserialize(snapshots.latest), "latest save", null);
+    return opened(await decode(store, meta.id, snapshots.latest), "latest save", null);
   } catch (error) {
     if (error instanceof SnapshotError && error.code === "newer-version") {
       return newCityFallback(`Could not open "${meta.name}". ${error.message} ${left}`, makeId);
@@ -75,7 +122,7 @@ async function openCity(store: CityStore, meta: CityMeta, makeId: () => string):
     const latestProblem = reason(error);
     if (snapshots.previous) {
       try {
-        const previous = deserialize(snapshots.previous);
+        const previous = await decode(store, meta.id, snapshots.previous);
         return opened(
           previous,
           "previous save",

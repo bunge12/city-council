@@ -14,6 +14,7 @@ import {
   readSnapshotHeader,
   replay,
   serialize,
+  serializeDetached,
   step,
   submit,
   type LogEntry,
@@ -123,8 +124,10 @@ describe("serialize and deserialize", () => {
   it("writes a header that can be read without decoding the rest", () => {
     const state = busyState(77);
     const header = readSnapshotHeader(serialize(state));
+    // A snapshot that carries its paged log is written as format 1, which
+    // builds from before detached logs still read.
     expect(header).toEqual({
-      formatVersion: SNAPSHOT_FORMAT_VERSION,
+      formatVersion: 1,
       stateVersion: SNAPSHOT_VERSION,
       seed: 77,
       tick: state.tick,
@@ -168,6 +171,90 @@ describe("the activity log across a save", () => {
     const fullLog = [...back.pagedLog, ...back.state.log];
     expect(fullLog).toEqual(read);
     expect(hashState(replay(back.state.seed, fullLog, back.state.tick))).toBe(hash);
+  });
+});
+
+describe("a snapshot written without its paged log", () => {
+  /** A city with entries paged out of live state, and the entries a host would have read. */
+  function pagedCity(): { state: SimState; fullLog: LogEntry[] } {
+    const state = createState(21);
+    const fullLog: LogEntry[] = [];
+    let seq = 0;
+    while (state.logOffset === 0) {
+      for (let i = 0; i < MAX_PENDING_COMMANDS; i++) submit(state, { seq: seq++, playerId: "a", type: "NoOp", payload: { i } });
+      step(state);
+      fullLog.push(...readLog(state, fullLog.length));
+    }
+    return { state, fullLog };
+  }
+
+  it("comes back to the same hash and says its log is elsewhere", () => {
+    const { state } = pagedCity();
+    const back = deserialize(serializeDetached(state));
+    expect(back.logDetached).toBe(true);
+    expect(back.pagedLog).toEqual([]);
+    expect(back.state.logOffset).toBe(state.logOffset);
+    expect(hashState(back.state)).toBe(hashState(state));
+    expect(back.header.formatVersion).toBe(SNAPSHOT_FORMAT_VERSION);
+  });
+
+  it("does not grow with the entries that have left live state", () => {
+    const { state, fullLog } = pagedCity();
+    const detached = serializeDetached(state).byteLength;
+    const whole = serialize(state, fullLog.slice(0, state.logOffset)).byteLength;
+    expect(whole - detached).toBeGreaterThan(state.logOffset * 50);
+    expect(deserialize(serialize(state, fullLog.slice(0, state.logOffset))).logDetached).toBe(false);
+  });
+
+  it("is refused in the old layout, where the paged log is required", () => {
+    const bytes = serializeDetached(pagedCity().state);
+    new DataView(bytes.buffer).setUint16(4, 1, true);
+    expect(refusal(bytes).code).toBe("corrupt");
+  });
+});
+
+describe("save and resume against an uninterrupted run", () => {
+  // Steps the host loop from step `from` to step `to`. The commands depend
+  // only on the step number, so two runs send the same ones. They include
+  // pauses, so some steps do not advance the tick.
+  function drive(state: SimState, from: number, to: number): void {
+    for (let i = from; i < to; i++) {
+      if (i % 13 === 0) submit(state, { seq: i, playerId: i % 2 ? "a" : "b", type: "NoOp", payload: { i } });
+      if (i % 97 === 0) {
+        const speed = ([0, 1, 2, 4] as const)[(i / 97) % 4];
+        submit(state, { seq: i, playerId: "a", type: "SetSpeed", payload: { speed } });
+      }
+      if (i % 97 === 5) submit(state, { seq: i, playerId: "b", type: "SetSpeed", payload: { speed: 2 } });
+      step(state);
+    }
+  }
+
+  it("1,000 steps straight equal 500, a save, a load and 500 more", () => {
+    const straight = createState(42);
+    drive(straight, 0, 1000);
+
+    let resumed = createState(42);
+    drive(resumed, 0, 500);
+    resumed = deserialize(serialize(resumed)).state;
+    drive(resumed, 500, 1000);
+
+    expect(straight.tick).toBeGreaterThan(900);
+    expect(straight.log.length).toBeGreaterThan(80);
+    expect(resumed.tick).toBe(straight.tick);
+    expect(hashState(resumed)).toBe(hashState(straight));
+    expect(hashState(replay(42, resumed.log, resumed.tick))).toBe(hashState(straight));
+  });
+
+  it("holds when the save lands with a command still queued", () => {
+    const run = (save: boolean): SimState => {
+      let state = createState(42);
+      drive(state, 0, 500);
+      submit(state, { seq: 9999, playerId: "a", type: "SetSpeed", payload: { speed: 4 } });
+      if (save) state = deserialize(serialize(state)).state;
+      drive(state, 500, 1000);
+      return state;
+    };
+    expect(hashState(run(true))).toBe(hashState(run(false)));
   });
 });
 
@@ -217,7 +304,7 @@ describe("snapshots that are refused", () => {
     new DataView(bytes.buffer).setUint16(4, SNAPSHOT_FORMAT_VERSION + 1, true);
     const error = refusal(bytes);
     expect(error.code).toBe("newer-version");
-    expect(error.message).toMatch(/file format 2/);
+    expect(error.message).toContain(`file format ${SNAPSHOT_FORMAT_VERSION + 1}`);
   });
 
   it("refuses bytes that are not a snapshot", () => {
@@ -239,6 +326,16 @@ describe("snapshots that are refused", () => {
       const copy = bytes.slice();
       copy[at] = (copy[at] ?? 0) ^ 0x10;
       expect(refusal(copy).code).toBe("corrupt");
+    }
+  });
+
+  it("refuses a queued command that is not a command, which would throw on the first step", () => {
+    for (const bad of [null, 7, { seq: 1, playerId: "p1" }, { seq: 1, playerId: "p1", type: ["NoOp"] }]) {
+      const state = createState(3);
+      state.pending.push(bad as never);
+      const error = refusal(serialize(state));
+      expect(error.code).toBe("corrupt");
+      expect(error.message).toMatch(/queued command 0/);
     }
   });
 

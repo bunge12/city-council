@@ -105,6 +105,10 @@ export default tseslint.config(
         { name: "setTimeout", message: NO_TIMERS },
         { name: "setInterval", message: NO_TIMERS },
         { name: "performance", message: NO_CLOCK },
+        // `new Date()` reads the clock as surely as `Date.now()` does.
+        { name: "Date", message: NO_CLOCK },
+        // crypto.getRandomValues and crypto.randomUUID are unseeded.
+        { name: "crypto", message: NO_MATH_RANDOM },
       ],
     },
   },

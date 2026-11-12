@@ -1,10 +1,12 @@
 import {
+  LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
   TICK_MS,
   logLength,
   parseToSimMessage,
   readLog,
   serialize,
+  serializeDetached,
   step,
   submit,
   type FromSimMessage,
@@ -47,6 +49,7 @@ export class SimHost {
   private readonly state: SimState;
   private readonly transport: HostTransport;
   private readonly now: Clock;
+  private readonly playerId: string | null;
   /** Absolute log index up to which entries have been read out of state. */
   private logCursor: number;
   /**
@@ -69,8 +72,21 @@ export class SimHost {
   /**
    * `pagedLog` is the entries that have left live state, as a loaded save
    * gives them; a new city has none.
+   *
+   * `playerId` is who is on the other end of `transport`. The host knows
+   * that from the connection, so it stamps the id on every command and
+   * ignores the one the message claims: otherwise a client could send
+   * commands in another player's name. Null trusts the message, which is
+   * only for tests that play several players over one transport. A host
+   * with more than one connection must stamp each connection's own id.
    */
-  constructor(state: SimState, transport: HostTransport, now: Clock, pagedLog: readonly LogEntry[] = []) {
+  constructor(
+    state: SimState,
+    transport: HostTransport,
+    now: Clock,
+    pagedLog: readonly LogEntry[] = [],
+    playerId: string | null = null,
+  ) {
     if (pagedLog.length !== state.logOffset) {
       throw new RangeError(`pagedLog has ${pagedLog.length} entries but ${state.logOffset} have left live state`);
     }
@@ -78,6 +94,7 @@ export class SimHost {
     this.fullLog = [...pagedLog, ...state.log];
     this.transport = transport;
     this.now = now;
+    this.playerId = playerId;
     this.logCursor = logLength(state);
     this.sentTick = state.tick;
     this.sentSpeed = state.speed;
@@ -97,11 +114,33 @@ export class SimHost {
   }
 
   /**
-   * The city as snapshot bytes, for a save or a city file. Taken between
-   * steps, so it is always a whole tick.
+   * The city as snapshot bytes with its whole log inside, for a city file.
+   * Taken between steps, so it is always a whole tick. The cost grows with
+   * the length of the log, so this is for a download, not for every save.
    */
   snapshotBytes(): Uint8Array {
     return serialize(this.state, this.fullLog.slice(0, this.state.logOffset));
+  }
+
+  /**
+   * The city for a local save: snapshot bytes without the entries that have
+   * left live state, and those entries as pages of `LOG_PAGE_SIZE`, from
+   * page `pagesStored` on. The caller stores each page once, so a save
+   * writes only the live part of the log however long the log is.
+   * `pageCount` is how many pages the snapshot counts on in all.
+   */
+  saveBytes(pagesStored: number): LocalSave {
+    const { logOffset } = this.state;
+    // Live state pages entries out a whole page at a time, so this only
+    // fails for a city that came from a file someone edited. Keep its log
+    // inside the snapshot, as before.
+    if (logOffset % LOG_PAGE_SIZE !== 0) return { bytes: this.snapshotBytes(), pages: [], pageCount: 0 };
+    const pageCount = logOffset / LOG_PAGE_SIZE;
+    const pages: LogPageEntries[] = [];
+    for (let index = pagesStored; index < pageCount; index++) {
+      pages.push({ index, entries: this.fullLog.slice(index * LOG_PAGE_SIZE, (index + 1) * LOG_PAGE_SIZE) });
+    }
+    return { bytes: serializeDetached(this.state), pages, pageCount };
   }
 
   private receive(raw: unknown): void {
@@ -116,7 +155,8 @@ export class SimHost {
   private handle(message: ToSimMessage): void {
     switch (message.type) {
       case "command": {
-        const { command } = message;
+        const command =
+          this.playerId === null ? message.command : { ...message.command, playerId: this.playerId };
         this.send({
           v: PROTOCOL_VERSION,
           type: "commandResult",
@@ -215,6 +255,21 @@ export class SimHost {
   private send(message: FromSimMessage): void {
     this.transport.send(message);
   }
+}
+
+/** One page of entries that left live state together. */
+export interface LogPageEntries {
+  index: number;
+  entries: LogEntry[];
+}
+
+/** What `SimHost.saveBytes` returns. */
+export interface LocalSave {
+  bytes: Uint8Array;
+  /** Pages the caller has not stored yet. */
+  pages: LogPageEntries[];
+  /** Pages the snapshot counts on being stored, 0 when its log is inside it. */
+  pageCount: number;
 }
 
 /** The distinct buffers behind every typed array in `value`. */

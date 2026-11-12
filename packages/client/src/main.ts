@@ -10,6 +10,7 @@ import {
 } from "@city-council/sim";
 import { Vector3 } from "three/webgpu";
 import { SimMirror } from "./protocol/mirror";
+import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { createWorkerTransport } from "./protocol/transport";
 import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
 import type { SaveStatus } from "./save/channel";
@@ -21,15 +22,40 @@ import { mountUi } from "./ui/App";
 import type { AppServices, DownloadedCity } from "./ui/services";
 import { setViewReadout, useUi } from "./ui/store";
 
-/** Single player has one player. Multiplayer assigns ids on join. */
-const LOCAL_PLAYER_ID = "local";
+/** The city this tab runs, kept for the tab's life so a reload comes back to it. */
+const TAB_CITY_KEY = "city-council:city";
 
-const worker = createWorkerTransport();
+function tabCity(): string | null {
+  try {
+    return sessionStorage.getItem(TAB_CITY_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setTabCity(id: string): void {
+  try {
+    sessionStorage.setItem(TAB_CITY_KEY, id);
+  } catch {
+    // Without it a reload opens the most recently opened city, as a new tab does.
+  }
+}
+
+/** True from the moment this tab has chosen another city until the reload that opens it. */
+let switching = false;
+
+const worker = createWorkerTransport(tabCity());
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
 const saves = new SaveClient(worker.saves);
 
-saves.subscribe(() => {
+saves.subscribe((status) => {
   document.body.dataset["saveLoaded"] = "true";
+  document.body.dataset["openElsewhere"] = String(status.openElsewhere);
+  // Once a switch has picked the next city, a status still on its way from
+  // the worker must not put the old one back.
+  if (!switching) setTabCity(status.city.id);
+  // Nothing runs in this tab, so show the menu that offers another city.
+  if (status.openElsewhere && !useUi.getState().menuOpen) useUi.setState({ menuOpen: true });
 });
 
 /** Saves now and resolves with the worker's status after the write. */
@@ -77,11 +103,13 @@ async function downloadCity(): Promise<DownloadedCity> {
 const RELOAD_NOTE_KEY = "city-council:imported";
 
 /**
- * Opens the city the worker has just marked to open next, by reloading the
- * page, with `note` shown once it has. The worker opens the most recently
- * opened city.
+ * Opens city `cityId`, which the worker has just stored or marked, by
+ * reloading the page, with `note` shown once it has. The worker opens the
+ * city this tab asks for.
  */
-function reloadInto(note: string): void {
+function reloadInto(cityId: string, note: string): void {
+  switching = true;
+  setTabCity(cityId);
   try {
     sessionStorage.setItem(RELOAD_NOTE_KEY, note);
   } catch {
@@ -101,7 +129,7 @@ async function importCityFile(file: File): Promise<void> {
     useUi.setState({ fileProblem: result.error, busy: false });
     return;
   }
-  reloadInto(`Imported "${result.city.name}" from ${file.name}.`);
+  reloadInto(result.city.id, `Imported "${result.city.name}" from ${file.name}.`);
 }
 
 /** Saves the running city, starts a new one from `seed` and opens it. */
@@ -112,7 +140,7 @@ async function newCity(name: string, seed: number): Promise<void> {
     useUi.setState({ fileProblem: result.error, busy: false });
     return;
   }
-  reloadInto(`Started "${result.city.name}" from seed ${result.city.seed}.`);
+  reloadInto(result.city.id, `Started "${result.city.name}" from seed ${result.city.seed}.`);
 }
 
 /** Saves the running city and opens saved city `id`. */
@@ -123,7 +151,7 @@ async function openCity(id: string): Promise<void> {
     useUi.setState({ fileProblem: result.error, busy: false });
     return;
   }
-  reloadInto(`Opened "${result.city.name}" at tick ${result.city.tick}.`);
+  reloadInto(result.city.id, `Opened "${result.city.name}" at tick ${result.city.tick}.`);
 }
 
 try {

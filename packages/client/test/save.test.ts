@@ -4,6 +4,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { describe, expect, it } from "vitest";
 import {
   LOG_LIVE_LIMIT,
+  LOG_PAGE_SIZE,
   MAX_PENDING_COMMANDS,
   SNAPSHOT_VERSION,
   createState,
@@ -19,6 +20,7 @@ import { SAVES_CHANNEL, parseSaveRequest, type FromSaver, type SaveStatus } from
 import { cityFileName, cityNameFromFile, uniqueCityName, wantsExportReminder } from "../src/save/city-file";
 import { NEW_CITY_SEED } from "../src/save/config";
 import { openLatestCity } from "../src/save/load";
+import { cityFromWorkerName, cityLockName, claimCity, workerName, type LockManagerLike } from "../src/save/lock";
 import { Saver } from "../src/save/saver";
 import { CityStore, type CityMeta } from "../src/save/store";
 
@@ -183,6 +185,7 @@ async function hostCity(store: CityStore, wall = { now: 1_000 }) {
     host,
     transport: saves.worker,
     city: { id: city.id, name: city.name },
+    logPagesStored: city.logPagesStored,
     loadedFrom: city.from,
     problem: city.problem,
     wallClock: () => wall.now,
@@ -257,6 +260,89 @@ describe("saving and loading a hosted city", () => {
     const { state } = deserialize(bytes);
     expect(state.logOffset).toBeGreaterThan(0);
     expect(hashState(replay(state.seed, second.host.fullLog, state.tick))).toBe(hashState(state));
+  });
+
+  /** Sends full queues of NoOps until `pages` log pages have left live state. */
+  function fillPages(city: Awaited<ReturnType<typeof hostCity>>, pages: number, from = 1): number {
+    let seq = from;
+    while (city.host.fullLog.length < LOG_LIVE_LIMIT + 1 + (pages - 1) * LOG_PAGE_SIZE) {
+      for (let i = 0; i < MAX_PENDING_COMMANDS; i++) city.command(seq++);
+      city.run(100);
+    }
+    return seq;
+  }
+
+  it("writes each log page once, and a save holds only the live part of the log", async () => {
+    const store = await openStore();
+    const city = await hostCity(store);
+    const seq = fillPages(city, 1);
+    await city.saver.save("autosave");
+    const first = (await store.read(city.city.id))?.latest ?? new Uint8Array();
+    expect(deserialize(first)).toMatchObject({ logDetached: true, pagedLog: [] });
+    expect(deserialize(first).state.logOffset).toBe(LOG_PAGE_SIZE);
+    const page0 = await store.readLogPages(city.city.id, 1);
+    expect(page0?.[0]?.entries).toEqual(city.host.fullLog.slice(0, LOG_PAGE_SIZE));
+
+    // Two more pages leave live state. The save is no bigger for it, and
+    // the next save hands the store only the two new pages.
+    fillPages(city, 3, seq);
+    const written: number[] = [];
+    const save = store.save.bind(store);
+    store.save = (meta, bytes, pages = []) => {
+      written.push(...pages.map((p) => p.index));
+      return save(meta, bytes, pages);
+    };
+    await city.saver.save("autosave");
+    await city.saver.save("autosave");
+    expect(written).toEqual([1, 2]);
+    const third = (await store.read(city.city.id))?.latest ?? new Uint8Array();
+    expect(deserialize(third).state.logOffset).toBe(3 * LOG_PAGE_SIZE);
+    expect(third.byteLength).toBeLessThan(first.byteLength * 1.1);
+    expect(third.byteLength).toBeLessThan(city.host.snapshotBytes().byteLength / 1.5);
+
+    const again = await hostCity(store);
+    expect(again.city.from).toBe("latest save");
+    expect(again.city.logPagesStored).toBe(3);
+    expect(again.host.fullLog).toEqual(city.host.fullLog);
+  });
+
+  it("goes back to the save before when a log page is missing", async () => {
+    const store = await openStore();
+    const city = await hostCity(store);
+    const seq = fillPages(city, 1);
+    await city.saver.save("autosave");
+    const goodTick = city.host.tick;
+    const goodLog = structuredClone(city.host.fullLog);
+    fillPages(city, 2, seq);
+    await city.saver.save("autosave");
+    // Lose page 1, which only the latest save needs.
+    const read = store.readLogPages.bind(store);
+    store.readLogPages = async (id, count) => (count > 1 ? null : read(id, count));
+
+    const again = await hostCity(store);
+    expect(again.city.from).toBe("previous save");
+    expect(again.city.problem).toMatch(/part of its activity log is missing/);
+    expect(again.host.tick).toBe(goodTick);
+    expect(again.host.fullLog).toEqual(goodLog);
+  });
+
+  it("opens a save that still has its paged log inside, and moves it to pages on the next save", async () => {
+    const store = await openStore();
+    const city = await hostCity(store);
+    fillPages(city, 2);
+    // As a build from before log pages wrote it, and as an imported file is stored.
+    await store.save(meta(city.city.id, city.host.tick, 5_000, city.city.name), city.host.snapshotBytes());
+
+    const again = await hostCity(store);
+    expect(again.city.logPagesStored).toBe(0);
+    expect(again.host.fullLog).toEqual(city.host.fullLog);
+    await again.saver.save("manual");
+    expect(deserialize((await store.read(city.city.id))?.latest ?? new Uint8Array()).logDetached).toBe(true);
+    expect(await store.readLogPages(city.city.id, 2)).toHaveLength(2);
+
+    const third = await hostCity(store);
+    expect(third.city.logPagesStored).toBe(2);
+    expect(third.host.fullLog).toEqual(city.host.fullLog);
   });
 
   it("serialises saves so the latest one is written last", async () => {
@@ -530,5 +616,113 @@ describe("worker plumbing", () => {
     const state = createState(1);
     state.logOffset = 3;
     expect(() => new SimHost(state, memoryTransportPair().host, () => 0, [])).toThrow(/pagedLog has 0 entries/);
+  });
+});
+
+/** Web Locks as far as `claimCity` uses them: one holder per name, the rest wait in line. */
+function fakeLocks(): LockManagerLike & { release(name: string): void } {
+  const held = new Map<string, () => void>();
+  const waiting = new Map<string, (() => void)[]>();
+  return {
+    request(name, { signal }, callback) {
+      return new Promise((resolve, reject) => {
+        const run = () => {
+          const done = new Promise<void>((free) => held.set(name, free));
+          void Promise.race([callback(), done]).then(resolve);
+        };
+        if (!held.has(name)) return run();
+        const queue = waiting.get(name) ?? [];
+        waiting.set(name, queue);
+        queue.push(run);
+        signal.addEventListener("abort", () => {
+          queue.splice(queue.indexOf(run), 1);
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    },
+    release(name) {
+      held.get(name)?.();
+      held.delete(name);
+      waiting.get(name)?.shift()?.();
+    },
+  };
+}
+
+describe("one tab per city", () => {
+  it("gives the city to the first worker and refuses the second", async () => {
+    const locks = fakeLocks();
+    expect(await claimCity("a", locks, 20)).toBe(true);
+    expect(await claimCity("a", locks, 20)).toBe(false);
+    // Another city is free.
+    expect(await claimCity("b", locks, 20)).toBe(true);
+  });
+
+  it("waits out a holder that is on its way out, as after a reload", async () => {
+    const locks = fakeLocks();
+    expect(await claimCity("a", locks, 20)).toBe(true);
+    const second = claimCity("a", locks, 5_000);
+    locks.release(cityLockName("a"));
+    expect(await second).toBe(true);
+  });
+
+  it("runs unguarded where the browser has no locks, or they fail", async () => {
+    expect(await claimCity("a", undefined)).toBe(true);
+    const broken: LockManagerLike = { request: () => Promise.reject(new DOMException("no", "SecurityError")) };
+    expect(await claimCity("a", broken, 20)).toBe(true);
+  });
+
+  it("carries the tab's city to the worker in its name", () => {
+    expect(cityFromWorkerName(workerName("abc-123"))).toBe("abc-123");
+    expect(cityFromWorkerName(workerName(null))).toBeNull();
+    expect(cityFromWorkerName("something else")).toBeNull();
+  });
+
+  it("opens the city the tab asks for, and the most recently opened one when that is gone", async () => {
+    const store = await openStore();
+    await store.save({ ...meta("a", 10, 1), openedAt: 1 }, snapshotAt(10));
+    await store.save({ ...meta("b", 20, 2), openedAt: 2 }, snapshotAt(20));
+    expect((await openLatestCity(store, nextId, "a")).id).toBe("a");
+    expect((await openLatestCity(store, nextId, "gone")).id).toBe("b");
+    expect((await openLatestCity(store, nextId)).id).toBe("b");
+  });
+
+  it("saves nothing and marks nothing from a tab the city is not running in", async () => {
+    const store = await openStore();
+    const first = await hostCity(store);
+    first.run(1000);
+    await first.saver.save("manual");
+    const before = await store.read(first.city.id);
+    const listed = await store.list();
+
+    const saves = pair<FromSaver>();
+    const replies: FromSaver[] = [];
+    saves.page.onMessage((m) => replies.push(m));
+    const blocked = new Saver({
+      store,
+      host: null,
+      elsewhere: { seed: 4, tick: 9 },
+      transport: saves.worker,
+      city: { id: first.city.id, name: first.city.name },
+      loadedFrom: "latest save",
+      problem: null,
+      wallClock: () => 9_000,
+      makeId: nextId,
+    });
+    await blocked.start();
+    await blocked.save("autosave");
+    await blocked.exportCity(7);
+    expect(await store.read(first.city.id)).toEqual(before);
+    expect(await store.list()).toEqual(listed);
+    const status = replies.findLast((m) => m.type === "status");
+    expect(status?.type === "status" && status.status).toMatchObject({ openElsewhere: true, saveError: null, lastSave: null });
+    const exported = replies.find((m) => m.type === "exported");
+    expect(exported?.type === "exported" && exported.result).toMatchObject({ ok: false });
+
+    // It can still start another city, which is stored and left for the reload.
+    await blocked.newCity("Second", 77, 8);
+    const switched = replies.find((m) => m.type === "switched");
+    expect(switched?.type === "switched" && switched.result.ok).toBe(true);
+    expect((await store.list()).map((c) => c.name)).toContain("Second");
+    expect(await store.read(first.city.id)).toEqual(before);
   });
 });

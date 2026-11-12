@@ -4,7 +4,7 @@
 // a trip through the page.
 
 import { SnapshotError, createState, deserialize, serialize, type Snapshot } from "@city-council/sim";
-import type { SimHost } from "../protocol/host";
+import type { LocalSave, SimHost } from "../protocol/host";
 import {
   SAVES_CHANNEL,
   parseSaveRequest,
@@ -24,9 +24,18 @@ export interface SaverOptions {
   store: CityStore | null;
   /** Why the store is null, shown with every failed save. */
   storeError?: string;
-  host: SimHost;
+  /**
+   * The host of the running city. Null when another tab is running the
+   * city, so this worker hosts nothing: it saves nothing and can only start
+   * or open a different city, or take in a city file.
+   */
+  host: SimHost | null;
+  /** With a null host, the seed and tick of the city this tab could not run. */
+  elsewhere?: { seed: number; tick: number };
   transport: WorkerSaveTransport;
   city: { id: string; name: string };
+  /** Log pages of the city already in the store. A new or imported city has none. */
+  logPagesStored?: number;
   loadedFrom: LoadedFrom;
   problem: string | null;
   /** Wall clock, for the last-saved time. */
@@ -44,14 +53,18 @@ export class Saver {
   private status: SaveStatus;
   /** Saves run one at a time, in the order asked, so the latest is written last. */
   private queue: Promise<void> = Promise.resolve();
+  /** Log pages of the city in the store. Pages are written once, with the first save that needs them. */
+  private logPagesStored: number;
 
   constructor(options: SaverOptions) {
     this.options = options;
-    const { host, city, loadedFrom, problem } = options;
+    this.logPagesStored = options.logPagesStored ?? 0;
+    const { host, city, loadedFrom, problem, elsewhere } = options;
     this.status = {
-      city: { ...city, seed: host.seed },
+      city: { ...city, seed: host?.seed ?? elsewhere?.seed ?? 0 },
+      openElsewhere: host === null,
       loadedFrom,
-      loadedTick: host.tick,
+      loadedTick: host?.tick ?? elsewhere?.tick ?? 0,
       lastSave: null,
       problem,
       saveError: null,
@@ -95,6 +108,10 @@ export class Saver {
    */
   exportCity(requestId: number): Promise<void> {
     const { host, city } = this.options;
+    if (!host) {
+      this.reply({ channel: SAVES_CHANNEL, type: "exported", requestId, result: { ok: false, error: `"${city.name}" is open in another tab. Download it from there.` } });
+      return Promise.resolve();
+    }
     const tick = host.tick;
     let bytes: Uint8Array;
     try {
@@ -252,9 +269,12 @@ export class Saver {
    * the tab that just imported this one, does not take its place.
    */
   async start(): Promise<void> {
-    const { store, loadedFrom, city, wallClock } = this.options;
-    if (loadedFrom === "new city" && store) await this.save("new city");
-    await store?.touch(city.id, { openedAt: wallClock() }).catch(() => undefined);
+    const { store, loadedFrom, city, wallClock, host } = this.options;
+    // A city another tab is running is that tab's to save and to mark.
+    if (host) {
+      if (loadedFrom === "new city" && store) await this.save("new city");
+      await store?.touch(city.id, { openedAt: wallClock() }).catch(() => undefined);
+    }
     await this.announce();
   }
 
@@ -266,34 +286,43 @@ export class Saver {
 
   /**
    * Snapshots the city now and writes it. The snapshot is taken when this
-   * is called, between steps, so a save is always a whole tick.
+   * is called, between steps, so a save is always a whole tick. It holds
+   * the live part of the log only; entries that have left live state go
+   * out as pages, each written once.
    */
   save(reason: SaveReason, requestId: number | null = null): Promise<void> {
     const { host } = this.options;
+    // Nothing is running here, so there is nothing to save and nothing wrong.
+    if (!host) return this.enqueue(() => Promise.resolve(this.send(requestId)));
+    const { seed } = host;
     const tick = host.tick;
-    let bytes: Uint8Array | null = null;
+    let save: LocalSave | null = null;
     let snapshotError: string | null = null;
     try {
-      bytes = host.snapshotBytes();
+      save = host.saveBytes(this.logPagesStored);
     } catch (error) {
       snapshotError = String(error);
     }
-    return this.enqueue(() => this.write(reason, tick, bytes, snapshotError, requestId));
+    return this.enqueue(() => this.write(reason, seed, tick, save, snapshotError, requestId));
   }
 
   private async write(
     reason: SaveReason,
+    seed: number,
     tick: number,
-    bytes: Uint8Array | null,
+    save: LocalSave | null,
     snapshotError: string | null,
     requestId: number | null,
   ): Promise<void> {
-    const { store, storeError, city, host, wallClock } = this.options;
+    const { store, storeError, city, wallClock } = this.options;
     try {
       if (!store) throw new Error(storeError ?? "saving is not available in this browser");
-      if (!bytes) throw new Error(snapshotError ?? "the city could not be written out");
+      if (!save) throw new Error(snapshotError ?? "the city could not be written out");
       const savedAt = wallClock();
-      await store.save({ id: city.id, name: city.name, seed: host.seed, tick, savedAt }, bytes);
+      await store.save({ id: city.id, name: city.name, seed, tick, savedAt }, save.bytes, save.pages);
+      // Only now are the pages known to be stored. A save queued before this
+      // one finished carries the same pages again, which is harmless.
+      this.logPagesStored = Math.max(this.logPagesStored, save.pageCount);
       this.status = { ...this.status, lastSave: { tick, savedAt, reason }, saveError: null };
       await this.refreshList();
     } catch (error) {

@@ -6,7 +6,9 @@ import {
   MAX_PENDING_COMMANDS,
   PROTOCOL_VERSION,
   createState,
+  deserialize,
   hashState,
+  replay,
   type FromSimMessage,
 } from "@city-council/sim";
 import { MAX_CATCH_UP_STEPS, PUMP_INTERVAL_MS, SimHost, typedArrayBuffers } from "../src/protocol/host";
@@ -183,6 +185,75 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(mirror.state?.tick).toBe(0);
     expect(received.length).toBe(before + 1);
     expect(received.at(-1)?.type).toBe("snapshot");
+  });
+});
+
+describe("a host that knows who is on its connection", () => {
+  it("stamps that player on every command, whatever id the message claims", () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    const host = new SimHost(createState(3), hostEnd, () => now, [], "local");
+    client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq: 1, playerId: "someone else", type: "NoOp", payload: {} } });
+    client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq: 2, playerId: "", type: "NoOp", payload: {} } });
+    now += 100;
+    host.pump();
+    expect(received.filter((m) => m.type === "commandResult")).toEqual([
+      { v: PROTOCOL_VERSION, type: "commandResult", seq: 1, playerId: "local", result: { ok: true } },
+      { v: PROTOCOL_VERSION, type: "commandResult", seq: 2, playerId: "local", result: { ok: true } },
+    ]);
+    expect(host.fullLog.map((e) => e.playerId)).toEqual(["local", "local"]);
+  });
+});
+
+describe("a host resumed from its own save", () => {
+  // Drives a host for `ms` of real time from `from`, sending commands that
+  // depend only on the time, enough of them to page entries out of live
+  // state before the save.
+  function drive(host: SimHost, inject: (message: unknown) => void, clock: { now: number }, from: number, ms: number): void {
+    for (let t = from; t < from + ms; t += PUMP_INTERVAL_MS) {
+      if (t % 100 === 0) {
+        for (let i = 0; i < 10; i++) {
+          inject({ v: PROTOCOL_VERSION, type: "command", command: { seq: t + i, playerId: i % 2 ? "a" : "b", type: "NoOp", payload: { t, i } } });
+        }
+      }
+      if (t % 7000 === 0) {
+        const speed = ([1, 2, 0, 4] as const)[(t / 7000) % 4];
+        inject({ v: PROTOCOL_VERSION, type: "command", command: { seq: t, playerId: "a", type: "SetSpeed", payload: { speed } } });
+      }
+      clock.now += PUMP_INTERVAL_MS;
+      host.pump();
+    }
+  }
+
+  function start(bytes?: Uint8Array) {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const clock = { now: 0 };
+    const saved = bytes ? deserialize(bytes) : null;
+    const host = new SimHost(saved?.state ?? createState(9), hostEnd, () => clock.now, saved?.pagedLog ?? []);
+    return { host, clock, inject: (message: unknown) => client.send(message as never) };
+  }
+
+  it("ends on the same hash and the same full log as a host that never stopped", () => {
+    const HALF_MS = 50_000;
+    const straight = start();
+    drive(straight.host, straight.inject, straight.clock, 0, 2 * HALF_MS);
+
+    const first = start();
+    drive(first.host, first.inject, first.clock, 0, HALF_MS);
+    const second = start(first.host.snapshotBytes());
+    drive(second.host, second.inject, second.clock, HALF_MS, HALF_MS);
+
+    const a = deserialize(straight.host.snapshotBytes());
+    const b = deserialize(second.host.snapshotBytes());
+    expect(a.pagedLog.length).toBeGreaterThan(0);
+    expect(deserialize(first.host.snapshotBytes()).pagedLog.length).toBeGreaterThan(0);
+    expect(b.state.tick).toBe(a.state.tick);
+    expect(a.state.tick).toBeGreaterThan(1000);
+    expect(hashState(b.state)).toBe(hashState(a.state));
+    expect(second.host.fullLog).toEqual(straight.host.fullLog);
+    expect(hashState(replay(9, second.host.fullLog, second.host.tick))).toBe(hashState(a.state));
   });
 });
 

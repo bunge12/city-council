@@ -100,6 +100,7 @@ test("soak: one hour of game time at 4x", () => {
   const heap: { tick: number; mb: number }[] = [];
   const snapshotMs: number[] = [];
   let snapshotBytes = 0;
+  let pagesStored = 0;
   let lastSnapshotAt = 0;
   let lastNoOpTick = -1;
   const heapStart = heapUsed();
@@ -128,15 +129,22 @@ test("soak: one hour of game time at 4x", () => {
     received.length = 0;
     if (offset - lastSnapshotAt >= AUTOSAVE_INTERVAL_MS) {
       lastSnapshotAt = offset;
+      // What an autosave does: the live part of the log only. Pages are
+      // counted as stored, as they are after the first save that has them.
       const t0 = performance.now();
-      snapshotBytes = host.snapshotBytes().byteLength;
+      const save = host.saveBytes(pagesStored);
       snapshotMs.push(performance.now() - t0);
+      snapshotBytes = save.bytes.byteLength;
+      pagesStored = save.pageCount;
     }
     if (host.tick % SAMPLE_EVERY === 0 && heap.at(-1)?.tick !== host.tick) {
       heap.push({ tick: host.tick, mb: mb(memoryUsage().heapUsed) });
     }
   }
   const wallMs = performance.now() - wallStart;
+  const fileStart = performance.now();
+  const fileBytes = host.snapshotBytes().byteLength;
+  const fileMs = performance.now() - fileStart;
   const heapEnd = heapUsed();
 
   // The live city and a replay of its full log from the seed must agree.
@@ -168,7 +176,11 @@ test("soak: one hour of game time at 4x", () => {
     snapshot: {
       count: snapshotMs.length,
       bytes: snapshotBytes,
+      medianMs: ms(snapshotMs.slice().sort((x, y) => x - y)[Math.floor(snapshotMs.length / 2)] ?? 0),
       maxMs: ms(Math.max(0, ...snapshotMs)),
+      // A city file still carries the whole log. Written on download only.
+      cityFileBytes: fileBytes,
+      cityFileMs: ms(fileMs),
     },
     heapMb: {
       start: mb(heapStart),
@@ -180,4 +192,7 @@ test("soak: one hour of game time at 4x", () => {
   };
   writeFileSync(REPORT, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`soak report (also in ${REPORT}):\n${JSON.stringify(report, null, 2)}`);
+  // The tick budget is an exit number, so the run fails when a step passes
+  // it. Checked after the report is written, so a failure still leaves one.
+  expect(over, `steps over the ${BUDGET_MS} ms tick budget`).toBe(0);
 });

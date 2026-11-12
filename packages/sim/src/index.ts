@@ -16,7 +16,7 @@ export type { Command, CommandDef, CommandResult } from "./commands";
 export { COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
 export type { System, SystemTimer } from "./step";
 export { RNG_WORDS, nextFloat, nextInt, nextU32, seedRng } from "./rng";
-export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, logLength, readLog } from "./log";
+export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, isLogEntry, logLength, readLog } from "./log";
 export type { LogEntry } from "./log";
 export { TIME_BALANCE, gameDate } from "./calendar";
 export type { GameDate, TimeBalance } from "./calendar";
@@ -29,6 +29,7 @@ export {
   deserialize,
   readSnapshotHeader,
   serialize,
+  serializeDetached,
 } from "./snapshot";
 export type { Snapshot, SnapshotErrorCode, SnapshotHeader } from "./snapshot";
 export { PROTOCOL_VERSION, parseToSimMessage } from "./protocol";

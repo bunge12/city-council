@@ -9,7 +9,8 @@ export function TopBar() {
   const { sendCommand } = useServices();
   const date = useSim((s) => (s ? formatGameDate(gameDate(s.tick)) : "-"));
   const speed = useSim((s) => s?.speed ?? null);
-  const city = useSaveStatus()?.city.name ?? "Loading…";
+  const status = useSaveStatus();
+  const city = !status ? "Loading…" : status.openElsewhere ? "No city open" : status.city.name;
   const menuOpen = useUi((s) => s.menuOpen);
   const logOpen = useUi((s) => s.logOpen);
   const debugOpen = useUi((s) => s.debugOpen);

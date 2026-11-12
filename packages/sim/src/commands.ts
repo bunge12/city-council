@@ -60,12 +60,35 @@ export function validateCommand(state: SimState, command: Command): CommandResul
   if (typeof command.playerId !== "string" || command.playerId === "") {
     return { ok: false, reason: "playerId is required" };
   }
+  // A host passes on whatever a port or socket delivered, so `type` may be
+  // anything. Without this check a one-item array such as ["NoOp"] would be
+  // looked up as "NoOp", applied and logged with a type no save can load.
+  if (typeof command.type !== "string") {
+    return { ok: false, reason: "type must be a string" };
+  }
   const def = Object.hasOwn(COMMANDS, command.type) ? COMMANDS[command.type] : undefined;
   if (!def) {
-    return { ok: false, reason: `unknown command type "${String(command.type)}"` };
+    return { ok: false, reason: `unknown command type "${command.type}"` };
+  }
+  if (!isJsonSafe(command.payload)) {
+    return { ok: false, reason: "payload must be plain JSON data" };
   }
   const reason = def.validate(state, command);
   return reason === null ? { ok: true } : { ok: false, reason };
+}
+
+/**
+ * Whether `copyPayload` can copy the payload. A worker port can deliver a
+ * BigInt or an object that contains itself, and JSON refuses both by
+ * throwing, which would leave the sender without an answer.
+ */
+function isJsonSafe(payload: unknown): boolean {
+  try {
+    JSON.stringify(payload);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // A JSON round trip, so the queued payload is plain data the sender can no
