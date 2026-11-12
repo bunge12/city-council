@@ -146,7 +146,7 @@ The client only sends commands and receives state. Whether the sim sits in a wor
 4. **Flat data.** Roads, cells, buildings and pops live in typed arrays indexed by id, not in object graphs. Snapshots are then a handful of buffers that copy to a worker, a file or a socket with no serialisation step.
 5. **State is serialisable at every tick.** No closures, class instances or DOM references in sim state. Save, load and join-in-progress all use the same snapshot format.
 6. **The client is a view.** It keeps a read-only copy of state, applies deltas, and interpolates for smooth motion. Cars on screen are drawn by the client along routes the sim has already assigned. The sim does not move them.
-7. **Derived data is rebuilt, never saved.** Some structures are only a faster way to read state: the terrain, the road spatial index, and from issue 15 the routing graph. They live outside `SimState` and are never saved, hashed or sent. The terrain is cached by seed, because it depends on nothing else; commands that check the ground, such as `BuildRoad`, read it through that cache, so a worker, a server and a replay check against the same map. The others are cached by the state object they come from. Each is built from the graph arrays the first time it is asked for, then kept current by the functions that change the graph. A city loaded from a save, cloned or replayed is a new object, so it builds its own. A host calls `prepareDerived` after it creates or loads a city, so the rebuild lands at load and not inside a tick. A derived structure must give the same answers whether it was kept current through a city's whole history or built a moment ago, and every structure has a test that proves it. Every list inside one stays sorted by id and every query breaks ties by the lower id, so nothing depends on the order changes arrived in.
+7. **Derived data is rebuilt, never saved.** Some structures are only a faster way to read state: the terrain, the road spatial index, from issue 15 the routing graph, and from issue 18 the blocks. They live outside `SimState` and are never saved, hashed or sent. The terrain is cached by seed, because it depends on nothing else; commands that check the ground, such as `BuildRoad`, read it through that cache, so a worker, a server and a replay check against the same map. The others are cached by the state object they come from. Each is built from the graph arrays the first time it is asked for, then kept current by the functions that change the graph. A city loaded from a save, cloned or replayed is a new object, so it builds its own. A host calls `prepareDerived` after it creates or loads a city, so the rebuild lands at load and not inside a tick. A derived structure must give the same answers whether it was kept current through a city's whole history or built a moment ago, and every structure has a test that proves it. Every list inside one stays sorted by id and every query breaks ties by the lower id, so nothing depends on the order changes arrived in.
 
 ### Why this keeps multiplayer cheap
 
@@ -165,14 +165,14 @@ Your list put Map & Zoning first. I split it. With free-form roads, zoning cells
 | # | Milestone | Depends on | Exit test |
 | --- | --- | --- | --- |
 | M0 ✓ | Foundation and terrain | none | A seeded map renders with camera controls. The sim runs in a worker, accepts a no-op command, and the state saves and reloads from IndexedDB. |
-| M1 | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
+| M1 | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
 | M2 | Zoning and buildings | M1 | Paint R, C, I, O, and M on cells along roads. Buildings appear on zoned cells at a fixed rate and disappear when the road is removed. Each zone can have a level 1-3 which indicates density & impact |
 | M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. |
 | M4 | Economy | M3 | Taxes, upkeep and construction costs hit one treasury. A monthly budget panel balances. Running out of money blocks building. Allow borrowing. Demolishing an occupied building charges compensation. Property and business taxes and development charges work. The first population milestones unlock density 2 and pay grants. |
 | M5 | Traffic | M3 | Commutes load onto roads. A traffic overlay shows congested segments. Widening a road or adding a bypass visibly changes the overlay. Long commutes lower demand. Decorative cars visualize the traffic levels. Assignment stays inside its time budget on a 500,000 resident test city. |
 | M6 | Public transport: buses | M5 | Draw a bus line with stops. Pops choose it when it beats driving. Road volume on the parallel route drops. Fares show in the budget. Bike lanes on a street shift short trips from cars to cycling. |
 | M7 | Rail transport | M1, M6 | Lay tram, subway and commuter rail track with the same tools as roads. Stations, tunnels and elevated track work. Lines, mode choice and fares from M6 also work for heavy (commuter) rail, trams, and subways. A subway line carries more people per hour than the avenue above it. Off-street bike paths work, and a station reached by bike lanes draws riders from further away. |
-| M8 | Services | M4, M5 | Clinics, schools, childcare, fire and police have capacity and network coverage. Each changes a number the player can see, such as health, education level or the share of parents who work. |
+| M8 | Services | M4, M5 | Clinics, schools, childcare, fire and police have capacity and network coverage. Parks and recreation raise satisfaction and land value within walking distance. Each changes a number the player can see, such as health, education level or the share of parents who work. |
 | M9 | Utilities | M8 | Power, water and sewage plants are placed on the map and add capacity, with no grid to draw. A shortage lowers demand across the city. Pollution from plants feeds land value and satisfaction. |
 | M10 | Multiplayer | M4 minimum | Two browsers edit one city through a server. Roles work. A third player joins mid-game and sees the same city. The project owner moves a local city online. No accounts or payments yet. |
 | M11 | Polish and launch | all | Tutorial, sound, a performance pass against the targets above at 500,000 residents, public link. |
@@ -246,6 +246,8 @@ The build tool needs most of the work here.
 **How a road meets the ground.** A road follows the terrain; there is no terraforming. Its nodes take the ground height, and the slope check samples the ground along the path at most 8 m apart and refuses the road if the grade between any two samples passes its type's `maxSlope`. So a road can climb a hill only where every stretch of it is gentle enough, which is what a draped road needs to look right. If draped roads look wrong on rolling ground once they render (issue 06), the fallback is a straight grade between node heights with short embankments drawn by the client, which changes the check but not the graph.
 
 The sim side stores the graph in typed arrays and keeps a spatial index for snapping and picking. The index is a grid with one cell per 500 m chunk, the grid the renderer uses. Each cell lists the nodes inside it and the segments that touch it, and positions off the map fall in the nearest edge cell. It answers three queries, each with a network type filter: the nearest node within a radius, the nearest point on any segment within a radius, and every segment that touches a box. The queries are pure functions exported from the sim entry, so the client runs the same ones on its read-only copy. On a 30,000 segment network a nearest-segment query averages about 0.006 ms at a 50 m radius and 0.02 ms at 250 m, and rebuilding the whole index takes about 13 ms (`pnpm bench`, on the development container). It also derives a routing graph with one edge per direction per segment. That is enough for pops and aggregate traffic, so we do not model individual lanes.
+
+The sim also derives blocks from the graph. Roads split wherever they cross, so every area fully enclosed by ground-level roads is a closed polygon. Each block gets an id, its boundary and its area, and the list is updated when a road is added or removed. Blocks are used by whole-block parks in M8, by through-lots for large buildings, and by the per-block overlays.
 
 The map has two or three fixed highway connections at its edge. They are where new residents and outside trade arrive.
 
@@ -653,7 +655,49 @@ Density sets the load. A density 3 residential block needs many times the school
 
 School trips load onto the traffic model like commutes, so a school on a cul-de-sac causes the jam it would in real life. Older students can ride transit.
 
-Fire and police are in v1. Both use response time and not a simple radius, so a station behind a jammed road covers less ground, and congestion becomes a safety problem as well as a commute problem. Fires are random events weighted by building type, and crime is a per-cell value. Parks use the same coverage system and are also in M8, because they are nearly free to build. Garbage collection comes after v1.
+Fire and police are in v1. Both use response time and not a simple radius, so a station behind a jammed road covers less ground, and congestion becomes a safety problem as well as a commute problem. Fires are random events weighted by building type, and crime is a per-cell value. Parks and recreation are also in M8 and have their own section below. Garbage collection comes after v1.
+
+#### Parks and recreation
+
+Green space is its own system in M8. It differs from the other services in one way. People walk to a park, so its catchment is walking distance and not travel time by road.
+
+| Kind | How it is placed | Serves | Notes |
+| --- | --- | --- | --- |
+| Park cells | Painted on zoning cells like a zone, in any shape | Homes within a short walk | Covers pocket parks, playgrounds, plazas and neighbourhood parks. Good use for a leftover lot too small to build on. |
+| Recreation facilities | Placed buildings: sports fields, community centre, pool, arena | A wider catchment, weighted toward pops with children | Each has a capacity, like a school |
+| Natural areas | A free-form area drawn anywhere on the map | Homes nearby, and the whole city a little | Protects forest and shoreline from building. No facilities, very low upkeep. |
+| Street trees | An attribute on a road segment, like the cycling attribute | Buildings along that street | Cheap. Softens road noise for the homes beside it. |
+
+**Whole-block parks.** A block is an area fully enclosed by roads. If a block has zoning cells and every one of them is zoned as park, the entire block becomes park. The fill covers the whole polygon between the roads, including the corners and the middle that square cells never reach, whatever the block's shape or size.
+
+This is also how to make a large park. Enclose a wide area with roads, paint its cells as park, and the interior beyond six cells deep fills too. The full area of the polygon counts as park space for nearby residents, and upkeep is charged on that area.
+
+| Situation | What happens |
+| --- | --- |
+| One cell in the block is rezoned to another use | The fill goes away and the block returns to ordinary park cells |
+| A new road is drawn through a filled park | It becomes two blocks, and each stays filled if all its cells are still park |
+| A dead-end street runs into the block | Still one block. Cells along the dead end count like any others |
+| The block has no zoning cells, such as one ringed by highways | The rule cannot apply. A natural area can be drawn there |
+| A bridge, tunnel or off-street path crosses it | These do not split a block. Only roads at ground level do |
+| The block is bounded partly by water or the map edge | Not enclosed by roads, so it does not fill |
+
+What green space does:
+
+- **Satisfaction.** Each pop scores the park area it can walk to, shared among everyone else who can walk to it. A pocket park that delights a street of houses does little for three towers.
+- **Land value.** Homes near green space are worth more, most of all beside large parks and water.
+- **Health.** A small boost, on top of clinics.
+
+So demand for park space rises with density. A density 3 district needs real parkland within walking distance or its residents' satisfaction sags, however good its transit is.
+
+What it costs:
+
+- **Land.** Park cells pay no tax and hold no homes or jobs. In a dense core that is the most expensive land in the city.
+- **Timing.** Painting a park on empty land costs little. Making one in a built-up district means clearing buildings at eminent domain prices. Like transit corridors, parks reward planning ahead.
+- **Upkeep.** A yearly cost per cell, higher for recreation facilities.
+
+Forest already on the map counts as green space while it stands. Building over it removes that benefit, and drawing a natural area around it keeps it.
+
+The overlay shows park area per resident by block, so underserved districts stand out. Stadiums, zoos and other one-off attractions wait until after v1.
 
 #### Satisfaction
 
