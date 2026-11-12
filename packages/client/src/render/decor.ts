@@ -145,3 +145,17 @@ export function placeDecor(terrain: Terrain, ci: number, cj: number): ChunkDecor
 
   return { broadleaf: broadleaf.done(), conifer: conifer.done(), grass: grass.done() };
 }
+
+/** `placed` without the instances whose base `drop` says no to. Keeps the order of the rest. */
+export function withoutDropped(placed: DecorInstances, drop: (x: number, z: number) => boolean): DecorInstances {
+  const d = placed.data;
+  const out = new Float32Array(d.length);
+  let count = 0;
+  for (let k = 0; k < placed.count; k++) {
+    const o = k * DECOR_STRIDE;
+    if (drop(d[o] ?? 0, d[o + 2] ?? 0)) continue;
+    out.set(d.subarray(o, o + DECOR_STRIDE), count * DECOR_STRIDE);
+    count++;
+  }
+  return count === placed.count ? placed : { count, data: out.slice(0, count * DECOR_STRIDE) };
+}

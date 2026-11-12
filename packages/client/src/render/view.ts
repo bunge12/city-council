@@ -1,6 +1,6 @@
 // The renderer: three.js WebGPURenderer with the WebGL 2 backend as the
-// fallback, a fixed-daylight scene, the chunked terrain, the water plane and
-// the decorative trees and grass.
+// fallback, a fixed-daylight scene, the chunked terrain, the water plane,
+// the roads and the decorative trees and grass.
 //
 // The render loop runs on the browser's frame clock and never waits on the
 // sim. It reads the mirror; it does not drive the sim.
@@ -21,7 +21,10 @@ import {
 } from "three/webgpu";
 import { mapSize, type Terrain } from "@city-council/sim";
 import { FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, TERRAIN_LODS } from "./config";
+import type { ZoomBand } from "../camera/zoom-band";
 import { createDecorLayer, type DecorLayer } from "./decor-meshes";
+import { neighbourhood, type RoadNet } from "./road-geometry";
+import { createRoadLayer, type RoadLayer, type RoadStats } from "./road-meshes";
 import { buildChunk, chunkCentre, chunksPerSide } from "./terrain-chunks";
 import { SURFACE_HEIGHT_ATTRIBUTE, createTerrainMaterial } from "./terrain-material";
 
@@ -57,6 +60,13 @@ export interface View {
   lodCounts(): number[];
   /** Trees and grass tufts drawn in the last frame. */
   decorCounts(): { trees: number; grass: number };
+  /** Draws a road network from scratch, as after a snapshot. Call after `showTerrain`. */
+  showRoads(net: RoadNet): void;
+  /** Redraws what a delta's changed road rows touch. Returns the chunks rebuilt. */
+  updateRoads(nodeIds: readonly number[], segIds: readonly number[]): number[];
+  /** Shows the road layers for a zoom band. */
+  setZoomBand(band: ZoomBand): void;
+  roadStats(): RoadStats | null;
 }
 
 /** True when the page asks for the WebGL 2 backend with `?webgl`. */
@@ -89,7 +99,8 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   scene.add(sun);
   scene.add(new HemisphereLight(0xdfeaf5, 0x5a5040, 1.1));
 
-  let terrainRoot: { lods: LOD[]; decor: DecorLayer; dispose: () => void } | null = null;
+  let terrainRoot: { lods: LOD[]; decor: DecorLayer; roads: RoadLayer; dispose: () => void } | null = null;
+  let band: ZoomBand = "city";
 
   function showTerrain(terrain: Terrain): void {
     terrainRoot?.dispose();
@@ -140,13 +151,17 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     water.renderOrder = 1;
     scene.add(water);
 
-    const decor = createDecorLayer(terrain, scene);
+    const roads = createRoadLayer(terrain, scene);
+    roads.setBand(band);
+    const decor = createDecorLayer(terrain, scene, (chunk) => roads.decorMask(chunk));
 
     terrainRoot = {
       lods,
       decor,
+      roads,
       dispose() {
         decor.dispose();
+        roads.dispose();
         for (const lod of lods) scene.remove(lod);
         scene.remove(water);
         for (const g of geometries) g.dispose();
@@ -218,5 +233,22 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       return counts;
     },
     decorCounts: () => terrainRoot?.decor.counts() ?? { trees: 0, grass: 0 },
+    showRoads(net) {
+      if (!terrainRoot) return;
+      terrainRoot.roads.show(net);
+      // Every chunk: one that had roads before this snapshot may have none now.
+      terrainRoot.decor.refresh(terrainRoot.lods.map((_, chunk) => chunk));
+    },
+    updateRoads(nodeIds, segIds) {
+      if (!terrainRoot) return [];
+      const rebuilt = terrainRoot.roads.apply(nodeIds, segIds);
+      terrainRoot.decor.refresh(new Set(rebuilt.flatMap(neighbourhood)));
+      return rebuilt;
+    },
+    setZoomBand(next) {
+      band = next;
+      terrainRoot?.roads.setBand(next);
+    },
+    roadStats: () => terrainRoot?.roads.stats() ?? null,
   };
 }
