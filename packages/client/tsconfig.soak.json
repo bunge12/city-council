@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist/soak-types",
+    "emitDeclarationOnly": true,
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": ["soak", "vitest.soak.config.ts"],
+  "references": [{ "path": "." }]
+}
