@@ -26,6 +26,8 @@ import {
   type Terrain,
 } from "@city-council/sim";
 import type { RoadNet } from "../render/road-geometry";
+import { DEFAULT_GUIDES, type GuideId, type GuideToggles } from "./config";
+import { snapPoint, startSource, type Snap } from "./snap";
 
 /** The road types the tool offers, in toolbar order. Highway waits for M5. */
 export const TOOL_ROAD_TYPES = ["street", "avenue", "oneWay"] as const;
@@ -96,6 +98,8 @@ export interface RoadToolState {
   roadPending: readonly PendingRoad[];
   /** The last refusal, from the preview check at the click or from the sim. Null when there is none. */
   roadNote: string | null;
+  /** Which snapping guides are on. Kept for the page's life. */
+  guides: GuideToggles;
 }
 
 export const INITIAL_ROAD_TOOL: RoadToolState = {
@@ -104,7 +108,16 @@ export const INITIAL_ROAD_TOOL: RoadToolState = {
   roadStart: null,
   roadPending: [],
   roadNote: null,
+  guides: DEFAULT_GUIDES,
 };
+
+/** What the snap needs from the view at the cursor. */
+export interface SnapView {
+  /** Metres one CSS pixel covers at the cursor. */
+  metresPerPixel: number;
+  /** The free-hand key is held. */
+  free: boolean;
+}
 
 /** What the controller needs from the page. */
 export interface RoadToolHost {
@@ -157,6 +170,33 @@ export class RoadToolController {
     if (this.host.get().roadStart) this.host.set({ roadStart: null, roadNote: null });
   }
 
+  /** Turns a snapping guide on or off. */
+  toggleGuide(id: GuideId): void {
+    const guides = this.host.get().guides;
+    this.host.set({ guides: { ...guides, [id]: !guides[id] } });
+  }
+
+  /**
+   * Where the cursor at (x, z) lands with the guides that are on: the start
+   * of a road before the first click, its end after. Null with the tool off
+   * or before the first snapshot.
+   */
+  snap(cursor: BuildPoint | null, view: SnapView): Snap | null {
+    const s = this.host.get();
+    const world = this.host.world();
+    if (s.tool !== "road" || !cursor || !world) return null;
+    const start = s.roadStart;
+    return snapPoint(cursor.x, cursor.z, {
+      net: world.net,
+      start,
+      source: start ? startSource(world.net, start) : null,
+      metresPerPixel: view.metresPerPixel,
+      guides: s.guides,
+      free: view.free,
+      gridStep: world.terrain.spacing,
+    });
+  }
+
   /** The preview from the start to `cursor`, or null when nothing is being drawn. */
   preview(cursor: BuildPoint | null): RoadPreview | null {
     const s = this.host.get();
@@ -166,7 +206,7 @@ export class RoadToolController {
   }
 
   /**
-   * A left click on the ground, or on the sky (null). The first click sets
+   * A left click on the ground, or on the sky (null), already snapped. The first click sets
    * the start, the second sends the road if the preview passes. A click the
    * preview refuses keeps the start and shows the reason.
    */

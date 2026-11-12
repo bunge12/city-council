@@ -21,7 +21,10 @@ import { createCameraRig, type CameraRig } from "./camera/rig";
 import { createView, wantsWebGL, type View } from "./render/view";
 import { createRoadPreviewLayer } from "./render/road-preview";
 import type { PreviewShape } from "./render/road-preview-geometry";
+import { createSnapMarkLayer } from "./render/snap-marks";
+import { snapMarks } from "./render/snap-marks-geometry";
 import { RoadToolController, type RoadPreview } from "./tools/road-tool";
+import type { Snap } from "./tools/snap";
 import { mountUi } from "./ui/App";
 import type { AppServices, DownloadedCity } from "./ui/services";
 import { setRoadHover, setViewReadout, useUi } from "./ui/store";
@@ -240,6 +243,8 @@ interface CameraHooks {
   lastPick: GroundHit | null | undefined;
   /** Screen point, in CSS pixels, where world point (x, y, z) is drawn. */
   project(x: number, y: number, z: number): { x: number; y: number };
+  /** Where the road tool's cursor lands now, with the guides that are on, or null. */
+  snap(): Snap | null;
 }
 
 let resolveCamera: (hooks: CameraHooks) => void = () => undefined;
@@ -324,6 +329,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   const rig = createCameraRig(view.camera, terrain, () => ({ width: canvas.clientWidth, height: canvas.clientHeight }));
   const controls = createCameraControls(canvas, rig, view.scene);
   const v = new Vector3();
+  let lastSnap: Snap | null = null;
   const hooks: CameraHooks = {
     rig,
     controls,
@@ -333,20 +339,37 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       v.set(x, y, z).project(view.camera);
       return { x: ((v.x + 1) / 2) * canvas.clientWidth, y: ((1 - v.y) / 2) * canvas.clientHeight };
     },
+    snap: () => lastSnap,
   };
+  /**
+   * Metres one CSS pixel covers on the ground at `hit`: the mean of the
+   * screen lengths of a metre east and a metre south, so a snap distance in
+   * pixels feels the same at every zoom and tilt.
+   */
+  const metresPerPixel = (hit: GroundHit): number => {
+    const o = hooks.project(hit.x, hit.y, hit.z);
+    const e = hooks.project(hit.x + 1, hit.y, hit.z);
+    const s = hooks.project(hit.x, hit.y, hit.z + 1);
+    const pixels = (Math.hypot(e.x - o.x, e.y - o.y) + Math.hypot(s.x - o.x, s.y - o.y)) / 2;
+    return pixels > 1e-6 ? 1 / pixels : 1;
+  };
+  const snapAt = (hit: GroundHit | null): Snap | null =>
+    hit ? roadTool.snap(hit, { metresPerPixel: metresPerPixel(hit), free: controls.altHeld() }) : null;
   controls.onPick((hit) => {
     hooks.lastPick = hit;
     setViewReadout({ pick: metres(hit) });
-    roadTool.click(hit);
+    const snap = snapAt(hit);
+    roadTool.click(snap ? { x: snap.x, z: snap.z } : hit);
   });
   controls.onRightClick(() => roadTool.cancel());
   const previews = createRoadPreviewLayer(view.scene, () => hooks.terrain);
+  const marks = createSnapMarkLayer(view.scene, () => hooks.terrain);
   // The live preview, worked out again only when what it depends on changes.
   let mirrorVersion = 0;
   mirror.subscribe(() => mirrorVersion++);
   let previewKey = "";
   let preview: RoadPreview | null = null;
-  const livePreview = (cursor: GroundHit | null): RoadPreview | null => {
+  const livePreview = (cursor: { x: number; z: number } | null): RoadPreview | null => {
     const ui = useUi.getState();
     const start = ui.roadStart;
     const end = cursor ? { x: snapToGrid(cursor.x), z: snapToGrid(cursor.z) } : null;
@@ -376,12 +399,18 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     document.body.dataset["zoomBand"] = band;
     view.setZoomBand(band);
     const cursor = controls.cursor();
-    const live = livePreview(cursor);
+    const snap = snapAt(cursor);
+    lastSnap = snap;
+    document.body.dataset["snap"] = snap?.kind ?? "";
+    document.body.dataset["snapSquare"] = String(snap?.square ?? false);
+    const live = livePreview(snap);
     const shapes = useUi.getState().roadPending.map((p) => shapeOf(p.preview, "pending"));
     if (live) shapes.push(shapeOf(live, live.ok ? "ok" : "refused"));
     previews.show(shapes);
+    const scale = cursor ? metresPerPixel(cursor) : 1;
+    marks.show(snap ? snapMarks(snap, useUi.getState().roadStart, scale) : [], scale);
     const pointer = controls.pointer();
-    setRoadHover(live && pointer ? { x: pointer.x, y: pointer.y, preview: live } : null);
+    setRoadHover(live && pointer ? { x: pointer.x, y: pointer.y, preview: live, snap } : null);
     setViewReadout({
       camPosition: `${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} m`,
       camHeight: `${rig.heightAboveGround().toFixed(0)} m`,

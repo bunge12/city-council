@@ -265,6 +265,8 @@ Free-form roads make tidy layouts hard without help, so the road tool guides the
 
 Each guide has a toggle in the toolbar, and holding one key suspends them all for a free-hand segment.
 
+How snapping works, decided in issue M1-08. The snap is a list of sources tried in priority order, and the first that catches the cursor gives the point: an existing node, then a point on an existing segment, then an angle guide, then the 16 m terrain grid. On a segment, the point where the new road would meet it square wins over the nearest point when the cursor is near it. Length snap comes after, and only moves a point from an angle guide or from no snap at all, along the road's direction. Angle snap measures from every road at the start node, or from the segment a road starts on, and never offers a direction the sim would refuse as too sharp. 90, 45 and straight on reach 14 pixels, the 15 degree steps 6, and a strong step wins when both reach. Snap distances are screen pixels turned into metres at the cursor, so they feel the same at every zoom. The free-hand key is Alt. It turns every guide off, but node and segment markers still show inside the sim's 4 m merge distance, because the sim joins those whatever the client sends. Angle and length snap start on and the terrain grid starts off. The toggles live in the UI store for the page's life. The distances and steps are in `packages/client/src/tools/config.ts`, since they are feel, not balance.
+
 #### Grid tool
 
 The grid tool lays out a whole street grid in one action.

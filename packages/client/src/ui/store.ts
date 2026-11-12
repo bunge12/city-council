@@ -5,6 +5,7 @@
 
 import { create } from "zustand";
 import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tools/road-tool";
+import type { Snap } from "../tools/snap";
 
 export interface UiState extends RoadToolState {
   debugOpen: boolean;
@@ -100,6 +101,8 @@ export interface RoadHover {
   x: number;
   y: number;
   preview: RoadPreview | null;
+  /** Where the cursor snapped, for the angle in the readout. */
+  snap?: Snap | null;
 }
 
 export const useRoadHover = create<{ hover: RoadHover | null }>(() => ({ hover: null }));
@@ -107,6 +110,11 @@ export const useRoadHover = create<{ hover: RoadHover | null }>(() => ({ hover: 
 export function setRoadHover(hover: RoadHover | null): void {
   const current = useRoadHover.getState().hover;
   if (current === hover) return;
-  if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview && sameSnap(current.snap, hover.snap)) return;
   useRoadHover.setState({ hover });
+}
+
+function sameSnap(a: Snap | null | undefined, b: Snap | null | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.kind === b.kind && a.x === b.x && a.z === b.z && a.angle === b.angle && a.square === b.square;
 }

@@ -180,3 +180,33 @@ export const ROAD_PREVIEW = {
   junctionSides: 20,
   junctionLift: 0.1,
 } as const;
+
+/** The road tool's snap markers. Sizes are CSS pixels on screen, turned into metres at the cursor. */
+export const SNAP_MARKS = {
+  colours: {
+    /** Caught an existing node. */
+    node: 0xffd23a,
+    /** Caught a point on an existing segment. */
+    segment: 0x3fe0c5,
+    /** An angle guide line from the start. */
+    angle: 0xffffff,
+    /** The right-angle marker. */
+    square: 0xffffff,
+    /** Caught the terrain grid. */
+    grid: 0xd5dde6,
+  },
+  opacity: 0.95,
+  /** Metres above the ground, over the road preview. */
+  lift: 0.9,
+  nodeRingPx: { inner: 10, outer: 15 },
+  segmentDiamondPx: 13,
+  /** The guide line runs from the start this far past the cursor. */
+  guideOvershootPx: 120,
+  guideWidthPx: 1.5,
+  squarePx: 26,
+  squareWidthPx: 3,
+  gridCrossPx: 7,
+  gridWidthPx: 2,
+  /** Ground samples along a guide line at most this far apart, metres. */
+  sampleStep: 8,
+} as const;

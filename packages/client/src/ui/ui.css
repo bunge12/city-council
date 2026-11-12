@@ -384,29 +384,49 @@ kbd {
 }
 
 /* The build toolbar, centred along the bottom edge. */
+/* A column: the buttons on one row, then the hint. Sized to its widest
+   line rather than to the half of the screen right of its left edge, so the
+   buttons stay on one row wherever they fit. */
 .build-bar {
   position: absolute;
   left: 50%;
   bottom: 8px;
   transform: translateX(-50%);
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 6px 12px;
+  gap: 6px;
+  width: max-content;
   max-width: calc(100vw - 16px);
   box-sizing: border-box;
 }
 
+.build-bar .controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+}
+
 .build-bar .tools,
-.build-bar .road-types {
+.build-bar .road-types,
+.build-bar .guides {
   display: flex;
   gap: 4px;
 }
 
+.build-bar .guides {
+  align-items: center;
+}
+
+.build-bar .group-label {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
 .build-bar .hint {
   margin: 0;
-  flex-basis: 100%;
   text-align: center;
 }
 
@@ -422,7 +442,7 @@ kbd {
 
 .road-note {
   margin: 0;
-  flex-basis: 100%;
+  max-width: 60ch;
   padding: 4px 8px;
   border-radius: 4px;
   background: var(--bad-bg);
@@ -455,6 +475,7 @@ kbd {
   color: var(--bad-ink);
 }
 
+.road-readout .angle,
 .road-readout .junctions {
   color: var(--ink-soft);
 }
