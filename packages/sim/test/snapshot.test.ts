@@ -171,6 +171,51 @@ describe("the activity log across a save", () => {
   });
 });
 
+describe("save and resume against an uninterrupted run", () => {
+  // Steps the host loop from step `from` to step `to`. The commands depend
+  // only on the step number, so two runs send the same ones. They include
+  // pauses, so some steps do not advance the tick.
+  function drive(state: SimState, from: number, to: number): void {
+    for (let i = from; i < to; i++) {
+      if (i % 13 === 0) submit(state, { seq: i, playerId: i % 2 ? "a" : "b", type: "NoOp", payload: { i } });
+      if (i % 97 === 0) {
+        const speed = ([0, 1, 2, 4] as const)[(i / 97) % 4];
+        submit(state, { seq: i, playerId: "a", type: "SetSpeed", payload: { speed } });
+      }
+      if (i % 97 === 5) submit(state, { seq: i, playerId: "b", type: "SetSpeed", payload: { speed: 2 } });
+      step(state);
+    }
+  }
+
+  it("1,000 steps straight equal 500, a save, a load and 500 more", () => {
+    const straight = createState(42);
+    drive(straight, 0, 1000);
+
+    let resumed = createState(42);
+    drive(resumed, 0, 500);
+    resumed = deserialize(serialize(resumed)).state;
+    drive(resumed, 500, 1000);
+
+    expect(straight.tick).toBeGreaterThan(900);
+    expect(straight.log.length).toBeGreaterThan(80);
+    expect(resumed.tick).toBe(straight.tick);
+    expect(hashState(resumed)).toBe(hashState(straight));
+    expect(hashState(replay(42, resumed.log, resumed.tick))).toBe(hashState(straight));
+  });
+
+  it("holds when the save lands with a command still queued", () => {
+    const run = (save: boolean): SimState => {
+      let state = createState(42);
+      drive(state, 0, 500);
+      submit(state, { seq: 9999, playerId: "a", type: "SetSpeed", payload: { speed: 4 } });
+      if (save) state = deserialize(serialize(state)).state;
+      drive(state, 500, 1000);
+      return state;
+    };
+    expect(hashState(run(true))).toBe(hashState(run(false)));
+  });
+});
+
 describe("committed snapshots", () => {
   it("loads the version 1 fixture and migrates it to the current version", () => {
     const { state, header } = deserialize(fromHex(v1Fixture.hex));
@@ -239,6 +284,16 @@ describe("snapshots that are refused", () => {
       const copy = bytes.slice();
       copy[at] = (copy[at] ?? 0) ^ 0x10;
       expect(refusal(copy).code).toBe("corrupt");
+    }
+  });
+
+  it("refuses a queued command that is not a command, which would throw on the first step", () => {
+    for (const bad of [null, 7, { seq: 1, playerId: "p1" }, { seq: 1, playerId: "p1", type: ["NoOp"] }]) {
+      const state = createState(3);
+      state.pending.push(bad as never);
+      const error = refusal(serialize(state));
+      expect(error.code).toBe("corrupt");
+      expect(error.message).toMatch(/queued command 0/);
     }
   });
 

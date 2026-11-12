@@ -180,4 +180,7 @@ test("soak: one hour of game time at 4x", () => {
   };
   writeFileSync(REPORT, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`soak report (also in ${REPORT}):\n${JSON.stringify(report, null, 2)}`);
+  // The tick budget is an exit number, so the run fails when a step passes
+  // it. Checked after the report is written, so a failure still leaves one.
+  expect(over, `steps over the ${BUDGET_MS} ms tick budget`).toBe(0);
 });

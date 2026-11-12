@@ -421,6 +421,22 @@ function checkLogEntry(entry: unknown, where: string): void {
   }
 }
 
+/**
+ * A queued command is applied by the first step after loading, so one that
+ * is not a command would throw there, on every step, in a city that then
+ * cannot run. A city file can come from anyone.
+ */
+function checkPendingCommand(command: unknown, where: string): void {
+  if (
+    !isRecord(command) ||
+    !Number.isSafeInteger(command["seq"]) ||
+    typeof command["playerId"] !== "string" ||
+    typeof command["type"] !== "string"
+  ) {
+    throw corrupt(`${where} is not a command`);
+  }
+}
+
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[], header: SnapshotHeader): void {
   const { tick, seed, rng, speed, pending, log, logOffset } = state;
@@ -435,6 +451,7 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[], header:
   }
   pagedLog.forEach((entry, i) => checkLogEntry(entry, `paged log entry ${i}`));
   log.forEach((entry, i) => checkLogEntry(entry, `log entry ${i}`));
+  pending.forEach((command, i) => checkPendingCommand(command, `queued command ${i}`));
 }
 
 /**
