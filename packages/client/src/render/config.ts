@@ -1,8 +1,8 @@
 // Renderer settings. These are presentation, not game balance, so they live
 // with the client and not under packages/sim/balance.
 
-/** Side of a terrain chunk in metres. 12,000 m / 500 m gives 24 x 24 chunks. */
-export const CHUNK_SIZE = 500;
+/** Side of a chunk in metres. The sim owns it: its spatial index uses the same grid. */
+export { CHUNK_SIZE } from "@city-council/sim";
 
 /**
  * Detail levels for a chunk, nearest first. `segments` is the number of

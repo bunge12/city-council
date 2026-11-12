@@ -4,6 +4,7 @@ import {
   TICK_MS,
   logLength,
   parseToSimMessage,
+  prepareDerived,
   readLog,
   serialize,
   serializeDetached,
@@ -91,6 +92,7 @@ export class SimHost {
       throw new RangeError(`pagedLog has ${pagedLog.length} entries but ${state.logOffset} have left live state`);
     }
     this.state = state;
+    prepareDerived(state);
     this.fullLog = [...pagedLog, ...state.log];
     this.transport = transport;
     this.now = now;

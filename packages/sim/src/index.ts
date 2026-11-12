@@ -69,3 +69,23 @@ export {
   SEG_ALIVE,
 } from "./roads/network";
 export type { RoadNetwork } from "./roads/network";
+export { CHUNKS_PER_SIDE, CHUNK_SIZE } from "./chunks";
+export { prepareDerived } from "./derived";
+export {
+  NETWORKS_ALL,
+  NETWORKS_PATH,
+  NETWORKS_RAIL,
+  NETWORKS_ROAD,
+  buildRoadIndex,
+  indexNode,
+  indexSegment,
+  nearestNode,
+  nearestPointOnSegment,
+  nodeOnNetworks,
+  roadIndexOf,
+  segmentTouchesBox,
+  segmentsInBox,
+  unindexNode,
+  unindexSegment,
+} from "./roads/spatial";
+export type { NearestNode, NearestPoint, RoadIndex } from "./roads/spatial";
