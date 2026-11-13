@@ -1,4 +1,5 @@
 import {
+  bridgeDeckLevel,
   deserialize,
   fnv1a64,
   generateTerrain,
@@ -25,11 +26,13 @@ import { createRoadPreviewLayer } from "./render/road-preview";
 import type { PreviewShape } from "./render/road-preview-geometry";
 import { createSnapMarkLayer } from "./render/snap-marks";
 import { snapMarks } from "./render/snap-marks-geometry";
+import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
+import { dragSamples, pickSegment } from "./tools/pick-segment";
 import { RoadToolController, type RoadPreview } from "./tools/road-tool";
 import type { Snap } from "./tools/snap";
 import { mountUi } from "./ui/App";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import { setRoadHover, setViewReadout, useUi } from "./ui/store";
+import { setEditHover, setRoadHover, setViewReadout, useUi } from "./ui/store";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
 const TAB_CITY_KEY = "city-council:city";
@@ -199,6 +202,14 @@ const roadTool = new RoadToolController({
 });
 mirror.subscribe((update) => roadTool.mirrorUpdated(update));
 
+const editTool = new EditToolController({
+  get: () => useUi.getState(),
+  set: (patch) => useUi.setState(patch),
+  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain } : null),
+  send: (type, payload) => sendCommand(type, payload),
+});
+mirror.subscribe((update) => editTool.mirrorUpdated(update));
+
 const services: AppServices = {
   mirror,
   saves,
@@ -209,6 +220,7 @@ const services: AppServices = {
   newCity,
   openCity,
   roadTool,
+  editTool,
 };
 const uiRoot = document.getElementById("ui");
 if (!uiRoot) throw new Error("#ui is missing from index.html");
@@ -247,6 +259,8 @@ interface CameraHooks {
   project(x: number, y: number, z: number): { x: number; y: number };
   /** Where the road tool's cursor lands now, with the guides that are on, or null. */
   snap(): Snap | null;
+  /** The road segment the bulldoze or upgrade tool would pick at screen point (sx, sy), or NONE (-1). */
+  pickSegmentAt(sx: number, sy: number): number;
 }
 
 let resolveCamera: (hooks: CameraHooks) => void = () => undefined;
@@ -342,6 +356,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       return { x: ((v.x + 1) / 2) * canvas.clientWidth, y: ((1 - v.y) / 2) * canvas.clientHeight };
     },
     snap: () => lastSnap,
+    pickSegmentAt: (sx, sy) => segmentAt({ x: sx, y: sy }),
   };
   /**
    * Metres one CSS pixel covers on the ground at `hit`: the mean of the
@@ -357,13 +372,52 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   };
   const snapAt = (hit: GroundHit | null): Snap | null =>
     hit ? roadTool.snap(hit, { metresPerPixel: metresPerPixel(hit), free: controls.altHeld() }) : null;
+  /** The road segment under screen point `p` for the bulldoze and upgrade tools, or NONE. `prefer` wins while `p` is on it. */
+  function segmentAt(p: { x: number; y: number }, prefer = -1): number {
+    const net = mirror.state?.roads;
+    if (!net) return -1;
+    const ground = rig.pickGround(p.x, p.y);
+    const deckY = bridgeDeckLevel(hooks.terrain.waterLevel);
+    const deck = rig.pickLevel(p.x, p.y, deckY);
+    const at = ground ?? (deck ? { ...deck, y: deckY, distance: 0 } : null);
+    if (!at) return -1;
+    return pickSegment(net, hooks.terrain, {
+      pointer: p,
+      ground,
+      deck,
+      metresPerPixel: metresPerPixel(at),
+      project: hooks.project,
+    }, undefined, prefer);
+  }
   controls.onPick((hit) => {
     hooks.lastPick = hit;
     setViewReadout({ pick: metres(hit) });
+    if (editTool.active()) {
+      const pointer = controls.pointer();
+      editTool.click(pointer ? segmentAt(pointer) : -1);
+      return;
+    }
     const snap = snapAt(hit);
     roadTool.click(snap ? { x: snap.x, z: snap.z } : hit);
   });
-  controls.onRightClick(() => roadTool.cancel());
+  controls.onRightClick(() => {
+    const pointer = controls.pointer();
+    if (editTool.active() && pointer && editTool.rightClick(segmentAt(pointer))) return;
+    roadTool.cancel();
+  });
+  controls.setToolDrag({
+    active: () => editTool.active() !== null,
+    start: () => editTool.dragStart(),
+    move: (from, to) => {
+      for (const p of dragSamples(from, to)) {
+        // The segment the drag took last wins while the pointer is on it, so a drag along a road skips the roads crossing it.
+        const drag = useUi.getState().editDrag;
+        editTool.dragOver(segmentAt(p, drag?.[drag.length - 1] ?? -1));
+      }
+    },
+    end: () => editTool.dragEnd(),
+    cancel: () => editTool.dragCancel(),
+  });
   controls.onDoubleClick(() => roadTool.finish());
   const previews = createRoadPreviewLayer(view.scene, () => hooks.terrain);
   const marks = createSnapMarkLayer(view.scene, () => hooks.terrain);
@@ -386,6 +440,18 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       preview = key === "" ? null : roadTool.preview(end);
     }
     return preview;
+  };
+  // The edit under the pointer, worked out again only when what it depends on changes.
+  let editKey = "";
+  let edit: EditPreview | null = null;
+  const liveEdit = (seg: number): EditPreview | null => {
+    const ui = useUi.getState();
+    const key = editTool.active() ? `${ui.tool},${seg},${ui.editDrag?.join(";") ?? "-"},${ui.roadType},${mirrorVersion}` : "";
+    if (key !== editKey) {
+      editKey = key;
+      edit = key === "" ? null : editTool.preview(seg);
+    }
+    return edit;
   };
   const shapeOf = (p: RoadPreview, look: PreviewShape["look"]): PreviewShape => ({
     ax: p.from.x,
@@ -412,6 +478,20 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const live = livePreview(snap);
     const shapes = useUi.getState().roadPending.map((p) => shapeOf(p.preview, "pending"));
     if (live) shapes.push(shapeOf(live, live.ok ? "ok" : "refused"));
+    // The bulldoze and upgrade tools: edits in flight, then the one under the pointer.
+    const pointerNow = controls.pointer();
+    const picked = editTool.active() && pointerNow ? segmentAt(pointerNow) : -1;
+    document.body.dataset["pickedSegment"] = String(picked);
+    const editNow = liveEdit(picked);
+    const net = mirror.state?.roads;
+    if (net) {
+      for (const p of useUi.getState().editPending) shapes.push(...editShapes(net, p.preview, "pending"));
+      if (editNow) {
+        const look = !editNow.ok ? "refused" : editNow.kind === "bulldoze" ? "bulldoze" : "ok";
+        shapes.push(...editShapes(net, editNow, look));
+      }
+    }
+    setEditHover(editNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, preview: editNow } : null);
     previews.show(shapes);
     const scale = cursor ? metresPerPixel(cursor) : 1;
     const ui = useUi.getState();

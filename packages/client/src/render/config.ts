@@ -201,6 +201,8 @@ export const ROAD_PREVIEW = {
     junction: 0xffd23a,
     /** The part of a road that would be a bridge. */
     bridge: 0xb48cff,
+    /** A road the bulldoze tool would remove (issue M1-13). */
+    bulldoze: 0xff8a1f,
   },
   /** The bridge strip: width as a share of the road's, and extra height over the strip. */
   bridgeScale: 0.6,

@@ -24,13 +24,21 @@ function toolHint(mode: DrawMode, drawing: boolean, curving: boolean): string {
   return "Click to end the road. Esc or right-click drops it.";
 }
 
+/** What the hint says while the bulldoze or upgrade tool is on. */
+function editHint(tool: "bulldoze" | "upgrade", dragging: boolean, type: string): string {
+  if (dragging) return "Release to apply to every road marked. Esc drops the drag.";
+  const drag = "Drag across roads to take several at once. Shift-drag orbits.";
+  if (tool === "bulldoze") return `Click a road to bulldoze it. ${drag}`;
+  return `Click a road to upgrade it to ${type.toLowerCase()}. Right-click a one-way to reverse it. ${drag}`;
+}
+
 function typeName(id: string): string {
   return ROAD_TYPES.find((t) => t.id === id)?.name ?? id;
 }
 
-/** The build toolbar: the road tool and its road type picker. */
+/** The build toolbar: the road, upgrade and bulldoze tools and the road type picker. */
 export function BuildBar() {
-  const { roadTool } = useServices();
+  const { roadTool, editTool } = useServices();
   const ready = useSim((s) => s !== null);
   const tool = useUi((s) => s.tool);
   const roadType = useUi((s) => s.roadType);
@@ -40,13 +48,20 @@ export function BuildBar() {
   const pending = useUi((s) => s.roadPending.length);
   const note = useUi((s) => s.roadNote);
   const guides = useUi((s) => s.guides);
+  const dragging = useUi((s) => s.editDrag !== null);
+  const editPending = useUi((s) => s.editPending.length);
+  const editNote = useUi((s) => s.editNote);
   const active = tool === "road";
+  const editing = tool === "bulldoze" || tool === "upgrade";
 
   let hint = "Pick the road tool to draw roads.";
   if (active) {
     hint = toolHint(roadMode, drawing, curving);
     hint += ` Hold ${FREE_HAND_KEY_LABEL} to draw free-hand.`;
+  } else if (editing) {
+    hint = editHint(tool, dragging, typeName(roadType));
   }
+  const shownNote = editing ? editNote : note;
 
   return (
     <section className="panel build-bar" id="build-bar" aria-label="Build">
@@ -62,6 +77,26 @@ export function BuildBar() {
           >
             Road <kbd>B</kbd>
           </button>
+          <button
+            type="button"
+            id="upgrade-tool"
+            aria-pressed={tool === "upgrade"}
+            disabled={!ready}
+            title="Upgrade tool (V): change a road to the type picked"
+            onClick={() => editTool.toggle("upgrade")}
+          >
+            Upgrade <kbd>V</kbd>
+          </button>
+          <button
+            type="button"
+            id="bulldoze-tool"
+            aria-pressed={tool === "bulldoze"}
+            disabled={!ready}
+            title="Bulldoze tool (N): remove roads"
+            onClick={() => editTool.toggle("bulldoze")}
+          >
+            Bulldoze <kbd>N</kbd>
+          </button>
         </div>
         <div className="road-types" role="group" aria-label="Road type">
           {TOOL_ROAD_TYPES.map((id) => (
@@ -69,7 +104,7 @@ export function BuildBar() {
               key={id}
               type="button"
               id={`road-type-${id}`}
-              aria-pressed={active && roadType === id}
+              aria-pressed={(active || tool === "upgrade") && roadType === id}
               disabled={!ready}
               title={`${typeName(id)} (${TYPE_KEYS[id] ?? ""})`}
               onClick={() => roadTool.pickType(id)}
@@ -112,10 +147,11 @@ export function BuildBar() {
       <p className="hint" id="road-hint">
         {hint}
         {pending > 0 && <span id="road-pending"> Building {pending === 1 ? "1 road" : `${pending} roads`}…</span>}
+        {editPending > 0 && <span id="edit-pending"> Applying {editPending === 1 ? "1 change" : `${editPending} changes`}…</span>}
       </p>
-      {note && (
+      {shownNote && (
         <p className="road-note" id="road-note" role="status">
-          {note}
+          {shownNote}
         </p>
       )}
     </section>

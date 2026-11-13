@@ -4,8 +4,11 @@
 // Mouse: left drag pans (the ground under the cursor follows it), right or
 // middle drag orbits, wheel zooms towards the cursor, a left click picks the
 // ground and a right click without a drag is reported too, so a tool can
-// use it to cancel, and so is a double click, which ends a continuous road. Keyboard: WASD or arrows pan, Q and E turn, R and F tilt, + and -
-// zoom on the screen centre.
+// use it to cancel, and so is a double click, which ends a continuous road.
+// While a tool that drags is on (bulldoze and upgrade, issue M1-13), a left
+// drag goes to that tool instead of panning; Shift and a left drag still
+// orbit, and the keys still pan. Keyboard: WASD or arrows pan, Q and E turn,
+// R and F tilt, + and - zoom on the screen centre.
 
 import { Mesh, MeshBasicNodeMaterial, RingGeometry, type Scene } from "three/webgpu";
 import { CAMERA_SPEEDS, CLICK_SLOP, CURSOR_MARKER_SCALE } from "./config";
@@ -30,10 +33,30 @@ export interface CameraControls {
   onRightClick(listener: () => void): void;
   /** Called for a double click whose second press was a click, after both clicks have been picked. */
   onDoubleClick(listener: () => void): void;
+  /** Hands left drags to a tool while `handler.active()` is true, or back to panning with null. */
+  setToolDrag(handler: ToolDragHandler | null): void;
   dispose(): void;
 }
 
-type Drag = { kind: "pan" | "orbit"; button: number; startX: number; startY: number; lastX: number; lastY: number; moved: boolean };
+/**
+ * A tool that takes left drags. A press that does not move past the click
+ * slop stays a click and goes to `onPick` as usual; one that does starts a
+ * drag here instead of panning.
+ */
+export interface ToolDragHandler {
+  /** Whether a left press now starts a tool drag. Asked at each press. */
+  active(): boolean;
+  /** The press moved past the click slop. */
+  start(): void;
+  /** The pointer moved from `from` to `to`, CSS pixels over the canvas. The first call starts at the press. */
+  move(from: { x: number; y: number }, to: { x: number; y: number }): void;
+  /** The button came up: the drag is done. */
+  end(): void;
+  /** The drag was cut off, by a lost pointer or a lost window. */
+  cancel(): void;
+}
+
+type Drag = { kind: "pan" | "orbit" | "tool"; button: number; startX: number; startY: number; lastX: number; lastY: number; moved: boolean };
 
 const KEYS: Record<string, string> = {
   KeyW: "forward",
@@ -66,6 +89,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   let pointer: { x: number; y: number } | null = null;
   let cursorHit: GroundHit | null = null;
   let alt = false;
+  let toolDrag: ToolDragHandler | null = null;
 
   const marker = new Mesh(
     new RingGeometry(0.55, 1, 32).rotateX(-Math.PI / 2),
@@ -85,7 +109,8 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   function onPointerDown(e: PointerEvent): void {
     if (e.pointerType === "touch") return;
     const p = local(e);
-    const kind = e.button === 0 && !e.shiftKey ? "pan" : e.button === 0 || e.button === 1 || e.button === 2 ? "orbit" : null;
+    const left = e.button === 0 && !e.shiftKey;
+    const kind = left ? (toolDrag?.active() ? "tool" : "pan") : e.button === 0 || e.button === 1 || e.button === 2 ? "orbit" : null;
     if (!kind) return;
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
@@ -98,8 +123,16 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     pointer = p;
     alt = e.altKey;
     if (!drag) return;
+    const wasMoving = drag.moved;
     if (Math.abs(p.x - drag.startX) > CLICK_SLOP || Math.abs(p.y - drag.startY) > CLICK_SLOP) drag.moved = true;
-    if (drag.moved) {
+    if (drag.kind === "tool") {
+      if (drag.moved && !wasMoving) {
+        toolDrag?.start();
+        toolDrag?.move({ x: drag.startX, y: drag.startY }, p);
+      } else if (drag.moved) {
+        toolDrag?.move({ x: drag.lastX, y: drag.lastY }, p);
+      }
+    } else if (drag.moved) {
       if (drag.kind === "pan") rig.dragTo(p.x, p.y);
       else rig.orbit(-(p.x - drag.lastX) * CAMERA_SPEEDS.dragYaw, (p.y - drag.lastY) * CAMERA_SPEEDS.dragPitch);
     }
@@ -111,7 +144,11 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     alt = e.altKey;
     if (!drag) return;
     const released = e.type === "pointerup";
-    const wasClick = released && drag.kind === "pan" && !drag.moved;
+    const wasClick = released && (drag.kind === "pan" || drag.kind === "tool") && !drag.moved;
+    if (drag.kind === "tool" && drag.moved) {
+      if (released) toolDrag?.end();
+      else toolDrag?.cancel();
+    }
     const wasRightClick = released && drag.kind === "orbit" && drag.button === 2 && !drag.moved;
     if (released && drag.button === 0) lastWasClick = wasClick;
     drag = null;
@@ -167,6 +204,10 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   function onBlur(): void {
     held.clear();
     alt = false;
+    if (drag?.kind === "tool") {
+      if (drag.moved) toolDrag?.cancel();
+      drag = null;
+    }
   }
 
   const noMenu = (e: Event) => e.preventDefault();
@@ -232,6 +273,9 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     onPick: (l) => pickListeners.push(l),
     onRightClick: (l) => rightClickListeners.push(l),
     onDoubleClick: (l) => doubleClickListeners.push(l),
+    setToolDrag(handler) {
+      toolDrag = handler;
+    },
     dispose() {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
