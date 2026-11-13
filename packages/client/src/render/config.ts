@@ -164,6 +164,25 @@ export const ROADS = {
   decorClearance: { trees: 3, grass: 0.5 },
   /** Side of a cell in the road mask that decoration checks, metres. */
   maskCell: 2,
+  /**
+   * Bridges. Sizes are metres: the deck's depth under its surface, the
+   * railing along each edge, and the piers, which stand at most
+   * `pierSpacing` apart under the level deck, are `pierThickness` along the
+   * road and `pierWidthShare` of its width across, and reach `pierFooting`
+   * into the ground.
+   */
+  bridges: {
+    deckDepth: 1.2,
+    railingHeight: 1.1,
+    railingThickness: 0.35,
+    pierSpacing: 36,
+    pierThickness: 1.6,
+    pierWidthShare: 0.7,
+    pierFooting: 1,
+    railing: 0xc9c5ba,
+    underside: 0x8e8a82,
+    pier: 0xa7a296,
+  },
 } as const;
 
 /**
@@ -180,7 +199,12 @@ export const ROAD_PREVIEW = {
     pending: 0xb9c6d3,
     /** Where the road would meet another. */
     junction: 0xffd23a,
+    /** The part of a road that would be a bridge. */
+    bridge: 0xb48cff,
   },
+  /** The bridge strip: width as a share of the road's, and extra height over the strip. */
+  bridgeScale: 0.6,
+  bridgeLift: 0.05,
   opacity: 0.72,
   /** Metres above the ground. */
   lift: 0.6,

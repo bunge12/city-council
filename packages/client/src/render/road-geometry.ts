@@ -30,15 +30,24 @@
 // lines than for the street-level surface. A junction cuts a curved road
 // back along the curve, and its polygon meets the cut edge exactly where the
 // strip ends, so there is no gap.
+//
+// A bridge (issue 11) is drawn at its deck's height, which the sim's
+// `bridgeDeckHeight` gives from its bank nodes and the water, not on the
+// ground: the deck, a fascia and railing along each edge, and piers from
+// under the deck down to the ground or the lake bed below.
 
 import {
   CHUNKS_PER_SIDE,
   CHUNK_SIZE,
+  LEVEL_BRIDGE,
   NETWORK_ROAD,
   NODE_ALIVE,
   NONE,
   ROAD_TYPES,
   SEG_ALIVE,
+  bridgeDeckHeight,
+  bridgeDeckLevel,
+  bridgeRamps,
   heightAt,
   isStraight,
   minRadius,
@@ -749,6 +758,7 @@ export function buildRoadChunk(
     return v;
   };
 
+  const deck = bridgeDeckLevel(terrain.waterLevel);
   const sorted = [...segs].sort((a, b) => a - b);
   for (const seg of sorted) {
     if (!liveRoadSegment(net, seg)) continue;
@@ -757,7 +767,25 @@ export function buildRoadChunk(
     const b = net.segB[seg] ?? 0;
     const t0 = trimAt(junctions(a), seg);
     const t1 = f.length - trimAt(junctions(b), seg);
-    const st = f.stations(0, f.length, ROADS.sampleStep);
+    const bridge = net.segLevel[seg] === LEVEL_BRIDGE;
+    const hA = net.nodeHeight[a] ?? 0;
+    const hB = net.nodeHeight[b] ?? 0;
+    /** The deck's height at distance `t` along a bridge. */
+    const deckAt = (t: number): number => bridgeDeckHeight(hA, hB, f.length, t, deck, f.type.maxSlope);
+    let st = f.stations(0, f.length, ROADS.sampleStep);
+    if (bridge) {
+      // A station where each ramp meets the level deck, so the kink is drawn where it is.
+      const ramps = bridgeRamps(hA, hB, f.length, deck, f.type.maxSlope);
+      st = [...st, ramps.a, f.length - ramps.b].filter((t) => t > 1e-3 && t < f.length - 1e-3);
+      st = [0, ...st, f.length].sort((p, q) => p - q).filter((t, i, all) => i === 0 || t - (all[i - 1] ?? 0) > 1e-3);
+    }
+    /** A surface vertex: on the ground, or on a bridge's deck facing straight up. */
+    const onRoad = (x: number, z: number, t: number): number => {
+      if (!bridge) return ground(surface, x, z, rgb);
+      const v = surface.vertex(x, deckAt(t), z, rgb);
+      surface.normals.push(0, 1, 0);
+      return v;
+    };
     const inChunk = (mid: number) => {
       const p = f.point(mid);
       return chunkAt(p.x, p.z) === chunk;
@@ -783,7 +811,7 @@ export function buildRoadChunk(
         }
         const pair = (t: number): [number, number] => {
           const { x, z, nx, nz } = f.frame(t);
-          const y = heightAt(terrain, x, z);
+          const y = bridge ? deckAt(t) : heightAt(terrain, x, z);
           const r = lines.vertex(x, y, z, lineRgb);
           lines.sides.push(-nx, -nz);
           lines.halves.push(f.half);
@@ -815,8 +843,8 @@ export function buildRoadChunk(
         }
         const edge = (t: number) => {
           const { x: cx, z: cz, nx, nz } = f.frame(t);
-          const r = ground(surface, cx - nx * f.half, cz - nz * f.half, rgb);
-          const l = ground(surface, cx + nx * f.half, cz + nz * f.half, rgb);
+          const r = onRoad(cx - nx * f.half, cz - nz * f.half, t);
+          const l = onRoad(cx + nx * f.half, cz + nz * f.half, t);
           const p = surface.positions;
           return { r, l, hr: p[r * 3 + 1] ?? 0, hl: p[l * 3 + 1] ?? 0 };
         };
@@ -828,6 +856,13 @@ export function buildRoadChunk(
         const piece: Piece = { t0: s0, t1: s1, r0: start.hr, l0: start.hl, r1: end.hr, l1: end.hl };
         for (const paint of paints) paintPiece(markings, f, piece, paint, m.width);
         if (f.type.oneWay) arrows(markings, f, piece, t0, t1);
+        if (bridge) bridgeSides(surface, f, s0, s1, deckAt);
+      }
+    }
+    if (bridge) {
+      for (const t of pierStations(f.length, deckAt, deck)) {
+        const p = f.point(t);
+        if (chunkAt(p.x, p.z) === chunk) pier(surface, f, t, deckAt(t), heightAt(terrain, p.x, p.z));
       }
     }
     if (drew) segCount++;
@@ -869,6 +904,111 @@ export function buildRoadChunk(
   }
 
   return { surface: surface.done(), markings: markings.done(), lines: lines.done(), segments: segCount, junctions: junctionCount };
+}
+
+/**
+ * A quad facing `normal`: its corners in order around it, wound so the
+ * front face is the side `normal` points to.
+ */
+function face(mesh: Mesh, a: number, b: number, c: number, d: number, normal: readonly [number, number, number]): void {
+  const p = mesh.positions;
+  const at = (v: number, k: number) => p[v * 3 + k] ?? 0;
+  const ux = at(b, 0) - at(a, 0);
+  const uy = at(b, 1) - at(a, 1);
+  const uz = at(b, 2) - at(a, 2);
+  const vx = at(c, 0) - at(a, 0);
+  const vy = at(c, 1) - at(a, 1);
+  const vz = at(c, 2) - at(a, 2);
+  const dot = (uy * vz - uz * vy) * normal[0] + (uz * vx - ux * vz) * normal[1] + (ux * vy - uy * vx) * normal[2];
+  if (dot >= 0) mesh.indices.push(a, b, c, a, c, d);
+  else mesh.indices.push(a, c, b, a, d, c);
+}
+
+/** A vertex with its own normal. */
+function lit(mesh: Mesh, x: number, y: number, z: number, rgb: readonly number[], n: readonly [number, number, number]): number {
+  const v = mesh.vertex(x, y, z, rgb);
+  mesh.normals.push(n[0], n[1], n[2]);
+  return v;
+}
+
+/**
+ * Both edges of a bridge piece from `s0` to `s1`: a fascia from under the
+ * deck up to a railing, the railing's inner face and its top, and the
+ * deck's underside between the fascias.
+ */
+function bridgeSides(mesh: Mesh, f: SegPath, s0: number, s1: number, deckAt: (t: number) => number): void {
+  const b = ROADS.bridges;
+  const rgb = linearRgb(b.railing);
+  const under = linearRgb(b.underside);
+  const f0 = f.frame(s0);
+  const f1 = f.frame(s1);
+  const y0 = deckAt(s0);
+  const y1 = deckAt(s1);
+  const outer = f.half + b.railingThickness;
+  for (const side of [1, -1]) {
+    // Outward from the road on this side, in plan.
+    const n0: [number, number, number] = [f0.nx * side, 0, f0.nz * side];
+    const n1: [number, number, number] = [f1.nx * side, 0, f1.nz * side];
+    const at = (fr: PathFrame, o: number, y: number, n: readonly [number, number, number], colour = rgb) =>
+      lit(mesh, fr.x + fr.nx * side * o, y, fr.z + fr.nz * side * o, colour, n);
+    // Outer face, from under the deck to the top of the railing.
+    face(mesh, at(f0, outer, y0 - b.deckDepth, n0), at(f1, outer, y1 - b.deckDepth, n1), at(f1, outer, y1 + b.railingHeight, n1), at(f0, outer, y0 + b.railingHeight, n0), n0);
+    // Inner face, from the deck up.
+    const in0: [number, number, number] = [-n0[0], 0, -n0[2]];
+    const in1: [number, number, number] = [-n1[0], 0, -n1[2]];
+    face(mesh, at(f0, f.half, y0, in0), at(f1, f.half, y1, in1), at(f1, f.half, y1 + b.railingHeight, in1), at(f0, f.half, y0 + b.railingHeight, in0), in0);
+    // The railing's top.
+    const up: [number, number, number] = [0, 1, 0];
+    face(mesh, at(f0, f.half, y0 + b.railingHeight, up), at(f1, f.half, y1 + b.railingHeight, up), at(f1, outer, y1 + b.railingHeight, up), at(f0, outer, y0 + b.railingHeight, up), up);
+  }
+  const down: [number, number, number] = [0, -1, 0];
+  const u = (fr: PathFrame, side: number, y: number) =>
+    lit(mesh, fr.x + fr.nx * side * outer, y - b.deckDepth, fr.z + fr.nz * side * outer, under, down);
+  face(mesh, u(f0, 1, y0), u(f1, 1, y1), u(f1, -1, y1), u(f0, -1, y0), down);
+}
+
+/**
+ * Where a bridge's piers stand, metres along it: evenly spaced, at most
+ * `ROADS.bridges.pierSpacing` apart, along the level deck. None where the
+ * ramps run, which meet the ground at the bank nodes.
+ */
+export function pierStations(length: number, deckAt: (t: number) => number, deck: number): number[] {
+  let from = 0;
+  while (from < length && deckAt(from) < deck - 1e-6) from += 1;
+  let to = length;
+  while (to > from && deckAt(to) < deck - 1e-6) to -= 1;
+  const span = to - from;
+  if (span <= 0) return [];
+  const gaps = Math.max(1, Math.ceil(span / ROADS.bridges.pierSpacing));
+  const out: number[] = [];
+  for (let k = 0; k <= gaps; k++) out.push(from + (span * k) / gaps);
+  return out;
+}
+
+/** A pier at `t` along a bridge: a box from under the deck at `top` down into the ground at `bottom`. */
+function pier(mesh: Mesh, f: SegPath, t: number, top: number, bottom: number): void {
+  const b = ROADS.bridges;
+  const fr = f.frame(t);
+  const rgb = linearRgb(b.pier);
+  const hy = top - b.deckDepth;
+  const lo = bottom - b.pierFooting;
+  if (hy <= lo) return;
+  const along = b.pierThickness / 2;
+  const across = f.half * b.pierWidthShare;
+  const corner = (sa: number, sc: number, y: number, n: readonly [number, number, number]) =>
+    lit(mesh, fr.x + fr.dx * along * sa + fr.nx * across * sc, y, fr.z + fr.dz * along * sa + fr.nz * across * sc, rgb, n);
+  const sides: [number, number, number, number][] = [
+    [1, -1, 1, 1],
+    [-1, 1, -1, -1],
+    [-1, 1, 1, 1],
+    [1, -1, -1, -1],
+  ];
+  // Each side as (along, across) at its two corners: the two faces across the road, then the two along it.
+  for (const [a0, c0, a1, c1] of sides) {
+    const n: [number, number, number] =
+      a0 === a1 ? [fr.dx * a0, 0, fr.dz * a0] : [fr.nx * c0, 0, fr.nz * c0];
+    face(mesh, corner(a0, c0, lo, n), corner(a1, c1, lo, n), corner(a1, c1, hy, n), corner(a0, c0, hy, n), n);
+  }
 }
 
 /** A flat quad painted on a strip piece: from `ta` to `tb` along, from `o0` to `o1` across. */

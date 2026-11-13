@@ -35,6 +35,21 @@ export interface RoadTypeBalance {
   minCurveRadius: number;
   buildCostPerMetre: BalancePrice;
   upkeepPerMetrePerYear: BalancePrice;
+  /** What happens where this type crosses water. */
+  bridge: BridgeBalance;
+}
+
+/** A road type's bridges. */
+export interface BridgeBalance {
+  /** Longest bridge, metres, ramps included. */
+  maxLength: number;
+  /** A metre of bridge costs this many times a metre of the road on the ground. */
+  costMultiplier: number;
+  sourceYear: number;
+  source: string;
+  sourceUrl?: string;
+  placeholder?: boolean;
+  note?: string;
 }
 
 /** How the sim checks a road before it builds one. */
@@ -49,6 +64,8 @@ export interface RoadBuildBalance {
   minAngleDegrees: number;
   /** Most metres between two ground samples along a road. */
   groundSampleStep: number;
+  /** Metres from the water surface up to a bridge deck. */
+  bridgeClearance: number;
 }
 
 export interface RoadBalance {
@@ -67,7 +84,7 @@ export interface RoadType extends Omit<RoadTypeBalance, "buildCostPerMetre" | "u
 
 const NUMBER_FIELDS = ["lanes", "speedKmh", "capacityPerLane", "width", "maxSlope", "minCurveRadius"] as const;
 const BOOLEAN_FIELDS = ["oneWay", "zonable", "buildable"] as const;
-const BUILD_FIELDS = ["gridStep", "mergeDistance", "minLength", "minAngleDegrees", "groundSampleStep"] as const;
+const BUILD_FIELDS = ["gridStep", "mergeDistance", "minLength", "minAngleDegrees", "groundSampleStep", "bridgeClearance"] as const;
 const PRICE_FIELDS = ["buildCostPerMetre", "upkeepPerMetrePerYear"] as const;
 /** Segments store the type in a Uint8Array. */
 const MAX_TYPES = 256;
@@ -108,6 +125,18 @@ function checkPrice(price: unknown, where: string, toYear: number, errors: strin
   if (price["placeholder"] !== undefined && typeof price["placeholder"] !== "boolean") {
     errors.push(`${where}.placeholder must be true or false`);
   }
+}
+
+function checkBridge(bridge: unknown, where: string, toYear: number, errors: string[]): void {
+  if (!isRecord(bridge)) {
+    errors.push(`${where} is missing`);
+    return;
+  }
+  if (!isPositive(bridge["maxLength"])) errors.push(`${where}.maxLength must be a positive number`);
+  if (!isPositive(bridge["costMultiplier"])) errors.push(`${where}.costMultiplier must be a positive number`);
+  if (!isYear(bridge["sourceYear"])) errors.push(`${where}.sourceYear is missing`);
+  else if ((bridge["sourceYear"] as number) > toYear) errors.push(`${where}.sourceYear is after ${toYear}`);
+  if (typeof bridge["source"] !== "string" || bridge["source"].trim() === "") errors.push(`${where}.source is missing`);
 }
 
 /**
@@ -166,6 +195,7 @@ export function checkRoadBalance(data: unknown): string[] {
       if (typeof type[field] !== "boolean") errors.push(`${where}.${field} must be true or false`);
     }
     for (const field of PRICE_FIELDS) checkPrice(type[field], `${where}.${field}`, toYear, errors);
+    checkBridge(type["bridge"], `${where}.bridge`, toYear, errors);
   });
   return errors;
 }
