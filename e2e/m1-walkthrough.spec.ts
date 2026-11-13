@@ -95,8 +95,10 @@ const A = { x0: 4220, x1: 4524, z: 4600 };
 const B = { x: 4350, z0: 4470, z1: 4730 };
 /** Seed 2026's inlet: water from x = 3488 to 3600 along z = 6600. */
 const RIVER = { x0: 3400, x1: 3700, z: 6600, mid: 3545 };
-/** A street up the slope west of the flat square: an 18% grade, over the street's 12% (found with planRoad). */
+/** A street up the slope west of the flat square: an 18% grade, over the street's 16% (found with planRoad). */
 const STEEP = { x0: 3850, x1: 3930, z: 4700 };
+/** The street's slope limit as the refusal reads it, a whole percentage. */
+const STREET_SLOPE = `${Math.round((street?.maxSlope ?? 0) * 100)}%`;
 /** The street the grid is dragged from, on the inlet's east bank, and the grid's far corner across the water. */
 const GRID_STREET = { x: 3840, z0: 6640, z1: 6900 };
 const GRID_CORNER = { x: 3440, z: 6890 };
@@ -489,7 +491,7 @@ for (const variant of [
       await click(page, STEEP.x0, STEEP.z);
       await hover(page, STEEP.x1, STEEP.z);
       await expect(readout).toHaveAttribute("data-ok", "false");
-      await expect(page.locator("#road-reason")).toHaveText(/^Too steep: a \d+% grade, and the street limit is 12%$/);
+      await expect(page.locator("#road-reason")).toHaveText(new RegExp(`^Too steep: a \\d+% grade, and the street limit is ${STREET_SLOPE}$`));
       await shot(page, info, dir, "4-steep-refused");
       await click(page, STEEP.x1, STEEP.z);
       await expect(page.locator("#road-note")).toContainText("Too steep");

@@ -303,6 +303,7 @@ test("both tools' keys are listed with the other shortcuts", async ({ page }, te
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#upgrade-tool")).toHaveAttribute("aria-pressed", "false");
   await page.keyboard.press("Escape");
-  await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "false");
+  // Off, the road menu closes and takes the bulldoze button with it (issue 47).
+  await expect(page.locator("#bulldoze-tool")).toHaveCount(0);
   await attach(page, testInfo, "13 the shortcut list");
 });

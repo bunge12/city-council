@@ -41,6 +41,7 @@ import { buildRoadIndex, roadIndexOf } from "../src/roads/spatial";
 import { heldIds } from "../src/undo";
 import { terrainOf } from "../src/terrain/cache";
 import fixtureJson from "./fixtures/replay/edit-roads.json";
+import { withBridgeLimit } from "./balance-override";
 import { expectReplay, type ReplayFixture } from "./replay-helper";
 
 // Issue M1-12: BulldozeRoad and UpgradeRoad.
@@ -55,6 +56,11 @@ function typeOf(id: string): RoadType {
   const type = ROAD_TYPES.find((t) => t.id === id);
   if (!type) throw new RangeError(id);
   return type;
+}
+
+/** A type's slope limit as the reason a player reads it, a whole percentage. */
+function slopeLimit(id: string): string {
+  return `${Math.round(typeOf(id).maxSlope * 100)}%`;
 }
 
 let seq = 0;
@@ -307,7 +313,7 @@ describe("UpgradeRoad", () => {
     const [x, z] = found ?? [0, 0];
     const state = createBareState(SEED);
     ok(state, road([x, z], [x + 16, z]));
-    expect(rejection(state, upgrade("avenue", [0]))).toMatch(/^Too steep: .* the avenue limit is 10%$/);
+    expect(rejection(state, upgrade("avenue", [0]))).toMatch(new RegExp(`^Too steep: .* the avenue limit is ${slopeLimit("avenue")}$`));
     expect(state.roads.segType[0]).toBe(typeOf("street").index);
     // One-way has the street's limits.
     ok(state, upgrade("oneWay", [0]));
@@ -320,7 +326,9 @@ describe("UpgradeRoad", () => {
     const radius = minRadius(segmentQuad(state.roads, 0));
     expect(radius).toBeGreaterThanOrEqual(typeOf("street").minCurveRadius);
     expect(radius).toBeLessThan(typeOf("avenue").minCurveRadius);
-    expect(rejection(state, upgrade("avenue", [0]))).toMatch(/^The curve is too tight: .* the avenue limit is 40 m$/);
+    expect(rejection(state, upgrade("avenue", [0]))).toMatch(
+      new RegExp(`^The curve is too tight: .* the avenue limit is ${typeOf("avenue").minCurveRadius} m$`),
+    );
   });
 
   it("refuses a bridge too long for the new type, or whose ramps it cannot climb", () => {
@@ -329,8 +337,8 @@ describe("UpgradeRoad", () => {
     const net = state.roads;
     const bridge = liveSegments(net).find((s) => net.segLevelA[s] === LEVEL_BRIDGE) ?? -1;
     expect(bridge).toBeGreaterThanOrEqual(0);
-    // Avenue ramps are held to 10% rather than 12%, so either the bridge fits
-    // or the reason names the ramp. A one-way has the street's limits.
+    // Avenue ramps are held to a lower grade than a street's, so either the
+    // bridge fits or the reason names the ramp. A one-way has the street's limits.
     const avenue = planUpgrade(net, terrainOf(SEED), { segments: [bridge], type: "avenue" });
     if (!avenue.ok) expect(avenue.reason).toMatch(/ramp|bank/);
     ok(state, upgrade("oneWay", [bridge]));
@@ -345,26 +353,40 @@ describe("UpgradeRoad", () => {
   });
 
   it("refuses a bridge longer than the new type's limit, or whose ramps are too steep for it", () => {
-    // Ground at 20 m with the water at 10 m from x = 160 to 240, so the deck
-    // is at 15 m and each ramp falls 5 m.
-    const terrain = synthetic((x) => (x >= 160 && x <= 240 ? 0 : 20));
+    // Ground at 22 m with the water at 10 m from x = 160 to 240, so the deck
+    // is at 15 m and each ramp falls 7 m.
+    const terrain = synthetic((x) => (x >= 160 && x <= 240 ? 0 : 22));
     const net = createBareState(SEED).roads;
+    const street = typeOf("street");
+    const avenue = typeOf("avenue");
+    const oneWay = typeOf("oneWay");
     const bridgeAt = (x0: number, x1: number, z: number) =>
-      addSegment(net, addNode(net, x0, z, 20), addNode(net, x1, z, 20), { type: typeOf("avenue").index, level: LEVEL_BRIDGE });
-    // 350 m: an avenue spans it, a street cannot.
+      addSegment(net, addNode(net, x0, z, 22), addNode(net, x1, z, 22), { type: avenue.index, level: LEVEL_BRIDGE });
+    // 350 m: within every type's limit since issue 47, so a street spans it.
     const long = bridgeAt(0, 350, 100);
-    expect(planUpgrade(net, terrain, { segments: [long], type: "street" })).toEqual({
-      ok: false,
-      reason: "Too long for a bridge: 350 m, and the street limit is 300 m",
+    expect(street.bridge.maxLength).toBeGreaterThan(350);
+    expect(planUpgrade(net, terrain, { segments: [long], type: "street" }).ok).toBe(true);
+    // No bridge on the map is longer than the limits in the balance, so the
+    // check is run with a street limit lowered below this bridge.
+    withBridgeLimit(street, 300, () => {
+      expect(planUpgrade(net, terrain, { segments: [long], type: "street" })).toEqual({
+        ok: false,
+        reason: "Too long for a bridge: 350 m, and the street limit is 300 m",
+      });
     });
-    // 44 m from the bank to the shore: enough for a street's 12%, not an avenue's 10%.
-    const short = addSegment(net, addNode(net, 100, 300, 20), addNode(net, 300, 300, 20), {
-      type: typeOf("street").index,
+    expect(planUpgrade(net, terrain, { segments: [long], type: "street" }).ok).toBe(true);
+    // 48 m from the bank to the last dry sample: 7 m over 48 m is enough for
+    // a street's grade, not an avenue's.
+    const grade = 7 / 48;
+    expect(grade).toBeGreaterThan(avenue.maxSlope);
+    expect(grade).toBeLessThanOrEqual(oneWay.maxSlope);
+    const short = addSegment(net, addNode(net, 100, 300, 22), addNode(net, 300, 300, 22), {
+      type: street.index,
       level: LEVEL_BRIDGE,
     });
     expect(planUpgrade(net, terrain, { segments: [short], type: "avenue" })).toEqual({
       ok: false,
-      reason: expect.stringMatching(/^The bank is too steep for the bridge: the ramp down to the deck would be a \d+% grade, and the avenue limit is 10%$/),
+      reason: `The bank is too steep for the bridge: the ramp down to the deck would be a ${Math.round(grade * 100)}% grade, and the avenue limit is ${slopeLimit("avenue")}`,
     });
     expect(planUpgrade(net, terrain, { segments: [short], type: "oneWay" }).ok).toBe(true);
   });

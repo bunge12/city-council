@@ -5,8 +5,8 @@
   "log": [
     { "tick": 0, "seq": 1, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 3400, "z": 6600 }, "to": { "x": 3700, "z": 6600 }, "type": "street" } },
     { "tick": 0, "seq": 1, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 3300, "z": 7200 }, "to": { "x": 3800, "z": 7200 }, "type": "avenue" } },
-    { "tick": 1, "seq": 2, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 3447.375, "z": 6600 }, "to": { "x": 3447.375, "z": 6480 }, "type": "street" } },
+    { "tick": 1, "seq": 2, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 3455.25, "z": 6600 }, "to": { "x": 3455.25, "z": 6480 }, "type": "street" } },
     { "tick": 4, "seq": 4, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 3380, "z": 6640 }, "to": { "x": 3720, "z": 6640 }, "type": "street", "control": { "x": 3550, "z": 6700 } } }
   ],
-  "hash": "423515221e479f50"
+  "hash": "bb172e6883a12f79"
 }

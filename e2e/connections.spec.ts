@@ -97,7 +97,7 @@ function bluePixels(image: Image, cx: number, cy: number, half: number): number 
   return n;
 }
 
-test("a new city starts looking at a connection, and every connection is marked from the city band", async ({ page }, testInfo) => {
+test("a new city starts looking at a connection from the district band, and every connection is marked from the city band", async ({ page }, testInfo) => {
   await page.goto("/?webgl");
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
   await page.addStyleTag({ content: ".notes { display: none !important; }" });
@@ -113,14 +113,14 @@ test("a new city starts looking at a connection, and every connection is marked 
     const cam = await window.cityCouncil.camera;
     return { target: cam.rig.pose.target, band: cam.rig.zoomBand() };
   });
-  expect(start.band).toBe("city");
+  expect(start.band).toBe("district");
   const ux = (first.ix - first.x) / 200;
   const uz = (first.iz - first.z) / 200;
   const ahead = (start.target.x - first.ix) * ux + (start.target.z - first.iz) * uz;
   expect(ahead).toBeGreaterThan(0);
   expect(ahead).toBeLessThan(2000);
   await frames(page);
-  const opening = await attach(page, testInfo, "1 a new city opens on an outside connection");
+  const opening = await attach(page, testInfo, "1 a new city opens on an outside connection, in the district band");
   const atEdge = await page.evaluate(async ([x, y, z]) => (await window.cityCouncil.camera).project(x, y, z), [first.x, first.y, first.z] as const);
   expect(bluePixels(opening, atEdge.x, atEdge.y, 40)).toBeGreaterThan(100);
 

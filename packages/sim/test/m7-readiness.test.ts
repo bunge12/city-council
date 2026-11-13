@@ -134,7 +134,7 @@ describe("M7 readiness", () => {
         if (!asStreet.ok) continue;
         const asAvenue = planRoad(state.roads, terrain, { ...payload, type: "avenue" });
         if (!asAvenue.ok && asAvenue.reason.startsWith("Too steep")) {
-          expect(asAvenue.reason).toMatch(/avenue limit is 10%/);
+          expect(asAvenue.reason).toMatch(`avenue limit is ${Math.round(avenue.maxSlope * 100)}%`);
           found = true;
         }
       }
