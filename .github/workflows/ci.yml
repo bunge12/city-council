@@ -99,7 +99,10 @@ jobs:
           - { id: roads-1, args: "--project roads --no-deps --workers=1 --shard=1/3" }
           - { id: roads-2, args: "--project roads --no-deps --workers=1 --shard=2/3" }
           - { id: roads-3, args: "--project roads --no-deps --workers=1 --shard=3/3" }
-          - { id: walkthrough, args: "--project walkthrough --no-deps" }
+          # The M0 and M1 walkthroughs on runners of their own: each runs
+          # on WebGPU in software, which takes most of a runner's CPU.
+          - { id: walkthrough-m0, args: "--project walkthrough --no-deps -g \"M0 walkthrough\"" }
+          - { id: walkthrough-m1, args: "--project walkthrough --no-deps -g \"M1 walkthrough\"" }
     name: e2e (${{ matrix.id }})
     steps:
       - uses: actions/checkout@v4
@@ -114,9 +117,9 @@ jobs:
       # playwright.config.ts), so give them a display.
       - run: xvfb-run -a pnpm e2e ${{ matrix.args }}
       - uses: actions/upload-artifact@v4
-        if: always() && matrix.id == 'walkthrough'
+        if: always() && startsWith(matrix.id, 'walkthrough')
         with:
-          name: walkthrough
+          name: ${{ matrix.id }}
           path: walkthrough-screenshots
           retention-days: 30
       - uses: actions/upload-artifact@v4
