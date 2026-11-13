@@ -102,7 +102,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - uses: ./.github/actions/playwright-browsers
       # The roads and walkthrough projects run headed (see
       # playwright.config.ts), so give them a display.
       - run: xvfb-run -a pnpm e2e ${{ matrix.args }}
