@@ -4,7 +4,8 @@
 //
 // Layers by zoom band (PRD, "Zoom bands"):
 // - street: road surfaces, lane markings and one-way arrows
-// - district: road surfaces only
+// - district: road surfaces, with markings and arrows while the camera is
+//   below `ROADS.markingsBelow`
 // - city: avenues and highways only, as lines of a fixed screen width
 //
 // The renderer reads the mirror; it never writes it.
@@ -43,7 +44,8 @@ export interface RoadLayer {
   show(net: RoadNet): number[];
   /** Rebuilds what a delta's changed rows touch. Returns the chunks rebuilt. */
   apply(nodeIds: readonly number[], segIds: readonly number[]): number[];
-  setBand(band: ZoomBand): void;
+  /** Shows the layers for zoom band `band` with the camera `height` metres over the ground. */
+  setBand(band: ZoomBand, height: number): void;
   stats(): RoadStats;
   /** Where decoration must not stand in `chunk`, or null if no road is near. See `roadMask`. */
   decorMask(chunk: number): Uint8Array | null;
@@ -208,9 +210,9 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
       };
       return dirty;
     },
-    setBand(band) {
+    setBand(band, height) {
       roots.surface.visible = band !== "city";
-      roots.markings.visible = band === "street";
+      roots.markings.visible = band !== "city" && height < ROADS.markingsBelow;
       roots.lines.visible = band === "city";
     },
     stats: () => stats,

@@ -62,7 +62,20 @@ export const DECOR = {
     minAbove: 3,
     maxAbove: 330,
     /** Camera distance in metres to a chunk's centre beyond which its trees are not drawn. */
-    drawDistance: 2500,
+    drawDistance: 3500,
+  },
+  /**
+   * The stand-in for trees too far away to draw: the terrain under forest
+   * takes the canopy colour, so a forest still reads as green from the city
+   * band. It fades in from `fadeFrom` metres from the camera and is full at
+   * `fadeTo`, which matches the trees' draw distance so the two hand over.
+   * `cover` is how much of the ground colour the canopy hides at full.
+   */
+  canopy: {
+    colour: 0x4a7436,
+    fadeFrom: 1500,
+    fadeTo: 3500,
+    cover: 0.85,
   },
   grass: {
     /** Side of the jitter cell in metres. */
@@ -115,6 +128,12 @@ export const ROADS = {
   lift: { base: 0.25, perMetre: 0.0012 },
   /** Extra height of lane markings over the surface, in metres. */
   markingLift: 0.06,
+  /**
+   * Lane markings and arrows show while the camera is lower than this many
+   * metres over the ground: all of the street band and the low part of the
+   * district band. Higher up a line is under a pixel wide and shimmers.
+   */
+  markingsBelow: 1400,
   /** Surface colour by road type id. */
   surface: {
     street: 0x6d6f73,
@@ -147,7 +166,7 @@ export const ROADS = {
    * camera; a line is never thinner than the road.
    */
   cityLines: {
-    colours: { avenue: 0xf2a43a, highway: 0xe0563a } as Readonly<Record<string, number>>,
+    colours: { avenue: 0x5c5e63, highway: 0xe0563a } as Readonly<Record<string, number>>,
     perMetre: 0.0013,
     /**
      * Most metres between two points along a line. Coarser than the surface:

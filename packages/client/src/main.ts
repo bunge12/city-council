@@ -598,7 +598,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const p = view.camera.position;
     const band = rig.zoomBand();
     document.body.dataset["zoomBand"] = band;
-    view.setZoomBand(band);
+    view.setZoomBand(band, rig.heightAboveGround());
     const cursor = controls.cursor();
     const snap = snapAt(cursor);
     lastSnap = snap;
