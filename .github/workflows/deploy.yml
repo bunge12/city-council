@@ -65,7 +65,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - uses: ./.github/actions/playwright-browsers
       - name: Walkthrough against the public address
         env:
           PAGE_URL: ${{ needs.deploy.outputs.page_url }}

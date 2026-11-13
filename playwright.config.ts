@@ -46,8 +46,13 @@ export default defineConfig({
       // with the same screenshots. Headed for the same reasons as the
       // walkthrough, against the dev server. It starts after the chromium
       // project, since software WebGPU takes most of a CI runner's CPU.
+      // In CI each project has runners of its own (see
+      // .github/workflows/ci.yml). There the tests of this one file are
+      // split over three of them with `--shard`, which only splits a file
+      // when the project is fully parallel, and each runs one worker.
       name: "roads",
       testMatch: "roads.spec.ts",
+      fullyParallel: isCI,
       dependencies: remoteBase ? [] : ["chromium"],
       use: {
         ...devices["Desktop Chrome"],

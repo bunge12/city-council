@@ -1,0 +1,27 @@
+name: Playwright browsers
+description: >
+  Installs Chromium for Playwright, keeping the download in the Actions
+  cache. Run it after `pnpm install`.
+
+# The cache key is the Playwright version, so a version bump downloads the
+# browsers again. A pull request can read caches saved on main, and deploy.yml
+# saves one there on every push, so a new pull request starts with a hit.
+runs:
+  using: composite
+  steps:
+    - id: version
+      shell: bash
+      run: echo "version=$(pnpm exec playwright --version | sed 's/^Version //')" >> "$GITHUB_OUTPUT"
+    - id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.version.outputs.version }}
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: pnpm exec playwright install --with-deps chromium
+    # The cache holds the browsers only. The system packages they need, the
+    # fonts among them, still come from apt.
+    - if: steps.cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: pnpm exec playwright install-deps chromium
