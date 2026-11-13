@@ -4,12 +4,13 @@
 // `useSim` (hooks.ts) and change it only by sending commands.
 
 import { create } from "zustand";
+import { INITIAL_BLOCK_OVERLAY, type BlockOverlayState } from "../tools/block-overlay";
 import { INITIAL_EDIT_TOOL, type EditPreview, type EditToolState } from "../tools/edit-tool";
 import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tools/road-tool";
 import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
 
-export interface UiState extends RoadToolState, EditToolState, RouteToolState {
+export interface UiState extends RoadToolState, EditToolState, RouteToolState, BlockOverlayState {
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
@@ -42,6 +43,7 @@ export const useUi = create<UiState>(() => ({
   ...INITIAL_ROAD_TOOL,
   ...INITIAL_EDIT_TOOL,
   ...INITIAL_ROUTE_TOOL,
+  ...INITIAL_BLOCK_OVERLAY,
 }));
 
 export function toggleDebug(): void {
@@ -144,4 +146,29 @@ export function setEditHover(hover: EditHover | null): void {
   if (current === hover) return;
   if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview) return;
   useEditHover.setState({ hover });
+}
+
+/** A block's area label on screen: CSS pixels over the canvas. */
+export interface BlockLabel {
+  id: number;
+  x: number;
+  y: number;
+  area: number;
+}
+
+/**
+ * Where the block overlay's area labels sit on screen, worked out each frame
+ * the camera or the blocks change. Its own store, like the readouts beside
+ * the cursor, so only the labels re-render.
+ */
+export const useBlockLabels = create<{ labels: readonly BlockLabel[] }>(() => ({ labels: [] }));
+
+export function setBlockLabels(labels: readonly BlockLabel[]): void {
+  const current = useBlockLabels.getState().labels;
+  if (current.length === labels.length && current.every((l, i) => sameLabel(l, labels[i]))) return;
+  useBlockLabels.setState({ labels });
+}
+
+function sameLabel(a: BlockLabel, b: BlockLabel | undefined): boolean {
+  return !!b && a.id === b.id && a.area === b.area && Math.round(a.x) === Math.round(b.x) && Math.round(a.y) === Math.round(b.y);
 }

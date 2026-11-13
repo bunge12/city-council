@@ -1,5 +1,6 @@
 import { simInfo } from "@city-council/sim";
 import { useEffect, useState } from "react";
+import { blocksReadout } from "../tools/block-overlay";
 import { routeReadout } from "../tools/route-tool";
 import { TICK_BUDGET_MS } from "./config";
 import { formatSpeed } from "./format";
@@ -119,6 +120,30 @@ function RouteTool() {
   );
 }
 
+/** The block overlay: a button to outline every block with its area, and how many there are. */
+function BlockOverlay() {
+  const { blockOverlay } = useServices();
+  const on = useUi((s) => s.showBlocks);
+  const readout = useUi((s) => blocksReadout(s));
+  const count = useUi((s) => s.blocks?.length ?? null);
+  return (
+    <div className="route-tool">
+      <button
+        id="blocks-toggle"
+        type="button"
+        aria-pressed={on}
+        title="Outline every area enclosed by ground-level roads, with its area."
+        onClick={() => blockOverlay.toggle()}
+      >
+        Show blocks
+      </button>
+      <span id="blocks-readout" data-count={count === null ? "" : String(count)}>
+        {readout}
+      </span>
+    </div>
+  );
+}
+
 /** Numbers for whoever is building the next module. Toggled with the backquote key. */
 export function DebugPanel() {
   const open = useUi((s) => s.debugOpen);
@@ -174,6 +199,10 @@ export function DebugPanel() {
         <dt>Route</dt>
         <dd>
           <RouteTool />
+        </dd>
+        <dt>Blocks</dt>
+        <dd>
+          <BlockOverlay />
         </dd>
       </dl>
       <h3>Keys</h3>

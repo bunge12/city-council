@@ -6,6 +6,7 @@ import type { CommandResult } from "@city-council/sim";
 import type { SimMirror } from "../protocol/mirror";
 import type { SaveStatus } from "../save/channel";
 import type { SaveClient } from "../save/page";
+import type { BlockOverlayController } from "../tools/block-overlay";
 import type { EditToolController } from "../tools/edit-tool";
 import type { RoadToolController } from "../tools/road-tool";
 import type { RouteToolController } from "../tools/route-tool";
@@ -43,4 +44,6 @@ export interface AppServices {
   editTool: EditToolController;
   /** The debug panel's route tool. Its state is in the UI store too. */
   routeTool: RouteToolController;
+  /** The debug panel's block overlay. Its state is in the UI store too. */
+  blockOverlay: BlockOverlayController;
 }

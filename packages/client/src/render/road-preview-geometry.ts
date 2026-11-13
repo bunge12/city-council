@@ -22,8 +22,8 @@ import {
 import { ROADS, ROAD_PREVIEW } from "./config";
 import { linearRgb, stations } from "./road-geometry";
 
-/** How a preview is drawn: buildable, refused, sent and waiting for the sim, marked for the bulldozer, or on a route. */
-export type PreviewLook = "ok" | "refused" | "pending" | "bulldoze" | "route";
+/** How a preview is drawn: buildable, refused, sent and waiting for the sim, marked for the bulldozer, on a route, or outlining a block. */
+export type PreviewLook = "ok" | "refused" | "pending" | "bulldoze" | "route" | "block";
 
 /** A built bridge's deck, so its mark is drawn where the deck is: bank node heights and the type's slope limit. */
 export interface PreviewDeck {

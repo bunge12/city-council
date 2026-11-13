@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import type { Speed } from "@city-council/sim";
 import { ActivityLog } from "./ActivityLog";
+import { BlockLabels } from "./BlockLabels";
 import { BuildBar } from "./BuildBar";
 import { CityMenu } from "./CityMenu";
 import { DebugPanel } from "./DebugPanel";
@@ -86,6 +87,8 @@ function Shell() {
   useShortcuts();
   return (
     <>
+      {/* First, so the panels sit over the labels. */}
+      <BlockLabels />
       <TopBar />
       <div className="left-column">
         <Notes />

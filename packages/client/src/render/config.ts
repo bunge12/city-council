@@ -205,6 +205,8 @@ export const ROAD_PREVIEW = {
     bulldoze: 0xff8a1f,
     /** A route the debug panel's route tool found (issue M1-15). */
     route: 0x2ee06f,
+    /** The outline of a block the debug panel's block overlay shows (issue M1-18). */
+    block: 0xff4fd8,
   },
   /** The bridge strip: width as a share of the road's, and extra height over the strip. */
   bridgeScale: 0.6,
