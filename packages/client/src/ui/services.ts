@@ -8,6 +8,7 @@ import type { SaveStatus } from "../save/channel";
 import type { SaveClient } from "../save/page";
 import type { EditToolController } from "../tools/edit-tool";
 import type { RoadToolController } from "../tools/road-tool";
+import type { RouteToolController } from "../tools/route-tool";
 
 /** What a download wrote, for the page and Playwright. */
 export interface DownloadedCity {
@@ -40,4 +41,6 @@ export interface AppServices {
   roadTool: RoadToolController;
   /** The bulldoze and upgrade tools' input handling. Their state is in the UI store too. */
   editTool: EditToolController;
+  /** The debug panel's route tool. Its state is in the UI store too. */
+  routeTool: RouteToolController;
 }

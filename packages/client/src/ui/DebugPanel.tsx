@@ -1,5 +1,6 @@
 import { simInfo } from "@city-council/sim";
 import { useEffect, useState } from "react";
+import { routeReadout } from "../tools/route-tool";
 import { TICK_BUDGET_MS } from "./config";
 import { formatSpeed } from "./format";
 import { useServices, useSim } from "./hooks";
@@ -94,6 +95,30 @@ function TickTimes() {
   );
 }
 
+/** The route tool: a button to pick two points, and the route between them or why there is none. */
+function RouteTool() {
+  const { routeTool } = useServices();
+  const on = useUi((s) => s.tool === "route");
+  const readout = useUi((s) => routeReadout(s));
+  const found = useUi((s) => s.routeResult?.ok ?? null);
+  return (
+    <div className="route-tool">
+      <button
+        id="route-tool"
+        type="button"
+        aria-pressed={on}
+        title="Click two points on the map to see the quickest road route between them. Escape clears them."
+        onClick={() => routeTool.toggle()}
+      >
+        Pick two points
+      </button>
+      <span id="route-readout" data-found={found === null ? "" : String(found)}>
+        {readout}
+      </span>
+    </div>
+  );
+}
+
 /** Numbers for whoever is building the next module. Toggled with the backquote key. */
 export function DebugPanel() {
   const open = useUi((s) => s.debugOpen);
@@ -146,6 +171,10 @@ export function DebugPanel() {
         <dd id="cursor-world">{view.cursor}</dd>
         <dt>Clicked</dt>
         <dd id="pick-world">{view.pick}</dd>
+        <dt>Route</dt>
+        <dd>
+          <RouteTool />
+        </dd>
       </dl>
       <h3>Keys</h3>
       <dl id="shortcut-list" className="keys">

@@ -29,6 +29,7 @@ import { snapMarks } from "./render/snap-marks-geometry";
 import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
 import { dragSamples, pickSegment } from "./tools/pick-segment";
 import { RoadToolController, type RoadPreview } from "./tools/road-tool";
+import { RouteToolController, routeShapes } from "./tools/route-tool";
 import type { Snap } from "./tools/snap";
 import { mountUi } from "./ui/App";
 import type { AppServices, DownloadedCity } from "./ui/services";
@@ -228,6 +229,16 @@ const editTool = new EditToolController({
 });
 mirror.subscribe((update) => editTool.mirrorUpdated(update));
 
+const routeTool = new RouteToolController({
+  get: () => useUi.getState(),
+  set: (patch) => useUi.setState(patch),
+  net: () => mirror.state?.roads ?? null,
+});
+// Only a change to the roads can change a route.
+mirror.subscribe((update) => {
+  if (update.kind === "snapshot" || update.roadSegs.length > 0 || update.roadNodes.length > 0) routeTool.refresh();
+});
+
 const services: AppServices = {
   mirror,
   saves,
@@ -240,6 +251,7 @@ const services: AppServices = {
   openCity,
   roadTool,
   editTool,
+  routeTool,
 };
 const uiRoot = document.getElementById("ui");
 if (!uiRoot) throw new Error("#ui is missing from index.html");
@@ -411,6 +423,10 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   controls.onPick((hit) => {
     hooks.lastPick = hit;
     setViewReadout({ pick: metres(hit) });
+    if (routeTool.active()) {
+      routeTool.click(hit);
+      return;
+    }
     if (editTool.active()) {
       const pointer = controls.pointer();
       editTool.click(pointer ? segmentAt(pointer) : -1);
@@ -511,10 +527,15 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       }
     }
     setEditHover(editNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, preview: editNow } : null);
+    // The debug route tool's route, under nothing else the tools draw.
+    const route = useUi.getState().routeResult;
+    if (net && route?.ok) shapes.unshift(...routeShapes(net, route.route));
     previews.show(shapes);
     const scale = cursor ? metresPerPixel(cursor) : 1;
     const ui = useUi.getState();
-    const shown = snap ? snapMarks(snap, roadTool.anchor(), scale) : [];
+    const shown = snap && !routeTool.active() ? snapMarks(snap, roadTool.anchor(), scale) : [];
+    // The route tool's points, as rings.
+    for (const point of [ui.routeFrom, ui.routeTo]) if (point) shown.push({ shape: "ring", x: point.x, z: point.z, look: "node" });
     // Before a curve's control point is set, a line from the start shows the direction it will leave in.
     if (snap && ui.roadMode === "curved" && ui.roadStart && !ui.roadControl && snap.kind !== "tangent") {
       shown.push({ shape: "line", ax: ui.roadStart.x, az: ui.roadStart.z, bx: snap.x, bz: snap.z, look: "angle" });
