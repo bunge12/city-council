@@ -38,9 +38,8 @@ function typeName(id: string): string {
 
 /** The build toolbar: the road, upgrade and bulldoze tools and the road type picker. */
 export function BuildBar() {
-  const { roadTool, editTool, undo, mirror } = useServices();
+  const { roadTool, editTool } = useServices();
   const ready = useSim((s) => s !== null);
-  const canUndo = useSim((s) => s?.undo.some((r) => r.playerId === mirror.playerId) ?? false);
   const undoNote = useUi((s) => s.undoNote);
   const tool = useUi((s) => s.tool);
   const roadType = useUi((s) => s.roadType);
@@ -98,15 +97,6 @@ export function BuildBar() {
             onClick={() => editTool.toggle("bulldoze")}
           >
             Bulldoze <kbd>N</kbd>
-          </button>
-          <button
-            type="button"
-            id="undo"
-            disabled={!ready || !canUndo}
-            title={canUndo ? "Undo your last road change (Ctrl+Z or Cmd+Z)" : "Nothing to undo"}
-            onClick={() => void undo()}
-          >
-            Undo <kbd>Ctrl Z</kbd>
           </button>
         </div>
         <div className="road-types" role="group" aria-label="Road type">
