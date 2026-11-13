@@ -9,6 +9,9 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   1: (old) => ({ ...old, version: 2, log: [], logOffset: 0 }),
   // Version 3 adds the road graph, empty.
   2: (old) => ({ ...old, version: 3, roads: createRoadNetwork() }),
+  // Version 4 adds every player's undo history, empty. Ids a version 3
+  // network removed are all on its free lists, so none is held.
+  3: (old) => ({ ...old, version: 4, undo: [] }),
 };
 
 /**

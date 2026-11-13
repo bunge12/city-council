@@ -44,6 +44,7 @@ import { migrateState } from "./migrate";
 import { RNG_WORDS } from "./rng";
 import { checkRoadNetwork } from "./roads/network";
 import { SNAPSHOT_VERSION, SPEEDS, type SimState } from "./state";
+import { checkUndoHistory, heldIds, type UndoRecord } from "./undo";
 
 /** Newest version of the byte layout above this build reads. Bump on any change to it. */
 export const SNAPSHOT_FORMAT_VERSION = 2;
@@ -463,7 +464,7 @@ function checkPendingCommand(command: unknown, where: string): void {
 
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
-  const { tick, seed, rng, speed, pending, log, logOffset, roads } = state;
+  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");
   if (!isUint32(seed)) throw corrupt("its seed is not a 32-bit integer");
   if (tick !== header.tick || seed !== header.seed) throw corrupt("its header does not match its contents");
@@ -477,7 +478,9 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   pagedLog?.forEach((entry, i) => checkLogEntry(entry, `paged log entry ${i}`));
   log.forEach((entry, i) => checkLogEntry(entry, `log entry ${i}`));
   pending.forEach((command, i) => checkPendingCommand(command, `queued command ${i}`));
-  const roadProblem = checkRoadNetwork(roads);
+  const undoProblem = checkUndoHistory(undo);
+  if (undoProblem !== null) throw corrupt(`its undo history is malformed: ${undoProblem}`);
+  const roadProblem = checkRoadNetwork(roads, heldIds(undo as UndoRecord[]));
   if (roadProblem !== null) throw corrupt(`its road network is malformed: ${roadProblem}`);
 }
 

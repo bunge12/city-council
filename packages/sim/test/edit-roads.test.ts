@@ -38,6 +38,7 @@ import {
   type RoadNetwork,
 } from "../src/roads/network";
 import { buildRoadIndex, roadIndexOf } from "../src/roads/spatial";
+import { heldIds } from "../src/undo";
 import { terrainOf } from "../src/terrain/cache";
 import fixtureJson from "./fixtures/replay/edit-roads.json";
 import { expectReplay, type ReplayFixture } from "./replay-helper";
@@ -157,7 +158,7 @@ describe("BulldozeRoad", () => {
     expect(nodeCount(net)).toBe(nodes);
     expect(segmentsAt(net, centre)).toHaveLength(3);
     expect(segmentsAt(net, east)).toHaveLength(3);
-    expect(checkRoadNetwork(net)).toBeNull();
+    expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
   });
 
   it("removes a dead end and the node at its open end", () => {
@@ -224,7 +225,7 @@ describe("BulldozeRoad", () => {
     expect(rejection(state, command("BulldozeRoad", null))).toMatch(/list of segment ids/);
   });
 
-  it("leaves empty arrays and a full free list after bulldozing every segment", () => {
+  it("leaves empty arrays, and every id free or held for undo, after bulldozing every segment", () => {
     const { state } = crossroads();
     ok(state, road([4250, 4600], [4450, 4800], "avenue"));
     ok(state, road([4300, 4900], [4600, 4900], "oneWay", [4450, 4800]));
@@ -232,14 +233,16 @@ describe("BulldozeRoad", () => {
     ok(state, bulldoze(...liveSegments(net)));
     expect(segmentCount(net)).toBe(0);
     expect(nodeCount(net)).toBe(0);
-    expect(net.segFree.length).toBe(segmentIdLimit(net));
-    expect(net.nodeFree.length).toBe(nodeIdLimit(net));
+    // The bulldoze's undo record holds every id it removed.
+    const held = heldIds(state.undo);
+    expect(net.segFree.length + held.segs.length).toBe(segmentIdLimit(net));
+    expect(net.nodeFree.length + held.nodes.length).toBe(nodeIdLimit(net));
     expect([...net.segFlags].every((f) => f === 0)).toBe(true);
     expect([...net.nodeFlags].every((f) => f === 0)).toBe(true);
     expect([...net.segLength].every((v) => v === 0)).toBe(true);
     expect(roadIndexOf(net).segCells.every((c) => c.length === 0)).toBe(true);
     expect(roadIndexOf(net).nodeCells.every((c) => c.length === 0)).toBe(true);
-    expect(checkRoadNetwork(net)).toBeNull();
+    expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
   });
 
   it("prices a demolition from the balance file", () => {
@@ -279,7 +282,7 @@ describe("UpgradeRoad", () => {
     expect(net.segType[east]).toBe(avenue.index);
     expect([net.segA[west], net.segB[west]]).toEqual(ends);
     expect(segmentCount(net)).toBe(4);
-    expect(checkRoadNetwork(net)).toBeNull();
+    expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
   });
 
   it("never prices a downgrade below zero", () => {
@@ -375,7 +378,7 @@ describe("UpgradeRoad", () => {
     ok(state, upgrade("oneWay", [0], [b]));
     expect(net.segType[0]).toBe(typeOf("oneWay").index);
     expect([net.segA[0], net.segB[0]]).toEqual([b, a]);
-    expect(checkRoadNetwork(net)).toBeNull();
+    expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
     // The same type reverses it, for nothing.
     expect(planUpgrade(net, terrainOf(SEED), { segments: [0], type: "oneWay" })).toMatchObject({ ok: true, plan: { cost: 0, reverse: [true] } });
     ok(state, upgrade("oneWay", [0]));
@@ -396,7 +399,7 @@ describe("UpgradeRoad", () => {
     const from = [centre, otherEnd(net, east, centre), centre, otherEnd(net, south, centre)];
     ok(state, upgrade("oneWay", [west, east, north, south], from));
     expect(segmentsAt(net, centre)).toEqual(before);
-    expect(checkRoadNetwork(net)).toBeNull();
+    expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
     expect(net.segA[west]).toBe(centre);
     expect(net.segA[north]).toBe(centre);
     expect(net.segB[east]).toBe(centre);
@@ -458,12 +461,12 @@ describe("builds, upgrades and bulldozes together", () => {
         c = bulldoze(...new Set([segs[next(segs.length)] ?? 0, segs[next(segs.length)] ?? 0]));
       }
       if (run(state, c).ok) accepted++;
-      if (i % 50 === 0) expect(checkRoadNetwork(net)).toBeNull();
+      if (i % 50 === 0) expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
     }
     expect(accepted).toBeGreaterThan(100);
     expect(state.log.some((e) => e.type === "UpgradeRoad")).toBe(true);
     expect(state.log.some((e) => e.type === "BulldozeRoad")).toBe(true);
-    expect(checkRoadNetwork(net)).toBeNull();
+    expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
     const fresh = buildRoadIndex(net);
     expect(roadIndexOf(net).segCells).toEqual(fresh.segCells);
     expect(roadIndexOf(net).nodeCells).toEqual(fresh.nodeCells);

@@ -343,6 +343,50 @@ describe("road deltas", () => {
     expect(arrays(mirror.state?.roads)).toEqual(arrays(roads));
   });
 
+  it("keeps the mirror's network and undo history equal to the sim's through random builds, edits and undos", () => {
+    const { mirror, tick, hostRoads, received } = roadSetup();
+    const rng = seedRng(47);
+    const point = (): [number, number] => [FLAT.x0 + nextFloat(rng) * (FLAT.x1 - FLAT.x0), FLAT.z0 + nextFloat(rng) * (FLAT.z1 - FLAT.z0)];
+    const live = () => {
+      const roads = mirror.state?.roads;
+      const out: number[] = [];
+      for (let id = 0; roads && id < roads.segFlags.length; id++) if ((roads.segFlags[id] ?? 0) & 1) out.push(id);
+      return out;
+    };
+    for (let t = 0; t < 400; t++) {
+      const roll = nextInt(rng, 10);
+      const segs = live();
+      if (roll < 4 || segs.length === 0) void mirror.sendCommand("BuildRoad", road(point(), point(), TYPES[nextInt(rng, 3)]));
+      else if (roll < 5) void mirror.sendCommand("BulldozeRoad", { segments: [segs[nextInt(rng, segs.length)]] });
+      else if (roll < 6) void mirror.sendCommand("UpgradeRoad", { segments: [segs[nextInt(rng, segs.length)]], type: "avenue" });
+      else void mirror.sendCommand("Undo");
+      tick();
+      if (t % 100 === 99) expect(arrays(mirror.state?.roads)).toEqual(arrays(hostRoads()));
+    }
+    expect(arrays(mirror.state?.roads)).toEqual(arrays(hostRoads()));
+    const snap = received.filter((m) => m.type === "snapshot").at(-1);
+    expect(snap?.type === "snapshot" && snap.state.undo).toEqual(mirror.state?.undo);
+    // Enough happened for this to mean something.
+    expect(mirror.state?.log.filter((e) => e.type === "Undo").length).toBeGreaterThan(50);
+  });
+
+  it("sends the undo history only in a delta where it changed", async () => {
+    const { mirror, received, tick } = roadSetup();
+    await mirror.sendCommand("BuildRoad", road([4200, 4500], [4600, 4500]));
+    tick();
+    const deltas = () => received.filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    expect(deltas().some((d) => d.undo?.length === 1)).toBe(true);
+    expect(mirror.state?.undo.map((r) => r.playerId)).toEqual(["p1"]);
+    const before = deltas().length;
+    tick();
+    expect(deltas().slice(before).every((d) => d.undo === undefined)).toBe(true);
+    expect(await mirror.sendCommand("Undo")).toEqual({ ok: true });
+    tick();
+    expect(mirror.state?.undo).toEqual([]);
+    expect(mirror.state?.roads.segFlags.length).toBe(0);
+    expect(await mirror.sendCommand("Undo")).toEqual({ ok: false, reason: "Nothing to undo" });
+  });
+
   it("carries the whole network in a snapshot", async () => {
     const { mirror, tick, hostRoads } = roadSetup();
     await mirror.sendCommand("BuildRoad", road([4200, 4500], [4600, 4500]));

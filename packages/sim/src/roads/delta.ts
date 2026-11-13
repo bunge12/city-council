@@ -16,6 +16,10 @@
 //
 // Node positions never change once a node exists, so a segment's shape
 // changes only when the segment itself does.
+//
+// Undo can take back the newest ids by shrinking the arrays again, so an id
+// limit can go down. A delta then carries the dropped ids as rows of zeros
+// and the copy shrinks to the new limit after copying them.
 
 import {
   NODE_ARRAYS,
@@ -61,9 +65,9 @@ export interface RoadChanges {
  * Plain fields and typed arrays only, so it crosses a worker or a socket.
  */
 export interface RoadDelta {
-  /** `nodeIdLimit` after the change. Never smaller than before. */
+  /** `nodeIdLimit` after the change. Smaller than before only after an undo. */
   nodeLimit: number;
-  /** `segmentIdLimit` after the change. Never smaller than before. */
+  /** `segmentIdLimit` after the change. Smaller than before only after an undo. */
   segLimit: number;
   /** Changed node ids, ascending. Row `i` of each node array is node `nodeIds[i]`. */
   nodeIds: Int32Array;
@@ -105,11 +109,12 @@ export function recordRoadChanges(net: RoadNetwork): void {
   observeNetwork(net, {
     nodeAdded: (id) => void rec.nodes.add(id),
     nodeRemoving: (id) => void rec.nodes.add(id),
-    // Adding a segment puts it at the head of both nodes' lists.
+    // Adding a segment puts it at the head of both nodes' lists, but undo
+    // puts one back in the middle, which changes the segment before it.
     segmentAdded: (id) => {
       rec.segs.add(id);
-      rec.nodes.add(net.segA[id] ?? NONE);
-      rec.nodes.add(net.segB[id] ?? NONE);
+      markNodeAndList(net, rec, net.segA[id] ?? NONE);
+      markNodeAndList(net, rec, net.segB[id] ?? NONE);
     },
     // Called once the segment is out of its nodes' lists. Whatever pointed
     // at it now points past it: a node's head or the segment before it in a
@@ -190,9 +195,14 @@ export function encodeRoadDelta(net: RoadNetwork, changes: RoadChanges): RoadDel
 
 /** Why `delta` cannot apply to `net`, or null if it can. */
 function deltaProblem(net: RoadNetwork, delta: RoadDelta): string | null {
-  if (delta.nodeLimit < nodeIdLimit(net) || delta.segLimit < segmentIdLimit(net)) return "id limits went down";
-  const ids = (list: Int32Array, limit: number) => list.every((id, i) => id >= 0 && id < limit && (i === 0 || id > (list[i - 1] ?? 0)));
-  if (!ids(delta.nodeIds, delta.nodeLimit) || !ids(delta.segIds, delta.segLimit)) return "row ids are out of range or order";
+  if (!Number.isSafeInteger(delta.nodeLimit) || delta.nodeLimit < 0 || !Number.isSafeInteger(delta.segLimit) || delta.segLimit < 0) {
+    return "id limits are not whole numbers";
+  }
+  // A row past both the copy's limit and the new one is for an id handed
+  // out and taken back by undo between two deltas. The copy never had it,
+  // and copying it changes nothing.
+  const ids = (list: Int32Array) => list.every((id, i) => id >= 0 && (i === 0 || id > (list[i - 1] ?? 0)));
+  if (!ids(delta.nodeIds) || !ids(delta.segIds)) return "row ids are out of range or order";
   if (NODE_ARRAYS.some((key) => delta.nodes[key].length !== delta.nodeIds.length)) return "node rows differ in length";
   if (SEG_ARRAYS.some((key) => delta.segs[key].length !== delta.segIds.length)) return "segment rows differ in length";
   // Every id past the old limit was handed out since, so it has a row.
@@ -207,16 +217,22 @@ function deltaProblem(net: RoadNetwork, delta: RoadDelta): string | null {
   if (!covered(delta.nodeIds, nodeIdLimit(net), delta.nodeLimit) || !covered(delta.segIds, segmentIdLimit(net), delta.segLimit)) {
     return "new ids have no rows";
   }
+  // Every id an undo dropped was removed, so it has a row too.
+  if (!covered(delta.nodeIds, delta.nodeLimit, nodeIdLimit(net)) || !covered(delta.segIds, delta.segLimit, segmentIdLimit(net))) {
+    return "dropped ids have no rows";
+  }
   return null;
 }
 
 function scatter<K extends string>(net: RoadNetwork, keys: readonly K[], limit: number, ids: Int32Array, rows: Record<K, AnyTypedArray>): void {
   const arrays = net as unknown as Record<K, AnyTypedArray>;
   for (const key of keys) {
-    const target = resized(arrays[key], limit);
+    // Rows past a smaller limit are copied too, then cut off, so nothing
+    // is left behind in the buffer to come back if the arrays grow again.
+    const target = resized(arrays[key], Math.max(limit, arrays[key].length));
     const source = rows[key];
     for (let i = 0; i < ids.length; i++) target[ids[i] ?? 0] = source[i] ?? 0;
-    arrays[key] = target;
+    arrays[key] = resized(target, limit);
   }
 }
 

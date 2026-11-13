@@ -1,8 +1,10 @@
-import { LOG_PAGE_SIZE, recordEntry } from "./log";
+import { LOG_PAGE_SIZE, logLength, recordEntry } from "./log";
 import { buildRoad, planRoad } from "./roads/build";
 import { bulldozeRoad, planBulldoze, planUpgrade, upgradeRoad } from "./roads/edit";
+import { endJournal, startJournal } from "./roads/network";
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
+import { applyUndo, planUndo, recordUndo } from "./undo";
 
 /**
  * A request to change the city. `payload` is plain JSON data, so a command
@@ -50,6 +52,21 @@ const SetSpeed: CommandDef = {
 };
 
 /**
+ * Applies a road command with the network's journal open, and keeps what it
+ * wrote as the sender's newest undo record, tied to the log entry the
+ * command is about to get.
+ */
+function undoable(state: SimState, command: Command, run: () => void): void {
+  startJournal(state.roads);
+  try {
+    run();
+  } finally {
+    const ops = endJournal(state.roads);
+    recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops });
+  }
+}
+
+/**
  * A road from `payload.from` to `payload.to` of road type `payload.type`,
  * straight or, with `payload.control`, one quadratic curve through it. See roads/build.ts for the checks. The terrain comes from
  * the seed, so a worker, a server and a replay check against the same ground.
@@ -62,7 +79,7 @@ const BuildRoad: CommandDef = {
   apply: (state, command) => {
     const terrain = terrainOf(state.seed);
     const result = planRoad(state.roads, terrain, command.payload);
-    if (result.ok) buildRoad(state.roads, terrain, result.plan);
+    if (result.ok) undoable(state, command, () => buildRoad(state.roads, terrain, result.plan));
   },
 };
 
@@ -77,7 +94,7 @@ const BulldozeRoad: CommandDef = {
   },
   apply: (state, command) => {
     const result = planBulldoze(state.roads, command.payload);
-    if (result.ok) bulldozeRoad(state.roads, result.plan);
+    if (result.ok) undoable(state, command, () => bulldozeRoad(state.roads, result.plan));
   },
 };
 
@@ -92,7 +109,22 @@ const UpgradeRoad: CommandDef = {
   },
   apply: (state, command) => {
     const result = planUpgrade(state.roads, terrainOf(state.seed), command.payload);
-    if (result.ok) upgradeRoad(state.roads, result.plan);
+    if (result.ok) undoable(state, command, () => upgradeRoad(state.roads, result.plan));
+  },
+};
+
+/**
+ * Takes back the sender's newest road command that has not been undone. It
+ * carries no target, so the payload is ignored. See undo.ts.
+ */
+const Undo: CommandDef = {
+  validate: (state, command) => {
+    const result = planUndo(state, command.playerId);
+    return result.ok ? null : result.reason;
+  },
+  apply: (state, command) => {
+    const result = planUndo(state, command.playerId);
+    if (result.ok) applyUndo(state, result.index);
   },
 };
 
@@ -103,6 +135,7 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   BuildRoad,
   BulldozeRoad,
   UpgradeRoad,
+  Undo,
 });
 
 /** Checks a command against the current state without changing anything. */

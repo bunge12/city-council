@@ -38,8 +38,10 @@ function typeName(id: string): string {
 
 /** The build toolbar: the road, upgrade and bulldoze tools and the road type picker. */
 export function BuildBar() {
-  const { roadTool, editTool } = useServices();
+  const { roadTool, editTool, undo, mirror } = useServices();
   const ready = useSim((s) => s !== null);
+  const canUndo = useSim((s) => s?.undo.some((r) => r.playerId === mirror.playerId) ?? false);
+  const undoNote = useUi((s) => s.undoNote);
   const tool = useUi((s) => s.tool);
   const roadType = useUi((s) => s.roadType);
   const roadMode = useUi((s) => s.roadMode);
@@ -97,6 +99,15 @@ export function BuildBar() {
           >
             Bulldoze <kbd>N</kbd>
           </button>
+          <button
+            type="button"
+            id="undo"
+            disabled={!ready || !canUndo}
+            title={canUndo ? "Undo your last road change (Ctrl+Z or Cmd+Z)" : "Nothing to undo"}
+            onClick={() => void undo()}
+          >
+            Undo <kbd>Ctrl Z</kbd>
+          </button>
         </div>
         <div className="road-types" role="group" aria-label="Road type">
           {TOOL_ROAD_TYPES.map((id) => (
@@ -149,6 +160,11 @@ export function BuildBar() {
         {pending > 0 && <span id="road-pending"> Building {pending === 1 ? "1 road" : `${pending} roads`}…</span>}
         {editPending > 0 && <span id="edit-pending"> Applying {editPending === 1 ? "1 change" : `${editPending} changes`}…</span>}
       </p>
+      {undoNote && (
+        <p className="road-note" id="undo-note" role="status">
+          {undoNote}
+        </p>
+      )}
       {shownNote && (
         <p className="road-note" id="road-note" role="status">
           {shownNote}

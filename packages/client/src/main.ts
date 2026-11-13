@@ -88,6 +88,24 @@ async function sendCommand(type: string, payload: unknown = {}): Promise<Command
   return result;
 }
 
+// A refusal's reason is about the history as it stood. Once the history
+// changes, as when the player builds again, it no longer applies.
+let undoHistory: unknown = null;
+mirror.subscribe(() => {
+  const history = mirror.state?.undo ?? null;
+  if (history === undoHistory) return;
+  undoHistory = history;
+  if (useUi.getState().undoNote !== null) useUi.setState({ undoNote: null });
+});
+
+/** Takes back this player's newest road change, and keeps the reason if the sim refuses. */
+async function undo(): Promise<CommandResult> {
+  useUi.setState({ undoNote: null });
+  const result = await sendCommand("Undo");
+  if (!result.ok) useUi.setState({ undoNote: result.reason });
+  return result;
+}
+
 // City files. The worker writes the file bytes and checks imported ones; the
 // page only hands bytes to and from the browser's file handling.
 
@@ -214,6 +232,7 @@ const services: AppServices = {
   mirror,
   saves,
   sendCommand,
+  undo,
   saveNow,
   downloadCity,
   importCityFile,

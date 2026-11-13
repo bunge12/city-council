@@ -72,6 +72,8 @@ export class SimHost {
   private deltaSeq = 0;
   private sentTick: number;
   private sentSpeed: number;
+  /** The undo history the last delta or snapshot reflected. The sim replaces it on every change. */
+  private sentUndo: SimState["undo"];
   private sentLogFrom: number;
   private stepsSinceDelta = 0;
   private lastTimings: SystemTiming[] = [];
@@ -112,6 +114,7 @@ export class SimHost {
     this.logCursor = logLength(state);
     this.sentTick = state.tick;
     this.sentSpeed = state.speed;
+    this.sentUndo = state.undo;
     this.sentLogFrom = this.logCursor;
     this.lastPump = now();
     transport.onMessage((raw) => this.receive(raw));
@@ -234,8 +237,10 @@ export class SimHost {
       this.unsent.length > 0 ||
       this.unsentRoads !== null ||
       this.state.tick !== this.sentTick ||
-      this.state.speed !== this.sentSpeed;
+      this.state.speed !== this.sentSpeed ||
+      this.state.undo !== this.sentUndo;
     if (!changed) return;
+    const undo = this.state.undo !== this.sentUndo ? structuredClone(this.state.undo) : undefined;
     const log = this.unsent;
     // Rows are read now, after every step since the last delta, so an id
     // removed and reused in between goes out once, as what it is now.
@@ -249,6 +254,7 @@ export class SimHost {
       logFrom: this.sentLogFrom,
       log,
       ...(roads ? { roads } : {}),
+      ...(undo ? { undo } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };
@@ -259,6 +265,7 @@ export class SimHost {
     this.unsentRoads = null;
     this.sentTick = this.state.tick;
     this.sentSpeed = this.state.speed;
+    this.sentUndo = this.state.undo;
     this.sentLogFrom += log.length;
     this.stepsSinceDelta = 0;
   }

@@ -134,6 +134,18 @@ describe("shortcuts", () => {
     }
   });
 
+  it("maps Ctrl Z and Cmd Z to undo, but not in a field, held down or with Shift or Alt", () => {
+    expect(shortcutFor(press("KeyZ", { ctrlKey: true }))).toEqual({ kind: "undo" });
+    expect(shortcutFor(press("KeyZ", { metaKey: true }))).toEqual({ kind: "undo" });
+    expect(shortcutFor(press("KeyZ", { ctrlKey: true, targetTag: "INPUT" }))).toBeNull();
+    expect(shortcutFor(press("KeyZ", { metaKey: true, targetEditable: true }))).toBeNull();
+    expect(shortcutFor(press("KeyZ", { ctrlKey: true, repeat: true }))).toBeNull();
+    expect(shortcutFor(press("KeyZ", { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(shortcutFor(press("KeyZ", { ctrlKey: true, altKey: true }))).toBeNull();
+    // On a button too: undo is not something a button press does.
+    expect(shortcutFor(press("KeyZ", { ctrlKey: true, targetTag: "BUTTON" }))).toEqual({ kind: "undo" });
+  });
+
   it("gives every key one action", () => {
     const codes = SHORTCUTS.flatMap((s) => s.codes);
     expect(new Set(codes).size).toBe(codes.length);

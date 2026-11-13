@@ -73,6 +73,8 @@ export interface RoadBuildBalance {
    * it to another type, from 0 to 1. Reuse of the roadbed, not a refund.
    */
   upgradeCredit: number;
+  /** How many of their own road changes each player can undo. The oldest past this are forgotten. */
+  undoSteps: number;
 }
 
 export interface RoadBalance {
@@ -184,6 +186,8 @@ export function checkRoadBalance(data: unknown): string[] {
     }
     const credit = build["upgradeCredit"];
     if (typeof credit !== "number" || !(credit >= 0 && credit <= 1)) errors.push("build.upgradeCredit must be a number from 0 to 1");
+    const undoSteps = build["undoSteps"];
+    if (!Number.isSafeInteger(undoSteps) || (undoSteps as number) < 1) errors.push("build.undoSteps must be a whole number of at least 1");
     // Positions are whole multiples of the step, so it must divide a metre
     // into a power of two for them to be exact in a float64.
     const step = build["gridStep"];

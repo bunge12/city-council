@@ -13,6 +13,15 @@
 // `nodeFirstSeg` and each segment links on through `segNextA` (at its node
 // A) or `segNextB` (at its node B). -1 ends a list.
 //
+// While a journal is open (`startJournal`), every change is also written
+// down as plain data, so undo (undo.ts) can reverse it exactly. A node or
+// segment the command removed and did not hand out again is held when the
+// journal closes: its row stays zeroed but its id comes off the free list,
+// so nothing else can take it and undo can put it back under the same id.
+// The undo record that removed it holds it, and frees it when the record is
+// forgotten. An id a command frees and reuses itself, as a split does, is
+// handed out exactly as without a journal.
+//
 // Only exact arithmetic here (rule 6): two machines must agree on lengths.
 
 import { ROAD_TYPES } from "./balance";
@@ -178,14 +187,20 @@ export function isSegment(net: RoadNetwork, id: number): boolean {
   return Number.isInteger(id) && id >= 0 && id < net.segFlags.length && ((net.segFlags[id] ?? 0) & SEG_ALIVE) !== 0;
 }
 
-/** Live nodes. */
-export function nodeCount(net: RoadNetwork): number {
-  return net.nodeFlags.length - net.nodeFree.length;
+function countAlive(flags: Uint8Array, alive: number): number {
+  let n = 0;
+  for (const f of flags) if ((f & alive) !== 0) n++;
+  return n;
 }
 
-/** Live segments. */
+/** Live nodes. Counts the flags, since held ids are on no free list. */
+export function nodeCount(net: RoadNetwork): number {
+  return countAlive(net.nodeFlags, NODE_ALIVE);
+}
+
+/** Live segments. Counts the flags, since held ids are on no free list. */
 export function segmentCount(net: RoadNetwork): number {
-  return net.segFlags.length - net.segFree.length;
+  return countAlive(net.segFlags, SEG_ALIVE);
 }
 
 /** The per-node arrays, every one indexed by node id. */
@@ -205,26 +220,165 @@ export const SEG_ARRAYS = [
   "segLength",
 ] as const;
 
+/** Every field of one segment, as plain data. */
+export interface SegmentRow {
+  a: number;
+  b: number;
+  type: number;
+  network: number;
+  level: number;
+  flags: number;
+  cx: number;
+  cz: number;
+  length: number;
+}
+
+/**
+ * One change a journal wrote down. `grown` is true when the id came from
+ * growing the arrays rather than off the free list. `atA` and `atB` are
+ * where a removed segment stood in its nodes' lists, counted from the head.
+ */
+export type NetworkOp =
+  | { op: "addNode"; id: number; grown: boolean }
+  | { op: "removeNode"; id: number; x: number; z: number; height: number; flags: number }
+  | { op: "addSeg"; id: number; grown: boolean; row: SegmentRow }
+  | { op: "removeSeg"; id: number; row: SegmentRow; atA: number; atB: number }
+  | { op: "restyle"; id: number; from: number; to: number; reverse: boolean };
+
+// Open journals by network object. Only open while one command applies, so
+// never part of state.
+const journals = new WeakMap<RoadNetwork, NetworkOp[]>();
+
+/** Starts writing down every change to `net`, and holding removed ids. */
+export function startJournal(net: RoadNetwork): void {
+  journals.set(net, []);
+}
+
+/**
+ * Stops the journal `startJournal` opened and returns what it wrote, oldest
+ * first. Ids the command removed and left removed come off the free list,
+ * held for undo (see `heldByOps`).
+ */
+export function endJournal(net: RoadNetwork): NetworkOp[] {
+  const ops = journals.get(net) ?? [];
+  journals.delete(net);
+  const held = heldByOps(ops);
+  for (const id of held.nodes) claim(net, "nodeFree", id);
+  for (const id of held.segs) claim(net, "segFree", id);
+  return ops;
+}
+
+/**
+ * The ids a journal's command removed and did not hand out again, in the
+ * order they were removed. They are held for its undo record.
+ */
+export function heldByOps(ops: readonly NetworkOp[]): HeldIds {
+  const nodes = new Map<number, boolean>();
+  const segs = new Map<number, boolean>();
+  for (const op of ops) {
+    if (op.op === "addNode" || op.op === "removeNode") {
+      nodes.delete(op.id);
+      nodes.set(op.id, op.op === "removeNode");
+    } else if (op.op === "addSeg" || op.op === "removeSeg") {
+      segs.delete(op.id);
+      segs.set(op.id, op.op === "removeSeg");
+    }
+  }
+  const removed = (m: Map<number, boolean>) => [...m].filter(([, gone]) => gone).map(([id]) => id);
+  return { nodes: removed(nodes), segs: removed(segs) };
+}
+
+function journal(net: RoadNetwork, op: NetworkOp): void {
+  journals.get(net)?.push(op);
+}
+
+/** Every field of segment `id`. */
+export function readSegment(net: RoadNetwork, id: number): SegmentRow {
+  return {
+    a: net.segA[id] ?? NONE,
+    b: net.segB[id] ?? NONE,
+    type: net.segType[id] ?? 0,
+    network: net.segNetwork[id] ?? 0,
+    level: net.segLevel[id] ?? 0,
+    flags: net.segFlags[id] ?? 0,
+    cx: net.segCX[id] ?? 0,
+    cz: net.segCZ[id] ?? 0,
+    length: net.segLength[id] ?? 0,
+  };
+}
+
+/** Whether two rows hold the same values. */
+export function sameRow(p: SegmentRow, q: SegmentRow): boolean {
+  return (
+    p.a === q.a &&
+    p.b === q.b &&
+    p.type === q.type &&
+    p.network === q.network &&
+    p.level === q.level &&
+    p.flags === q.flags &&
+    Object.is(p.cx, q.cx) &&
+    Object.is(p.cz, q.cz) &&
+    Object.is(p.length, q.length)
+  );
+}
+
 /** Takes an id off the free list, or grows every array by one. */
-function allocate(net: RoadNetwork, freeKey: "nodeFree" | "segFree", keys: readonly (keyof RoadNetwork)[]): number {
+function allocate(net: RoadNetwork, freeKey: "nodeFree" | "segFree", keys: readonly (keyof RoadNetwork)[]): { id: number; grown: boolean } {
   const free = net[freeKey];
   if (free.length > 0) {
     const id = free[free.length - 1] ?? 0;
     net[freeKey] = resized(free, free.length - 1);
-    return id;
+    return { id, grown: false };
   }
   const id = (net[keys[0] as keyof RoadNetwork] as AnyTypedArray).length;
   for (const key of keys) {
     (net as unknown as Record<string, AnyTypedArray>)[key] = resized(net[key] as AnyTypedArray, id + 1);
   }
-  return id;
+  return { id, grown: true };
+}
+
+function pushFree(net: RoadNetwork, freeKey: "nodeFree" | "segFree", id: number): void {
+  const free = resized(net[freeKey], net[freeKey].length + 1);
+  free[free.length - 1] = id;
+  net[freeKey] = free;
 }
 
 function release(net: RoadNetwork, freeKey: "nodeFree" | "segFree", keys: readonly (keyof RoadNetwork)[], id: number): void {
   for (const key of keys) (net[key] as AnyTypedArray)[id] = 0;
-  const free = resized(net[freeKey], net[freeKey].length + 1);
-  free[free.length - 1] = id;
-  net[freeKey] = free;
+  pushFree(net, freeKey, id);
+}
+
+/**
+ * The exact reverse of `allocate`, for undo. The row must be zeroed. An id
+ * that came from growing the arrays shrinks them again while it is still the
+ * last; otherwise it goes back on the free list.
+ */
+function unallocate(net: RoadNetwork, freeKey: "nodeFree" | "segFree", keys: readonly (keyof RoadNetwork)[], id: number, grown: boolean): void {
+  const length = (net[keys[0] as keyof RoadNetwork] as AnyTypedArray).length;
+  if (grown && id === length - 1) {
+    for (const key of keys) {
+      (net as unknown as Record<string, AnyTypedArray>)[key] = resized(net[key] as AnyTypedArray, id);
+    }
+  } else {
+    pushFree(net, freeKey, id);
+  }
+}
+
+/** Takes `id` off the free list if it is there. A held id is on no list. */
+function claim(net: RoadNetwork, freeKey: "nodeFree" | "segFree", id: number): void {
+  const free = net[freeKey];
+  const at = free.lastIndexOf(id);
+  if (at < 0) return;
+  const next = new Int32Array(free.length - 1);
+  next.set(free.subarray(0, at));
+  next.set(free.subarray(at + 1), at);
+  net[freeKey] = next;
+}
+
+/** Puts held ids on the free list, nodes then segments, each in the order given. */
+export function releaseHeld(net: RoadNetwork, nodes: readonly number[], segs: readonly number[]): void {
+  for (const id of nodes) pushFree(net, "nodeFree", id);
+  for (const id of segs) pushFree(net, "segFree", id);
 }
 
 function checkFinite(name: string, value: number): void {
@@ -236,12 +390,13 @@ export function addNode(net: RoadNetwork, x: number, z: number, height: number, 
   checkFinite("x", x);
   checkFinite("z", z);
   checkFinite("height", height);
-  const id = allocate(net, "nodeFree", NODE_ARRAYS);
+  const { id, grown } = allocate(net, "nodeFree", NODE_ARRAYS);
   net.nodeX[id] = x;
   net.nodeZ[id] = z;
   net.nodeHeight[id] = height;
   net.nodeFlags[id] = NODE_ALIVE | (fixed ? NODE_FIXED : 0);
   net.nodeFirstSeg[id] = NONE;
+  journal(net, { op: "addNode", id, grown });
   for (const observer of observers.get(net) ?? []) observer.nodeAdded(id);
   return id;
 }
@@ -254,6 +409,14 @@ export function removeNode(net: RoadNetwork, id: number): void {
   if (!isNode(net, id)) throw new RangeError(`node ${id} does not exist`);
   if (((net.nodeFlags[id] ?? 0) & NODE_FIXED) !== 0) throw new RangeError(`node ${id} is fixed`);
   if (net.nodeFirstSeg[id] !== NONE) throw new RangeError(`node ${id} still has segments`);
+  journal(net, {
+    op: "removeNode",
+    id,
+    x: net.nodeX[id] ?? 0,
+    z: net.nodeZ[id] ?? 0,
+    height: net.nodeHeight[id] ?? 0,
+    flags: net.nodeFlags[id] ?? 0,
+  });
   for (const observer of observers.get(net) ?? []) observer.nodeRemoving(id);
   release(net, "nodeFree", NODE_ARRAYS, id);
 }
@@ -324,7 +487,7 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   checkFinite("cx", cx);
   checkFinite("cz", cz);
 
-  const id = allocate(net, "segFree", SEG_ARRAYS);
+  const { id, grown } = allocate(net, "segFree", SEG_ARRAYS);
   net.segA[id] = a;
   net.segB[id] = b;
   net.segType[id] = spec.type;
@@ -339,6 +502,7 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   net.nodeFirstSeg[a] = id;
   net.segNextB[id] = net.nodeFirstSeg[b] ?? NONE;
   net.nodeFirstSeg[b] = id;
+  if (journals.has(net)) journal(net, { op: "addSeg", id, grown, row: readSegment(net, id) });
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
   return id;
 }
@@ -354,26 +518,105 @@ function setNextAt(net: RoadNetwork, seg: number, node: number, next: number): v
   else net.segNextB[seg] = next;
 }
 
-function unlink(net: RoadNetwork, seg: number, node: number): void {
+/** Takes `seg` out of `node`'s list and returns where it stood, counted from the head. */
+function unlink(net: RoadNetwork, seg: number, node: number): number {
   let prev = NONE;
   let at = net.nodeFirstSeg[node] ?? NONE;
+  let place = 0;
   while (at !== NONE && at !== seg) {
     prev = at;
     at = nextSegmentAt(net, at, node);
+    place++;
   }
   if (at === NONE) throw new Error(`segment ${seg} is missing from node ${node}'s list`);
   const next = nextSegmentAt(net, seg, node);
   if (prev === NONE) net.nodeFirstSeg[node] = next;
   else setNextAt(net, prev, node, next);
+  return place;
+}
+
+/** Puts `seg` into `node`'s list at `place` from the head, or at the tail if the list is shorter. */
+function linkAt(net: RoadNetwork, seg: number, node: number, place: number): void {
+  let prev = NONE;
+  let at = net.nodeFirstSeg[node] ?? NONE;
+  for (let i = 0; i < place && at !== NONE; i++) {
+    prev = at;
+    at = nextSegmentAt(net, at, node);
+  }
+  setNextAt(net, seg, node, at);
+  if (prev === NONE) net.nodeFirstSeg[node] = seg;
+  else setNextAt(net, prev, node, seg);
 }
 
 /** Removes a segment. Its nodes stay. */
 export function removeSegment(net: RoadNetwork, id: number): void {
   if (!isSegment(net, id)) throw new RangeError(`segment ${id} does not exist`);
+  const row = readSegment(net, id);
+  const atA = unlink(net, id, row.a);
+  const atB = unlink(net, id, row.b);
+  journal(net, { op: "removeSeg", id, row, atA, atB });
+  for (const observer of observers.get(net) ?? []) observer.segmentRemoving(id);
+  release(net, "segFree", SEG_ARRAYS, id);
+}
+
+// ---- The reverse of each change, for undo ----
+//
+// Each one undoes exactly what its forward change did, so a change and its
+// reverse in turn leave the arrays, the free lists and every node's list as
+// they were. Callers check first that the reverse makes sense: undo.ts
+// does. None of them is written to a journal.
+
+/** Reverses `addNode`. The node must have no segments. */
+export function unaddNode(net: RoadNetwork, id: number, grown: boolean): void {
+  if (!isNode(net, id)) throw new RangeError(`node ${id} does not exist`);
+  if (net.nodeFirstSeg[id] !== NONE) throw new RangeError(`node ${id} still has segments`);
+  for (const observer of observers.get(net) ?? []) observer.nodeRemoving(id);
+  for (const key of NODE_ARRAYS) net[key][id] = 0;
+  unallocate(net, "nodeFree", NODE_ARRAYS, id, grown);
+}
+
+/** Reverses `removeNode`: brings back a held or free node id with the fields it had. */
+export function restoreNode(net: RoadNetwork, id: number, x: number, z: number, height: number, flags: number): void {
+  if (!Number.isInteger(id) || id < 0 || id >= net.nodeFlags.length || isNode(net, id)) throw new RangeError(`node ${id} cannot be restored`);
+  claim(net, "nodeFree", id);
+  net.nodeX[id] = x;
+  net.nodeZ[id] = z;
+  net.nodeHeight[id] = height;
+  net.nodeFlags[id] = flags;
+  net.nodeFirstSeg[id] = NONE;
+  for (const observer of observers.get(net) ?? []) observer.nodeAdded(id);
+}
+
+/** Reverses `addSegment`. */
+export function unaddSegment(net: RoadNetwork, id: number, grown: boolean): void {
+  if (!isSegment(net, id)) throw new RangeError(`segment ${id} does not exist`);
   unlink(net, id, net.segA[id] ?? NONE);
   unlink(net, id, net.segB[id] ?? NONE);
   for (const observer of observers.get(net) ?? []) observer.segmentRemoving(id);
-  release(net, "segFree", SEG_ARRAYS, id);
+  for (const key of SEG_ARRAYS) net[key][id] = 0;
+  unallocate(net, "segFree", SEG_ARRAYS, id, grown);
+}
+
+/**
+ * Reverses `removeSegment`: brings back a held or free segment id with the
+ * fields it had, at the place it had in each node's list.
+ */
+export function restoreSegment(net: RoadNetwork, id: number, row: SegmentRow, atA: number, atB: number): void {
+  if (!Number.isInteger(id) || id < 0 || id >= net.segFlags.length || isSegment(net, id)) throw new RangeError(`segment ${id} cannot be restored`);
+  if (!isNode(net, row.a) || !isNode(net, row.b) || row.a === row.b) throw new RangeError(`segment ${id} has bad nodes`);
+  claim(net, "segFree", id);
+  net.segA[id] = row.a;
+  net.segB[id] = row.b;
+  net.segType[id] = row.type;
+  net.segNetwork[id] = row.network;
+  net.segLevel[id] = row.level;
+  net.segFlags[id] = row.flags;
+  net.segCX[id] = row.cx;
+  net.segCZ[id] = row.cz;
+  net.segLength[id] = row.length;
+  linkAt(net, id, row.a, atA);
+  linkAt(net, id, row.b, atB);
+  for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
 }
 
 /**
@@ -386,6 +629,7 @@ export function restyleSegment(net: RoadNetwork, id: number, type: number, rever
   if (!isSegment(net, id)) throw new RangeError(`segment ${id} does not exist`);
   if (!Number.isInteger(type) || type < 0 || type > 255) throw new RangeError(`bad segment type ${type}`);
   if (net.segNetwork[id] === NETWORK_ROAD && type >= ROAD_TYPES.length) throw new RangeError(`no road type ${type}`);
+  journal(net, { op: "restyle", id, from: net.segType[id] ?? 0, to: type, reverse });
   for (const observer of observers.get(net) ?? []) observer.segmentRemoving(id);
   net.segType[id] = type;
   if (reverse) {
@@ -435,11 +679,18 @@ const ARRAY_TYPES: Readonly<Record<keyof RoadNetwork, new (n: number) => AnyType
   segFree: Int32Array,
 };
 
+/** Ids an undo record holds: removed, on no free list, waiting to come back. */
+export interface HeldIds {
+  nodes: readonly number[];
+  segs: readonly number[];
+}
+
 /**
  * Why `value` is not a well-formed network, or null if it is. For loading a
  * save: a network that passes cannot make the graph functions throw or loop.
+ * `held` lists the ids undo records hold, which are neither live nor free.
  */
-export function checkRoadNetwork(value: unknown): string | null {
+export function checkRoadNetwork(value: unknown, held: HeldIds = { nodes: [], segs: [] }): string | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return "it is not an object";
   const net = value as Record<string, unknown>;
   for (const [key, Type] of Object.entries(ARRAY_TYPES)) {
@@ -453,17 +704,22 @@ export function checkRoadNetwork(value: unknown): string | null {
   if (NODE_ARRAYS.some((key) => n[key].length !== nodes)) return "its node arrays differ in length";
   if (SEG_ARRAYS.some((key) => n[key].length !== segs)) return "its segment arrays differ in length";
 
-  const checkFree = (free: Int32Array, limit: number, alive: (id: number) => boolean): string | null => {
+  const checkFree = (free: Int32Array, kept: readonly number[], limit: number, alive: (id: number) => boolean): string | null => {
     const seen = new Uint8Array(limit);
     for (const id of free) {
       if (id < 0 || id >= limit || seen[id] || alive(id)) return "its free list is malformed";
       seen[id] = 1;
     }
-    for (let id = 0; id < limit; id++) if (!seen[id] && !alive(id)) return `id ${id} is neither live nor free`;
+    for (const id of kept) {
+      if (!Number.isInteger(id) || id < 0 || id >= limit || seen[id] || alive(id)) return `held id ${id} is live, free or held twice`;
+      seen[id] = 1;
+    }
+    for (let id = 0; id < limit; id++) if (!seen[id] && !alive(id)) return `id ${id} is neither live, free nor held`;
     return null;
   };
   const freeProblem =
-    checkFree(n.nodeFree, nodes, (id) => isNode(n, id)) ?? checkFree(n.segFree, segs, (id) => isSegment(n, id));
+    checkFree(n.nodeFree, held.nodes, nodes, (id) => isNode(n, id)) ??
+    checkFree(n.segFree, held.segs, segs, (id) => isSegment(n, id));
   if (freeProblem) return freeProblem;
 
   // Each live segment must be in both of its nodes' lists exactly once, and

@@ -17,7 +17,7 @@ import "./ui.css";
 
 /** Turns key presses into shortcut actions. Speed keys send `SetSpeed`, like the buttons. */
 function useShortcuts(): void {
-  const { sendCommand, roadTool, editTool } = useServices();
+  const { sendCommand, roadTool, editTool, undo } = useServices();
   const speed = useSim((s) => s?.speed ?? null);
   const lastRunning = useRef<Speed>(1);
   const current = useRef<Speed | null>(null);
@@ -32,6 +32,7 @@ function useShortcuts(): void {
         ctrlKey: e.ctrlKey,
         metaKey: e.metaKey,
         altKey: e.altKey,
+        shiftKey: e.shiftKey,
         repeat: e.repeat,
         targetTag: target?.tagName ?? "",
         targetEditable: target?.isContentEditable ?? false,
@@ -71,11 +72,14 @@ function useShortcuts(): void {
         case "escape":
           if (!editTool.escape()) roadTool.escape();
           return;
+        case "undo":
+          void undo();
+          return;
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [sendCommand, roadTool, editTool]);
+  }, [sendCommand, roadTool, editTool, undo]);
 }
 
 function Shell() {

@@ -23,6 +23,8 @@ export interface UiState extends RoadToolState, EditToolState {
   reminderDismissed: boolean;
   /** A city switch or import is under way; the page reloads when it lands. */
   busy: boolean;
+  /** Why the sim refused the last undo, until the next one is sent. */
+  undoNote: string | null;
 }
 
 export const useUi = create<UiState>(() => ({
@@ -35,6 +37,7 @@ export const useUi = create<UiState>(() => ({
   storageNote: null,
   reminderDismissed: false,
   busy: false,
+  undoNote: null,
   ...INITIAL_ROAD_TOOL,
   ...INITIAL_EDIT_TOOL,
 }));

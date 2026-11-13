@@ -23,6 +23,8 @@ import {
 import v1Fixture from "./fixtures/snapshots/v1.json";
 import v2Fixture from "./fixtures/snapshots/v2.json";
 import v3Fixture from "./fixtures/snapshots/v3.json";
+import v4Fixture from "./fixtures/snapshots/v4.json";
+import { heldIds } from "../src/undo";
 import { addNode, addSegment, createRoadNetwork, removeSegment, segmentsAt } from "../src/roads/network";
 
 function fromHex(hex: string): Uint8Array {
@@ -276,33 +278,53 @@ describe("committed snapshots", () => {
       log: [],
       logOffset: 0,
       roads: createRoadNetwork(),
+      undo: [],
     });
   });
 
-  it("loads the version 2 fixture as a version 3 city with no roads", () => {
+  it("loads the version 2 fixture as a current city with no roads and no undo history", () => {
     const { state, header } = deserialize(fromHex(v2Fixture.hex));
     expect(header.stateVersion).toBe(2);
-    expect(state.version).toBe(3);
-    const { roads, ...rest } = state;
+    expect(state.version).toBe(SNAPSHOT_VERSION);
+    const { roads, undo, ...rest } = state;
     expect(roads).toEqual(createRoadNetwork());
+    expect(undo).toEqual([]);
     // Everything the version 2 save held comes back unchanged.
     expect(hashState({ ...rest, version: 2 })).toBe(v2Fixture.hash);
   });
 
-  it("loads the version 3 fixture to its recorded hash", () => {
+  it("loads the version 3 fixture with an empty undo history", () => {
     const { state, header } = deserialize(fromHex(v3Fixture.hex));
     expect(header.stateVersion).toBe(3);
-    expect(hashState(state)).toBe(v3Fixture.hash);
+    const { undo, ...rest } = state;
+    expect(undo).toEqual([]);
+    // Everything the version 3 save held comes back unchanged.
+    expect(hashState({ ...rest, version: 3 })).toBe(v3Fixture.hash);
     expect(segmentsAt(state.roads, 1)).toHaveLength(2);
     expect(Array.from(state.roads.segFree)).toEqual([1]);
     expect(Array.from(state.roads.nodeFree)).toEqual([4]);
   });
 
-  it("still writes the version 3 fixture byte for byte", () => {
+  it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
+    const { state, header } = deserialize(fromHex(v4Fixture.hex));
+    expect(header.stateVersion).toBe(4);
+    expect(hashState(state)).toBe(v4Fixture.hash);
+    expect(state.undo.map((r) => [r.playerId, r.type])).toEqual([
+      ["p1", "BuildRoad"],
+      ["p2", "BuildRoad"],
+      ["p1", "UpgradeRoad"],
+      ["p2", "BulldozeRoad"],
+    ]);
+    expect(heldIds(state.undo)).toEqual(v4Fixture.held);
+    // p2's bulldoze comes back on undo.
+    expect(submit(state, { seq: 1, playerId: "p2", type: "Undo", payload: {} })).toEqual({ ok: true });
+  });
+
+  it("still writes the version 4 fixture byte for byte", () => {
     // If this fails the byte layout changed: bump SNAPSHOT_FORMAT_VERSION and
     // keep reading the old layout, or explain in the pull request why not.
-    const { state } = deserialize(fromHex(v3Fixture.hex));
-    expect(toHex(serialize(state))).toBe(v3Fixture.hex);
+    const { state } = deserialize(fromHex(v4Fixture.hex));
+    expect(toHex(serialize(state))).toBe(v4Fixture.hex);
   });
 });
 
