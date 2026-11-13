@@ -364,6 +364,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     roadTool.click(snap ? { x: snap.x, z: snap.z } : hit);
   });
   controls.onRightClick(() => roadTool.cancel());
+  controls.onDoubleClick(() => roadTool.finish());
   const previews = createRoadPreviewLayer(view.scene, () => hooks.terrain);
   const marks = createSnapMarkLayer(view.scene, () => hooks.terrain);
   // The live preview, worked out again only when what it depends on changes.
@@ -374,10 +375,11 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   const livePreview = (cursor: { x: number; z: number } | null): RoadPreview | null => {
     const ui = useUi.getState();
     const start = ui.roadStart;
+    const control = ui.roadControl;
     const end = cursor ? { x: snapToGrid(cursor.x), z: snapToGrid(cursor.z) } : null;
     const key =
       ui.tool === "road" && start && end
-        ? `${start.x},${start.z},${end.x},${end.z},${ui.roadType},${mirrorVersion}`
+        ? `${start.x},${start.z},${control ? `${control.x},${control.z}` : "-"},${end.x},${end.z},${ui.roadType},${ui.roadMode},${mirrorVersion}`
         : "";
     if (key !== previewKey) {
       previewKey = key;
@@ -390,6 +392,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     az: p.from.z,
     bx: p.to.x,
     bz: p.to.z,
+    control: p.control,
     width: p.type.width,
     look,
     junctions: look === "refused" ? [] : p.junctions,
@@ -410,7 +413,19 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     if (live) shapes.push(shapeOf(live, live.ok ? "ok" : "refused"));
     previews.show(shapes);
     const scale = cursor ? metresPerPixel(cursor) : 1;
-    marks.show(snap ? snapMarks(snap, useUi.getState().roadStart, scale) : [], scale);
+    const ui = useUi.getState();
+    const shown = snap ? snapMarks(snap, roadTool.anchor(), scale) : [];
+    // Before a curve's control point is set, a line from the start shows the direction it will leave in.
+    if (snap && ui.roadMode === "curved" && ui.roadStart && !ui.roadControl && snap.kind !== "tangent") {
+      shown.push({ shape: "line", ax: ui.roadStart.x, az: ui.roadStart.z, bx: snap.x, bz: snap.z, look: "angle" });
+    }
+    // Once it is set, lines from the start to the control point and on to the cursor show the curve's frame.
+    if (snap && ui.roadStart && ui.roadControl) {
+      const c = ui.roadControl;
+      shown.push({ shape: "line", ax: ui.roadStart.x, az: ui.roadStart.z, bx: c.x, bz: c.z, look: "angle" });
+      shown.push({ shape: "line", ax: c.x, az: c.z, bx: snap.x, bz: snap.z, look: "angle" });
+    }
+    marks.show(shown, scale);
     const pointer = controls.pointer();
     setRoadHover(live && pointer ? { x: pointer.x, y: pointer.y, preview: live, snap } : null);
     setViewReadout({

@@ -5,7 +5,7 @@ import { gameDate } from "@city-council/sim";
 import { formatGameDate, formatMoneyShort, formatSpeed } from "../src/ui/format";
 import { TickRateMeter } from "../src/ui/rate";
 import { parseSeed, randomSeed } from "../src/ui/seed";
-import { TOOL_ROAD_TYPES } from "../src/tools/road-tool";
+import { DRAW_MODES, TOOL_ROAD_TYPES } from "../src/tools/road-tool";
 import { SHORTCUTS, shortcutFor, toggledSpeed, type KeyPress } from "../src/ui/shortcuts";
 import { setViewReadout, useViewReadout } from "../src/ui/store";
 
@@ -112,6 +112,14 @@ describe("shortcuts", () => {
     // Every type the tool offers has a key.
     const types = SHORTCUTS.flatMap((s) => (s.action.kind === "roadType" ? [s.action.type] : []));
     expect(types).toEqual([...TOOL_ROAD_TYPES]);
+  });
+
+  it("maps T Y U to the straight, curved and continuous drawing modes", () => {
+    expect(shortcutFor(press("KeyT"))).toEqual({ kind: "drawMode", mode: "straight" });
+    expect(shortcutFor(press("KeyY"))).toEqual({ kind: "drawMode", mode: "curved" });
+    expect(shortcutFor(press("KeyU"))).toEqual({ kind: "drawMode", mode: "continuous" });
+    const modes = SHORTCUTS.flatMap((s) => (s.action.kind === "drawMode" ? [s.action.mode] : []));
+    expect(modes).toEqual([...DRAW_MODES]);
   });
 
   it("leaves typing, modified keys, repeats and the camera keys alone", () => {

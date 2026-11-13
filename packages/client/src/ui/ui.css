@@ -411,6 +411,7 @@ kbd {
 
 .build-bar .tools,
 .build-bar .road-types,
+.build-bar .draw-modes,
 .build-bar .guides {
   display: flex;
   gap: 4px;
