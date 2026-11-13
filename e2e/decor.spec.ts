@@ -88,7 +88,10 @@ test("no trees or grass are drawn over the whole map", async ({ page }) => {
 
 test("trees and grass stand on the land near the camera, the same after a reload", async ({ page }, testInfo) => {
   // Software WebGL on CI runners draws the forest at a few frames a second.
-  test.setTimeout(150_000);
+  // Alone on a fast machine the test takes about a minute, but on a CI
+  // runner shared with a second worker it takes anywhere from 1.2 to over
+  // 2.5 minutes, so it gets twice that.
+  test.setTimeout(300_000);
   await ready(page, "/?webgl");
   await lookAtForestEdge(page, 160, 420);
   const first = await settledCounts(page);
