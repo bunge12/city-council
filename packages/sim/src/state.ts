@@ -1,14 +1,16 @@
 import type { Command } from "./commands";
 import type { LogEntry } from "./log";
 import { seedRng } from "./rng";
+import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, type RoadNetwork } from "./roads/network";
+import { terrainOf } from "./terrain/cache";
 import type { UndoRecord } from "./undo";
 
 /**
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 4;
+export const SNAPSHOT_VERSION = 5;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -45,10 +47,32 @@ export interface SimState {
    * the order their commands applied. Replaced, never changed in place.
    */
   undo: UndoRecord[];
+  /**
+   * The outside connections' edge nodes, in the order they were placed
+   * (roads/connections.ts). Each has one fixed highway stub; the stub's
+   * other end is where the player builds from. Never changes after the
+   * city is created.
+   */
+  connections: Int32Array;
 }
 
-/** A new city from a 32-bit unsigned integer seed. */
+/**
+ * A new city from a 32-bit unsigned integer seed: no roads but its outside
+ * connections, placed from the seed. Generates the terrain for the seed, if
+ * it is not cached, to place them.
+ */
 export function createState(seed: number): SimState {
+  const state = createBareState(seed);
+  state.connections = placeConnections(state.roads, terrainOf(seed), seed);
+  return state;
+}
+
+/**
+ * A city with no roads at all, not even its outside connections. No game
+ * starts from one. For tests that need an empty network, and the base
+ * `createState` builds on.
+ */
+export function createBareState(seed: number): SimState {
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) {
     throw new RangeError(`seed must be an integer from 0 to 2^32 - 1, got ${seed}`);
   }
@@ -63,6 +87,7 @@ export function createState(seed: number): SimState {
     logOffset: 0,
     roads: createRoadNetwork(),
     undo: [],
+    connections: new Int32Array(0),
   };
 }
 

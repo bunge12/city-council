@@ -6,7 +6,7 @@ import {
   ROAD_TYPES,
   bridgeDeckHeight,
   bridgeDeckLevel,
-  createState,
+  createBareState,
   deserialize,
   hashState,
   heightAt,
@@ -120,7 +120,7 @@ describe("the test map", () => {
 
 describe("a road across water", () => {
   it("becomes ground, bridge and ground, with a node on each bank", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     build(state, road([RIVER.x0, RIVER.z], [RIVER.x1, RIVER.z]));
     const net = state.roads;
     const t = terrainOf(SEED);
@@ -139,7 +139,7 @@ describe("a road across water", () => {
 
   it("only bridges the wet stretch, and its ramps reach the deck by the water", () => {
     const t = terrainOf(SEED);
-    const p = plan(createState(SEED).roads, t, road([RIVER.x0, RIVER.z], [RIVER.x1, RIVER.z]));
+    const p = plan(createBareState(SEED).roads, t, road([RIVER.x0, RIVER.z], [RIVER.x1, RIVER.z]));
     expect(p.levels).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
     expect(wetAlong(t, p, 0).some(Boolean)).toBe(false);
     expect(wetAlong(t, p, 2).some(Boolean)).toBe(false);
@@ -159,7 +159,7 @@ describe("a road across water", () => {
 
   it("costs the bridge's length at the type's multiplier", () => {
     const t = terrainOf(SEED);
-    const p = plan(createState(SEED).roads, t, road([RIVER.x0, RIVER.z], [RIVER.x1, RIVER.z]));
+    const p = plan(createBareState(SEED).roads, t, road([RIVER.x0, RIVER.z], [RIVER.x1, RIVER.z]));
     expect(p.bridgeLength).toBe(nth(p.stops, 2).x - nth(p.stops, 1).x);
     const ground = p.length - p.bridgeLength;
     const price = street.buildCostPerMetre;
@@ -170,7 +170,7 @@ describe("a road across water", () => {
   it("is refused when the crossing is longer than the type's limit", () => {
     const t = terrainOf(SEED);
     const wide = road([3200, 6800], [3900, 6800]);
-    expect(reason(createState(SEED).roads, t, wide)).toBe(
+    expect(reason(createBareState(SEED).roads, t, wide)).toBe(
       `Too long for a bridge: 453 m, and the street limit is ${street.bridge.maxLength} m`,
     );
     // An avenue may bridge further than a street.
@@ -180,7 +180,7 @@ describe("a road across water", () => {
 
   it("is refused when it starts or ends in water", () => {
     const t = terrainOf(SEED);
-    const net = createState(SEED).roads;
+    const net = createBareState(SEED).roads;
     expect(reason(net, t, road([3500, RIVER.z], [3700, RIVER.z]))).toBe("A road cannot start or end in water");
     expect(reason(net, t, road([3400, RIVER.z], [3550, RIVER.z]))).toBe("A road cannot start or end in water");
     expect(reason(createRoadNetwork(), CANAL, road([450, 500], [700, 500]))).toBe("A road cannot start or end in water");
@@ -220,7 +220,7 @@ describe("a road across water", () => {
   });
 
   it("bridges each crossing of a curve", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     build(state, road([3380, 6640], [3720, 6640], "street", [3550, 6700]));
     expect(Array.from(state.roads.segLevel)).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
   });

@@ -35,6 +35,7 @@ import {
   LEVEL_BRIDGE,
   LEVEL_GROUND,
   NETWORK_ROAD,
+  NODE_FIXED,
   NONE,
   SEG_FIXED,
   addNode,
@@ -222,6 +223,7 @@ const SHORT_ROAD = `Too short: a road must be at least ${ROAD_BUILD.minLength} m
 const SHORT_PIECE = `Too close to a junction: every piece of road between junctions must be at least ${ROAD_BUILD.minLength} m long`;
 const DUPLICATE = "A road already joins these two points";
 const ALONG = "The road runs along another road";
+const AT_CONNECTION = "The highway at an outside connection cannot be joined or crossed: build from the end of it";
 const SHARP = `The angle with the road it joins is too sharp: it must be at least ${ROAD_BUILD.minAngleDegrees} degrees`;
 const SHALLOW = `The road crosses another road at too shallow an angle: it must be at least ${ROAD_BUILD.minAngleDegrees} degrees`;
 const TANGLED = "The road passes too close to another junction to join it cleanly";
@@ -966,6 +968,11 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
   const bridged = placeBridges(terrain, type, orderStops(start, end, middle, curved), control);
   if (typeof bridged === "string") return { ok: false, reason: bridged };
   const { stops, levels } = bridged;
+  // A fixed node or segment, as at an outside connection, never gains a road.
+  for (const s of stops) {
+    if (s.node !== NONE && ((net.nodeFlags[s.node] ?? 0) & NODE_FIXED) !== 0) return { ok: false, reason: AT_CONNECTION };
+    for (const seg of s.splits) if (((net.segFlags[seg] ?? 0) & SEG_FIXED) !== 0) return { ok: false, reason: AT_CONNECTION };
+  }
 
   // A segment split at its own end runs along the road. So does a straight
   // one split twice by a straight road. A curve can meet a segment twice,

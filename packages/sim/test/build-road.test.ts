@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ROAD_BALANCE,
   ROAD_BUILD,
+  createBareState,
   createState,
   deserialize,
   generateTerrain,
@@ -70,7 +71,7 @@ describe("the test map", () => {
 
 describe("BuildRoad", () => {
   it("builds a straight street with nodes on the ground", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(build(state, road([4200, 4500], [4500, 4500]))).toEqual({ ok: true });
     const net = state.roads;
     expect(nodeCount(net)).toBe(2);
@@ -86,7 +87,7 @@ describe("BuildRoad", () => {
   });
 
   it("builds each buildable type", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(build(state, road([4200, 4500], [4500, 4500], "avenue"))).toEqual({ ok: true });
     expect(build(state, road([4200, 4600], [4500, 4600], "oneWay"))).toEqual({ ok: true });
     expect([...state.roads.segType]).toEqual([roadTypeIndex("avenue"), roadTypeIndex("oneWay")]);
@@ -97,14 +98,14 @@ describe("BuildRoad", () => {
     expect(snapToGrid(4200.06)).toBe(4200);
     expect(snapToGrid(4200.07)).toBe(4200.125);
     expect(snapToGrid(-0.01)).toBe(0);
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(build(state, road([4200.04, 4500.3], [4400.9, 4500.3]))).toEqual({ ok: true });
     expect([state.roads.nodeX[0], state.roads.nodeZ[0]]).toEqual([4200, 4500.25]);
     expect([state.roads.nodeX[1], state.roads.nodeZ[1]]).toEqual([4400.875, 4500.25]);
   });
 
   it("joins two roads drawn to the same point at one node", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(build(state, road([4200, 4500], [4500, 4500]))).toEqual({ ok: true });
     expect(build(state, road([4500, 4800], [4500, 4500]))).toEqual({ ok: true });
     expect(nodeCount(state.roads)).toBe(3);
@@ -112,7 +113,7 @@ describe("BuildRoad", () => {
   });
 
   it("joins an end within the merge distance of a node, and moves it there", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     build(state, road([4200, 4500], [4500, 4500]));
     const near = ROAD_BUILD.mergeDistance - 0.5;
     expect(build(state, road([4500 + near, 4800], [4500 + near, 4500]))).toEqual({ ok: true });
@@ -122,7 +123,7 @@ describe("BuildRoad", () => {
   });
 
   it("makes a new node for an end just past the merge distance", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     build(state, road([4200, 4500], [4500, 4500]));
     const far = ROAD_BUILD.mergeDistance + 0.5;
     expect(build(state, road([4500, 4800], [4500 + far, 4500 - far]))).toEqual({ ok: true });
@@ -130,7 +131,7 @@ describe("BuildRoad", () => {
   });
 
   it("drops a command made invalid by an earlier one in the same tick, and does not log it", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(submit(state, road([4200, 4500], [4500, 4500], "street", "p1"))).toEqual({ ok: true });
     expect(submit(state, road([4500, 4500], [4200, 4500], "avenue", "p2"))).toEqual({ ok: true });
     step(state);
@@ -141,13 +142,13 @@ describe("BuildRoad", () => {
 
 describe("BuildRoad refuses", () => {
   const ok = (): SimState => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(build(state, road([4200, 4500], [4500, 4500]))).toEqual({ ok: true });
     return state;
   };
 
   it("a payload without two points and a type", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     const base = road([4200, 4500], [4500, 4500]);
     expect(rejection(state, { ...base, payload: null })).toMatch(/start, an end and a road type/);
     expect(rejection(state, { ...base, payload: { from: { x: 1 }, to: { x: 2, z: 2 }, type: "street" } })).toMatch(/finite x and z/);
@@ -156,16 +157,16 @@ describe("BuildRoad refuses", () => {
   });
 
   it("an unknown road type", () => {
-    expect(rejection(createState(SEED), road([4200, 4500], [4500, 4500], "boulevard"))).toBe('There is no road type "boulevard"');
+    expect(rejection(createBareState(SEED), road([4200, 4500], [4500, 4500], "boulevard"))).toBe('There is no road type "boulevard"');
   });
 
   it("a highway, until M5", () => {
-    expect(rejection(createState(SEED), road([4200, 4500], [4500, 4500], "highway"))).toBe("Highways cannot be built yet");
+    expect(rejection(createBareState(SEED), road([4200, 4500], [4500, 4500], "highway"))).toBe("Highways cannot be built yet");
   });
 
   it("a road outside the map", () => {
     const size = mapSize(terrainOf(SEED));
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(rejection(state, road([-5, 4500], [100, 4500]))).toBe("The road runs off the map");
     expect(rejection(state, road([size - 100, 4500], [size + 1, 4500]))).toBe("The road runs off the map");
     expect(rejection(state, road([4200, 4500], [4200, size + 50]))).toBe("The road runs off the map");
@@ -173,7 +174,7 @@ describe("BuildRoad refuses", () => {
 
   it("a road shorter than the minimum length", () => {
     const short = ROAD_BUILD.minLength - 1;
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(rejection(state, road([4200, 4500], [4200 + short, 4500]))).toMatch(/^Too short: a road must be at least 10 m/);
     expect(rejection(state, road([4200, 4500], [4200, 4500]))).toMatch(/^Too short/);
   });
@@ -206,13 +207,13 @@ describe("BuildRoad refuses", () => {
   });
 
   it("a road that ends in water", () => {
-    expect(rejection(createState(SEED), road([SHORE.x, SHORE.z], [SHORE.x + 200, SHORE.z]))).toBe(
+    expect(rejection(createBareState(SEED), road([SHORE.x, SHORE.z], [SHORE.x + 200, SHORE.z]))).toBe(
       "A road cannot start or end in water",
     );
   });
 
   it("a road steeper than its type allows", () => {
-    expect(rejection(createState(SEED), road([SLOPE.x, SLOPE.z], [SLOPE.x + 40, SLOPE.z]))).toMatch(
+    expect(rejection(createBareState(SEED), road([SLOPE.x, SLOPE.z], [SLOPE.x + 40, SLOPE.z]))).toMatch(
       /^Too steep: a \d+% grade, and the street limit is 12%$/,
     );
   });
@@ -221,7 +222,7 @@ describe("BuildRoad refuses", () => {
     // Find a short run in the flat square whose grade is between the avenue
     // limit and the street limit, and build each type on it.
     const t = terrainOf(SEED);
-    const net = createState(SEED).roads;
+    const net = createBareState(SEED).roads;
     const between = (x: number, z: number): boolean => {
       const plan = planRoad(net, t, { from: { x, z }, to: { x: x + 16, z }, type: "street" });
       const avenue = planRoad(net, t, { from: { x, z }, to: { x: x + 16, z }, type: "avenue" });
@@ -233,7 +234,7 @@ describe("BuildRoad refuses", () => {
     }
     expect(found).not.toBeNull();
     const [x, z] = found ?? [0, 0];
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(rejection(state, road([x, z], [x + 16, z], "avenue"))).toMatch(/^Too steep: .* the avenue limit is 10%$/);
     expect(build(state, road([x, z], [x + 16, z], "street"))).toEqual({ ok: true });
   });
@@ -241,7 +242,7 @@ describe("BuildRoad refuses", () => {
 
 describe("planRoad", () => {
   it("prices the road from the balance file and changes nothing", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     const before = hashState(state);
     const result = planRoad(state.roads, terrainOf(SEED), road([4200, 4500], [4500, 4500], "avenue").payload);
     expect(result.ok).toBe(true);
@@ -261,7 +262,7 @@ describe("terrain for commands", () => {
 
 describe("a city saved and reloaded mid-build", () => {
   it("checks and builds the same as one that never stopped", () => {
-    const live = createState(SEED);
+    const live = createBareState(SEED);
     build(live, road([4200, 4500], [4500, 4500]));
     build(live, road([4500, 4500], [4500, 4800]));
     const loaded = deserialize(serialize(live)).state;
@@ -315,8 +316,9 @@ describe("road build balance", () => {
 describe("replay fixture build-roads", () => {
   it("replays to its recorded hash", () => {
     const state = expectReplay(fixture);
-    expect(segmentCount(state.roads)).toBe(4);
-    expect(nodeCount(state.roads)).toBe(4);
+    // The fixture's own roads, plus each outside connection's stub and its two nodes.
+    expect(segmentCount(state.roads)).toBe(4 + state.connections.length);
+    expect(nodeCount(state.roads)).toBe(4 + 2 * state.connections.length);
   });
 
   it("matches the same commands submitted live", () => {

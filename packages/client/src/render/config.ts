@@ -249,3 +249,24 @@ export const SNAP_MARKS = {
   /** Ground samples along a guide line at most this far apart, metres. */
   sampleStep: 8,
 } as const;
+
+/**
+ * The marks on each outside connection (issue M1-16): a disc with an arrow
+ * pointing into the map, on the edge node. Sizes are CSS pixels on screen,
+ * turned into metres where each mark stands, so a connection is as easy to
+ * find from the city band as from the street.
+ */
+export const CONNECTION_MARKS = {
+  /** The disc, a road-sign blue, and the arrow on it. */
+  disc: 0x1f6fd1,
+  arrow: 0xffffff,
+  opacity: 0.95,
+  /** Metres above the ground, over the roads. */
+  lift: 1.2,
+  discPx: 15,
+  discSides: 28,
+  /** The arrow's length and width, and its stroke. */
+  arrowPx: 16,
+  arrowWidthPx: 14,
+  arrowStrokePx: 3.5,
+} as const;

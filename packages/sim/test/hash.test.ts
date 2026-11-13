@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createState, fnv1a64, hashState, step, submit, type SimState } from "../src/index";
+import { createBareState, fnv1a64, hashState, step, submit, type SimState } from "../src/index";
 
 declare function structuredClone<T>(value: T): T;
 declare class TextEncoder {
@@ -14,7 +14,7 @@ function referenceFnv(bytes: Uint8Array): string {
 }
 
 function busyState(): SimState {
-  const state = createState(77);
+  const state = createBareState(77);
   submit(state, { seq: 1, playerId: "p1", type: "SetSpeed", payload: { speed: 2 } });
   step(state);
   submit(state, { seq: 2, playerId: "p2", type: "NoOp", payload: { note: "hi" } });

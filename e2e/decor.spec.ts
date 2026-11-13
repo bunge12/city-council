@@ -81,6 +81,8 @@ async function lookAtForestEdge(page: Page, height: number, back: number): Promi
 
 test("no trees or grass are drawn over the whole map", async ({ page }) => {
   await ready(page);
+  // A new city opens on an outside connection (issue M1-16). Look at the whole map.
+  await page.evaluate(async () => (await window.cityCouncil.camera).rig.setPose([6000, 8400, 15_840], [6000, 0, 5640]));
   expect(await settledCounts(page)).toEqual({ trees: 0, grass: 0 });
 });
 

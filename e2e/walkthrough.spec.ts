@@ -39,7 +39,10 @@ declare const window: {
     renderStatus(): { backend: string; seed: number; readyMs: number } | null;
     view: Promise<{ lodCounts(): number[] }>;
     camera: Promise<{
-      rig: { pose: { target: Hit; distance: number; yaw: number; pitch: number } };
+      rig: {
+        pose: { target: Hit; distance: number; yaw: number; pitch: number };
+        setPose(position: readonly [number, number, number], target: readonly [number, number, number]): void;
+      };
       terrain: { samples: number; spacing: number };
       lastPick: Hit | null | undefined;
     }>;
@@ -195,6 +198,9 @@ for (const variant of [
       info.annotations.push({ type: "cold load", description: note });
       console.log(`${variant.name}: ${note}`);
 
+      // A new city opens on an outside connection (issue M1-16). From here
+      // on the walkthrough looks at the whole map, as M0 did.
+      await page.evaluate(async () => (await window.cityCouncil.camera).rig.setPose([6000, 8400, 15_840], [6000, 0, 5640]));
       // The map is drawn, not just loaded: the renderer reports the chunks
       // and the water as draw calls, and most of the screen is not sky.
       // A lost WebGPU device leaves the counters at zero and the canvas

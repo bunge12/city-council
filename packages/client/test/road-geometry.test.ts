@@ -9,7 +9,7 @@ import {
   bridgeDeckLevel,
   heightAt,
   applyRoadDelta,
-  createState,
+  createBareState,
   drainRoadChanges,
   encodeRoadDelta,
   generateTerrain,
@@ -69,7 +69,7 @@ function build(state: SimState, from: [number, number], to: [number, number], ty
 }
 
 function city(roads: [from: [number, number], to: [number, number], type?: string, control?: [number, number]][]): RoadNetwork {
-  const state = createState(SEED);
+  const state = createBareState(SEED);
   for (const [from, to, type, control] of roads) build(state, from, to, type, control);
   return state.roads;
 }
@@ -271,7 +271,7 @@ describe("junctions", () => {
     const types = ["street", "avenue", "oneWay"];
     let tried = 0;
     for (let n = 0; n < 24; n++) {
-      const state = createState(SEED);
+      const state = createBareState(SEED);
       const cx = 4200 + (n % 4) * 130;
       const cz = 4470 + Math.floor(n / 4) * 85;
       const arms = 2 + nextInt(rng, 5);
@@ -424,7 +424,7 @@ describe("chunks", () => {
 
   it("rebuild after a delta to exactly what a fresh build draws", () => {
     // A host and a client copy fed the same deltas, as the worker and the mirror are.
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     recordRoadChanges(state.roads);
     const copy = structuredClone(state.roads);
     const index = new RoadChunks();
@@ -462,7 +462,7 @@ describe("chunks", () => {
   });
 
   it("name only the chunks a short road and its junctions reach", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     build(state, [4150, 4450], [4350, 4450]);
     recordRoadChanges(state.roads);
     const index = new RoadChunks();

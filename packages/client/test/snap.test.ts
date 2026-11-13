@@ -1,7 +1,7 @@
 // Snapping for the road tool (issue M1-08), on a network the sim itself
 // built, read the way the client reads its mirror.
 import { describe, expect, it } from "vitest";
-import { ROAD_BUILD, createState, generateTerrain, step, submit, type BuildPoint, type SimState } from "@city-council/sim";
+import { ROAD_BUILD, createBareState, generateTerrain, step, submit, type BuildPoint, type SimState } from "@city-council/sim";
 import { liveRoadSegment, type RoadNet } from "../src/render/road-geometry";
 import { buildSnapMarks, snapMarks } from "../src/render/snap-marks-geometry";
 import { DEFAULT_GUIDES, SNAP, type GuideToggles } from "../src/tools/config";
@@ -14,7 +14,7 @@ const SEED = 2026;
 const terrain = generateTerrain(SEED);
 
 function build(roads: [BuildPoint, BuildPoint][]): SimState {
-  const state = createState(SEED);
+  const state = createBareState(SEED);
   let seq = 0;
   for (const [from, to] of roads) {
     const result = submit(state, { seq: ++seq, playerId: "test", type: "BuildRoad", payload: { from, to, type: "street" } });

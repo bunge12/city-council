@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createState, nextFloat, nextInt, nextU32, seedRng } from "../src/index";
+import { createBareState, nextFloat, nextInt, nextU32, seedRng } from "../src/index";
 
 function take(rng: Uint32Array, n: number): number[] {
   return Array.from({ length: n }, () => nextU32(rng));
@@ -24,7 +24,7 @@ describe("xoshiro128**", () => {
   });
 
   it("stores its state in SimState and advances it in place", () => {
-    const state = createState(12345);
+    const state = createBareState(12345);
     const first = nextU32(state.rng);
     expect(first).toBe(518667457);
     expect(nextU32(state.rng)).toBe(440444462);

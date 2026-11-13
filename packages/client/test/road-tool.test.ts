@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ROAD_BALANCE,
   ROAD_TYPES,
-  createState,
+  createBareState,
   generateTerrain,
   heightAt,
   type BuildRoadPayload,
@@ -34,7 +34,7 @@ function waterPoint(): { x: number; z: number } {
 function setup(send?: (payload: BuildRoadPayload) => Promise<CommandResult>) {
   const { client, host: hostEnd } = memoryTransportPair();
   let now = 0;
-  const host = new SimHost(createState(SEED), hostEnd, () => now);
+  const host = new SimHost(createBareState(SEED), hostEnd, () => now);
   const mirror = new SimMirror(client, "p1");
   let state: RoadToolState = { ...INITIAL_ROAD_TOOL };
   const sent: BuildRoadPayload[] = [];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cloneState, createState } from "../src/state";
+import { cloneState, createBareState } from "../src/state";
 import { hashState } from "../src/index";
 import {
   LEVEL_BRIDGE,
@@ -165,7 +165,7 @@ describe("road network id reuse", () => {
       let net = createRoadNetwork();
       for (let i = 0; i < 40; i++) addNode(net, i, i, i);
       for (let i = 0; i < 40; i += 3) removeNode(net, i);
-      if (roundTrip) net = cloneState({ ...createState(1), roads: net }).roads;
+      if (roundTrip) net = cloneState({ ...createBareState(1), roads: net }).roads;
       for (let i = 0; i < 10; i++) addNode(net, -i, -i, 0);
       return net;
     };
@@ -209,7 +209,7 @@ describe("road network array growth", () => {
     expect(hashState(grown)).toBe(hashState(full));
 
     // And a grown network hashes like a fresh copy with no spare room.
-    const copy = cloneState({ ...createState(1), roads: grown }).roads;
+    const copy = cloneState({ ...createBareState(1), roads: grown }).roads;
     expect(capacityOf(copy.nodeX)).toBe(copy.nodeX.length);
     expect(hashState(copy)).toBe(hashState(grown));
     expect(before).not.toBe(hashState(grown));
@@ -218,7 +218,7 @@ describe("road network array growth", () => {
   it("hashes a network built to a size the same as one built past it and trimmed by a copy", () => {
     const net = createRoadNetwork();
     for (let i = 0; i < 17; i++) addNode(net, i, 0, 0);
-    const trimmed = cloneState({ ...createState(1), roads: net }).roads;
+    const trimmed = cloneState({ ...createBareState(1), roads: net }).roads;
     expect(capacityOf(net.nodeX)).toBe(32);
     expect(capacityOf(trimmed.nodeX)).toBe(17);
     expect(hashState(trimmed)).toBe(hashState(net));

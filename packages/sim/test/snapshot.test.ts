@@ -5,6 +5,7 @@ import {
   SNAPSHOT_FORMAT_VERSION,
   SNAPSHOT_VERSION,
   SnapshotError,
+  createBareState,
   createState,
   deserialize,
   fnv1a64,
@@ -24,8 +25,10 @@ import v1Fixture from "./fixtures/snapshots/v1.json";
 import v2Fixture from "./fixtures/snapshots/v2.json";
 import v3Fixture from "./fixtures/snapshots/v3.json";
 import v4Fixture from "./fixtures/snapshots/v4.json";
+import v5Fixture from "./fixtures/snapshots/v5.json";
+import { checkConnections } from "../src/roads/connections";
 import { heldIds } from "../src/undo";
-import { addNode, addSegment, createRoadNetwork, removeSegment, segmentsAt } from "../src/roads/network";
+import { addNode, addSegment, removeSegment, segmentsAt } from "../src/roads/network";
 
 function fromHex(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
@@ -58,7 +61,7 @@ function refusal(bytes: Uint8Array): SnapshotError {
 
 /** A state with commands applied and one still queued. */
 function busyState(seed = 11): SimState {
-  const state = createState(seed);
+  const state = createBareState(seed);
   nextU32(state.rng);
   submit(state, { seq: 1, playerId: "p1", type: "NoOp", payload: {} });
   step(state);
@@ -71,7 +74,7 @@ function busyState(seed = 11): SimState {
 
 describe("serialize and deserialize", () => {
   it("round-trips a new city to the same hash", () => {
-    const state = createState(1);
+    const state = createBareState(1);
     const { state: back, pagedLog } = deserialize(serialize(state));
     expect(hashState(back)).toBe(hashState(state));
     expect(back).toEqual(state);
@@ -88,7 +91,7 @@ describe("serialize and deserialize", () => {
   });
 
   it("keeps values plain JSON would lose or confuse", () => {
-    const state = createState(3);
+    const state = createBareState(3);
     const payload = {
       $: "looks like a tag",
       nested: { $: "section", name: "rng" },
@@ -139,13 +142,13 @@ describe("serialize and deserialize", () => {
   });
 
   it("refuses to write a paged log that does not match logOffset", () => {
-    const state = createState(1);
+    const state = createBareState(1);
     state.logOffset = 2;
     expect(() => serialize(state, [])).toThrow(/pagedLog has 0 entries but 2/);
   });
 
   it("refuses state that is not plain data", () => {
-    const state = createState(1) as SimState & { bad?: unknown };
+    const state = createBareState(1) as SimState & { bad?: unknown };
     state.bad = new Map();
     expect(() => serialize(state)).toThrow(/not plain data/);
   });
@@ -181,7 +184,7 @@ describe("the activity log across a save", () => {
 describe("a snapshot written without its paged log", () => {
   /** A city with entries paged out of live state, and the entries a host would have read. */
   function pagedCity(): { state: SimState; fullLog: LogEntry[] } {
-    const state = createState(21);
+    const state = createBareState(21);
     const fullLog: LogEntry[] = [];
     let seq = 0;
     while (state.logOffset === 0) {
@@ -251,7 +254,7 @@ describe("save and resume against an uninterrupted run", () => {
 
   it("holds when the save lands with a command still queued", () => {
     const run = (save: boolean): SimState => {
-      let state = createState(42);
+      let state = createBareState(42);
       drive(state, 0, 500);
       submit(state, { seq: 9999, playerId: "a", type: "SetSpeed", payload: { speed: 4 } });
       if (save) state = deserialize(serialize(state)).state;
@@ -266,8 +269,9 @@ describe("committed snapshots", () => {
   it("loads the version 1 fixture and migrates it to the current version", () => {
     const { state, header } = deserialize(fromHex(v1Fixture.hex));
     expect(header.stateVersion).toBe(1);
-    const rng = createState(5).rng;
+    const rng = createBareState(5).rng;
     nextU32(rng);
+    const fresh = createState(5);
     expect(state).toEqual({
       version: SNAPSHOT_VERSION,
       tick: 42,
@@ -277,38 +281,44 @@ describe("committed snapshots", () => {
       pending: [],
       log: [],
       logOffset: 0,
-      roads: createRoadNetwork(),
+      roads: fresh.roads,
       undo: [],
+      connections: fresh.connections,
     });
   });
 
-  it("loads the version 2 fixture as a current city with no roads and no undo history", () => {
+  it("loads the version 2 fixture as a current city with no roads but its outside connections and no undo history", () => {
     const { state, header } = deserialize(fromHex(v2Fixture.hex));
     expect(header.stateVersion).toBe(2);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    const { roads, undo, ...rest } = state;
-    expect(roads).toEqual(createRoadNetwork());
+    const { roads, undo, connections, ...rest } = state;
+    const fresh = createState(state.seed);
+    expect(roads).toEqual(fresh.roads);
+    expect(connections).toEqual(fresh.connections);
     expect(undo).toEqual([]);
     // Everything the version 2 save held comes back unchanged.
     expect(hashState({ ...rest, version: 2 })).toBe(v2Fixture.hash);
   });
 
-  it("loads the version 3 fixture with an empty undo history", () => {
+  it("loads the version 3 fixture with an empty undo history, and connections in its free ids", () => {
     const { state, header } = deserialize(fromHex(v3Fixture.hex));
     expect(header.stateVersion).toBe(3);
-    const { undo, ...rest } = state;
-    expect(undo).toEqual([]);
-    // Everything the version 3 save held comes back unchanged.
-    expect(hashState({ ...rest, version: 3 })).toBe(v3Fixture.hash);
+    expect(state.undo).toEqual([]);
     expect(segmentsAt(state.roads, 1)).toHaveLength(2);
-    expect(Array.from(state.roads.segFree)).toEqual([1]);
-    expect(Array.from(state.roads.nodeFree)).toEqual([4]);
+    // The connections take the ids the save had free, then new ones.
+    expect(Array.from(state.connections)).toEqual([4, 6]);
+    expect(Array.from(state.roads.segFree)).toEqual([]);
+    expect(Array.from(state.roads.nodeFree)).toEqual([]);
+    expect(checkConnections(state.connections, state.roads)).toBeNull();
+    expect(hashState(state)).toBe("9901553503370b5a");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
     const { state, header } = deserialize(fromHex(v4Fixture.hex));
     expect(header.stateVersion).toBe(4);
-    expect(hashState(state)).toBe(v4Fixture.hash);
+    // Migrated, it is the version 5 fixture.
+    expect(hashState(state)).toBe(v5Fixture.hash);
+    expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(state.undo.map((r) => [r.playerId, r.type])).toEqual([
       ["p1", "BuildRoad"],
       ["p2", "BuildRoad"],
@@ -320,11 +330,27 @@ describe("committed snapshots", () => {
     expect(submit(state, { seq: 1, playerId: "p2", type: "Undo", payload: {} })).toEqual({ ok: true });
   });
 
-  it("still writes the version 4 fixture byte for byte", () => {
+  it("loads the version 5 fixture to its recorded hash", () => {
+    const { state, header } = deserialize(fromHex(v5Fixture.hex));
+    expect(header.stateVersion).toBe(5);
+    expect(hashState(state)).toBe(v5Fixture.hash);
+    expect(heldIds(state.undo)).toEqual(v5Fixture.held);
+    expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
+  });
+
+  it("still writes the version 5 fixture byte for byte", () => {
     // If this fails the byte layout changed: bump SNAPSHOT_FORMAT_VERSION and
     // keep reading the old layout, or explain in the pull request why not.
-    const { state } = deserialize(fromHex(v4Fixture.hex));
-    expect(toHex(serialize(state))).toBe(v4Fixture.hex);
+    const { state } = deserialize(fromHex(v5Fixture.hex));
+    expect(toHex(serialize(state))).toBe(v5Fixture.hex);
+  });
+
+  it("refuses a save whose connection list names a node that is not a connection", () => {
+    const { state } = deserialize(fromHex(v5Fixture.hex));
+    state.connections = Int32Array.of(0);
+    const error = refusal(serialize(state));
+    expect(error.code).toBe("corrupt");
+    expect(error.message).toMatch(/outside connections are malformed/);
   });
 });
 
@@ -369,7 +395,7 @@ describe("snapshots with a road network", () => {
 
 describe("snapshots that are refused", () => {
   it("refuses a newer state version with a clear message", () => {
-    const bytes = serialize(createState(1));
+    const bytes = serialize(createBareState(1));
     new DataView(bytes.buffer).setUint16(6, SNAPSHOT_VERSION + 1, true);
     const error = refusal(bytes);
     expect(error.code).toBe("newer-version");
@@ -378,7 +404,7 @@ describe("snapshots that are refused", () => {
   });
 
   it("refuses a newer file format before reading anything after the version", () => {
-    const bytes = serialize(createState(1)).slice(0, 8);
+    const bytes = serialize(createBareState(1)).slice(0, 8);
     new DataView(bytes.buffer).setUint16(4, SNAPSHOT_FORMAT_VERSION + 1, true);
     const error = refusal(bytes);
     expect(error.code).toBe("newer-version");
@@ -409,7 +435,7 @@ describe("snapshots that are refused", () => {
 
   it("refuses a queued command that is not a command, which would throw on the first step", () => {
     for (const bad of [null, 7, { seq: 1, playerId: "p1" }, { seq: 1, playerId: "p1", type: ["NoOp"] }]) {
-      const state = createState(3);
+      const state = createBareState(3);
       state.pending.push(bad as never);
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");

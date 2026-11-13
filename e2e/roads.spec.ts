@@ -116,7 +116,8 @@ for (const { name, query } of BACKENDS) {
     testInfo.annotations.push({ type: "backend", description: backend });
     const stats = await roadStats(page);
     // Three chunks: the grid and avenue cross the lines x = 4500 and z = 4500.
-    expect(stats.chunks).toBe(3);
+    // Plus one for each of the two outside connection stubs at the map edge.
+    expect(stats.chunks).toBe(3 + 2);
     for (const { band, position, target } of BANDS) {
       await setPose(page, position, target);
       await settle(page);

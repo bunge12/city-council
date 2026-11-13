@@ -6,12 +6,12 @@
     { "tick": 0, "seq": 1, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4200, "z": 4500 }, "to": { "x": 4500, "z": 4500 }, "type": "street" } },
     { "tick": 0, "seq": 1, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 4300, "z": 4400 }, "to": { "x": 4300, "z": 4700 }, "type": "street" } },
     { "tick": 1, "seq": 2, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4400, "z": 4400 }, "to": { "x": 4400, "z": 4700 }, "type": "street", "control": { "x": 4450, "z": 4550 } } },
-    { "tick": 3, "seq": 3, "playerId": "p1", "type": "UpgradeRoad", "payload": { "segments": [0], "type": "avenue" } },
-    { "tick": 3, "seq": 2, "playerId": "p2", "type": "UpgradeRoad", "payload": { "segments": [2, 3], "type": "oneWay", "from": [3, 4] } },
-    { "tick": 4, "seq": 3, "playerId": "p2", "type": "UpgradeRoad", "payload": { "segments": [2], "type": "oneWay" } },
-    { "tick": 6, "seq": 4, "playerId": "p1", "type": "BulldozeRoad", "payload": { "segments": [4] } },
-    { "tick": 7, "seq": 4, "playerId": "p2", "type": "BulldozeRoad", "payload": { "segments": [1, 0] } },
+    { "tick": 3, "seq": 3, "playerId": "p1", "type": "UpgradeRoad", "payload": { "segments": [2], "type": "avenue" } },
+    { "tick": 3, "seq": 2, "playerId": "p2", "type": "UpgradeRoad", "payload": { "segments": [4, 5], "type": "oneWay", "from": [7, 8] } },
+    { "tick": 4, "seq": 3, "playerId": "p2", "type": "UpgradeRoad", "payload": { "segments": [4], "type": "oneWay" } },
+    { "tick": 6, "seq": 4, "playerId": "p1", "type": "BulldozeRoad", "payload": { "segments": [6] } },
+    { "tick": 7, "seq": 4, "playerId": "p2", "type": "BulldozeRoad", "payload": { "segments": [3, 2] } },
     { "tick": 9, "seq": 5, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4250, "z": 4600 }, "to": { "x": 4450, "z": 4600 }, "type": "avenue" } }
   ],
-  "hash": "d04df899195d67d0"
+  "hash": "c27ae229e3dea805"
 }
