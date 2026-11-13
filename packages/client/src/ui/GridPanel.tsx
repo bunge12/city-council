@@ -19,9 +19,10 @@ export function gridHint(drawn: boolean, dragging: boolean, onRoad: boolean): st
  * A block size in whole cells. What is typed stays as typed, so the field
  * can be cleared and retyped; each whole number in range is taken as it is
  * typed, and leaving the field shows the size in use. Enter builds the grid,
- * since the field keeps focus through a drag on the map.
+ * since the field keeps focus through a drag on the map, and Escape
+ * does what it does on the map.
  */
-function CellsField(props: { id: string; label: string; value: number; onCommit(cells: number): void; onEnter(): void }) {
+function CellsField(props: { id: string; label: string; value: number; onCommit(cells: number): void; onEnter(): void; onEscape(): void }) {
   const [draft, setDraft] = useState<string | null>(null);
   return (
     <label>
@@ -41,10 +42,13 @@ function CellsField(props: { id: string; label: string; value: number; onCommit(
         }}
         onBlur={() => setDraft(null)}
         onKeyDown={(e) => {
-          if (e.key !== "Enter") return;
+          // Enter and Escape hand focus back to the map, so the keys work as they do there.
+          if (e.key !== "Enter" && e.key !== "Escape") return;
           e.preventDefault();
           setDraft(null);
-          props.onEnter();
+          e.currentTarget.blur();
+          if (e.key === "Enter") props.onEnter();
+          else props.onEscape();
         }}
       />
       cells
@@ -74,8 +78,8 @@ export function GridPanel() {
   const cuts = preview?.cuts.length ?? 0;
   return (
     <div className="grid-panel" id="grid-panel">
-      <CellsField id="grid-depth" label="Depth" value={depth} onCommit={(v) => gridTool.setBlock("depth", v)} onEnter={() => gridTool.confirm()} />
-      <CellsField id="grid-width" label="Width" value={width} onCommit={(v) => gridTool.setBlock("width", v)} onEnter={() => gridTool.confirm()} />
+      <CellsField id="grid-depth" label="Depth" value={depth} onCommit={(v) => gridTool.setBlock("depth", v)} onEnter={() => gridTool.confirm()} onEscape={() => gridTool.escape()} />
+      <CellsField id="grid-width" label="Width" value={width} onCommit={(v) => gridTool.setBlock("width", v)} onEnter={() => gridTool.confirm()} onEscape={() => gridTool.escape()} />
       {preview && (
         <span
           className={preview.ok ? "grid-summary" : "grid-summary refused"}

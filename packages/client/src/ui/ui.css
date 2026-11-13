@@ -421,6 +421,12 @@ kbd {
   align-items: center;
 }
 
+/* Tighter than other buttons, so the tools, types, modes and guides fit
+   on one row at 1280 pixels with the grid tool's button among them. */
+#ui .build-bar .controls button {
+  padding-inline: 7px;
+}
+
 /* Five toggles: smaller than the other buttons, so the whole toolbar stays
    on one row at 1280 pixels in any system font, DejaVu Sans included. */
 #ui .build-bar .guides button {

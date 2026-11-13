@@ -49,7 +49,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     codes: ["Escape"],
     label: "Esc",
-    description: "drop the road or grid being drawn or the drag, or leave the tool",
+    description: "drop the road being drawn, the grid's rectangle or the drag, or leave the tool",
     action: { kind: "escape" },
   },
 ];
