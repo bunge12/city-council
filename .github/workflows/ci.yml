@@ -77,15 +77,22 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { id: chromium-1, args: "--project chromium --shard=1/4" }
-          - { id: chromium-2, args: "--project chromium --shard=2/4" }
-          - { id: chromium-3, args: "--project chromium --shard=3/4" }
-          - { id: chromium-4, args: "--project chromium --shard=4/4" }
+          # One worker each, like the roads project. With two, the heavy
+          # tests (two tabs drawing the whole map, the forest) starve the
+          # page in the other worker on a slow runner, and its locators and
+          # screenshots time out. Six shards keep the wall time about where
+          # two workers on four had it.
+          - { id: chromium-1, args: "--project chromium --workers=1 --shard=1/6" }
+          - { id: chromium-2, args: "--project chromium --workers=1 --shard=2/6" }
+          - { id: chromium-3, args: "--project chromium --workers=1 --shard=3/6" }
+          - { id: chromium-4, args: "--project chromium --workers=1 --shard=4/6" }
+          - { id: chromium-5, args: "--project chromium --workers=1 --shard=5/6" }
+          - { id: chromium-6, args: "--project chromium --workers=1 --shard=6/6" }
           # One worker: software WebGPU takes most of a runner's CPU. In CI
           # the roads project is fully parallel, so its one file is dealt
           # out test by test.
