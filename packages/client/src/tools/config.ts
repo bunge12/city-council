@@ -21,6 +21,22 @@ export const BLOCK_OVERLAY = {
   labelCurveSteps: 8,
 } as const;
 
+/** The grid tool (issue M1-21). */
+export const GRID_TOOL = {
+  /**
+   * Block depth to start with, cells between road edges: two zoning strips
+   * of `SNAP.zoneDepthCells` back to back, so every lot faces a street.
+   */
+  defaultDepthCells: 12,
+  /** Block width to start with, cells between road edges along the first side. */
+  defaultWidthCells: 24,
+  /** The block size fields take whole cells in this range. The sim refuses blocks under 10 m. */
+  minBlockCells: 2,
+  maxBlockCells: 100,
+  /** A rectangle turned with Alt held turns in steps of this many degrees. */
+  turnStepDegrees: 1,
+} as const;
+
 export const SNAP = {
   /** An existing node catches the cursor this near. */
   nodePx: 16,

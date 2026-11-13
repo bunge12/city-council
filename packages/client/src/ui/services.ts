@@ -8,6 +8,7 @@ import type { SaveStatus } from "../save/channel";
 import type { SaveClient } from "../save/page";
 import type { BlockOverlayController } from "../tools/block-overlay";
 import type { EditToolController } from "../tools/edit-tool";
+import type { GridToolController } from "../tools/grid-tool";
 import type { RoadToolController } from "../tools/road-tool";
 import type { RouteToolController } from "../tools/route-tool";
 
@@ -40,6 +41,8 @@ export interface AppServices {
   undo(): Promise<CommandResult>;
   /** The road tool's input handling. Its state is in the UI store. */
   roadTool: RoadToolController;
+  /** The grid tool's input handling. Its state is in the UI store too. */
+  gridTool: GridToolController;
   /** The bulldoze and upgrade tools' input handling. Their state is in the UI store too. */
   editTool: EditToolController;
   /** The debug panel's route tool. Its state is in the UI store too. */

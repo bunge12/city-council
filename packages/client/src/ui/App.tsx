@@ -18,7 +18,7 @@ import "./ui.css";
 
 /** Turns key presses into shortcut actions. Speed keys send `SetSpeed`, like the buttons. */
 function useShortcuts(): void {
-  const { sendCommand, roadTool, editTool, routeTool, undo } = useServices();
+  const { sendCommand, roadTool, gridTool, editTool, routeTool, undo } = useServices();
   const speed = useSim((s) => s?.speed ?? null);
   const lastRunning = useRef<Speed>(1);
   const current = useRef<Speed | null>(null);
@@ -58,6 +58,12 @@ function useShortcuts(): void {
         case "roadTool":
           roadTool.toggle();
           return;
+        case "gridTool":
+          gridTool.toggle();
+          return;
+        case "confirm":
+          gridTool.confirm();
+          return;
         case "bulldozeTool":
           editTool.toggle("bulldoze");
           return;
@@ -71,7 +77,7 @@ function useShortcuts(): void {
           roadTool.pickMode(action.mode);
           return;
         case "escape":
-          if (!routeTool.escape() && !editTool.escape()) roadTool.escape();
+          if (!routeTool.escape() && !editTool.escape() && !gridTool.escape()) roadTool.escape();
           return;
         case "undo":
           void undo();
@@ -80,7 +86,7 @@ function useShortcuts(): void {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [sendCommand, roadTool, editTool, routeTool, undo]);
+  }, [sendCommand, roadTool, gridTool, editTool, routeTool, undo]);
 }
 
 function Shell() {

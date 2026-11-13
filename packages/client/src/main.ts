@@ -35,6 +35,7 @@ import { createSnapMarkLayer } from "./render/snap-marks";
 import { snapMarks } from "./render/snap-marks-geometry";
 import { BlockOverlayController, blockLabelPoint, blockShapes } from "./tools/block-overlay";
 import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
+import { GridToolController, gridMarks, gridShapes } from "./tools/grid-tool";
 import { dragSamples, pickSegment } from "./tools/pick-segment";
 import { RoadToolController, type RoadPreview } from "./tools/road-tool";
 import { RouteToolController, routeShapes } from "./tools/route-tool";
@@ -230,6 +231,14 @@ const roadTool = new RoadToolController({
 });
 mirror.subscribe((update) => roadTool.mirrorUpdated(update));
 
+const gridTool = new GridToolController({
+  get: () => useUi.getState(),
+  set: (patch) => useUi.setState(patch),
+  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain } : null),
+  send: (payload) => sendCommand("BuildRoadGrid", payload),
+});
+mirror.subscribe((update) => gridTool.mirrorUpdated(update));
+
 const editTool = new EditToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
@@ -267,6 +276,7 @@ const services: AppServices = {
   newCity,
   openCity,
   roadTool,
+  gridTool,
   editTool,
   routeTool,
   blockOverlay,
@@ -419,8 +429,11 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const pixels = (Math.hypot(e.x - o.x, e.y - o.y) + Math.hypot(s.x - o.x, s.y - o.y)) / 2;
     return pixels > 1e-6 ? 1 / pixels : 1;
   };
-  const snapAt = (hit: GroundHit | null): Snap | null =>
-    hit ? roadTool.snap(hit, { metresPerPixel: metresPerPixel(hit), free: controls.altHeld() }) : null;
+  const snapAt = (hit: GroundHit | null): Snap | null => {
+    if (!hit) return null;
+    const view = { metresPerPixel: metresPerPixel(hit), free: controls.altHeld() };
+    return gridTool.active() ? gridTool.snap(hit, view) : roadTool.snap(hit, view);
+  };
   /** The road segment under screen point `p` for the bulldoze and upgrade tools, or NONE. `prefer` wins while `p` is on it. */
   function segmentAt(p: { x: number; y: number }, prefer = -1): number {
     const net = mirror.state?.roads;
@@ -450,26 +463,60 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       editTool.click(pointer ? segmentAt(pointer) : -1);
       return;
     }
+    // The grid tool takes drags, not clicks.
+    if (gridTool.active()) return;
     const snap = snapAt(hit);
     roadTool.click(snap ? { x: snap.x, z: snap.z } : hit);
   });
   controls.onRightClick(() => {
     const pointer = controls.pointer();
     if (editTool.active() && pointer && editTool.rightClick(segmentAt(pointer))) return;
+    if (gridTool.active()) {
+      gridTool.cancel();
+      return;
+    }
     roadTool.cancel();
   });
+  /** The grid tool's corner at screen point `p`: the ground there, caught by a road node or segment unless Alt is held. */
+  const gridPointAt = (p: { x: number; y: number }): { x: number; z: number } | null => {
+    const hit = rig.pickGround(p.x, p.y);
+    if (!hit) return null;
+    const snap = gridTool.snap(hit, { metresPerPixel: metresPerPixel(hit), free: controls.altHeld() });
+    return snap ? { x: snap.x, z: snap.z } : hit;
+  };
+  /** A grid drag has started and its first move, which carries the press point, has not come yet. */
+  let gridDragStarting = false;
   controls.setToolDrag({
-    active: () => editTool.active() !== null,
-    start: () => editTool.dragStart(),
+    active: () => editTool.active() !== null || gridTool.active(),
+    start: () => {
+      if (gridTool.active()) gridDragStarting = true;
+      else editTool.dragStart();
+    },
     move: (from, to) => {
+      if (gridTool.active()) {
+        if (gridDragStarting) {
+          gridDragStarting = false;
+          gridTool.dragStart(gridPointAt(from));
+        }
+        gridTool.dragMove(gridPointAt(to), controls.altHeld());
+        return;
+      }
       for (const p of dragSamples(from, to)) {
         // The segment the drag took last wins while the pointer is on it, so a drag along a road skips the roads crossing it.
         const drag = useUi.getState().editDrag;
         editTool.dragOver(segmentAt(p, drag?.[drag.length - 1] ?? -1));
       }
     },
-    end: () => editTool.dragEnd(),
-    cancel: () => editTool.dragCancel(),
+    end: () => {
+      gridDragStarting = false;
+      if (gridTool.active()) gridTool.dragEnd();
+      else editTool.dragEnd();
+    },
+    cancel: () => {
+      gridDragStarting = false;
+      if (gridTool.active()) gridTool.dragCancel();
+      else editTool.dragCancel();
+    },
   });
   controls.onDoubleClick(() => roadTool.finish());
   const previews = createRoadPreviewLayer(view.scene, () => hooks.terrain);
@@ -560,6 +607,12 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const live = livePreview(snap);
     const shapes = useUi.getState().roadPending.map((p) => shapeOf(p.preview, "pending"));
     if (live) shapes.push(shapeOf(live, live.ok ? "ok" : "refused"));
+    // The grid tool: grids in flight, then the one drawn.
+    for (const p of useUi.getState().gridPending) shapes.push(...gridShapes(p.preview, "pending"));
+    const gridPayload = gridTool.payload();
+    const gridNow = gridTool.preview();
+    if (gridNow) shapes.push(...gridShapes(gridNow, gridNow.ok ? "ok" : "refused"));
+    document.body.dataset["gridPreview"] = gridNow ? (gridNow.ok ? "ok" : "refused") : "";
     // The bulldoze and upgrade tools: edits in flight, then the one under the pointer.
     const pointerNow = controls.pointer();
     const picked = editTool.active() && pointerNow ? segmentAt(pointerNow) : -1;
@@ -585,6 +638,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const scale = cursor ? metresPerPixel(cursor) : 1;
     const ui = useUi.getState();
     const shown = snap && !routeTool.active() ? snapMarks(snap, roadTool.anchor(), scale) : [];
+    if (gridPayload) shown.push(...gridMarks(gridPayload, gridNow?.cuts ?? []));
     // The route tool's points, as rings.
     for (const point of [ui.routeFrom, ui.routeTo]) if (point) shown.push({ shape: "ring", x: point.x, z: point.z, look: "node" });
     // Before a curve's control point is set, a line from the start shows the direction it will leave in.

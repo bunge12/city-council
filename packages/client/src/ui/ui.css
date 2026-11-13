@@ -406,7 +406,7 @@ kbd {
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 6px 10px;
+  gap: 6px 8px;
 }
 
 .build-bar .tools,
@@ -421,11 +421,45 @@ kbd {
   align-items: center;
 }
 
+/* Tighter than other buttons, so the tools, types, modes and guides fit
+   on one row at 1280 pixels with the grid tool's button among them. Under
+   DejaVu Sans, as on the CI runner, 7 px still wrapped; 5 px leaves about
+   40 px to spare. */
+#ui .build-bar .controls button {
+  padding-inline: 5px;
+}
+
 /* Five toggles: smaller than the other buttons, so the whole toolbar stays
    on one row at 1280 pixels in any system font, DejaVu Sans included. */
 #ui .build-bar .guides button {
   padding-inline: 6px;
   font-size: 12px;
+}
+
+.build-bar .grid-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+
+.build-bar .grid-panel label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.build-bar .grid-panel input {
+  width: 4.5em;
+}
+
+.build-bar .grid-summary.refused {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bad-bg);
+  color: var(--bad-ink);
 }
 
 .build-bar .group-label {

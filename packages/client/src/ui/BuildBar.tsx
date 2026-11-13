@@ -1,6 +1,7 @@
 import { ROAD_TYPES } from "@city-council/sim";
 import { FREE_HAND_KEY_LABEL, GUIDES } from "../tools/config";
 import { DRAW_MODES, TOOL_ROAD_TYPES, type DrawMode } from "../tools/road-tool";
+import { GridPanel, gridHint } from "./GridPanel";
 import { useServices, useSim } from "./hooks";
 import { useUi } from "./store";
 
@@ -36,9 +37,9 @@ function typeName(id: string): string {
   return ROAD_TYPES.find((t) => t.id === id)?.name ?? id;
 }
 
-/** The build toolbar: the road, upgrade and bulldoze tools and the road type picker. */
+/** The build toolbar: the road, grid, upgrade and bulldoze tools and the road type picker. */
 export function BuildBar() {
-  const { roadTool, editTool } = useServices();
+  const { roadTool, gridTool, editTool } = useServices();
   const ready = useSim((s) => s !== null);
   const undoNote = useUi((s) => s.undoNote);
   const tool = useUi((s) => s.tool);
@@ -52,17 +53,25 @@ export function BuildBar() {
   const dragging = useUi((s) => s.editDrag !== null);
   const editPending = useUi((s) => s.editPending.length);
   const editNote = useUi((s) => s.editNote);
+  const gridDrawn = useUi((s) => s.gridOrigin !== null);
+  const gridDragging = useUi((s) => s.gridDragging);
+  const gridOnRoad = useUi((s) => s.gridOnRoad);
+  const gridPending = useUi((s) => s.gridPending.length);
+  const gridNote = useUi((s) => s.gridNote);
   const active = tool === "road";
+  const gridding = tool === "grid";
   const editing = tool === "bulldoze" || tool === "upgrade";
 
   let hint = "Pick the road tool to draw roads.";
   if (active) {
     hint = toolHint(roadMode, drawing, curving);
     hint += ` Hold ${FREE_HAND_KEY_LABEL} to draw free-hand.`;
+  } else if (gridding) {
+    hint = gridHint(gridDrawn, gridDragging, gridOnRoad);
   } else if (editing) {
     hint = editHint(tool, dragging, typeName(roadType));
   }
-  const shownNote = editing ? editNote : note;
+  const shownNote = editing ? editNote : gridding ? gridNote : note;
 
   return (
     <section className="panel build-bar" id="build-bar" aria-label="Build">
@@ -77,6 +86,16 @@ export function BuildBar() {
             onClick={() => roadTool.toggle()}
           >
             Road <kbd>B</kbd>
+          </button>
+          <button
+            type="button"
+            id="grid-tool"
+            aria-pressed={gridding}
+            disabled={!ready}
+            title="Grid tool (G): drag out a rectangle to lay a street grid"
+            onClick={() => gridTool.toggle()}
+          >
+            Grid <kbd>G</kbd>
           </button>
           <button
             type="button"
@@ -105,7 +124,7 @@ export function BuildBar() {
               key={id}
               type="button"
               id={`road-type-${id}`}
-              aria-pressed={(active || tool === "upgrade") && roadType === id}
+              aria-pressed={(active || gridding || tool === "upgrade") && roadType === id}
               disabled={!ready}
               title={`${typeName(id)} (${TYPE_KEYS[id] ?? ""})`}
               onClick={() => roadTool.pickType(id)}
@@ -114,6 +133,8 @@ export function BuildBar() {
             </button>
           ))}
         </div>
+        {gridding && <GridPanel />}
+        {!gridding && (
         <div className="draw-modes" role="group" aria-label="Drawing mode">
           {DRAW_MODES.map((mode) => (
             <button
@@ -129,6 +150,8 @@ export function BuildBar() {
             </button>
           ))}
         </div>
+        )}
+        {!gridding && (
         <div className="guides" role="group" aria-label="Guides">
           <span className="group-label">Snap</span>
           {GUIDES.map((g) => (
@@ -144,10 +167,12 @@ export function BuildBar() {
             </button>
           ))}
         </div>
+        )}
       </div>
       <p className="hint" id="road-hint">
         {hint}
         {pending > 0 && <span id="road-pending"> Building {pending === 1 ? "1 road" : `${pending} roads`}…</span>}
+        {gridPending > 0 && <span id="grid-pending"> Building {gridPending === 1 ? "1 grid" : `${gridPending} grids`}…</span>}
         {editPending > 0 && <span id="edit-pending"> Applying {editPending === 1 ? "1 change" : `${editPending} changes`}…</span>}
       </p>
       {undoNote && (

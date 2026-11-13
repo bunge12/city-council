@@ -14,7 +14,7 @@ export type SnapMark =
   | { shape: "diamond"; x: number; z: number; look: "segment" }
   | { shape: "line"; ax: number; az: number; bx: number; bz: number; look: "angle" | "line" | "offset" }
   | { shape: "square"; x: number; z: number; ux: number; uz: number; vx: number; vz: number; look: "square" }
-  | { shape: "cross"; x: number; z: number; look: "grid" | "line" };
+  | { shape: "cross"; x: number; z: number; look: "grid" | "line" | "cut" };
 
 /**
  * The lines a guide snap shows (issue M1-19). A guide line runs from its

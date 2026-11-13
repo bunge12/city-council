@@ -239,6 +239,8 @@ export const SNAP_MARKS = {
     line: 0x8fc7ff,
     /** A parallel offset beside a road, and the gap it measures. */
     offset: 0xffa64d,
+    /** Where water or steep ground cuts a street of the grid tool's preview (issue M1-21). */
+    cut: 0xff5a4a,
   },
   opacity: 0.95,
   /** Metres above the ground, over the road preview. */
