@@ -139,3 +139,5 @@ export {
   reachesOutside,
 } from "./roads/connections";
 export type { ConnectionBalance, ConnectionSite } from "./roads/connections";
+export { BLOCK_MIN_AREA, blockById, blockIndexOf, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
+export type { Block, BlockIndex } from "./roads/blocks";

@@ -44,6 +44,7 @@ import {
   unindexNode,
   unindexSegment,
 } from "./spatial";
+import { addBlockSegment, existingBlockIndex, removeBlockSegment } from "./blocks";
 import { NO_EDGE, existingRoutingGraph, refreshRoutingSegment } from "./routing";
 
 type NodeKey = (typeof NODE_ARRAYS)[number];
@@ -266,6 +267,10 @@ export function applyRoadDelta(net: RoadNetwork, delta: RoadDelta): number[] | s
     for (const seg of delta.segIds) if (isSegment(net, seg)) unindexSegment(index, seg);
     for (const node of delta.nodeIds) if (isNode(net, node)) unindexNode(index, node);
   }
+  // Blocks the same way: each changed row lets go while the lists are as
+  // they were, and comes back once they are as they are.
+  const blocks = existingBlockIndex(net);
+  if (blocks) for (const seg of delta.segIds) if (isSegment(net, seg)) removeBlockSegment(blocks, seg);
   scatter(net, NODE_ARRAYS, delta.nodeLimit, delta.nodeIds, delta.nodes);
   scatter(net, SEG_ARRAYS, delta.segLimit, delta.segIds, delta.segs);
   if (delta.nodeFree) net.nodeFree = delta.nodeFree.slice();
@@ -274,6 +279,7 @@ export function applyRoadDelta(net: RoadNetwork, delta: RoadDelta): number[] | s
     for (const node of delta.nodeIds) if (isNode(net, node)) indexNode(index, node);
     for (const seg of delta.segIds) if (isSegment(net, seg)) indexSegment(index, seg);
   }
+  if (blocks) for (const seg of delta.segIds) if (isSegment(net, seg)) addBlockSegment(blocks, seg);
   // The routing graph keeps per-segment numbers only, so each changed row is
   // worked out again, and ids past a smaller limit lose their edges.
   const graph = existingRoutingGraph(net);

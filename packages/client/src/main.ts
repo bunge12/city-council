@@ -10,6 +10,7 @@ import {
   heightAt,
   replay,
   snapToGrid,
+  type Block,
   type CommandResult,
   type LogEntry,
   type Terrain,
@@ -29,8 +30,10 @@ import { createRoadPreviewLayer } from "./render/road-preview";
 import type { PreviewShape } from "./render/road-preview-geometry";
 import { createConnectionMarkLayer } from "./render/connection-marks";
 import { connectionMarks } from "./render/connection-marks-geometry";
+import type { RoadNet } from "./render/road-geometry";
 import { createSnapMarkLayer } from "./render/snap-marks";
 import { snapMarks } from "./render/snap-marks-geometry";
+import { BlockOverlayController, blockLabelPoint, blockShapes } from "./tools/block-overlay";
 import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
 import { dragSamples, pickSegment } from "./tools/pick-segment";
 import { RoadToolController, type RoadPreview } from "./tools/road-tool";
@@ -38,7 +41,7 @@ import { RouteToolController, routeShapes } from "./tools/route-tool";
 import type { Snap } from "./tools/snap";
 import { mountUi } from "./ui/App";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import { setEditHover, setRoadHover, setViewReadout, useUi } from "./ui/store";
+import { setBlockLabels, setEditHover, setRoadHover, setViewReadout, useUi, type BlockLabel } from "./ui/store";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
 const TAB_CITY_KEY = "city-council:city";
@@ -239,9 +242,17 @@ const routeTool = new RouteToolController({
   set: (patch) => useUi.setState(patch),
   net: () => mirror.state?.roads ?? null,
 });
-// Only a change to the roads can change a route.
+const blockOverlay = new BlockOverlayController({
+  get: () => useUi.getState(),
+  set: (patch) => useUi.setState(patch),
+  net: () => mirror.state?.roads ?? null,
+});
+// Only a change to the roads can change a route or a block.
 mirror.subscribe((update) => {
-  if (update.kind === "snapshot" || update.roadSegs.length > 0 || update.roadNodes.length > 0) routeTool.refresh();
+  if (update.kind === "snapshot" || update.roadSegs.length > 0 || update.roadNodes.length > 0) {
+    routeTool.refresh();
+    blockOverlay.refresh();
+  }
 });
 
 const services: AppServices = {
@@ -257,6 +268,7 @@ const services: AppServices = {
   roadTool,
   editTool,
   routeTool,
+  blockOverlay,
 };
 const uiRoot = document.getElementById("ui");
 if (!uiRoot) throw new Error("#ui is missing from index.html");
@@ -507,6 +519,32 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     junctions: look === "refused" ? [] : p.junctions,
     bridges: look === "refused" ? [] : p.bridges.map((b) => ({ ax: b.from.x, az: b.from.z, bx: b.to.x, bz: b.to.z, control: b.control })),
   });
+  // The block overlay's outlines and label points change only with the blocks.
+  let outlinesFor: readonly Block[] | null = null;
+  let outlines: PreviewShape[] = [];
+  let labelPoints: { id: number; x: number; y: number; z: number; area: number }[] = [];
+  const blockOutlines = (net: RoadNet, blocks: readonly Block[]): PreviewShape[] => {
+    if (blocks !== outlinesFor) {
+      outlinesFor = blocks;
+      outlines = blockShapes(net, blocks);
+      labelPoints = blocks.map((b) => {
+        const p = blockLabelPoint(net, b);
+        return { id: b.id, x: p.x, y: Math.max(heightAt(hooks.terrain, p.x, p.z), hooks.terrain.waterLevel), z: p.z, area: b.area };
+      });
+    }
+    return outlines;
+  };
+  /** Each block's label on screen, leaving out those behind the camera or off the canvas. */
+  const blockLabels = (net: RoadNet, blocks: readonly Block[]): BlockLabel[] => {
+    blockOutlines(net, blocks);
+    const out: BlockLabel[] = [];
+    for (const p of labelPoints) {
+      v.set(p.x, p.y, p.z).project(view.camera);
+      if (v.z > 1 || v.x < -1 || v.x > 1 || v.y < -1 || v.y > 1) continue;
+      out.push({ id: p.id, x: ((v.x + 1) / 2) * canvas.clientWidth, y: ((1 - v.y) / 2) * canvas.clientHeight, area: p.area });
+    }
+    return out;
+  };
   view.onBeforeFrame((seconds) => {
     controls.update(seconds);
     const p = view.camera.position;
@@ -538,6 +576,10 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     // The debug route tool's route, under nothing else the tools draw.
     const route = useUi.getState().routeResult;
     if (net && route?.ok) shapes.unshift(...routeShapes(net, route.route));
+    // The debug block overlay's outlines, under the route.
+    const shownBlocks = useUi.getState().blocks;
+    if (net && shownBlocks) shapes.unshift(...blockOutlines(net, shownBlocks));
+    setBlockLabels(net && shownBlocks ? blockLabels(net, shownBlocks) : []);
     previews.show(shapes);
     const scale = cursor ? metresPerPixel(cursor) : 1;
     const ui = useUi.getState();

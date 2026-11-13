@@ -13,6 +13,14 @@ export const ROUTE_TOOL = {
   widthScale: 1.25,
 } as const;
 
+/** The block overlay in the debug panel (issue M1-18). */
+export const BLOCK_OVERLAY = {
+  /** The outline's width as a share of the road's, so it reads as a line down the middle. */
+  widthScale: 0.35,
+  /** Points each curve is followed through when placing a block's label. */
+  labelCurveSteps: 8,
+} as const;
+
 export const SNAP = {
   /** An existing node catches the cursor this near. */
   nodePx: 16,
