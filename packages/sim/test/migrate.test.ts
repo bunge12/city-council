@@ -13,18 +13,27 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(3);
-    expect(state).toEqual({ ...v1, version: 3, log: [], logOffset: 0, roads: createRoadNetwork() });
+    expect(SNAPSHOT_VERSION).toBe(4);
+    expect(state).toEqual({ ...v1, version: 4, log: [], logOffset: 0, roads: createRoadNetwork(), undo: [] });
     expect(() => hashState(state)).not.toThrow();
   });
 
   it("upgrades a version 2 state by adding an empty road network", () => {
-    const { roads, ...rest } = createState(9);
+    const { roads, undo, ...rest } = createState(9);
     const v2 = { ...rest, version: 2 };
     const state = migrateState(v2);
-    expect(state).toEqual({ ...v2, version: 3, roads });
+    expect(state).toEqual({ ...v2, version: 4, roads, undo });
     expect(state.roads.nodeFlags.length).toBe(0);
     expect(state.roads.segFlags.length).toBe(0);
+    expect(() => hashState(state)).not.toThrow();
+  });
+
+  it("upgrades a version 3 state by adding an empty undo history", () => {
+    const { undo, ...rest } = createState(9);
+    const v3 = { ...rest, version: 3 };
+    const state = migrateState(v3);
+    expect(undo).toEqual([]);
+    expect(state).toEqual({ ...v3, version: 4, undo: [] });
     expect(() => hashState(state)).not.toThrow();
   });
 

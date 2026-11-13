@@ -31,6 +31,11 @@ export interface AppServices {
   newCity(name: string, seed: number): Promise<void>;
   /** Reloads into saved city `id`, or reports why not. */
   openCity(id: string): Promise<void>;
+  /**
+   * Sends `Undo` for this player's newest road change. A refusal's reason
+   * goes in the UI store as `undoNote`, for the build bar to show.
+   */
+  undo(): Promise<CommandResult>;
   /** The road tool's input handling. Its state is in the UI store. */
   roadTool: RoadToolController;
   /** The bulldoze and upgrade tools' input handling. Their state is in the UI store too. */

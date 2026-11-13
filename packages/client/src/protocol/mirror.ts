@@ -54,7 +54,8 @@ type Listener = (update: MirrorUpdate) => void;
  */
 export class SimMirror {
   private readonly transport: ClientTransport;
-  private readonly playerId: string;
+  /** Who this copy sends commands as. */
+  readonly playerId: string;
   private current: SimState | null = null;
   private logFrom = 0;
   /** `seq` of the next delta that lines up with the copy. */
@@ -161,6 +162,7 @@ export class SimMirror {
     // Any step drains the host's queue, so queued commands from the
     // snapshot have now been applied or dropped.
     if (delta.steps > 0) state.pending = [];
+    if (delta.undo) state.undo = delta.undo;
     for (const entry of delta.log) state.log.push(entry);
     this.logFrom += delta.log.length;
     // Same paging as live state, so the copy stays the same shape.

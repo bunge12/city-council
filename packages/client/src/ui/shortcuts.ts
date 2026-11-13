@@ -14,7 +14,8 @@ export type ShortcutAction =
   | { kind: "upgradeTool" }
   | { kind: "roadType"; type: ToolRoadType }
   | { kind: "drawMode"; mode: DrawMode }
-  | { kind: "escape" };
+  | { kind: "escape" }
+  | { kind: "undo" };
 
 export interface Shortcut {
   /** `KeyboardEvent.code` values that trigger it. */
@@ -62,6 +63,7 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "Click, drag", description: "with bulldoze or upgrade: one road, or every road the drag passes over" },
   { label: "Right-click", description: "with upgrade: reverse a one-way" },
   { label: "Shift-drag", description: "with bulldoze or upgrade: orbit, since a drag picks roads" },
+  { label: "Ctrl Z, Cmd Z", description: "undo your last road change" },
 ];
 
 /** The parts of a key event the shortcut handler looks at. */
@@ -70,6 +72,8 @@ export interface KeyPress {
   ctrlKey: boolean;
   metaKey: boolean;
   altKey: boolean;
+  /** Left out by callers that do not care; Shift with Ctrl Z is redo elsewhere, which this game does not have. */
+  shiftKey?: boolean;
   repeat: boolean;
   /** Tag name of the focused element, upper case as the DOM gives it. */
   targetTag: string;
@@ -81,9 +85,13 @@ export interface KeyPress {
  * left alone, and so is Space on a button, which presses the button.
  */
 export function shortcutFor(press: KeyPress): ShortcutAction | null {
-  if (press.ctrlKey || press.metaKey || press.altKey || press.repeat) return null;
   const tag = press.targetTag;
+  // A field keeps Ctrl Z for its own text.
   if (press.targetEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return null;
+  if (press.repeat || press.altKey) return null;
+  // Ctrl Z, or Cmd Z on a Mac. Held down it does not repeat, so one press is one step.
+  if ((press.ctrlKey || press.metaKey) && press.code === "KeyZ" && !press.shiftKey) return { kind: "undo" };
+  if (press.ctrlKey || press.metaKey) return null;
   if (press.code === "Space" && (tag === "BUTTON" || tag === "SUMMARY" || tag === "A" || tag === "LABEL")) return null;
   return SHORTCUTS.find((s) => s.codes.includes(press.code))?.action ?? null;
 }

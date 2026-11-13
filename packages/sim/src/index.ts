@@ -88,6 +88,9 @@ export type { RoadNetwork } from "./roads/network";
 export { applyRoadDelta, drainRoadChanges, encodeRoadDelta, mergeRoadChanges, recordRoadChanges } from "./roads/delta";
 export type { RoadChanges, RoadDelta } from "./roads/delta";
 export { CHUNKS_PER_SIDE, CHUNK_SIZE } from "./chunks";
+export { UNDO_STEPS, planUndo } from "./undo";
+export type { UndoPlanResult, UndoRecord } from "./undo";
+export type { NetworkOp, SegmentRow } from "./roads/network";
 export { prepareDerived } from "./derived";
 export {
   NETWORKS_ALL,

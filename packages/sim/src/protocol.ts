@@ -7,9 +7,10 @@ import type { Command, CommandResult } from "./commands";
 import type { LogEntry } from "./log";
 import type { RoadDelta } from "./roads/delta";
 import type { SimState, Speed } from "./state";
+import type { UndoRecord } from "./undo";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 // ---- Client to sim ----
 
@@ -69,6 +70,8 @@ export interface DeltaMessage {
   log: LogEntry[];
   /** Road rows added, changed or removed. Left out when no road changed. */
   roads?: RoadDelta;
+  /** The whole undo history, when it changed. Left out otherwise. */
+  undo?: UndoRecord[];
   /** Steps the host ran since the previous delta, paused steps included. */
   steps: number;
   /** Per-system time of the most recent step, in `step` order. */

@@ -8,14 +8,15 @@
     "sourceYear": 2025
   },
   "build": {
-    "_about": "How the sim checks a road before it builds one. Lengths are metres, angles degrees. `bridgeClearance` is how far a bridge deck sits above the water. `upgradeCredit` is the share of the old road's build cost taken off an upgrade's price, because the roadbed is reused; a placeholder with no source. Starting values to tune.",
+    "_about": "How the sim checks a road before it builds one. Lengths are metres, angles degrees. `bridgeClearance` is how far a bridge deck sits above the water. `upgradeCredit` is the share of the old road's build cost taken off an upgrade's price, because the roadbed is reused; a placeholder with no source. `undoSteps` is how many road changes each player can take back. Starting values to tune.",
     "gridStep": 0.125,
     "mergeDistance": 4,
     "minLength": 10,
     "minAngleDegrees": 25,
     "groundSampleStep": 8,
     "bridgeClearance": 5,
-    "upgradeCredit": 0.5
+    "upgradeCredit": 0.5,
+    "undoSteps": 50
   },
   "types": [
     {

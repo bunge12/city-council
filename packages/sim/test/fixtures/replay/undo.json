@@ -1,0 +1,127 @@
+{
+  "description": "Two players undo their own road changes on seed 2026. p1 builds two parallel streets, p2 builds an avenue across both, p1 makes a piece a one-way and p2 bulldozes the avenue's middle. p1 undoes the upgrade and p2 the bulldoze. p1 builds a street across the pieces p2's avenue made, so p2's next undo is refused and not logged. Then p1 undoes that street and p2 its avenue.",
+  "seed": 2026,
+  "untilTick": 16,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4450
+        },
+        "to": {
+          "x": 4500,
+          "z": 4450
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 0,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4550
+        },
+        "to": {
+          "x": 4500,
+          "z": 4550
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 3,
+      "playerId": "p2",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4300,
+          "z": 4400
+        },
+        "to": {
+          "x": 4300,
+          "z": 4600
+        },
+        "type": "avenue"
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 4,
+      "playerId": "p1",
+      "type": "UpgradeRoad",
+      "payload": {
+        "segments": [
+          0
+        ],
+        "type": "oneWay"
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 5,
+      "playerId": "p2",
+      "type": "BulldozeRoad",
+      "payload": {
+        "segments": [
+          5
+        ]
+      }
+    },
+    {
+      "tick": 6,
+      "seq": 6,
+      "playerId": "p1",
+      "type": "Undo",
+      "payload": {}
+    },
+    {
+      "tick": 7,
+      "seq": 7,
+      "playerId": "p2",
+      "type": "Undo",
+      "payload": {}
+    },
+    {
+      "tick": 8,
+      "seq": 8,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4400,
+          "z": 4400
+        },
+        "to": {
+          "x": 4400,
+          "z": 4600
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 11,
+      "seq": 10,
+      "playerId": "p1",
+      "type": "Undo",
+      "payload": {}
+    },
+    {
+      "tick": 12,
+      "seq": 11,
+      "playerId": "p2",
+      "type": "Undo",
+      "payload": {}
+    }
+  ],
+  "hash": "c7571a82911ded2e"
+}

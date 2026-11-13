@@ -40,6 +40,7 @@ function typeName(id: string): string {
 export function BuildBar() {
   const { roadTool, editTool } = useServices();
   const ready = useSim((s) => s !== null);
+  const undoNote = useUi((s) => s.undoNote);
   const tool = useUi((s) => s.tool);
   const roadType = useUi((s) => s.roadType);
   const roadMode = useUi((s) => s.roadMode);
@@ -149,6 +150,11 @@ export function BuildBar() {
         {pending > 0 && <span id="road-pending"> Building {pending === 1 ? "1 road" : `${pending} roads`}…</span>}
         {editPending > 0 && <span id="edit-pending"> Applying {editPending === 1 ? "1 change" : `${editPending} changes`}…</span>}
       </p>
+      {undoNote && (
+        <p className="road-note" id="undo-note" role="status">
+          {undoNote}
+        </p>
+      )}
       {shownNote && (
         <p className="road-note" id="road-note" role="status">
           {shownNote}
