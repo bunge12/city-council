@@ -1,4 +1,5 @@
 import { SNAP } from "../tools/config";
+import type { Snap } from "../tools/snap";
 import { formatMoneyShort } from "./format";
 import { useRoadHover } from "./store";
 
@@ -9,19 +10,45 @@ export function formatCells(metres: number): string {
   return cells === 1 ? "1 cell" : `${text} cells`;
 }
 
+/** The gap a parallel offset snap holds between the road edges, in cells, or null for any other snap. */
+export function offsetCells(snap: Snap | null | undefined): number | null {
+  return snap?.guides?.find((g) => g.kind === "offset")?.cells ?? null;
+}
+
+/** What the readout says about a parallel offset. */
+export function formatOffset(cells: number): string {
+  return `${formatCells(cells * SNAP.cellSize)} beside the road, edge to edge`;
+}
+
 /** Offset of the readout from the pointer, CSS pixels. */
 const OFFSET = 18;
 
 /**
  * Next to the cursor while a road is being drawn: its type, length in metres
  * and in cells, cost, how much of it is bridge, and angle to the road it
- * starts from, or the reason the sim would refuse it. The numbers are also on data attributes, in metres,
+ * starts from, or the reason the sim would refuse it, and the gap a parallel
+ * offset holds. Before the first click it shows only the offset, when one
+ * caught the cursor. The numbers are also on data attributes, in metres,
  * whole dollars and degrees, for tests.
  */
 export function RoadReadout() {
   const hover = useRoadHover((s) => s.hover);
-  if (!hover?.preview) return null;
+  const cells = offsetCells(hover?.snap);
+  if (!hover) return null;
   const { preview, snap } = hover;
+  const offset = cells !== null && (
+    <div className="offset" id="road-offset">
+      {formatOffset(cells)}
+    </div>
+  );
+  if (!preview) {
+    if (cells === null) return null;
+    return (
+      <div className="road-readout" id="road-readout" role="status" data-snap={snap?.kind ?? "none"} data-offset-cells={String(cells)} style={{ left: hover.x + OFFSET, top: hover.y + OFFSET }}>
+        {offset}
+      </div>
+    );
+  }
   const length = `${preview.length.toFixed(0)} m`;
   const angle = snap?.angle ?? null;
   return (
@@ -38,6 +65,7 @@ export function RoadReadout() {
       data-angle={angle === null ? "" : String(angle)}
       data-snap={snap?.kind ?? "none"}
       data-square={String(snap?.square ?? false)}
+      data-offset-cells={cells === null ? "" : String(cells)}
       style={{ left: hover.x + OFFSET, top: hover.y + OFFSET }}
     >
       <div className="what">
@@ -49,6 +77,7 @@ export function RoadReadout() {
           {Math.round(angle)}° to the road{snap?.square ? ", square" : ""}
         </div>
       )}
+      {offset}
       {preview.ok && preview.bridgeLength > 0 && (
         <div className="bridge" id="road-bridge">
           {preview.bridges.length === 1 ? "Bridge" : `${preview.bridges.length} bridges`}, {preview.bridgeLength.toFixed(0)} m
