@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { MENU_SHIFT } from "./dock";
 
 // Issue M1-08: snapping. A player draws a block of four streets with every
 // click up to 10 pixels off where they aim, and gets four nodes and right
@@ -73,8 +74,13 @@ async function frames(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
-async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
-  await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
+async function setPose(page: Page, position: Vec3, target: Vec3, shift = MENU_SHIFT): Promise<void> {
+  // Issue 47: the road menu covers the bottom middle of the screen, so the
+  // view sits a quarter of its height further back and the work area higher up.
+  const back = (position[1] - target[1]) * shift;
+  const p: Vec3 = [position[0], position[1], position[2] + back];
+  const t: Vec3 = [target[0], target[1], target[2] + back];
+  await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [p, t] as const);
   await frames(page);
 }
 
@@ -234,7 +240,9 @@ test("draws a square block with clicks up to 10 pixels off target", async ({ pag
 async function overStreet(page: Page): Promise<NodeInfo> {
   await openCity(page, streetCity());
   const g = groundAt(4400, 4640);
-  await setPose(page, [4400, g + 380, 4920], [4400, g, 4640]);
+  // Its tests work around the street's middle, clear of the road menu, and
+  // their pixel reaches are tuned to this exact view, so it is not shifted.
+  await setPose(page, [4400, g + 380, 4920], [4400, g, 4640], 0);
   // At this zoom 3 degrees off at 99 m, about 5 m, is inside the 14 px reach of a 90 degree snap.
   expect(14 * (await metresPerPixel(page, 4524, 4650))).toBeGreaterThan(5.5);
   await page.locator("#road-tool").click();
@@ -312,10 +320,12 @@ test("node, segment and grid snaps show their markers, and a segment snap makes 
   await expect(page.locator("body")).toHaveAttribute("data-snap", "segment");
   await attach(page, testInfo, "point on a segment marker");
 
-  // The terrain grid, off by default, snaps to 16 m when on. Clear of the street's parallel offsets.
-  expect((await hover(page, 4421, 4745))?.kind).toBe("none");
+  // The terrain grid, off by default, snaps to 16 m when on. North of the
+  // street, clear of its parallel offsets, the new street's guide lines and
+  // offsets, and the road menu at the bottom of the screen.
+  expect((await hover(page, 4400, 4455))?.kind).toBe("none");
   await page.locator("#guide-grid").click();
-  const grid = await hover(page, 4421, 4745);
+  const grid = await hover(page, 4400, 4455);
   expect(grid?.kind).toBe("grid");
   expect([(grid?.x ?? 0) % 16, (grid?.z ?? 0) % 16]).toEqual([0, 0]);
   await attach(page, testInfo, "terrain grid marker");

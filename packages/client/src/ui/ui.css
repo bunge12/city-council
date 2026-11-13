@@ -383,10 +383,8 @@ kbd {
   }
 }
 
-/* The build toolbar, centred along the bottom edge. */
-/* A column: the buttons on one row, then the hint. Sized to its widest
-   line rather than to the half of the screen right of its left edge, so the
-   buttons stay on one row wherever they fit. */
+/* The build dock, centred along the bottom edge: the tool buttons on one
+   row, then the hint. A tool's options open in a menu above its button. */
 .build-bar {
   position: absolute;
   left: 50%;
@@ -399,41 +397,60 @@ kbd {
   width: max-content;
   max-width: calc(100vw - 16px);
   box-sizing: border-box;
+  /* The menus hang above the dock, outside the panel's box. */
+  overflow: visible;
 }
 
-.build-bar .controls {
+.build-bar .dock {
+  display: flex;
+  gap: 6px;
+}
+
+/* A tool's button, with its menu anchored above it. */
+.build-bar .dock-slot {
+  position: relative;
+}
+
+.build-bar .dock > .dock-slot > button {
+  padding-inline: 10px;
+}
+
+.build-bar .tool-menu {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  /* Centred over the road button, which sits mid-screen, so a menu that
+     grows (the grid's summary) has room on both sides. */
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: max-content max-content;
+  align-items: center;
+  gap: 6px 10px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+}
+
+/* A group: its label in the first column, its buttons in the second. */
+.build-bar .menu-group {
+  display: contents;
+}
+
+.build-bar .menu-buttons {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 6px 8px;
-}
-
-.build-bar .tools,
-.build-bar .road-types,
-.build-bar .draw-modes,
-.build-bar .guides {
-  display: flex;
   gap: 4px;
 }
 
-.build-bar .guides {
-  align-items: center;
-}
-
-/* Tighter than other buttons, so the tools, types, modes and guides fit
-   on one row at 1280 pixels with the grid tool's button among them. Under
-   DejaVu Sans, as on the CI runner, 7 px still wrapped; 5 px leaves about
-   40 px to spare. */
-#ui .build-bar .controls button {
-  padding-inline: 5px;
-}
-
-/* Five toggles: smaller than the other buttons, so the whole toolbar stays
-   on one row at 1280 pixels in any system font, DejaVu Sans included. */
-#ui .build-bar .guides button {
+#ui .build-bar .tool-menu button {
   padding-inline: 6px;
+}
+
+#ui .build-bar .guides button {
   font-size: 12px;
+}
+
+.build-bar .tool-menu .grid-panel {
+  grid-column: 1 / -1;
 }
 
 .build-bar .grid-panel {
@@ -465,6 +482,7 @@ kbd {
 .build-bar .group-label {
   color: var(--ink-soft);
   font-size: 12px;
+  text-align: right;
 }
 
 .build-bar .hint {
@@ -476,7 +494,8 @@ kbd {
   margin-left: 4px;
 }
 
-.build-bar button[aria-pressed="true"] kbd {
+.build-bar button[aria-pressed="true"] kbd,
+.build-bar button[aria-expanded="true"] kbd {
   background: rgb(255 255 255 / 0.2);
   border-color: rgb(255 255 255 / 0.5);
   color: inherit;

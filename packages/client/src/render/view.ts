@@ -64,8 +64,8 @@ export interface View {
   showRoads(net: RoadNet): void;
   /** Redraws what a delta's changed road rows touch. Returns the chunks rebuilt. */
   updateRoads(nodeIds: readonly number[], segIds: readonly number[]): number[];
-  /** Shows the road layers for a zoom band. */
-  setZoomBand(band: ZoomBand): void;
+  /** Shows the road layers for a zoom band, with the camera `height` metres over the ground. */
+  setZoomBand(band: ZoomBand, height: number): void;
   roadStats(): RoadStats | null;
 }
 
@@ -101,6 +101,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
 
   let terrainRoot: { lods: LOD[]; decor: DecorLayer; roads: RoadLayer; dispose: () => void } | null = null;
   let band: ZoomBand = "city";
+  let height = Infinity;
 
   function showTerrain(terrain: Terrain): void {
     terrainRoot?.dispose();
@@ -152,7 +153,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     scene.add(water);
 
     const roads = createRoadLayer(terrain, scene);
-    roads.setBand(band);
+    roads.setBand(band, height);
     const decor = createDecorLayer(terrain, scene, (chunk) => roads.decorMask(chunk));
 
     terrainRoot = {
@@ -245,9 +246,10 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       terrainRoot.decor.refresh(new Set(rebuilt.flatMap(neighbourhood)));
       return rebuilt;
     },
-    setZoomBand(next) {
+    setZoomBand(next, nextHeight) {
       band = next;
-      terrainRoot?.roads.setBand(next);
+      height = nextHeight;
+      terrainRoot?.roads.setBand(next, nextHeight);
     },
     roadStats: () => terrainRoot?.roads.stats() ?? null,
   };

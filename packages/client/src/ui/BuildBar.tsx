@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ROAD_TYPES } from "@city-council/sim";
 import { FREE_HAND_KEY_LABEL, GUIDES } from "../tools/config";
 import { DRAW_MODES, TOOL_ROAD_TYPES, type DrawMode } from "../tools/road-tool";
@@ -37,7 +38,22 @@ function typeName(id: string): string {
   return ROAD_TYPES.find((t) => t.id === id)?.name ?? id;
 }
 
-/** The build toolbar: the road, grid, upgrade and bulldoze tools and the road type picker. */
+/** One labelled row of buttons in a tool menu. */
+function MenuGroup({ label, id, children }: { label: string; id: string; children: ReactNode }) {
+  return (
+    <div className={`menu-group ${id}`} role="group" aria-label={label}>
+      <span className="group-label">{label}</span>
+      <div className="menu-buttons">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * The build dock along the bottom edge. Its road button opens the road menu
+ * above it, and the menu is hidden while no road tool is on, so the dock
+ * stays short (issue 47). Bulldoze and upgrade are actions in the menu, and
+ * the grid is a build mode beside straight, curved and continuous.
+ */
 export function BuildBar() {
   const { roadTool, gridTool, editTool } = useServices();
   const ready = useSim((s) => s !== null);
@@ -61,6 +77,7 @@ export function BuildBar() {
   const active = tool === "road";
   const gridding = tool === "grid";
   const editing = tool === "bulldoze" || tool === "upgrade";
+  const roadMenu = active || editing || gridding;
 
   let hint = "Pick the road tool to draw roads.";
   if (active) {
@@ -73,101 +90,122 @@ export function BuildBar() {
   }
   const shownNote = editing ? editNote : gridding ? gridNote : note;
 
+  // An action or the grid that is on goes back to drawing roads rather than closing the menu.
+  const action = (id: "upgrade" | "bulldoze") => {
+    editTool.toggle(id);
+    if (tool === id) roadTool.toggle();
+  };
+  const grid = () => {
+    gridTool.toggle();
+    if (gridding) roadTool.toggle();
+  };
+
+  const roadTypes = (
+    <MenuGroup label="Road type" id="road-types">
+      {TOOL_ROAD_TYPES.map((id) => (
+        <button
+          key={id}
+          type="button"
+          id={`road-type-${id}`}
+          aria-pressed={roadType === id}
+          disabled={!ready}
+          title={`${typeName(id)} (${TYPE_KEYS[id] ?? ""})`}
+          onClick={() => roadTool.pickType(id)}
+        >
+          {typeName(id)} <kbd>{TYPE_KEYS[id]}</kbd>
+        </button>
+      ))}
+    </MenuGroup>
+  );
+
   return (
     <section className="panel build-bar" id="build-bar" aria-label="Build">
-      <div className="controls">
-        <div className="tools" role="group" aria-label="Tools">
+      <div className="dock" role="group" aria-label="Tools">
+        <div className="dock-slot">
+          {roadMenu && (
+            <div className="panel tool-menu" id="road-menu" aria-label="Road tool options">
+              <MenuGroup label="Actions" id="actions">
+                <button
+                  type="button"
+                  id="upgrade-tool"
+                  aria-pressed={tool === "upgrade"}
+                  disabled={!ready}
+                  title="Upgrade (V): change a road to the type picked"
+                  onClick={() => action("upgrade")}
+                >
+                  Upgrade <kbd>V</kbd>
+                </button>
+                <button
+                  type="button"
+                  id="bulldoze-tool"
+                  aria-pressed={tool === "bulldoze"}
+                  disabled={!ready}
+                  title="Bulldoze (N): remove roads"
+                  onClick={() => action("bulldoze")}
+                >
+                  Bulldoze <kbd>N</kbd>
+                </button>
+              </MenuGroup>
+              {tool !== "bulldoze" && roadTypes}
+              {(active || gridding) && (
+                <MenuGroup label="Build mode" id="draw-modes">
+                  {DRAW_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      id={`draw-mode-${mode}`}
+                      aria-pressed={active && roadMode === mode}
+                      disabled={!ready}
+                      title={`${MODES[mode].title} (${MODES[mode].key})`}
+                      onClick={() => roadTool.pickMode(mode)}
+                    >
+                      {MODES[mode].label} <kbd>{MODES[mode].key}</kbd>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    id="grid-tool"
+                    aria-pressed={gridding}
+                    disabled={!ready}
+                    title="Grid (G): drag out a rectangle to lay a street grid"
+                    onClick={grid}
+                  >
+                    Grid <kbd>G</kbd>
+                  </button>
+                </MenuGroup>
+              )}
+              {gridding && <GridPanel />}
+              {active && (
+                <MenuGroup label="Snapping" id="guides">
+                  {GUIDES.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      id={`guide-${g.id}`}
+                      aria-pressed={guides[g.id]}
+                      title={g.title}
+                      onClick={() => roadTool.toggleGuide(g.id)}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </MenuGroup>
+              )}
+            </div>
+          )}
           <button
             type="button"
             id="road-tool"
             aria-pressed={active}
+            aria-expanded={roadMenu}
+            aria-controls={roadMenu ? "road-menu" : undefined}
             disabled={!ready}
             title="Road tool (B)"
             onClick={() => roadTool.toggle()}
           >
             Road <kbd>B</kbd>
           </button>
-          <button
-            type="button"
-            id="grid-tool"
-            aria-pressed={gridding}
-            disabled={!ready}
-            title="Grid tool (G): drag out a rectangle to lay a street grid"
-            onClick={() => gridTool.toggle()}
-          >
-            Grid <kbd>G</kbd>
-          </button>
-          <button
-            type="button"
-            id="upgrade-tool"
-            aria-pressed={tool === "upgrade"}
-            disabled={!ready}
-            title="Upgrade tool (V): change a road to the type picked"
-            onClick={() => editTool.toggle("upgrade")}
-          >
-            Upgrade <kbd>V</kbd>
-          </button>
-          <button
-            type="button"
-            id="bulldoze-tool"
-            aria-pressed={tool === "bulldoze"}
-            disabled={!ready}
-            title="Bulldoze tool (N): remove roads"
-            onClick={() => editTool.toggle("bulldoze")}
-          >
-            Bulldoze <kbd>N</kbd>
-          </button>
         </div>
-        <div className="road-types" role="group" aria-label="Road type">
-          {TOOL_ROAD_TYPES.map((id) => (
-            <button
-              key={id}
-              type="button"
-              id={`road-type-${id}`}
-              aria-pressed={(active || gridding || tool === "upgrade") && roadType === id}
-              disabled={!ready}
-              title={`${typeName(id)} (${TYPE_KEYS[id] ?? ""})`}
-              onClick={() => roadTool.pickType(id)}
-            >
-              {typeName(id)} <kbd>{TYPE_KEYS[id]}</kbd>
-            </button>
-          ))}
-        </div>
-        {gridding && <GridPanel />}
-        {!gridding && (
-        <div className="draw-modes" role="group" aria-label="Drawing mode">
-          {DRAW_MODES.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              id={`draw-mode-${mode}`}
-              aria-pressed={active && roadMode === mode}
-              disabled={!ready}
-              title={`${MODES[mode].title} (${MODES[mode].key})`}
-              onClick={() => roadTool.pickMode(mode)}
-            >
-              {MODES[mode].label} <kbd>{MODES[mode].key}</kbd>
-            </button>
-          ))}
-        </div>
-        )}
-        {!gridding && (
-        <div className="guides" role="group" aria-label="Guides">
-          <span className="group-label">Snap</span>
-          {GUIDES.map((g) => (
-            <button
-              key={g.id}
-              type="button"
-              id={`guide-${g.id}`}
-              aria-pressed={guides[g.id]}
-              title={g.title}
-              onClick={() => roadTool.toggleGuide(g.id)}
-            >
-              {g.label}
-            </button>
-          ))}
-        </div>
-        )}
       </div>
       <p className="hint" id="road-hint">
         {hint}

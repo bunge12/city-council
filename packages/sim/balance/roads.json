@@ -1,5 +1,5 @@
 {
-  "_about": "Road types. Lengths and widths are metres, speeds km/h, capacity vehicles per hour per lane, slopes rise over run. Prices are whole dollars in their source year; `escalation` brings them to 2026. A type's place in `types` is its id in saves, so append new types and never reorder. `demolitionCostPerMetre` is what bulldozing a metre costs, times the bridge multiplier on a bridge. A type's `bridge` sets the longest bridge it can make, in metres, and how many times its price per metre a bridge costs. Speeds, capacities, widths and limits are starting values to tune.",
+  "_about": "Road types. Lengths and widths are metres, speeds km/h, capacity vehicles per hour per lane, slopes rise over run. Prices are whole dollars in their source year; `escalation` brings them to 2026. A type's place in `types` is its id in saves, so append new types and never reorder. `demolitionCostPerMetre` is what bulldozing a metre costs, times the bridge multiplier on a bridge. A type's `bridge` sets the longest bridge it can make, in metres, and how many times its price per metre a bridge costs. Speeds, capacities, widths and limits are starting values to tune. Issue 47 relaxed the grades and curve radii of the buildable types and raised every bridge limit to the longest bridge over water.",
   "escalation": {
     "toYear": 2026,
     "annualFactor": 1.1085,
@@ -43,8 +43,8 @@
       "capacityPerLane": 800,
       "width": 10,
       "zonable": true,
-      "maxSlope": 0.12,
-      "minCurveRadius": 20,
+      "maxSlope": 0.16,
+      "minCurveRadius": 12,
       "buildCostPerMetre": {
         "amount": 1400,
         "sourceYear": 2023,
@@ -65,7 +65,8 @@
         "placeholder": true
       },
       "bridge": {
-        "maxLength": 300,
+        "maxLength": 38400,
+        "maxLengthSource": "The longest continuous bridge over water, the Lake Pontchartrain Causeway in Louisiana, is 38.4 km (Guinness World Records, 2011). Longer than the 12 km map, so in practice any water a road can reach it can bridge (issue 47).",
         "costMultiplier": 31,
         "sourceYear": 2023,
         "source": "Arkansas DOT, Bridge Cost 2023: $339.54 per square foot of deck ($3,655 per square metre) for off-NHS bridges let in the 2023 federal fiscal year. Deck width is the road width plus 2 m of barriers; the multiplier is that cost per metre over the road's own price per metre.",
@@ -83,8 +84,8 @@
       "capacityPerLane": 900,
       "width": 18,
       "zonable": true,
-      "maxSlope": 0.1,
-      "minCurveRadius": 40,
+      "maxSlope": 0.13,
+      "minCurveRadius": 25,
       "buildCostPerMetre": {
         "amount": 2800,
         "sourceYear": 2023,
@@ -104,7 +105,8 @@
         "placeholder": true
       },
       "bridge": {
-        "maxLength": 400,
+        "maxLength": 38400,
+        "maxLengthSource": "The longest continuous bridge over water, the Lake Pontchartrain Causeway in Louisiana, is 38.4 km (Guinness World Records, 2011). Longer than the 12 km map, so in practice any water a road can reach it can bridge (issue 47).",
         "costMultiplier": 26,
         "sourceYear": 2023,
         "source": "Arkansas DOT, Bridge Cost 2023: $339.54 per square foot of deck ($3,655 per square metre) for off-NHS bridges let in the 2023 federal fiscal year. Deck width is the road width plus 2 m of barriers; the multiplier is that cost per metre over the road's own price per metre.",
@@ -122,8 +124,8 @@
       "capacityPerLane": 800,
       "width": 8,
       "zonable": true,
-      "maxSlope": 0.12,
-      "minCurveRadius": 20,
+      "maxSlope": 0.16,
+      "minCurveRadius": 12,
       "buildCostPerMetre": {
         "amount": 1400,
         "sourceYear": 2023,
@@ -143,7 +145,8 @@
         "placeholder": true
       },
       "bridge": {
-        "maxLength": 300,
+        "maxLength": 38400,
+        "maxLengthSource": "The longest continuous bridge over water, the Lake Pontchartrain Causeway in Louisiana, is 38.4 km (Guinness World Records, 2011). Longer than the 12 km map, so in practice any water a road can reach it can bridge (issue 47).",
         "costMultiplier": 26,
         "sourceYear": 2023,
         "source": "Arkansas DOT, Bridge Cost 2023: $339.54 per square foot of deck ($3,655 per square metre) for off-NHS bridges let in the 2023 federal fiscal year. Deck width is the road width plus 2 m of barriers; the multiplier is that cost per metre over the road's own price per metre.",
@@ -182,7 +185,8 @@
         "placeholder": true
       },
       "bridge": {
-        "maxLength": 800,
+        "maxLength": 38400,
+        "maxLengthSource": "The longest continuous bridge over water, the Lake Pontchartrain Causeway in Louisiana, is 38.4 km (Guinness World Records, 2011). Longer than the 12 km map, so in practice any water a road can reach it can bridge (issue 47).",
         "costMultiplier": 9,
         "sourceYear": 2023,
         "source": "Arkansas DOT, Bridge Cost 2023: $339.54 per square foot of deck ($3,655 per square metre) for off-NHS bridges let in the 2023 federal fiscal year. Deck width is the road width plus 2 m of barriers; the multiplier is that cost per metre over the road's own price per metre.",

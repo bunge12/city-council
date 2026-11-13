@@ -10,6 +10,7 @@ import {
   deserialize,
   hashState,
   heightAt,
+  mapSize,
   planRoad,
   serialize,
   step,
@@ -25,6 +26,7 @@ import { checkRoadBalance, ROAD_BALANCE } from "../src/roads/balance";
 import { createRoadNetwork, isSegment, segmentCount, type RoadNetwork } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 import fixtureJson from "./fixtures/replay/bridges.json";
+import { withBridgeLimit } from "./balance-override";
 import { expectReplay, type ReplayFixture } from "./replay-helper";
 
 // Issue M1-11: a road drawn across water becomes a bridge.
@@ -44,6 +46,8 @@ function typeOf(id: string): RoadType {
 }
 
 const street = typeOf("street");
+/** The street's slope limit as the reason a player reads it, a whole percentage. */
+const STREET_SLOPE = `${Math.round(street.maxSlope * 100)}%`;
 
 // Seed 2026 has an inlet whose water runs from x = 3488 to 3600 along
 // z = 6600, with low banks either side. The first test checks it.
@@ -170,12 +174,18 @@ describe("a road across water", () => {
   it("is refused when the crossing is longer than the type's limit", () => {
     const t = terrainOf(SEED);
     const wide = road([3200, 6800], [3900, 6800]);
-    expect(reason(createBareState(SEED).roads, t, wide)).toBe(
-      `Too long for a bridge: 453 m, and the street limit is ${street.bridge.maxLength} m`,
-    );
-    // An avenue may bridge further than a street.
-    const avenue = typeOf("avenue");
-    expect(avenue.bridge.maxLength).toBeGreaterThan(street.bridge.maxLength);
+    // Over 400 m of water, which a street spans since issue 47.
+    const p = plan(createBareState(SEED).roads, t, wide);
+    expect(p.levels).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
+    expect(p.bridgeLength).toBeGreaterThan(400);
+    // No crossing on the map is longer than the limits in the balance, so
+    // the check is run with a street limit lowered below this one.
+    withBridgeLimit(street, 400, () => {
+      expect(reason(createBareState(SEED).roads, t, wide)).toBe(
+        `Too long for a bridge: ${Math.round(p.bridgeLength)} m, and the street limit is 400 m`,
+      );
+    });
+    expect(planRoad(createBareState(SEED).roads, t, wide.payload).ok).toBe(true);
   });
 
   it("is refused when it starts or ends in water", () => {
@@ -187,17 +197,19 @@ describe("a road across water", () => {
   });
 
   it("is refused when the bank is too steep for the ramp down to the deck", () => {
-    // A 30 m cliff on the west bank, 25 m above the deck.
-    const cliff = synthetic((x) => (x < 400 ? 40 : x <= 520 ? 0 : 11));
+    // A 55 m cliff on the west bank, 40 m above the deck.
+    const cliff = synthetic((x) => (x < 400 ? 55 : x <= 520 ? 0 : 11));
     expect(reason(createRoadNetwork(), cliff, road([200, 500], [700, 500]))).toBe(
-      "The bank is too steep for the bridge: the ramp down to the deck would be a 13% grade, and the street limit is 12%",
+      `The bank is too steep for the bridge: the ramp down to the deck would be a 21% grade, and the street limit is ${STREET_SLOPE}`,
     );
   });
 
   it("is refused when there is no room on a low bank for the ramp up", () => {
-    // The ramp from a bank 1 m above the water needs 4 m of rise, 33 m at 12 percent.
-    expect(reason(createRoadNetwork(), CANAL, road([360, 500], [700, 500]))).toMatch(
-      /^Not enough room on the bank for the ramp up to the bridge: it would be a \d+% grade, and the street limit is 12%$/,
+    // The ramp from a bank 1 m above the water needs 4 m of rise, 25 m at
+    // the street's grade, and a road from x = 364 has under 30 m of bank.
+    expect(4 / street.maxSlope).toBeGreaterThan(20);
+    expect(reason(createRoadNetwork(), CANAL, road([364, 500], [700, 500]))).toMatch(
+      new RegExp(`^Not enough room on the bank for the ramp up to the bridge: it would be a \\d+% grade, and the street limit is ${STREET_SLOPE}$`),
     );
     const p = plan(createRoadNetwork(), CANAL, road([300, 500], [700, 500]));
     expect(p.levels).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
@@ -244,7 +256,9 @@ describe("nothing joins a bridge but at its banks", () => {
     // Both decks sit at the same clearance over the water.
     expect(reason(net, terrain, road([500, 200], [500, 800]))).toBe(SAME_HEIGHT);
     // A curved one too. It meets the first where its own ramp is still a little below the deck.
-    expect(reason(net, terrain, road([300, 200], [700, 800], "street", [400, 700]))).toMatch(/^The road would pass only [\d.]+ m (over|under) a bridge/);
+    const curve = road([300, 200], [700, 800], "street", [425, 700]);
+    expect(plan(createRoadNetwork(), terrain, curve).levels).toContain(LEVEL_BRIDGE);
+    expect(reason(net, terrain, curve)).toMatch(/^The road would pass only [\d.]+ m (over|under) a bridge/);
   });
 
   it("refuses a ground road across a bridge's ramp, too close under it to pass", () => {
@@ -271,6 +285,8 @@ describe("nothing joins a bridge but at its banks", () => {
 describe("a bridge in a save and a replay", () => {
   it("survives save and load with the same hash", () => {
     const state = expectReplay(fixture);
+    // Every command was applied: the third joins the street bridge's west bank node.
+    expect(state.log).toHaveLength(fixture.log.length);
     expect(Array.from(state.roads.segLevelA).filter((l) => l === LEVEL_BRIDGE)).toHaveLength(3);
     const loaded = deserialize(serialize(state)).state;
     expect(hashState(loaded)).toBe(hashState(state));
@@ -288,6 +304,11 @@ describe("the bridge balance", () => {
     nth(bad.types, 1).bridge["costMultiplier"] = -1;
     delete nth(bad.types, 1).bridge["source"];
     expect(checkRoadBalance(bad)).toEqual(["types[1].bridge.costMultiplier must be a positive number", "types[1].bridge.source is missing"]);
+  });
+
+  it("lets every type bridge further than the map is wide, since issue 47", () => {
+    const size = mapSize(terrainOf(SEED));
+    for (const type of ROAD_TYPES) expect(type.bridge.maxLength).toBeGreaterThan(Math.sqrt(2 * size * size));
   });
 
   it("is in the file the sim uses", () => {

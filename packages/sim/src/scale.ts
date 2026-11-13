@@ -189,7 +189,9 @@ export function buildScaleCity(target = SCALE_SEGMENTS, seed = SCALE_SEED): Scal
  * Calls `build` across each stretch of water 24 to 360 m wide along lines
  * 48 m apart over the whole map, both ways: first with the banks 40 m back
  * from the water, then further back if the ramp needs more room. A street
- * where it fits, an avenue, whose bridges reach further, where it does not.
+ * on crossings under 300 m and an avenue on longer ones. That once followed
+ * the bridge limits; since issue 47 every type bridges further than the map,
+ * and the split stays so the scale city does not change.
  * Stops after `most` bridges.
  */
 function bridgeAcross(

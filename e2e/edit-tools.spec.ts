@@ -207,7 +207,7 @@ test("a drag across four segments bulldozes them in one log entry", async ({ pag
   await openCity(page, state);
   await look(page, 4350, MAIN_Z, 320);
   const start = (await logEntries(page)).length;
-  await page.locator("#bulldoze-tool").click();
+  await page.keyboard.press("KeyN");
   const a = await screenAt(page, 4165, MAIN_Z);
   const b = await screenAt(page, 4535, MAIN_Z);
   await page.mouse.move(a.x, a.y);
@@ -303,6 +303,7 @@ test("both tools' keys are listed with the other shortcuts", async ({ page }, te
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#upgrade-tool")).toHaveAttribute("aria-pressed", "false");
   await page.keyboard.press("Escape");
-  await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "false");
+  // Off, the road menu closes and takes the bulldoze button with it (issue 47).
+  await expect(page.locator("#bulldoze-tool")).toHaveCount(0);
   await attach(page, testInfo, "13 the shortcut list");
 });

@@ -21,7 +21,7 @@ import {
   type SimState,
 } from "../src/index";
 import { cosDegrees, segmentsMeet } from "../src/roads/build";
-import { checkRoadBalance, roadTypeIndex } from "../src/roads/balance";
+import { checkRoadBalance, ROAD_TYPES, roadTypeIndex } from "../src/roads/balance";
 import { isNode, isSegment, nodeCount, segmentCount, segmentsAt } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 import fixtureJson from "./fixtures/replay/build-roads.json";
@@ -49,6 +49,11 @@ function build(state: SimState, command: Command): CommandResult {
   const result = submit(state, command);
   step(state);
   return result;
+}
+
+/** A type's slope limit as the reason a player reads it, a whole percentage. */
+function slopeLimit(id: string): string {
+  return `${Math.round((ROAD_TYPES[roadTypeIndex(id)]?.maxSlope ?? 0) * 100)}%`;
 }
 
 function rejection(state: SimState, command: Command): string {
@@ -214,7 +219,7 @@ describe("BuildRoad refuses", () => {
 
   it("a road steeper than its type allows", () => {
     expect(rejection(createBareState(SEED), road([SLOPE.x, SLOPE.z], [SLOPE.x + 40, SLOPE.z]))).toMatch(
-      /^Too steep: a \d+% grade, and the street limit is 12%$/,
+      new RegExp(`^Too steep: a \\d+% grade, and the street limit is ${slopeLimit("street")}$`),
     );
   });
 
@@ -235,7 +240,7 @@ describe("BuildRoad refuses", () => {
     expect(found).not.toBeNull();
     const [x, z] = found ?? [0, 0];
     const state = createBareState(SEED);
-    expect(rejection(state, road([x, z], [x + 16, z], "avenue"))).toMatch(/^Too steep: .* the avenue limit is 10%$/);
+    expect(rejection(state, road([x, z], [x + 16, z], "avenue"))).toMatch(new RegExp(`^Too steep: .* the avenue limit is ${slopeLimit("avenue")}$`));
     expect(build(state, road([x, z], [x + 16, z], "street"))).toEqual({ ok: true });
   });
 });

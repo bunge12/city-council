@@ -201,10 +201,11 @@ function shareMatching(
   return points.length === 0 ? 0 : hits / points.length;
 }
 
-/** Asphalt: grey, with little difference between channels. Grass is green, so it fails. */
+/**
+ * Asphalt: grey, with little difference between channels. Grass is green, so
+ * it fails. The city band's avenue line is grey too since issue 47.
+ */
 const asphalt = (r: number, g: number, b: number) => Math.max(r, g, b) - Math.min(r, g, b) < 40 && g < 150;
-/** City band line: orange, red well above blue. */
-const orange = (r: number, _g: number, b: number) => r > 180 && r - b > 80;
 
 for (const { name, query } of BACKENDS) {
   test(`roads stay on top of the terrain at every zoom (${name})`, async ({ page }, testInfo) => {
@@ -231,7 +232,7 @@ for (const { name, query } of BACKENDS) {
         // Beyond the street band a road is a few pixels wide and sits a little
         // above the projected ground point, so a sample may land a pixel off.
         const reach = band === "street" ? 0 : 1;
-        const share = shareMatching(decodePng(shot), inView, band === "city" ? orange : asphalt, reach);
+        const share = shareMatching(decodePng(shot), inView, asphalt, reach);
         results.push(`${height} m, ${band}, frame ${frame}: ${share}`);
       }
     }

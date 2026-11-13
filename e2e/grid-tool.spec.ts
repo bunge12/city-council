@@ -234,5 +234,7 @@ test("a grid over the cap shows the reason and cannot be confirmed", async ({ pa
   await page.keyboard.press("Escape");
   await expect(summary).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await expect(page.locator("#grid-tool")).toHaveAttribute("aria-pressed", "false");
+  // Off, the road menu closes and takes the grid button with it (issue 47).
+  await expect(page.locator("#grid-tool")).toHaveCount(0);
+  await expect(page.locator("#road-tool")).toHaveAttribute("aria-expanded", "false");
 });

@@ -221,9 +221,10 @@ describe("crossings between levels", () => {
     if (bridge === undefined) throw new Error("expected a bridge");
     const ax = net.nodeX[net.segA[bridge] ?? 0] ?? 0;
     const bx = net.nodeX[net.segB[bridge] ?? 0] ?? 0;
-    // Just inside the east bank node, on the approach, where the shore runs dry north to south.
+    // Just inside the east bank node, on the approach, from the dry ground
+    // north of the bridge to the last of it before the shore to the south.
     const x = (ax > bx ? ax : bx) - 2;
-    const across = (level?: string): Command => road([x, 6540], [x, 6630], level);
+    const across = (level?: string): Command => road([x, 6540], [x, 6612], level);
     const deckGap = (): number => {
       const shape = segmentShape(net, bridge);
       const u = (x - (net.nodeX[net.segA[bridge] ?? 0] ?? 0)) / ((net.nodeX[net.segB[bridge] ?? 0] ?? 0) - (net.nodeX[net.segA[bridge] ?? 0] ?? 0));

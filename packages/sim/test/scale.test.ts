@@ -133,10 +133,13 @@ function scriptedTick(state: SimState, grids: readonly { x: number; z: number }[
         send("Undo", {});
         break;
       default:
+        // A quarter of a block in from the grid's corner, so its lines run
+        // between the city's own and clear of the curved one-ways, which bow
+        // east from the middle of their blocks.
         send("BuildRoadGrid", {
-          origin: { x: g.x + 72, z: g.z + 72 },
-          along: { x: g.x + 72 + 3 * 96, z: g.z + 72 },
-          across: { x: g.x + 72, z: g.z + 72 + 3 * 96 },
+          origin: { x: g.x + 24, z: g.z + 24 },
+          along: { x: g.x + 24 + 3 * 96, z: g.z + 24 },
+          across: { x: g.x + 24, z: g.z + 24 + 3 * 96 },
           depth: 86,
           width: 86,
           type: "street",

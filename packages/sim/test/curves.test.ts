@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { createBareState, planRoad, step, submit, type Command, type CommandResult, type SimState } from "../src/index";
+import {
+  LEVEL_BRIDGE,
+  LEVEL_GROUND,
+  createBareState,
+  planRoad,
+  step,
+  submit,
+  type Command,
+  type CommandResult,
+  type SimState,
+} from "../src/index";
 import {
   curveBox,
   isStraight,
@@ -36,8 +46,16 @@ import { unjoinedCrossings } from "./unjoined";
 const SEED = 2026;
 /** A north-south street at x = 3300 from z = 6680 to 6780 is dry; 100 m east is water. */
 const SHORE = { x: 3300, z0: 6680, z1: 6780 };
-/** A north-south street at x = 2000 from z = 1380 to 1460 is gentle; 40 m west it is steep. */
+/** A north-south street at x = 2000 from z = 1380 to 1460 is gentle; 60 m west it is steep. */
 const SLOPE = { x: 2000, z0: 1380, z1: 1460 };
+
+function typeOf(id: string): (typeof ROAD_TYPES)[number] {
+  const type = ROAD_TYPES.find((t) => t.id === id);
+  if (!type) throw new RangeError(id);
+  return type;
+}
+const STREET = typeOf("street");
+const AVENUE = typeOf("avenue");
 
 const fixture = fixtureJson as ReplayFixture;
 
@@ -226,18 +244,21 @@ describe("BuildRoad with a control point", () => {
 
 describe("the radius limit", () => {
   it("refuses a curve tighter than the road type allows", () => {
-    // Radius 10 m at its apex; a street needs 20 m.
+    // Radius 10 m at its apex, tighter than a street allows.
+    expect(STREET.minCurveRadius).toBeGreaterThan(10);
     expect(rejection(createBareState(SEED), road([4200, 4500], [4240, 4500], [4220, 4540]))).toBe(
-      "The curve is too tight: a 10 m radius, and the street limit is 20 m",
+      `The curve is too tight: a 10 m radius, and the street limit is ${STREET.minCurveRadius} m`,
     );
   });
 
   it("comes from the road type", () => {
-    // Radius 30 m: wide enough for a street, too tight for an avenue.
-    const curve = (type: string) => road([4200, 4500], [4260, 4500], [4230, 4530], type);
+    // Radius 20 m: wide enough for a street, too tight for an avenue.
+    expect(STREET.minCurveRadius).toBeLessThanOrEqual(20);
+    expect(AVENUE.minCurveRadius).toBeGreaterThan(20);
+    const curve = (type: string) => road([4200, 4500], [4260, 4500], [4230, 4545], type);
     expect(build(createBareState(SEED), curve("street"))).toEqual({ ok: true });
     expect(rejection(createBareState(SEED), curve("avenue"))).toBe(
-      "The curve is too tight: a 30 m radius, and the avenue limit is 40 m",
+      `The curve is too tight: a 20 m radius, and the avenue limit is ${AVENUE.minCurveRadius} m`,
     );
   });
 
@@ -251,15 +272,19 @@ describe("the ground under a curve", () => {
     const straight = road([SHORE.x, SHORE.z0], [SHORE.x, SHORE.z1]);
     expect(planRoad(createBareState(SEED).roads, terrainOf(SEED), straight.payload).ok).toBe(true);
     const bulging = road([SHORE.x, SHORE.z0], [SHORE.x, SHORE.z1], [SHORE.x + 100, (SHORE.z0 + SHORE.z1) / 2]);
-    // Over the water it would be a bridge, but the curve leaves no room on the banks for its ramps.
-    expect(rejection(createBareState(SEED), bulging)).toMatch(/^Not enough room on the bank for the ramp up to the bridge/);
+    // The chord is dry and all ground. The curve reaches the water, so part of it is a bridge.
+    const straightPlan = planRoad(createBareState(SEED).roads, terrainOf(SEED), straight.payload);
+    expect(straightPlan.ok && straightPlan.plan.levels).toEqual([LEVEL_GROUND]);
+    const bulgingPlan = planRoad(createBareState(SEED).roads, terrainOf(SEED), bulging.payload);
+    expect(bulgingPlan.ok && bulgingPlan.plan.levels).toContain(LEVEL_BRIDGE);
   });
 
   it("is checked along the curve, not the chord, for slope", () => {
     const straight = road([SLOPE.x, SLOPE.z0], [SLOPE.x, SLOPE.z1]);
     expect(planRoad(createBareState(SEED).roads, terrainOf(SEED), straight.payload).ok).toBe(true);
-    const bulging = road([SLOPE.x, SLOPE.z0], [SLOPE.x, SLOPE.z1], [SLOPE.x - 80, (SLOPE.z0 + SLOPE.z1) / 2]);
-    expect(rejection(createBareState(SEED), bulging)).toMatch(/^Too steep: a \d+% grade, and the street limit is 12%$/);
+    const bulging = road([SLOPE.x, SLOPE.z0], [SLOPE.x, SLOPE.z1], [SLOPE.x - 120, (SLOPE.z0 + SLOPE.z1) / 2]);
+    const limit = `${Math.round(STREET.maxSlope * 100)}%`;
+    expect(rejection(createBareState(SEED), bulging)).toMatch(new RegExp(`^Too steep: a \\d+% grade, and the street limit is ${limit}$`));
   });
 });
 
