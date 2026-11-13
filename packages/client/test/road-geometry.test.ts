@@ -4,7 +4,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   CHUNKS_PER_SIDE,
+  LEVEL_BRIDGE,
   ROAD_TYPES,
+  bridgeDeckLevel,
+  heightAt,
   applyRoadDelta,
   createState,
   drainRoadChanges,
@@ -31,6 +34,7 @@ import {
   junctionAt,
   masked,
   paintFor,
+  pierStations,
   roadMask,
   roadSegmentsAt,
   segPath,
@@ -531,5 +535,53 @@ describe("decoration near roads", () => {
     const kept = withoutDropped({ count: 3, data }, (x) => x === 2);
     expect(kept.count).toBe(2);
     expect(Array.from(kept.data)).toEqual([1, 0, 1, 5, 0, 0, 3, 0, 3, 5, 0, 0]);
+  });
+});
+
+describe("a bridge", () => {
+  // Seed 2026's inlet: water from x = 3488 to 3600 along z = 6600.
+  function bridged(): { net: RoadNetwork; seg: number } {
+    const net = city([[[3400, 6600], [3700, 6600]]]);
+    const seg = Array.from(net.segLevel).indexOf(LEVEL_BRIDGE);
+    expect(seg).toBeGreaterThanOrEqual(0);
+    return { net, seg };
+  }
+
+  it("draws its deck level at the clearance over the water, and joins the ground at its banks", () => {
+    const { net, seg } = bridged();
+    const deck = bridgeDeckLevel(terrain.waterLevel);
+    const g = buildRoadChunk(net, terrain, chunkAt(3550, 6600), [0, 1, 2], [], () => null);
+    const p = g.surface.positions;
+    let overWater = 0;
+    let atDeck = 0;
+    let below = 0;
+    for (let i = 0; i < p.length; i += 3) {
+      const x = p[i] ?? 0;
+      const y = p[i + 1] ?? 0;
+      const z = p[i + 2] ?? 0;
+      if (y < deck - ROADS.bridges.deckDepth - 0.5) below++;
+      if (heightAt(terrain, x, z) > terrain.waterLevel || Math.abs(z - 6600) > 5.01) continue;
+      overWater++;
+      if (Math.abs(y - deck) < 1e-6) atDeck++;
+    }
+    // Every deck vertex over the water is at the deck; railings and the deck's underside are not.
+    expect(overWater).toBeGreaterThan(20);
+    expect(atDeck).toBeGreaterThan(20);
+    // Piers reach below the deck, down to the lake bed.
+    expect(below).toBeGreaterThan(0);
+    // The ramp ends at the bank node's own height.
+    const a = net.segA[seg] ?? 0;
+    expect(net.nodeHeight[a]).toBe(heightAt(terrain, net.nodeX[a] ?? 0, net.nodeZ[a] ?? 0));
+  });
+
+  it("stands piers along its level deck, no further apart than the spacing", () => {
+    const { net, seg } = bridged();
+    const f = segPath(net, seg);
+    const deck = bridgeDeckLevel(terrain.waterLevel);
+    const level = (t: number) => (t > 40 && t < f.length - 40 ? deck : deck - 1);
+    const piers = pierStations(f.length, level, deck);
+    expect(piers.length).toBeGreaterThanOrEqual(3);
+    expect(piers[0]).toBeGreaterThan(40);
+    for (let i = 1; i < piers.length; i++) expect((piers[i] ?? 0) - (piers[i - 1] ?? 0)).toBeLessThanOrEqual(ROADS.bridges.pierSpacing + 1e-9);
   });
 });

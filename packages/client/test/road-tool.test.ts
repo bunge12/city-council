@@ -97,6 +97,36 @@ describe("previewRoad", () => {
   });
 });
 
+describe("the preview of a road across water", () => {
+  it("shows the bridge, bank to bank, and puts it in the cost", () => {
+    const { mirror } = setup();
+    const net = mirror.state?.roads;
+    if (!net) throw new Error("no snapshot");
+    // Seed 2026's inlet: water from x = 3488 to 3600 along z = 6600.
+    const p = previewRoad(net, terrain, { x: 3400, z: 6600 }, { x: 3700, z: 6600 }, "street");
+    expect(p.ok).toBe(true);
+    expect(p.bridges).toHaveLength(1);
+    const bridge = p.bridges[0];
+    expect(bridge?.from.x).toBeLessThan(3488);
+    expect(bridge?.to.x).toBeGreaterThan(3600);
+    expect(p.bridgeLength).toBe((bridge?.to.x ?? 0) - (bridge?.from.x ?? 0));
+    const street = ROAD_TYPES.find((t) => t.id === "street");
+    if (!street) throw new Error("no street");
+    const price = street.buildCostPerMetre;
+    expect(p.cost).toBe(Math.round((p.length - p.bridgeLength) * price + p.bridgeLength * price * street.bridge.costMultiplier));
+    // A road on dry ground has none.
+    expect(previewRoad(net, terrain, { x: 4200, z: 4600 }, { x: 4400, z: 4600 }, "street")).toMatchObject({ bridges: [], bridgeLength: 0 });
+  });
+
+  it("draws the bridge part in its own colour over the strip", () => {
+    const shape = { ax: 3400, az: 6600, bx: 3700, bz: 6600, control: null, width: 10, look: "ok" as const, junctions: [] };
+    const plain = buildPreviewGeometry(terrain, [{ ...shape, bridges: [] }]);
+    const bridged = buildPreviewGeometry(terrain, [{ ...shape, bridges: [{ ax: 3450, az: 6600, bx: 3640, bz: 6600, control: null }] }]);
+    expect(bridged.positions.length).toBeGreaterThan(plain.positions.length);
+    expect(previewKey([{ ...shape, bridges: [] }])).not.toBe(previewKey([{ ...shape, bridges: [{ ax: 3450, az: 6600, bx: 3640, bz: 6600, control: null }] }]));
+  });
+});
+
 describe("RoadToolController", () => {
   it("draws a street, then an avenue across it, and marks the crossing", async () => {
     const { mirror, tool, tick, settle, sent, state } = setup();
@@ -198,7 +228,7 @@ describe("RoadToolController", () => {
 describe("preview geometry", () => {
   it("lays a strip as wide as the road type on the ground, with a marker per junction", () => {
     const width = ROAD_TYPES.find((t) => t.id === "avenue")?.width ?? 0;
-    const shape = { ax: 4200, az: 4600, bx: 4280, bz: 4600, control: null, width, look: "ok" as const, junctions: [{ x: 4240, z: 4600 }] };
+    const shape = { ax: 4200, az: 4600, bx: 4280, bz: 4600, control: null, width, look: "ok" as const, junctions: [{ x: 4240, z: 4600 }], bridges: [] };
     const arrays = buildPreviewGeometry(terrain, [shape]);
     const zs: number[] = [];
     for (let i = 0; i < arrays.positions.length; i += 3) {
@@ -467,7 +497,7 @@ describe("switching part way through a road", () => {
 describe("curved preview geometry", () => {
   it("follows the curve, with pieces that each turn at most the surface limit", () => {
     const width = 10;
-    const shape = { ax: 4200, az: 4700, bx: 4400, bz: 4700, control: { x: 4300, z: 4600 }, width, look: "ok" as const, junctions: [] };
+    const shape = { ax: 4200, az: 4700, bx: 4400, bz: 4700, control: { x: 4300, z: 4600 }, width, look: "ok" as const, junctions: [], bridges: [] };
     const arrays = buildPreviewGeometry(terrain, [shape]);
     const sections = arrays.positions.length / 6;
     // The apex of the curve is at t = 0.5: (4300, 4650).

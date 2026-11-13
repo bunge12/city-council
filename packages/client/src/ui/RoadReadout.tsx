@@ -14,8 +14,8 @@ const OFFSET = 18;
 
 /**
  * Next to the cursor while a road is being drawn: its type, length in metres
- * and in cells, cost and angle to the road it starts from, or the reason the
- * sim would refuse it. The numbers are also on data attributes, in metres,
+ * and in cells, cost, how much of it is bridge, and angle to the road it
+ * starts from, or the reason the sim would refuse it. The numbers are also on data attributes, in metres,
  * whole dollars and degrees, for tests.
  */
 export function RoadReadout() {
@@ -32,6 +32,7 @@ export function RoadReadout() {
       data-ok={String(preview.ok)}
       data-length={String(preview.length)}
       data-cost={String(preview.cost)}
+      data-bridge={String(preview.bridgeLength)}
       data-type={preview.type.id}
       data-cells={String(preview.length / SNAP.cellSize)}
       data-angle={angle === null ? "" : String(angle)}
@@ -46,6 +47,11 @@ export function RoadReadout() {
       {angle !== null && (
         <div className="angle" id="road-angle">
           {Math.round(angle)}° to the road{snap?.square ? ", square" : ""}
+        </div>
+      )}
+      {preview.ok && preview.bridgeLength > 0 && (
+        <div className="bridge" id="road-bridge">
+          {preview.bridges.length === 1 ? "Bridge" : `${preview.bridges.length} bridges`}, {preview.bridgeLength.toFixed(0)} m
         </div>
       )}
       {preview.ok && preview.junctions.length > 0 && (

@@ -477,6 +477,7 @@ kbd {
 }
 
 .road-readout .angle,
+.road-readout .bridge,
 .road-readout .junctions {
   color: var(--ink-soft);
 }

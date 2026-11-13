@@ -251,7 +251,8 @@ describe("the ground under a curve", () => {
     const straight = road([SHORE.x, SHORE.z0], [SHORE.x, SHORE.z1]);
     expect(planRoad(createState(SEED).roads, terrainOf(SEED), straight.payload).ok).toBe(true);
     const bulging = road([SHORE.x, SHORE.z0], [SHORE.x, SHORE.z1], [SHORE.x + 100, (SHORE.z0 + SHORE.z1) / 2]);
-    expect(rejection(createState(SEED), bulging)).toBe("The road crosses water, and bridges are not available yet");
+    // Over the water it would be a bridge, but the curve leaves no room on the banks for its ramps.
+    expect(rejection(createState(SEED), bulging)).toMatch(/^Not enough room on the bank for the ramp up to the bridge/);
   });
 
   it("is checked along the curve, not the chord, for slope", () => {
