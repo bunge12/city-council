@@ -5,6 +5,7 @@ import { ActivityLog } from "./ActivityLog";
 import { BuildBar } from "./BuildBar";
 import { CityMenu } from "./CityMenu";
 import { DebugPanel } from "./DebugPanel";
+import { EditReadout } from "./EditReadout";
 import { ServicesContext, useServices, useSim } from "./hooks";
 import { Notes } from "./Notes";
 import { RoadReadout } from "./RoadReadout";
@@ -16,7 +17,7 @@ import "./ui.css";
 
 /** Turns key presses into shortcut actions. Speed keys send `SetSpeed`, like the buttons. */
 function useShortcuts(): void {
-  const { sendCommand, roadTool } = useServices();
+  const { sendCommand, roadTool, editTool } = useServices();
   const speed = useSim((s) => s?.speed ?? null);
   const lastRunning = useRef<Speed>(1);
   const current = useRef<Speed | null>(null);
@@ -55,6 +56,12 @@ function useShortcuts(): void {
         case "roadTool":
           roadTool.toggle();
           return;
+        case "bulldozeTool":
+          editTool.toggle("bulldoze");
+          return;
+        case "upgradeTool":
+          editTool.toggle("upgrade");
+          return;
         case "roadType":
           roadTool.pickType(action.type);
           return;
@@ -62,13 +69,13 @@ function useShortcuts(): void {
           roadTool.pickMode(action.mode);
           return;
         case "escape":
-          roadTool.escape();
+          if (!editTool.escape()) roadTool.escape();
           return;
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [sendCommand, roadTool]);
+  }, [sendCommand, roadTool, editTool]);
 }
 
 function Shell() {
@@ -86,6 +93,7 @@ function Shell() {
       </div>
       <BuildBar />
       <RoadReadout />
+      <EditReadout />
     </>
   );
 }

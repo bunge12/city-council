@@ -10,6 +10,8 @@ export type ShortcutAction =
   | { kind: "toggleDebug" }
   | { kind: "toggleLog" }
   | { kind: "roadTool" }
+  | { kind: "bulldozeTool" }
+  | { kind: "upgradeTool" }
   | { kind: "roadType"; type: ToolRoadType }
   | { kind: "drawMode"; mode: DrawMode }
   | { kind: "escape" };
@@ -31,16 +33,18 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["Backquote"], label: "`", description: "show or hide this panel", action: { kind: "toggleDebug" } },
   { codes: ["KeyL"], label: "L", description: "show or hide the activity log", action: { kind: "toggleLog" } },
   { codes: ["KeyB"], label: "B", description: "road tool on or off", action: { kind: "roadTool" } },
-  { codes: ["KeyZ"], label: "Z", description: "draw streets", action: { kind: "roadType", type: "street" } },
-  { codes: ["KeyX"], label: "X", description: "draw avenues", action: { kind: "roadType", type: "avenue" } },
-  { codes: ["KeyC"], label: "C", description: "draw one-way roads", action: { kind: "roadType", type: "oneWay" } },
+  { codes: ["KeyV"], label: "V", description: "upgrade tool on or off", action: { kind: "upgradeTool" } },
+  { codes: ["KeyN"], label: "N", description: "bulldoze tool on or off", action: { kind: "bulldozeTool" } },
+  { codes: ["KeyZ"], label: "Z", description: "draw streets, or upgrade to one", action: { kind: "roadType", type: "street" } },
+  { codes: ["KeyX"], label: "X", description: "draw avenues, or upgrade to one", action: { kind: "roadType", type: "avenue" } },
+  { codes: ["KeyC"], label: "C", description: "draw one-way roads, or upgrade to one", action: { kind: "roadType", type: "oneWay" } },
   { codes: ["KeyT"], label: "T", description: "draw straight roads", action: { kind: "drawMode", mode: "straight" } },
   { codes: ["KeyY"], label: "Y", description: "draw curved roads", action: { kind: "drawMode", mode: "curved" } },
   { codes: ["KeyU"], label: "U", description: "draw continuous roads", action: { kind: "drawMode", mode: "continuous" } },
   {
     codes: ["Escape"],
     label: "Esc",
-    description: "drop the road being drawn, or leave the tool",
+    description: "drop the road being drawn or the drag, or leave the tool",
     action: { kind: "escape" },
   },
 ];
@@ -55,6 +59,9 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "Click, right-click", description: "with the road tool: start or end a road, drop it" },
   { label: "Double click", description: "with the road tool: end a continuous road" },
   { label: "Hold Alt", description: "with the road tool: draw free-hand, without guides" },
+  { label: "Click, drag", description: "with bulldoze or upgrade: one road, or every road the drag passes over" },
+  { label: "Right-click", description: "with upgrade: reverse a one-way" },
+  { label: "Shift-drag", description: "with bulldoze or upgrade: orbit, since a drag picks roads" },
 ];
 
 /** The parts of a key event the shortcut handler looks at. */

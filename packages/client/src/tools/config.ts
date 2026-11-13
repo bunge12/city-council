@@ -42,3 +42,16 @@ export const DEFAULT_GUIDES: GuideToggles = { angle: true, length: true, grid: f
 
 /** How the key that, held, suspends every guide for a free-hand segment is written. The camera controls track it. */
 export const FREE_HAND_KEY_LABEL = "Alt";
+
+/** Picking a segment for the bulldoze and upgrade tools (issue M1-13). */
+export const PICK = {
+  /** A segment is picked when the pointer is this near its drawn edge, CSS pixels. */
+  segmentPx: 10,
+  /** A drag is sampled this often along the pointer's path, CSS pixels, so a fast drag skips no segment. */
+  dragStepPx: 4,
+  /** Points looked at along a segment when measuring its distance on screen: one every this many metres... */
+  sampleStep: 4,
+  /** ...and never fewer or more than these. */
+  minSamples: 8,
+  maxSamples: 160,
+} as const;

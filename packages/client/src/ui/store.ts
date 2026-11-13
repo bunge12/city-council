@@ -4,10 +4,11 @@
 // `useSim` (hooks.ts) and change it only by sending commands.
 
 import { create } from "zustand";
+import { INITIAL_EDIT_TOOL, type EditPreview, type EditToolState } from "../tools/edit-tool";
 import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tools/road-tool";
 import type { Snap } from "../tools/snap";
 
-export interface UiState extends RoadToolState {
+export interface UiState extends RoadToolState, EditToolState {
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
@@ -35,6 +36,7 @@ export const useUi = create<UiState>(() => ({
   reminderDismissed: false,
   busy: false,
   ...INITIAL_ROAD_TOOL,
+  ...INITIAL_EDIT_TOOL,
 }));
 
 export function toggleDebug(): void {
@@ -117,4 +119,24 @@ export function setRoadHover(hover: RoadHover | null): void {
 function sameSnap(a: Snap | null | undefined, b: Snap | null | undefined): boolean {
   if (!a || !b) return a === b;
   return a.kind === b.kind && a.x === b.x && a.z === b.z && a.angle === b.angle && a.square === b.square;
+}
+
+/**
+ * What the bulldoze or upgrade tool shows next to the cursor: the pointer in
+ * CSS pixels over the canvas and the edit under it, or null when it shows
+ * nothing. Its own store, like the road readout's.
+ */
+export interface EditHover {
+  x: number;
+  y: number;
+  preview: EditPreview;
+}
+
+export const useEditHover = create<{ hover: EditHover | null }>(() => ({ hover: null }));
+
+export function setEditHover(hover: EditHover | null): void {
+  const current = useEditHover.getState().hover;
+  if (current === hover) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview) return;
+  useEditHover.setState({ hover });
 }

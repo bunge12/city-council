@@ -177,10 +177,13 @@ export interface PendingRoad {
   status: "queued" | "sending" | "accepted";
 }
 
+/** The build tools: the road tool here, and bulldoze and upgrade in edit-tool.ts. */
+export type ToolId = "road" | "bulldoze" | "upgrade";
+
 /** The tool's part of the UI store. */
 export interface RoadToolState {
   /** The active tool, or null for none. */
-  tool: "road" | null;
+  tool: ToolId | null;
   roadType: ToolRoadType;
   roadMode: DrawMode;
   /** Where the road being drawn starts, or null before the first click. */
@@ -248,9 +251,14 @@ export class RoadToolController {
     else this.host.set({ tool: "road", roadNote: null });
   }
 
-  /** Picks a road type and turns the tool on. A road being drawn keeps going in the new type. */
+  /**
+   * Picks a road type and turns the road tool on, unless the upgrade tool is
+   * on, which upgrades to the type picked. A road being drawn keeps going in
+   * the new type.
+   */
   pickType(type: ToolRoadType): void {
-    this.host.set({ tool: "road", roadType: type, roadNote: null });
+    const tool = this.host.get().tool === "upgrade" ? "upgrade" : "road";
+    this.host.set({ tool, roadType: type, roadNote: null });
   }
 
   /** Picks a drawing mode and turns the tool on. A road being drawn is dropped. */

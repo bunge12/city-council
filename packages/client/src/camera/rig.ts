@@ -48,6 +48,13 @@ export interface CameraRig {
   dragTo(sx: number, sy: number): void;
   /** The ground under screen point (sx, sy), in world metres, or null. */
   pickGround(sx: number, sy: number): GroundHit | null;
+  /**
+   * Where the ray through screen point (sx, sy) crosses the level plane at
+   * height `y`, or null when it does not head down to it. The bulldoze and
+   * upgrade tools use it to find a bridge deck, which stands above the
+   * ground the ground pick lands on.
+   */
+  pickLevel(sx: number, sy: number, y: number): { x: number; z: number } | null;
   /** Camera height above the ground directly below it, in metres. */
   heightAboveGround(): number;
   zoomBand(): ZoomBand;
@@ -188,6 +195,7 @@ export function createCameraRig(camera: PerspectiveCamera, terrain: Terrain, vie
       if (anchor) keepUnder(anchor, sx, sy);
     },
     pickGround,
+    pickLevel: hitLevel,
     heightAboveGround() {
       const p = camera.position;
       return p.y - heightAt(t, p.x, p.z);

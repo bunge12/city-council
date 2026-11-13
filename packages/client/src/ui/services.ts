@@ -6,6 +6,7 @@ import type { CommandResult } from "@city-council/sim";
 import type { SimMirror } from "../protocol/mirror";
 import type { SaveStatus } from "../save/channel";
 import type { SaveClient } from "../save/page";
+import type { EditToolController } from "../tools/edit-tool";
 import type { RoadToolController } from "../tools/road-tool";
 
 /** What a download wrote, for the page and Playwright. */
@@ -32,4 +33,6 @@ export interface AppServices {
   openCity(id: string): Promise<void>;
   /** The road tool's input handling. Its state is in the UI store. */
   roadTool: RoadToolController;
+  /** The bulldoze and upgrade tools' input handling. Their state is in the UI store too. */
+  editTool: EditToolController;
 }
