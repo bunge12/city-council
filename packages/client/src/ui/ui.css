@@ -406,7 +406,7 @@ kbd {
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 6px 10px;
+  gap: 6px 8px;
 }
 
 .build-bar .tools,
@@ -422,9 +422,11 @@ kbd {
 }
 
 /* Tighter than other buttons, so the tools, types, modes and guides fit
-   on one row at 1280 pixels with the grid tool's button among them. */
+   on one row at 1280 pixels with the grid tool's button among them. Under
+   DejaVu Sans, as on the CI runner, 7 px still wrapped; 5 px leaves about
+   40 px to spare. */
 #ui .build-bar .controls button {
-  padding-inline: 7px;
+  padding-inline: 5px;
 }
 
 /* Five toggles: smaller than the other buttons, so the whole toolbar stays
