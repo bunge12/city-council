@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Fnv64 } from "../src/hash";
 import { createBareState, fnv1a64, hashState, step, submit, type SimState } from "../src/index";
 
 declare function structuredClone<T>(value: T): T;
@@ -38,6 +39,24 @@ describe("fnv1a64", () => {
     for (const n of [1, 2, 255, 256, 4096]) {
       expect(fnv1a64(bytes.subarray(0, n))).toBe(referenceFnv(bytes.subarray(0, n)));
     }
+  });
+});
+
+describe("Fnv64", () => {
+  it("gives the same hash for bytes fed together, one at a time, or part each way", () => {
+    const bytes = new Uint8Array(5000);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 211 + (i >> 5)) & 0xff;
+    const single = new Fnv64();
+    for (const b of bytes) single.byte(b);
+    const whole = new Fnv64();
+    whole.bytes(bytes);
+    const mixed = new Fnv64();
+    mixed.bytes(bytes.subarray(0, 1234));
+    mixed.byte(bytes[1234] ?? 0);
+    mixed.bytes(bytes.subarray(1235));
+    expect(whole.hex()).toBe(single.hex());
+    expect(mixed.hex()).toBe(single.hex());
+    expect(whole.hex()).toBe(referenceFnv(bytes));
   });
 });
 

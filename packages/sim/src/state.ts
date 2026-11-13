@@ -99,6 +99,19 @@ export function cloneState(state: SimState): SimState {
   return cloneValue(state) as SimState;
 }
 
+/**
+ * A copy of `state` to write a save from while the sim steps on, for the
+ * cost of copying the typed arrays. Log entries and undo records are shared
+ * with `state`, not copied: each is made once and never changed (log.ts,
+ * undo.ts). Everything else is copied as `cloneState` copies it.
+ */
+export function captureState(state: SimState): SimState {
+  // The spread keeps the keys in the order `state` has them, which is the
+  // order a snapshot writes them in.
+  const rest = cloneValue({ ...state, log: [], undo: [] }) as SimState;
+  return { ...rest, log: state.log.slice(), undo: state.undo };
+}
+
 function cloneValue(value: unknown): unknown {
   // slice() copies only the view, not spare capacity behind it.
   if (ArrayBuffer.isView(value)) return (value as Uint8Array).slice();

@@ -10,12 +10,16 @@ import {
   prepareDerived,
   readLog,
   recordRoadChanges,
+  captureState,
   serialize,
   serializeDetached,
+  serializeDetachedSteps,
+  serializeSteps,
   step,
   submit,
   type FromSimMessage,
   type LogEntry,
+  type SnapshotSteps,
   type RoadChanges,
   type SimState,
   type SystemTimer,
@@ -147,17 +151,39 @@ export class SimHost {
    * `pageCount` is how many pages the snapshot counts on in all.
    */
   saveBytes(pagesStored: number): LocalSave {
-    const { logOffset } = this.state;
     // Live state pages entries out a whole page at a time, so this only
     // fails for a city that came from a file someone edited. Keep its log
     // inside the snapshot, as before.
-    if (logOffset % LOG_PAGE_SIZE !== 0) return { bytes: this.snapshotBytes(), pages: [], pageCount: 0 };
-    const pageCount = logOffset / LOG_PAGE_SIZE;
+    if (this.state.logOffset % LOG_PAGE_SIZE !== 0) return { bytes: this.snapshotBytes(), pages: [], pageCount: 0 };
+    return { bytes: serializeDetached(this.state), ...this.logPages(pagesStored) };
+  }
+
+  /**
+   * Starts the local save `saveBytes` makes, of the city as it is on this
+   * tick, to be written a part at a time. Writing a large city at once
+   * holds the next ticks up (issue #83), so a save taken while the city
+   * runs is started here, for the cost of copying the typed arrays, and
+   * each call of `steps.next()` after that does one part. The caller
+   * leaves time for a pump between parts. The sim steps on meanwhile and
+   * the save does not see it.
+   */
+  startSave(pagesStored: number): PendingSave {
+    const state = captureState(this.state);
+    const { logOffset } = state;
+    if (logOffset % LOG_PAGE_SIZE !== 0) {
+      return { steps: serializeSteps(state, this.fullLog.slice(0, logOffset)), pages: [], pageCount: 0 };
+    }
+    return { steps: serializeDetachedSteps(state), ...this.logPages(pagesStored) };
+  }
+
+  /** The pages of entries that have left live state, from page `pagesStored` on, and how many there are in all. */
+  private logPages(pagesStored: number): { pages: LogPageEntries[]; pageCount: number } {
+    const pageCount = this.state.logOffset / LOG_PAGE_SIZE;
     const pages: LogPageEntries[] = [];
     for (let index = pagesStored; index < pageCount; index++) {
       pages.push({ index, entries: this.fullLog.slice(index * LOG_PAGE_SIZE, (index + 1) * LOG_PAGE_SIZE) });
     }
-    return { bytes: serializeDetached(this.state), pages, pageCount };
+    return { pages, pageCount };
   }
 
   private receive(raw: unknown): void {
@@ -293,6 +319,14 @@ export class SimHost {
 export interface LogPageEntries {
   index: number;
   entries: LogEntry[];
+}
+
+/** What `SimHost.startSave` returns: a `LocalSave` whose bytes are still to be written. */
+export interface PendingSave {
+  /** Each `next()` writes one part. The last returns the bytes. */
+  steps: SnapshotSteps;
+  pages: LogPageEntries[];
+  pageCount: number;
 }
 
 /** What `SimHost.saveBytes` returns. */

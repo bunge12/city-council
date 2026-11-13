@@ -1,7 +1,7 @@
 // Local saves against an in-memory IndexedDB, with the same SimHost the
 // worker runs.
 import { IDBFactory } from "fake-indexeddb";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   LOG_LIVE_LIMIT,
   LOG_PAGE_SIZE,
@@ -344,6 +344,45 @@ describe("saving and loading a hosted city", () => {
     const third = await hostCity(store);
     expect(third.city.logPagesStored).toBe(2);
     expect(third.host.fullLog).toEqual(city.host.fullLog);
+  });
+
+  it("writes an autosave in parts, of the city as it was when the save was asked for", async () => {
+    const store = await openStore();
+    const { saver, run, host, command, city } = await hostCity(store);
+    command(1);
+    run(500);
+    const tick = host.tick;
+    const expected = host.saveBytes(0).bytes;
+    const steps = vi.spyOn(host, "startSave");
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const saved = saver.save("autosave");
+    // The sim runs on while the parts are written.
+    command(2);
+    command(3, "SetSpeed", { speed: 4 });
+    run(2000);
+    await saved;
+    // A pause the length of a pump after each part but the last.
+    expect(timers.mock.calls.filter(([, ms]) => ms === PUMP_INTERVAL_MS)).toHaveLength(3);
+    timers.mockRestore();
+    expect(steps).toHaveBeenCalledTimes(1);
+    expect(host.tick).toBeGreaterThan(tick);
+    const stored = await store.read(city.id);
+    expect(stored?.latest).toEqual(expected);
+    expect((await store.list())[0]?.tick).toBe(tick);
+  });
+
+  it("does not hold a save the player asked for behind the pauses of an autosave", async () => {
+    const store = await openStore();
+    const { saver, run, host } = await hostCity(store);
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const a = saver.save("autosave");
+    run(500);
+    // Asked for before the autosave's first part has run.
+    const b = saver.save("manual");
+    await Promise.all([a, b]);
+    expect(timers.mock.calls.filter(([, ms]) => ms === PUMP_INTERVAL_MS)).toHaveLength(0);
+    timers.mockRestore();
+    expect((await store.list())[0]?.tick).toBe(host.tick);
   });
 
   it("serialises saves so the latest one is written last", async () => {
