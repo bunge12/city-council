@@ -12,20 +12,54 @@ import { linearRgb } from "./road-geometry";
 export type SnapMark =
   | { shape: "ring"; x: number; z: number; look: "node" }
   | { shape: "diamond"; x: number; z: number; look: "segment" }
-  | { shape: "line"; ax: number; az: number; bx: number; bz: number; look: "angle" }
+  | { shape: "line"; ax: number; az: number; bx: number; bz: number; look: "angle" | "line" | "offset" }
   | { shape: "square"; x: number; z: number; ux: number; uz: number; vx: number; vz: number; look: "square" }
-  | { shape: "cross"; x: number; z: number; look: "grid" };
+  | { shape: "cross"; x: number; z: number; look: "grid" | "line" };
+
+/**
+ * The lines a guide snap shows (issue M1-19). A guide line runs from its
+ * node through the point and on; a parallel offset runs along beside the
+ * road, with a line across the gap back to the road's centre; an angle ray
+ * runs from the start through the point.
+ */
+function guideMarks(snap: Snap, metresPerPixel: number): SnapMark[] {
+  const marks: SnapMark[] = [];
+  const over = SNAP_MARKS.guideOvershootPx * metresPerPixel;
+  for (const g of snap.guides ?? []) {
+    const t = (snap.x - g.x) * g.dx + (snap.z - g.z) * g.dz;
+    if (g.kind === "offset") {
+      marks.push({ shape: "line", ax: snap.x - g.dx * over, az: snap.z - g.dz * over, bx: snap.x + g.dx * over, bz: snap.z + g.dz * over, look: "offset" });
+      // Back across the gap to the road's centre line, square to it.
+      const back = gapFoot(snap, g);
+      if (back) marks.push({ shape: "line", ax: snap.x, az: snap.z, bx: back.x, bz: back.z, look: "offset" });
+      continue;
+    }
+    // From the node or the start, through the point and past it, whichever way the point lies.
+    const end = t + (t < 0 ? -over : over);
+    marks.push({ shape: "line", ax: g.x, az: g.z, bx: g.x + g.dx * end, bz: g.z + g.dz * end, look: g.kind === "angle" ? "angle" : "line" });
+  }
+  if (snap.kind === "crossing") marks.push({ shape: "cross", x: snap.x, z: snap.z, look: "line" });
+  return marks;
+}
+
+/** The point on a parallel offset's road centre line square across from `p`. */
+function gapFoot(p: { x: number; z: number }, g: NonNullable<Snap["guides"]>[number]): { x: number; z: number } | null {
+  if (!g.toRoad) return null;
+  return { x: p.x + g.toRoad.dx * g.toRoad.distance, z: p.z + g.toRoad.dz * g.toRoad.distance };
+}
 
 /**
  * The markers for a snap: one for what it caught, a guide line for an angle
- * snap, and a right-angle marker where the road is square to its source or
- * meets a segment square.
+ * snap, the guides that caught a line, offset or crossing snap, and a
+ * right-angle marker where the road is square to its source or meets a
+ * segment square.
  */
 export function snapMarks(snap: Snap, start: BuildPoint | null, metresPerPixel: number): SnapMark[] {
   const marks: SnapMark[] = [];
   if (snap.kind === "node") marks.push({ shape: "ring", x: snap.x, z: snap.z, look: "node" });
   if (snap.kind === "segment") marks.push({ shape: "diamond", x: snap.x, z: snap.z, look: "segment" });
   if (snap.kind === "grid") marks.push({ shape: "cross", x: snap.x, z: snap.z, look: "grid" });
+  marks.push(...guideMarks(snap, metresPerPixel));
   if (!start) return marks;
   const dx = snap.x - start.x;
   const dz = snap.z - start.z;

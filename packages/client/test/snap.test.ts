@@ -29,7 +29,12 @@ const state = build([[{ x: 4200, z: 4600 }, { x: 4600, z: 4600 }]]);
 const net: RoadNet = state.roads;
 const END: BuildPoint = { x: 4600, z: 4600 };
 
-/** The context for a road from `start`, at one metre a pixel unless told otherwise. */
+/**
+ * The context for a road from `start`, at one metre a pixel unless told
+ * otherwise. Guide lines and parallel offset (issue M1-19) start off here,
+ * so the tests of the other sources see those sources alone; the M1-19 tests
+ * turn them on.
+ */
 type Over = Partial<Omit<SnapContext, "guides">> & { guides?: Partial<GuideToggles> };
 
 function ctx(start: BuildPoint | null, over: Over = {}): SnapContext {
@@ -39,9 +44,10 @@ function ctx(start: BuildPoint | null, over: Over = {}): SnapContext {
     start,
     source: start ? startSource(net, start) : null,
     metresPerPixel: 1,
-    guides: { ...DEFAULT_GUIDES, ...guides },
+    guides: { ...DEFAULT_GUIDES, lines: false, offset: false, ...guides },
     free: false,
     gridStep: terrain.spacing,
+    roadWidth: 10,
     ...rest,
   };
 }
@@ -314,8 +320,9 @@ describe("the guide toggles", () => {
       world: () => ({ net, terrain }),
       send: () => Promise.resolve({ ok: true }),
     });
-    expect(s.guides).toEqual({ angle: true, length: true, grid: false });
-    const cursor = at(END, 3, 100);
+    expect(s.guides).toEqual({ angle: true, length: true, grid: false, lines: true, offset: true });
+    // Short of the 12 cell offset from the street, so the angle guide alone catches it.
+    const cursor = at(END, 3, 80);
     expect(tool.snap(cursor, { metresPerPixel: 1, free: false })?.kind).toBe("angle");
     expect(tool.snap(cursor, { metresPerPixel: 1, free: true })?.kind).toBe("none");
     tool.toggleGuide("angle");
@@ -324,6 +331,9 @@ describe("the guide toggles", () => {
     tool.toggleGuide("grid");
     expect(tool.snap(cursor, { metresPerPixel: 1, free: false })?.kind).toBe("grid");
     tool.toggleGuide("length");
-    expect(s.guides).toEqual({ angle: false, length: false, grid: true });
+    expect(s.guides).toEqual({ angle: false, length: false, grid: true, lines: true, offset: true });
+    tool.toggleGuide("lines");
+    tool.toggleGuide("offset");
+    expect(s.guides).toEqual({ angle: false, length: false, grid: true, lines: false, offset: false });
   });
 });

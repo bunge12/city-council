@@ -406,7 +406,7 @@ kbd {
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 6px 12px;
+  gap: 6px 10px;
 }
 
 .build-bar .tools,
@@ -419,6 +419,13 @@ kbd {
 
 .build-bar .guides {
   align-items: center;
+}
+
+/* Five toggles: smaller than the other buttons, so the whole toolbar stays
+   on one row at 1280 pixels in any system font, DejaVu Sans included. */
+#ui .build-bar .guides button {
+  padding-inline: 6px;
+  font-size: 12px;
 }
 
 .build-bar .group-label {
@@ -477,6 +484,7 @@ kbd {
 }
 
 .road-readout .angle,
+.road-readout .offset,
 .road-readout .bridge,
 .road-readout .junctions {
   color: var(--ink-soft);

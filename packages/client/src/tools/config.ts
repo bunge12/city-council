@@ -39,13 +39,58 @@ export const SNAP = {
    * a whole number of cells. If M2 changes the cell size, change it here.
    */
   cellSize: 8,
+  /**
+   * How deep zoning reaches from a road's edge, in cells: the M2 rule that a
+   * zonable segment gets cells six deep. The parallel offsets are strips of
+   * this depth, so if M2 changes it, they follow.
+   */
+  zoneDepthCells: 6,
 } as const;
 
-/** The guides the road tool offers, in toolbar order. Issue M1-19 appends guide lines and parallel offset. */
+/** Guide lines from nearby nodes (issue M1-19). */
+export const GUIDE_LINES = {
+  /** Nodes this near the cursor, in metres, give guide lines: a little over two blocks of twelve cells. */
+  searchMetres: 260,
+  /**
+   * The search starts at these shares of `searchMetres` and grows until it
+   * finds `enoughNodes` nodes, so a dense network costs no more than a sparse one.
+   */
+  searchSteps: [0.125, 0.25, 0.5, 1],
+  enoughNodes: 40,
+  /** At most this many lines are tried, nearest the cursor first. */
+  maxLines: 4,
+  /** A guide line catches the cursor this near. */
+  linePx: 10,
+  /** Where two guides cross, the crossing catches the cursor this near. */
+  crossingPx: 14,
+} as const;
+
+/** Parallel offset beside an existing straight road (issue M1-19). */
+export const PARALLEL = {
+  /**
+   * The gaps offered between the two roads' edges, in zoning strips of
+   * `SNAP.zoneDepthCells`, main first. Two strips back to back is the main
+   * one; one strip is the lighter one.
+   */
+  strips: [2, 1],
+  /** The main offset catches the cursor this near... */
+  mainPx: 14,
+  /** ...and the lighter ones this near. The main one wins when both reach. */
+  lightPx: 8,
+  /** The cursor counts as beside a road this far past either end of it, metres. */
+  pastEndMetres: 48,
+} as const;
+
+/** The edge-to-edge gaps the parallel offset snaps to, in cells, main first. */
+export const PARALLEL_GAP_CELLS: readonly number[] = PARALLEL.strips.map((n) => n * SNAP.zoneDepthCells);
+
+/** The guides the road tool offers, in toolbar order. */
 export const GUIDES = [
   { id: "angle", label: "Angle", title: "Snap to 90, 45 and 15 degree steps from the road you start on" },
   { id: "length", label: "Length", title: `Snap the length to whole ${SNAP.cellSize} m cells` },
   { id: "grid", label: "Grid", title: "Snap to the 16 m terrain grid" },
+  { id: "lines", label: "Lines", title: "Snap to lines running square and in line from nearby road ends and junctions" },
+  { id: "offset", label: "Offset", title: `Snap beside a road at ${PARALLEL_GAP_CELLS.join(" or ")} cells, edge to edge` },
 ] as const;
 
 export type GuideId = (typeof GUIDES)[number]["id"];
@@ -53,8 +98,8 @@ export type GuideId = (typeof GUIDES)[number]["id"];
 /** Which guides are on. */
 export type GuideToggles = Record<GuideId, boolean>;
 
-/** Angle and length on, the terrain grid off. */
-export const DEFAULT_GUIDES: GuideToggles = { angle: true, length: true, grid: false };
+/** Everything on but the terrain grid. */
+export const DEFAULT_GUIDES: GuideToggles = { angle: true, length: true, grid: false, lines: true, offset: true };
 
 /** How the key that, held, suspends every guide for a free-hand segment is written. The camera controls track it. */
 export const FREE_HAND_KEY_LABEL = "Alt";
