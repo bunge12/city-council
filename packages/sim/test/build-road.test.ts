@@ -10,7 +10,7 @@ import {
   hashState,
   heightAt,
   mapSize,
-  planStraightRoad,
+  planRoad,
   replay,
   snapToGrid,
   step,
@@ -223,8 +223,8 @@ describe("BuildRoad refuses", () => {
     const t = terrainOf(SEED);
     const net = createState(SEED).roads;
     const between = (x: number, z: number): boolean => {
-      const plan = planStraightRoad(net, t, { from: { x, z }, to: { x: x + 16, z }, type: "street" });
-      const avenue = planStraightRoad(net, t, { from: { x, z }, to: { x: x + 16, z }, type: "avenue" });
+      const plan = planRoad(net, t, { from: { x, z }, to: { x: x + 16, z }, type: "street" });
+      const avenue = planRoad(net, t, { from: { x, z }, to: { x: x + 16, z }, type: "avenue" });
       return plan.ok && !avenue.ok;
     };
     let found: [number, number] | null = null;
@@ -239,11 +239,11 @@ describe("BuildRoad refuses", () => {
   });
 });
 
-describe("planStraightRoad", () => {
+describe("planRoad", () => {
   it("prices the road from the balance file and changes nothing", () => {
     const state = createState(SEED);
     const before = hashState(state);
-    const result = planStraightRoad(state.roads, terrainOf(SEED), road([4200, 4500], [4500, 4500], "avenue").payload);
+    const result = planRoad(state.roads, terrainOf(SEED), road([4200, 4500], [4500, 4500], "avenue").payload);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.plan.cost).toBe(300 * (result.plan.type.buildCostPerMetre));
     expect(hashState(state)).toBe(before);

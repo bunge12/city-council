@@ -9,7 +9,7 @@ The sim can build a whole street grid as one command: one validation, one log en
 ## Scope
 
 - A `BuildRoadGrid` command. It carries a rectangle as three corners on the build grid, a block depth and a block width in metres, and a road type id
-- A pure `planRoadGrid` function, exported from the sim entry like `planStraightRoad`, that turns the command into a list of straight streets. The command and the tool's preview both call it, so the preview shows what the sim will build
+- A pure `planRoadGrid` function, exported from the sim entry like `planRoad`, that turns the command into a list of straight streets. The command and the tool's preview both call it, so the preview shows what the sim will build
 - The plan uses only exact arithmetic. The client works out the rectangle's angle, so the sim needs no trigonometry
 - Streets run along both axes of the rectangle at the block spacing. The spacing is between road edges, as in issue 19. The last block on each axis takes what is left, and a leftover too small for a block joins its neighbour
 - The grid bends to the ground. A street stops where it meets water or a slope too steep for its type, using the ground checks from issue 03. Pieces under the minimum length are dropped. A grid never builds a bridge

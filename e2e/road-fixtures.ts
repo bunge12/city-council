@@ -21,7 +21,7 @@ export const FLAT = { x0: 4100, z0: 4400, x1: 4700, z1: 5000 };
 /** Centre of the five-way junction. */
 export const FIVE_WAY = { x: 4600, z: 4630 };
 
-type Road = [from: [number, number], to: [number, number], type: string];
+type Road = [from: [number, number], to: [number, number], type: string, control?: [number, number]];
 
 /** The roads of the small fixture, in build order. */
 export function fixtureRoads(): Road[] {
@@ -51,14 +51,15 @@ export function fixtureRoads(): Road[] {
 /** Runs BuildRoad for each road, one tick apiece, and throws on a refusal. */
 export function buildRoads(state: SimState, roads: Road[]): void {
   let seq = 0;
-  for (const [from, to, type] of roads) {
-    const result = submit(state, {
-      seq: ++seq,
-      playerId: "fixture",
-      type: "BuildRoad",
-      payload: { from: { x: from[0], z: from[1] }, to: { x: to[0], z: to[1] }, type },
-    });
-    if (!result.ok) throw new Error(`fixture road ${JSON.stringify([from, to, type])} refused: ${result.reason}`);
+  for (const [from, to, type, control] of roads) {
+    const payload = {
+      from: { x: from[0], z: from[1] },
+      to: { x: to[0], z: to[1] },
+      type,
+      ...(control ? { control: { x: control[0], z: control[1] } } : {}),
+    };
+    const result = submit(state, { seq: ++seq, playerId: "fixture", type: "BuildRoad", payload });
+    if (!result.ok) throw new Error(`fixture road ${JSON.stringify([from, to, type, control])} refused: ${result.reason}`);
     step(state);
   }
 }
@@ -67,6 +68,32 @@ export function buildRoads(state: SimState, roads: Road[]): void {
 export function fixtureCity(): { bytes: Buffer; state: SimState } {
   const state = createState(SEED);
   buildRoads(state, fixtureRoads());
+  return { bytes: Buffer.from(serialize(state)), state };
+}
+
+/** Middle of the curved fixture, where the arch avenue meets the straight street. */
+export const CURVED_JUNCTION = { x: 4250, z: 4850 };
+
+/** The roads of the curved fixture, in build order. Issue M1-09. */
+export function curvedRoads(): Road[] {
+  return [
+    // An avenue arching north, from (4150, 4900) to (4350, 4900) with its apex at (4250, 4850).
+    [[4150, 4900], [4350, 4900], "avenue", [4250, 4800]],
+    // A straight street through the apex: a four-way junction with two curved arms.
+    [[4250, 4770], [4250, 4970], "street"],
+    // A street sagging south across the arch twice and the street once.
+    [[4150, 4820], [4350, 4820], "street", [4250, 4930]],
+    // A curved one-way off to the east, with arrows along the curve.
+    [[4400, 4780], [4400, 4960], "oneWay", [4480, 4870]],
+    // A street ending on the arch's body, a T-junction on a curve.
+    [[4330, 4960], [4330, 4882], "street"],
+  ];
+}
+
+/** A city with curved roads and junctions with curved arms. */
+export function curvedCity(): { bytes: Buffer; state: SimState } {
+  const state = createState(SEED);
+  buildRoads(state, curvedRoads());
   return { bytes: Buffer.from(serialize(state)), state };
 }
 

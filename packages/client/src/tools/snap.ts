@@ -25,7 +25,17 @@
 // Trigonometry is fine here: the sim only ever sees the resulting point,
 // which it rounds to its build grid.
 
-import { NETWORKS_ROAD, NONE, ROAD_BUILD, roadIndexOf, segmentsInBox, type BuildPoint, type RoadNetwork } from "@city-council/sim";
+import {
+  NETWORKS_ROAD,
+  NONE,
+  ROAD_BUILD,
+  nearestOnQuad,
+  roadIndexOf,
+  segmentQuad,
+  segmentsInBox,
+  type BuildPoint,
+  type RoadNetwork,
+} from "@city-council/sim";
 import { liveNode, liveRoadSegment, roadSegmentsAt, type RoadNet } from "../render/road-geometry";
 import { SNAP, type GuideToggles } from "./config";
 
@@ -110,27 +120,17 @@ function leaving(net: RoadNet, seg: number, node: number): { dx: number; dz: num
   return unit((net.segCX[seg] ?? 0) - (net.nodeX[node] ?? 0), (net.segCZ[seg] ?? 0) - (net.nodeZ[node] ?? 0));
 }
 
-/** The nearest point on straight segment `seg` to (x, z), and how far along it, 0 to 1. */
+/** The nearest point on segment `seg` to (x, z), straight or curved, and its curve parameter, 0 to 1. */
 function closestOn(net: RoadNet, seg: number, x: number, z: number): { x: number; z: number; t: number; d2: number } {
-  const a = net.segA[seg] ?? NONE;
-  const b = net.segB[seg] ?? NONE;
-  const ax = net.nodeX[a] ?? 0;
-  const az = net.nodeZ[a] ?? 0;
-  const sx = (net.nodeX[b] ?? 0) - ax;
-  const sz = (net.nodeZ[b] ?? 0) - az;
-  const len2 = sx * sx + sz * sz;
-  let t = len2 > 0 ? ((x - ax) * sx + (z - az) * sz) / len2 : 0;
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  const px = ax + t * sx;
-  const pz = az + t * sz;
-  return { x: px, z: pz, t, d2: (px - x) * (px - x) + (pz - z) * (pz - z) };
+  return nearestOnQuad(segmentQuad(asNetwork(net), seg), x, z);
 }
 
-/** Unit direction of straight segment `seg` from node A to node B. */
-function segmentDir(net: RoadNet, seg: number): { dx: number; dz: number } {
-  const a = net.segA[seg] ?? NONE;
-  const b = net.segB[seg] ?? NONE;
-  return unit((net.nodeX[b] ?? 0) - (net.nodeX[a] ?? 0), (net.nodeZ[b] ?? 0) - (net.nodeZ[a] ?? 0)) ?? { dx: 1, dz: 0 };
+/** Unit direction of segment `seg` toward node B at curve parameter `t`: along it when straight, the tangent on a curve. */
+function segmentDir(net: RoadNet, seg: number, t = 0): { dx: number; dz: number } {
+  const q = segmentQuad(asNetwork(net), seg);
+  const dx = q.cx - q.ax + t * (q.ax - 2 * q.cx + q.bx);
+  const dz = q.cz - q.az + t * (q.az - 2 * q.cz + q.bz);
+  return unit(dx, dz) ?? unit(q.bx - q.ax, q.bz - q.az) ?? { dx: 1, dz: 0 };
 }
 
 /** Road segments touching the square of half-side `r` around (x, z). */
@@ -153,15 +153,17 @@ export function startSource(net: RoadNet, start: BuildPoint): StartSource | null
   }
   let best = NONE;
   let bestD2 = r * r;
+  let bestT = 0;
   for (const seg of roadSegmentsNear(net, start.x, start.z, r)) {
     const c = closestOn(net, seg, start.x, start.z);
     if (c.d2 <= bestD2 && (best === NONE || c.d2 < bestD2)) {
       best = seg;
       bestD2 = c.d2;
+      bestT = c.t;
     }
   }
   if (best === NONE) return null;
-  const d = segmentDir(net, best);
+  const d = segmentDir(net, best, bestT);
   return { kind: "segment", id: best, dirs: [d, { dx: -d.dx, dz: -d.dz }] };
 }
 
@@ -226,7 +228,7 @@ export const segmentSource: SnapSource = {
         if (foot.t <= 0 || foot.t >= 1) continue;
         const d2 = (foot.x - x) * (foot.x - x) + (foot.z - z) * (foot.z - z);
         if (d2 > bestD2) continue;
-        best = { kind: "segment", x: foot.x, z: foot.z, segment: seg, perpendicular: true, along: segmentDir(ctx.net, seg) };
+        best = { kind: "segment", x: foot.x, z: foot.z, segment: seg, perpendicular: true, along: segmentDir(ctx.net, seg, foot.t) };
         bestD2 = d2;
       }
       if (best) return best;
@@ -237,7 +239,7 @@ export const segmentSource: SnapSource = {
     for (const seg of near) {
       const c = closestOn(ctx.net, seg, x, z);
       if (c.d2 > bestD2) continue;
-      best = { kind: "segment", x: c.x, z: c.z, segment: seg, along: segmentDir(ctx.net, seg) };
+      best = { kind: "segment", x: c.x, z: c.z, segment: seg, along: segmentDir(ctx.net, seg, c.t) };
       bestD2 = c.d2;
     }
     return best;

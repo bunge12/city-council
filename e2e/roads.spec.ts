@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { decodePng, type Image } from "./png";
-import { FIVE_WAY, fixtureCity, groundAt, scaleCity } from "./road-fixtures";
+import { CURVED_JUNCTION, FIVE_WAY, curvedCity, fixtureCity, groundAt, scaleCity } from "./road-fixtures";
 
 // Issue M1-06: roads in the mirror appear on the map. It runs in the `roads`
 // project, headed with WebGPU on where the browser has an adapter (see
@@ -126,6 +126,29 @@ for (const { name, query } of BACKENDS) {
       // One baseline per band, shared by both backends: they must draw the same picture.
       expect(shot).toMatchSnapshot(`roads-${band}.png`, { maxDiffPixelRatio: 0.01, threshold: 0.25 });
     }
+  });
+}
+
+// Issue M1-09: curved roads, junctions with curved arms, a curve crossing a
+// curve twice and a T-junction on a curve's body, at street level. The city
+// band shot shows the avenue's line cut into fewer pieces; it is attached,
+// not compared.
+const curvedGround = groundAt(CURVED_JUNCTION.x, CURVED_JUNCTION.z);
+for (const { name, query } of BACKENDS) {
+  test(`the curved fixture city draws curves and curved junctions (${name})`, async ({ page }, testInfo) => {
+    const backend = await openCity(page, query, "Curves", curvedCity().bytes);
+    if (query === "?webgl") expect(backend).toBe("webgl2");
+    testInfo.annotations.push({ type: "backend", description: backend });
+    const { x, z } = CURVED_JUNCTION;
+    await setPose(page, [x + 40, curvedGround + 210, z + 200], [x + 40, curvedGround, z + 30]);
+    await settle(page);
+    await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
+    const shot = await canvasShot(page);
+    await attach(testInfo, `curves, street band, ${backend}`, shot);
+    expect(shot).toMatchSnapshot("roads-curves.png", { maxDiffPixelRatio: 0.01, threshold: 0.25 });
+    await setPose(page, [x, curvedGround + 4200, z + 1700], [x, curvedGround, z]);
+    await settle(page);
+    await attach(testInfo, `curves, city band, ${backend}`, await canvasShot(page));
   });
 }
 

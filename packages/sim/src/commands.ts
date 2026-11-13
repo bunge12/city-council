@@ -1,5 +1,5 @@
 import { LOG_PAGE_SIZE, recordEntry } from "./log";
-import { buildRoad, planStraightRoad } from "./roads/build";
+import { buildRoad, planRoad } from "./roads/build";
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 
@@ -49,18 +49,18 @@ const SetSpeed: CommandDef = {
 };
 
 /**
- * A straight road from `payload.from` to `payload.to` of road type
- * `payload.type`. See roads/build.ts for the checks. The terrain comes from
+ * A road from `payload.from` to `payload.to` of road type `payload.type`,
+ * straight or, with `payload.control`, one quadratic curve through it. See roads/build.ts for the checks. The terrain comes from
  * the seed, so a worker, a server and a replay check against the same ground.
  */
 const BuildRoad: CommandDef = {
   validate: (state, command) => {
-    const result = planStraightRoad(state.roads, terrainOf(state.seed), command.payload);
+    const result = planRoad(state.roads, terrainOf(state.seed), command.payload);
     return result.ok ? null : result.reason;
   },
   apply: (state, command) => {
     const terrain = terrainOf(state.seed);
-    const result = planStraightRoad(state.roads, terrain, command.payload);
+    const result = planRoad(state.roads, terrain, command.payload);
     if (result.ok) buildRoad(state.roads, terrain, result.plan);
   },
 };
