@@ -1,7 +1,8 @@
 import { LOG_PAGE_SIZE, logLength, recordEntry } from "./log";
 import { buildRoad, planRoad } from "./roads/build";
+import { buildRoadGrid, checkRoadGrid, gridProblemReason, planRoadGrid, type GridProblem } from "./roads/grid";
 import { bulldozeRoad, planBulldoze, planUpgrade, upgradeRoad } from "./roads/edit";
-import { endJournal, startJournal } from "./roads/network";
+import { endJournal, reverseOps, startJournal, type NetworkOp } from "./roads/network";
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 import { applyUndo, planUndo, recordUndo } from "./undo";
@@ -27,6 +28,14 @@ export interface CommandDef {
   validate(state: SimState, command: Command): string | null;
   /** Changes state. Only called after `validate` returned null. */
   apply(state: SimState, command: Command): void;
+  /**
+   * Optional. Checks and applies in one pass, for a command whose check
+   * costs as much as applying it: returns null once applied, or the reason
+   * and leaves state exactly as it was. When present, the step calls this
+   * instead of `validate` and then `apply`. It must refuse exactly what
+   * `validate` refuses.
+   */
+  applyIfValid?(state: SimState, command: Command): string | null;
 }
 
 const NoOp: CommandDef = {
@@ -84,6 +93,48 @@ const BuildRoad: CommandDef = {
 };
 
 /**
+ * A whole street grid: the rectangle from `payload.origin` along to
+ * `payload.along` and across to `payload.across`, blocks `payload.depth` by
+ * `payload.width` metres between road edges, of road type `payload.type`.
+ * See roads/grid.ts. Validation rehearses the whole grid on the network and
+ * takes it back, so a grid is built whole or refused whole, with the street
+ * the refusal came from.
+ */
+const BuildRoadGrid: CommandDef = {
+  validate: (state, command) => {
+    const terrain = terrainOf(state.seed);
+    const result = planRoadGrid(state.roads, terrain, command.payload);
+    if (!result.ok) return result.reason;
+    const problem = checkRoadGrid(state.roads, terrain, result.plan);
+    return problem === null ? null : gridProblemReason(result.plan, problem);
+  },
+  apply: (state, command) => {
+    const terrain = terrainOf(state.seed);
+    const result = planRoadGrid(state.roads, terrain, command.payload);
+    if (result.ok) undoable(state, command, () => buildRoadGrid(state.roads, terrain, result.plan));
+  },
+  // The step builds the grid once with the journal open, and takes it back
+  // if a street is refused, rather than rehearsing it and building it again.
+  applyIfValid: (state, command) => {
+    const terrain = terrainOf(state.seed);
+    const result = planRoadGrid(state.roads, terrain, command.payload);
+    if (!result.ok) return result.reason;
+    startJournal(state.roads);
+    let problem: GridProblem | null = null;
+    let ops: NetworkOp[];
+    try {
+      problem = buildRoadGrid(state.roads, terrain, result.plan);
+    } finally {
+      ops = endJournal(state.roads);
+      if (problem !== null) reverseOps(state.roads, ops);
+    }
+    if (problem !== null) return gridProblemReason(result.plan, problem);
+    recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops });
+    return null;
+  },
+};
+
+/**
  * Removes the segments in `payload.segments`, and every node they leave with
  * no segments. See roads/edit.ts.
  */
@@ -133,6 +184,7 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   NoOp,
   SetSpeed,
   BuildRoad,
+  BuildRoadGrid,
   BulldozeRoad,
   UpgradeRoad,
   Undo,
@@ -140,27 +192,24 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
 
 /** Checks a command against the current state without changing anything. */
 export function validateCommand(state: SimState, command: Command): CommandResult {
-  if (!Number.isSafeInteger(command.seq) || command.seq < 0) {
-    return { ok: false, reason: "seq must be a non-negative integer" };
-  }
-  if (typeof command.playerId !== "string" || command.playerId === "") {
-    return { ok: false, reason: "playerId is required" };
-  }
+  const def = commandDef(command);
+  if (typeof def === "string") return { ok: false, reason: def };
+  const reason = def.validate(state, command);
+  return reason === null ? { ok: true } : { ok: false, reason };
+}
+
+/** The definition of a command's type, or why the command is malformed whatever the state. */
+function commandDef(command: Command): CommandDef | string {
+  if (!Number.isSafeInteger(command.seq) || command.seq < 0) return "seq must be a non-negative integer";
+  if (typeof command.playerId !== "string" || command.playerId === "") return "playerId is required";
   // A host passes on whatever a port or socket delivered, so `type` may be
   // anything. Without this check a one-item array such as ["NoOp"] would be
   // looked up as "NoOp", applied and logged with a type no save can load.
-  if (typeof command.type !== "string") {
-    return { ok: false, reason: "type must be a string" };
-  }
+  if (typeof command.type !== "string") return "type must be a string";
   const def = Object.hasOwn(COMMANDS, command.type) ? COMMANDS[command.type] : undefined;
-  if (!def) {
-    return { ok: false, reason: `unknown command type "${command.type}"` };
-  }
-  if (!isJsonSafe(command.payload)) {
-    return { ok: false, reason: "payload must be plain JSON data" };
-  }
-  const reason = def.validate(state, command);
-  return reason === null ? { ok: true } : { ok: false, reason };
+  if (!def) return `unknown command type "${command.type}"`;
+  if (!isJsonSafe(command.payload)) return "payload must be plain JSON data";
+  return def;
 }
 
 /**
@@ -220,15 +269,22 @@ export function enqueue(state: SimState, command: Command): void {
  * Applies queued commands in the order they were submitted and records each
  * one in the activity log. Each is checked again first, because an earlier
  * command in the same tick may have made it invalid. Those are dropped and
- * not recorded.
+ * not recorded. A command with `applyIfValid` is checked and applied in one
+ * pass.
  */
 export function applyPending(state: SimState): void {
   const queue = state.pending;
   state.pending = [];
   for (const command of queue) {
-    const def = COMMANDS[command.type];
-    if (def && validateCommand(state, command).ok) {
-      def.apply(state, command);
+    const def = commandDef(command);
+    if (typeof def === "string") continue;
+    let applied: boolean;
+    if (def.applyIfValid) applied = def.applyIfValid(state, command) === null;
+    else {
+      applied = def.validate(state, command) === null;
+      if (applied) def.apply(state, command);
+    }
+    if (applied) {
       recordEntry(state, {
         tick: state.tick,
         seq: command.seq,

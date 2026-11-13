@@ -1,0 +1,78 @@
+{
+  "description": "A grid on seed 2026. p1 builds a street, then a 4 by 4 street grid started on it, which builds nothing along it and carries on past its end. Then an avenue grid over the inlet, which stops at the water, and an undo that takes that whole grid back.",
+  "seed": 2026,
+  "untilTick": 6,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4500
+        },
+        "to": {
+          "x": 4392,
+          "z": 4500
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "BuildRoadGrid",
+      "payload": {
+        "origin": {
+          "x": 4200,
+          "z": 4500
+        },
+        "along": {
+          "x": 4584,
+          "z": 4500
+        },
+        "across": {
+          "x": 4200,
+          "z": 4884
+        },
+        "depth": 86,
+        "width": 86,
+        "type": "street"
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 3,
+      "playerId": "p1",
+      "type": "BuildRoadGrid",
+      "payload": {
+        "origin": {
+          "x": 3300,
+          "z": 6400
+        },
+        "along": {
+          "x": 3800,
+          "z": 6400
+        },
+        "across": {
+          "x": 3300,
+          "z": 6800
+        },
+        "depth": 86,
+        "width": 106,
+        "type": "avenue"
+      }
+    },
+    {
+      "tick": 4,
+      "seq": 4,
+      "playerId": "p1",
+      "type": "Undo",
+      "payload": {}
+    }
+  ],
+  "hash": "b8a1eac440bd2cdc"
+}
