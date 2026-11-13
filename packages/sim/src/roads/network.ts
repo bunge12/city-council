@@ -37,6 +37,8 @@ export const NODE_FIXED = 2;
 
 /** Segment flags. */
 export const SEG_ALIVE = 1;
+/** The player cannot remove or change this segment, as at an outside connection. */
+export const SEG_FIXED = 2;
 
 /** Marks the end of a list. */
 export const NONE = -1;
@@ -71,7 +73,7 @@ export interface RoadNetwork {
   segNetwork: Uint8Array;
   /** LEVEL_GROUND and the rest. */
   segLevel: Uint8Array;
-  /** SEG_ALIVE. */
+  /** SEG_ALIVE, SEG_FIXED. */
   segFlags: Uint8Array;
   /**
    * The quadratic curve's control point. A straight segment has it exactly
@@ -90,7 +92,9 @@ export type AnyTypedArray = Float64Array | Int32Array | Uint8Array;
 /**
  * Derived data that follows a network: the spatial index, later the routing
  * graph. Told after a node or segment is added and before one is removed,
- * while its fields still hold their values.
+ * while its fields still hold their values. A segment changed in place
+ * (`restyleSegment`) is reported as removed before the change and added
+ * after it.
  */
 export interface NetworkObserver {
   nodeAdded(id: number): void;
@@ -263,6 +267,8 @@ export interface SegmentSpec {
   /** Control point. Leave out both for a straight segment. */
   cx?: number;
   cz?: number;
+  /** Sets SEG_FIXED. */
+  fixed?: boolean;
 }
 
 /** Steps in the polyline that measures a curve. */
@@ -324,7 +330,7 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   net.segType[id] = spec.type;
   net.segNetwork[id] = network;
   net.segLevel[id] = level;
-  net.segFlags[id] = SEG_ALIVE;
+  net.segFlags[id] = SEG_ALIVE | (spec.fixed ? SEG_FIXED : 0);
   net.segCX[id] = cx;
   net.segCZ[id] = cz;
   net.segLength[id] = curveLength(ax, az, cx, cz, bx, bz);
@@ -368,6 +374,31 @@ export function removeSegment(net: RoadNetwork, id: number): void {
   unlink(net, id, net.segB[id] ?? NONE);
   for (const observer of observers.get(net) ?? []) observer.segmentRemoving(id);
   release(net, "segFree", SEG_ARRAYS, id);
+}
+
+/**
+ * Changes a segment in place: gives it road type `type` and, with `reverse`,
+ * swaps its two ends so it runs the other way. A one-way runs from node A to
+ * node B. The id, shape, length, level and place in each node's list stay.
+ * Observers see the segment go and come back, so derived data refiles it.
+ */
+export function restyleSegment(net: RoadNetwork, id: number, type: number, reverse: boolean): void {
+  if (!isSegment(net, id)) throw new RangeError(`segment ${id} does not exist`);
+  if (!Number.isInteger(type) || type < 0 || type > 255) throw new RangeError(`bad segment type ${type}`);
+  if (net.segNetwork[id] === NETWORK_ROAD && type >= ROAD_TYPES.length) throw new RangeError(`no road type ${type}`);
+  for (const observer of observers.get(net) ?? []) observer.segmentRemoving(id);
+  net.segType[id] = type;
+  if (reverse) {
+    // Each node's list follows the link on its own end, so swapping the
+    // links with the ends keeps both lists as they were.
+    const a = net.segA[id] ?? NONE;
+    const nextA = net.segNextA[id] ?? NONE;
+    net.segA[id] = net.segB[id] ?? NONE;
+    net.segNextA[id] = net.segNextB[id] ?? NONE;
+    net.segB[id] = a;
+    net.segNextB[id] = nextA;
+  }
+  for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
 }
 
 /** The segments touching `node`, newest first. */

@@ -35,6 +35,8 @@ export interface RoadTypeBalance {
   minCurveRadius: number;
   buildCostPerMetre: BalancePrice;
   upkeepPerMetrePerYear: BalancePrice;
+  /** Taking a metre of this road out. A bridge costs `bridge.costMultiplier` times this. */
+  demolitionCostPerMetre: BalancePrice;
   /** What happens where this type crosses water. */
   bridge: BridgeBalance;
 }
@@ -66,6 +68,11 @@ export interface RoadBuildBalance {
   groundSampleStep: number;
   /** Metres from the water surface up to a bridge deck. */
   bridgeClearance: number;
+  /**
+   * The share of the old road's build cost taken off the price of upgrading
+   * it to another type, from 0 to 1. Reuse of the roadbed, not a refund.
+   */
+  upgradeCredit: number;
 }
 
 export interface RoadBalance {
@@ -75,17 +82,25 @@ export interface RoadBalance {
 }
 
 /** A road type with its prices in whole 2026 dollars. */
-export interface RoadType extends Omit<RoadTypeBalance, "buildCostPerMetre" | "upkeepPerMetrePerYear"> {
+export interface RoadType extends Omit<RoadTypeBalance, "buildCostPerMetre" | "upkeepPerMetrePerYear" | "demolitionCostPerMetre"> {
   /** Index in the balance file. This is what segments store. */
   index: number;
   buildCostPerMetre: number;
   upkeepPerMetrePerYear: number;
+  demolitionCostPerMetre: number;
 }
 
 const NUMBER_FIELDS = ["lanes", "speedKmh", "capacityPerLane", "width", "maxSlope", "minCurveRadius"] as const;
 const BOOLEAN_FIELDS = ["oneWay", "zonable", "buildable"] as const;
-const BUILD_FIELDS = ["gridStep", "mergeDistance", "minLength", "minAngleDegrees", "groundSampleStep", "bridgeClearance"] as const;
-const PRICE_FIELDS = ["buildCostPerMetre", "upkeepPerMetrePerYear"] as const;
+const BUILD_FIELDS = [
+  "gridStep",
+  "mergeDistance",
+  "minLength",
+  "minAngleDegrees",
+  "groundSampleStep",
+  "bridgeClearance",
+] as const;
+const PRICE_FIELDS = ["buildCostPerMetre", "upkeepPerMetrePerYear", "demolitionCostPerMetre"] as const;
 /** Segments store the type in a Uint8Array. */
 const MAX_TYPES = 256;
 
@@ -167,6 +182,8 @@ export function checkRoadBalance(data: unknown): string[] {
     if (isPositive(build["minAngleDegrees"]) && (build["minAngleDegrees"] as number) >= 180) {
       errors.push("build.minAngleDegrees must be under 180");
     }
+    const credit = build["upgradeCredit"];
+    if (typeof credit !== "number" || !(credit >= 0 && credit <= 1)) errors.push("build.upgradeCredit must be a number from 0 to 1");
     // Positions are whole multiples of the step, so it must divide a metre
     // into a power of two for them to be exact in a float64.
     const step = build["gridStep"];
@@ -221,6 +238,7 @@ export function resolveRoadTypes(data: unknown): RoadType[] {
     index,
     buildCostPerMetre: escalate(type.buildCostPerMetre, escalation),
     upkeepPerMetrePerYear: escalate(type.upkeepPerMetrePerYear, escalation),
+    demolitionCostPerMetre: escalate(type.demolitionCostPerMetre, escalation),
   }));
 }
 

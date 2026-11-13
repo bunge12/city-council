@@ -1,5 +1,6 @@
 import { LOG_PAGE_SIZE, recordEntry } from "./log";
 import { buildRoad, planRoad } from "./roads/build";
+import { bulldozeRoad, planBulldoze, planUpgrade, upgradeRoad } from "./roads/edit";
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 
@@ -65,11 +66,43 @@ const BuildRoad: CommandDef = {
   },
 };
 
+/**
+ * Removes the segments in `payload.segments`, and every node they leave with
+ * no segments. See roads/edit.ts.
+ */
+const BulldozeRoad: CommandDef = {
+  validate: (state, command) => {
+    const result = planBulldoze(state.roads, command.payload);
+    return result.ok ? null : result.reason;
+  },
+  apply: (state, command) => {
+    const result = planBulldoze(state.roads, command.payload);
+    if (result.ok) bulldozeRoad(state.roads, result.plan);
+  },
+};
+
+/**
+ * Changes the segments in `payload.segments` to road type `payload.type` in
+ * place, or reverses one-ways given their own type. See roads/edit.ts.
+ */
+const UpgradeRoad: CommandDef = {
+  validate: (state, command) => {
+    const result = planUpgrade(state.roads, terrainOf(state.seed), command.payload);
+    return result.ok ? null : result.reason;
+  },
+  apply: (state, command) => {
+    const result = planUpgrade(state.roads, terrainOf(state.seed), command.payload);
+    if (result.ok) upgradeRoad(state.roads, result.plan);
+  },
+};
+
 /** Every command type the sim accepts, by name. */
 export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   NoOp,
   SetSpeed,
   BuildRoad,
+  BulldozeRoad,
+  UpgradeRoad,
 });
 
 /** Checks a command against the current state without changing anything. */

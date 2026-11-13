@@ -311,7 +311,7 @@ describe("road balance", () => {
   });
 
   it("fails when a price has no source year or no source", () => {
-    for (const price of ["buildCostPerMetre", "upkeepPerMetrePerYear"] as const) {
+    for (const price of ["buildCostPerMetre", "upkeepPerMetrePerYear", "demolitionCostPerMetre"] as const) {
       for (const field of ["sourceYear", "source", "amount"]) {
         const copy = copyBalance() as unknown as { types: Record<string, Record<string, unknown>>[] };
         delete copy.types[1]?.[price]?.[field];
