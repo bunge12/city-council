@@ -5,6 +5,7 @@ import {
   SNAPSHOT_FORMAT_VERSION,
   SNAPSHOT_VERSION,
   SnapshotError,
+  captureState,
   createBareState,
   createState,
   deserialize,
@@ -16,6 +17,8 @@ import {
   replay,
   serialize,
   serializeDetached,
+  serializeDetachedSteps,
+  serializeSteps,
   step,
   submit,
   type LogEntry,
@@ -27,6 +30,7 @@ import v3Fixture from "./fixtures/snapshots/v3.json";
 import v4Fixture from "./fixtures/snapshots/v4.json";
 import v5Fixture from "./fixtures/snapshots/v5.json";
 import v6Fixture from "./fixtures/snapshots/v6.json";
+import { snapshotChecksum } from "../src/snapshot";
 import { checkConnections } from "../src/roads/connections";
 import { heldIds } from "../src/undo";
 import { addNode, addSegment, removeSegment, segmentsAt } from "../src/roads/network";
@@ -43,7 +47,7 @@ function toHex(bytes: Uint8Array): string {
 
 /** Rewrites the checksum after a test edits the body, so only the edit is wrong. */
 function resign(bytes: Uint8Array): Uint8Array {
-  const sum = fnv1a64(bytes.subarray(40));
+  const sum = snapshotChecksum(bytes);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   view.setUint32(32, parseInt(sum.slice(0, 8), 16), true);
   view.setUint32(36, parseInt(sum.slice(8), 16), true);
@@ -204,6 +208,60 @@ describe("a snapshot written without its paged log", () => {
     expect(back.state.logOffset).toBe(state.logOffset);
     expect(hashState(back.state)).toBe(hashState(state));
     expect(back.header.formatVersion).toBe(SNAPSHOT_FORMAT_VERSION);
+  });
+
+  it("is written as format 3, whose checksum reads the body a word at a time", () => {
+    const { state } = pagedCity();
+    const bytes = serializeDetached(state);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    expect(view.getUint16(4, true)).toBe(3);
+    // The two sums, written out the slow way.
+    let a = 0x811c9dc5;
+    let b = 0xcbf29ce4;
+    for (let at = 40; at < bytes.byteLength; at += 4) {
+      const word = view.getInt32(at, true);
+      a = Math.imul(a ^ word, 0x01000193);
+      b = Math.imul(((b << 5) | (b >>> 27)) ^ word, 0x9e3779b1);
+    }
+    expect(view.getUint32(32, true)).toBe(a >>> 0);
+    expect(view.getUint32(36, true)).toBe(b >>> 0);
+    // Not the checksum of formats 1 and 2.
+    expect(snapshotChecksum(bytes)).not.toBe(fnv1a64(bytes.subarray(40)));
+  });
+
+  it("still reads a format 2 save, which has the FNV-1a checksum", () => {
+    const { state } = pagedCity();
+    const bytes = serializeDetached(state);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    view.setUint16(4, 2, true);
+    expect(refusal(bytes.slice()).message).toMatch(/checksum does not match/);
+    const sum = fnv1a64(bytes.subarray(40));
+    expect(snapshotChecksum(bytes)).toBe(sum);
+    view.setUint32(32, parseInt(sum.slice(0, 8), 16), true);
+    view.setUint32(36, parseInt(sum.slice(8), 16), true);
+    const back = deserialize(bytes);
+    expect(back.header.formatVersion).toBe(2);
+    expect(back.logDetached).toBe(true);
+    expect(hashState(back.state)).toBe(hashState(state));
+  });
+
+  it("notices any one byte of the body changing", () => {
+    const bytes = serializeDetached(busyState());
+    for (let at = 40; at < bytes.byteLength; at++) {
+      const damaged = bytes.slice();
+      damaged[at] = (damaged[at] ?? 0) ^ (1 << (at % 8));
+      expect(() => readSnapshotHeader(damaged), `byte ${at}`).toThrow(/checksum does not match/);
+    }
+  });
+
+  it("reads a save that does not start on a word boundary of its buffer", () => {
+    const { state } = pagedCity();
+    const bytes = serializeDetached(state);
+    for (const shift of [1, 2, 3]) {
+      const moved = new Uint8Array(bytes.byteLength + shift);
+      moved.set(bytes, shift);
+      expect(hashState(deserialize(moved.subarray(shift)).state)).toBe(hashState(state));
+    }
   });
 
   it("does not grow with the entries that have left live state", () => {
@@ -391,6 +449,70 @@ describe("snapshots with a road network", () => {
     for (let i = 0; i < 20; i++) addNode(r, i, i, 0);
     return state;
   }
+
+  it("writes the same bytes a part at a time", () => {
+    const state = withRoads();
+    for (const [steps, whole] of [
+      [serializeSteps(state), serialize(state)],
+      [serializeDetachedSteps(state), serializeDetached(state)],
+    ] as const) {
+      let parts = 0;
+      let part = steps.next();
+      while (!part.done) {
+        parts++;
+        part = steps.next();
+      }
+      // Find the arrays, write the JSON, lay out the bytes, then the checksum.
+      expect(parts).toBe(3);
+      expect(toHex(part.value)).toBe(toHex(whole));
+    }
+  });
+
+  it("refuses a bad state on the first part", () => {
+    const state = withRoads();
+    state.tick = -1;
+    expect(() => serializeDetachedSteps(state).next()).toThrow(RangeError);
+  });
+
+  it("captures a state that a save can be written from while the city changes", () => {
+    const state = withRoads();
+    state.undo = [{ playerId: "p1", entry: 0, type: "BuildRoad", ops: [{ op: "addNode", id: 1, grown: true }] }];
+    const before = toHex(serialize(state));
+    const hash = hashState(state);
+    const captured = captureState(state);
+    expect(hashState(captured)).toBe(hash);
+    // The entries are the same objects; the arrays and lists are copies.
+    expect(captured.log[0]).toBe(state.log[0]);
+    expect(captured.undo).toBe(state.undo);
+    expect(captured.log).not.toBe(state.log);
+    expect(captured.pending).not.toBe(state.pending);
+    expect(captured.rng).not.toBe(state.rng);
+    expect(captured.roads.nodeX).not.toBe(state.roads.nodeX);
+
+    // A save started on the capture, then the city moves on between parts.
+    const steps = serializeSteps(captured);
+    const change = (n: number): void => {
+      const r = state.roads;
+      const a = addNode(r, 500 + n, 40, 1);
+      const b = addNode(r, 600 + n, 40, 2);
+      const seg = addSegment(r, a, b, { type: 0 });
+      if (n % 2 === 0) removeSegment(r, seg);
+      r.nodeX[0] = 999 + n;
+      submit(state, { seq: 100 + n, playerId: "p1", type: "NoOp", payload: { n } });
+      step(state);
+      state.undo = [...state.undo, { playerId: "p2", entry: n, type: "BuildRoad", ops: [] }];
+    };
+    let n = 0;
+    let part = steps.next();
+    while (!part.done) {
+      change(n++);
+      part = steps.next();
+    }
+    expect(n).toBeGreaterThan(0);
+    expect(hashState(state)).not.toBe(hash);
+    expect(toHex(part.value)).toBe(before);
+    expect(hashState(captured)).toBe(hash);
+  });
 
   it("serialises, deserialises and hashes the same", () => {
     const state = withRoads();

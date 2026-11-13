@@ -12,7 +12,7 @@
 //     16  8  tick, float64
 //     24  4  body length in bytes
 //     28  4  reserved, zero
-//     32  8  FNV-1a 64 of the body, high word then low word
+//     32  8  checksum of the body, high word then low word
 //   body: sections, one after another, each starting on an 8-byte boundary
 //     1   name length n
 //     n   name, ASCII
@@ -35,6 +35,14 @@
 // each time. Nothing else differs, and a snapshot that carries its paged
 // log is still written as version 1, which older builds read.
 //
+// Format version 3 changes the checksum and nothing else. Versions 1 and 2
+// use FNV-1a 64, which takes the body a byte at a time: 7 ms for the 3.3 MB
+// of a 30,000 segment city, a third of a tick, and more as the city grows.
+// Version 3 takes the body four bytes at a time (`wordChecksum`) and is
+// several times faster. A snapshot without its paged log, which is what an
+// autosave writes between ticks, is written as version 3. Builds from
+// before it refuse such a save as one from a newer version.
+//
 // Typed array data is written in the platform's byte order. Every engine the
 // game targets is little endian, as `hashState` already assumes.
 
@@ -48,9 +56,11 @@ import { SNAPSHOT_VERSION, SPEEDS, type SimState } from "./state";
 import { checkUndoHistory, heldIds, type UndoRecord } from "./undo";
 
 /** Newest version of the byte layout above this build reads. Bump on any change to it. */
-export const SNAPSHOT_FORMAT_VERSION = 2;
+export const SNAPSHOT_FORMAT_VERSION = 3;
 /** The layout version in which the paged log is always inside the snapshot. */
 const FORMAT_LOG_INSIDE = 1;
+/** The first layout version whose checksum is `wordChecksum`. */
+const FORMAT_WORD_CHECKSUM = 3;
 
 /** "CITY" in ASCII. */
 const MAGIC = [0x43, 0x49, 0x54, 0x59] as const;
@@ -156,6 +166,19 @@ interface Section {
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
+/** Whether JSON holds `value` as it is. Checked before a path is built for it, since most values are these. */
+function isPlainJson(value: unknown): value is boolean | string | number {
+  if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
+  return typeof value === "string" || typeof value === "boolean";
+}
+
+/**
+ * `value` as JSON can hold it, its typed arrays moved to `sections`. A part
+ * of `value` that JSON holds as it is comes back as itself, not as a copy:
+ * most of a state's JSON is its log and undo records, which are such parts,
+ * and copying them on every save cost more than writing them. The result is
+ * only read, by `JSON.stringify`.
+ */
 function encodeJson(value: unknown, path: string, sections: Section[]): Json {
   switch (typeof value) {
     case "undefined":
@@ -175,7 +198,20 @@ function encodeJson(value: unknown, path: string, sections: Section[]): Json {
       throw new TypeError(`serialize: ${path} is a ${typeof value}, which state must not hold`);
   }
   if (value === null) return null;
-  if (Array.isArray(value)) return value.map((item, i) => encodeJson(item, `${path}.${i}`, sections));
+  if (Array.isArray(value)) {
+    const items = value as unknown[];
+    /** The copy, made at the first item that needs encoding. */
+    let out: Json[] | null = null;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (isPlainJson(item)) continue;
+      const encoded = encodeJson(item, `${path}.${i}`, sections);
+      if (encoded === item) continue;
+      out ??= items.slice() as Json[];
+      out[i] = encoded;
+    }
+    return out ?? (items as Json[]);
+  }
   if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
     const kind = kindOf(value);
     sections.push({
@@ -190,11 +226,20 @@ function encodeJson(value: unknown, path: string, sections: Section[]): Json {
     throw new TypeError(`serialize: ${path} is not plain data (CLAUDE.md rule 7)`);
   }
   const record = value as Record<string, unknown>;
-  const out: { [key: string]: Json } = {};
-  for (const key of Object.keys(record)) {
-    out[key] = encodeJson(record[key], path === "" ? key : `${path}.${key}`, sections);
+  let out: { [key: string]: Json } | null = null;
+  let hasDollar = false;
+  for (const key in record) {
+    if (!Object.hasOwn(record, key)) continue;
+    if (key === "$") hasDollar = true;
+    const item = record[key];
+    if (isPlainJson(item)) continue;
+    const encoded = encodeJson(item, path === "" ? key : `${path}.${key}`, sections);
+    if (encoded === item) continue;
+    out ??= { ...record } as { [key: string]: Json };
+    out[key] = encoded;
   }
-  return Object.hasOwn(record, "$") ? { $: "object", value: out } : out;
+  const fields = out ?? (record as { [key: string]: Json });
+  return hasDollar ? { $: "object", value: fields } : fields;
 }
 
 function corrupt(message: string): SnapshotError {
@@ -240,11 +285,21 @@ function decodeJson(value: Json, arrays: ReadonlyMap<string, TypedArray>): unkno
   }
 }
 
-function jsonSection(name: string, value: Json): Section {
+/** A section still to be written: a typed array's bytes, or JSON text that goes straight into the output. */
+interface Part {
+  name: string;
+  kind: number;
+  byteLength: number;
+  source: Uint8Array | string;
+}
+
+function arrayPart(section: Section): Part {
+  return { name: section.name, kind: section.kind, byteLength: section.bytes.byteLength, source: section.bytes };
+}
+
+function jsonPart(name: string, value: Json): Part {
   const text = JSON.stringify(value);
-  const units = new Uint16Array(text.length);
-  for (let i = 0; i < text.length; i++) units[i] = text.charCodeAt(i);
-  return { name, kind: KIND_JSON, bytes: new Uint8Array(units.buffer) };
+  return { name, kind: KIND_JSON, byteLength: text.length * 2, source: text };
 }
 
 function readJsonSection(section: Section): Json {
@@ -269,10 +324,49 @@ function align8(n: number): number {
   return n + ((8 - (n % 8)) % 8);
 }
 
-function checksum(bytes: Uint8Array): { hi: number; lo: number } {
+const WORD_PRIME_A = 0x01000193;
+const WORD_PRIME_B = 0x9e3779b1 | 0;
+
+/**
+ * The format 3 checksum: two 32-bit sums over the body read as
+ * little-endian 32-bit words. One is FNV-1a 32 with a word where it has a
+ * byte; the other turns its sum five bits before each word, so the two do
+ * not miss the same change. Each step is one to one in the sum, so no
+ * change to a single word goes unseen. Integer operations only, the same in
+ * every engine. `bytes` must be a whole number of words long.
+ */
+function wordChecksum(bytes: Uint8Array): { hi: number; lo: number } {
+  // A view of words has to start on a word boundary of its buffer.
+  const aligned = bytes.byteOffset % 4 === 0 ? bytes : bytes.slice();
+  const words = new Int32Array(aligned.buffer, aligned.byteOffset, aligned.byteLength / 4);
+  let a = 0x811c9dc5 | 0;
+  let b = 0xcbf29ce4 | 0;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i] ?? 0;
+    a = Math.imul(a ^ word, WORD_PRIME_A);
+    b = Math.imul(((b << 5) | (b >>> 27)) ^ word, WORD_PRIME_B);
+  }
+  return { hi: a >>> 0, lo: b >>> 0 };
+}
+
+/** The checksum of a snapshot body, as layout version `formatVersion` defines it. */
+function checksum(bytes: Uint8Array, formatVersion: number): { hi: number; lo: number } {
+  if (formatVersion >= FORMAT_WORD_CHECKSUM) return wordChecksum(bytes);
   const h = new Fnv64();
-  for (let i = 0; i < bytes.length; i++) h.byte(bytes[i] ?? 0);
+  h.bytes(bytes);
   return { hi: h.hi, lo: h.lo };
+}
+
+/**
+ * The checksum a snapshot's header should hold for its body, as 16 hex
+ * digits: the header's high word, then its low word. For tests and tools
+ * that edit snapshot bytes; `bytes` needs a readable format version and a
+ * body of the length its layout asks for.
+ */
+export function snapshotChecksum(bytes: Uint8Array): string {
+  const formatVersion = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(4, true);
+  const sum = checksum(bytes.subarray(HEADER_BYTES), formatVersion);
+  return sum.hi.toString(16).padStart(8, "0") + sum.lo.toString(16).padStart(8, "0");
 }
 
 function isUint32(n: unknown): n is number {
@@ -285,7 +379,7 @@ function isUint32(n: unknown): n is number {
  * `state.logOffset` entries. The state is only read.
  */
 export function serialize(state: SimState, pagedLog: readonly LogEntry[] = []): Uint8Array {
-  return write(state, pagedLog);
+  return finish(write(state, pagedLog));
 }
 
 /**
@@ -295,10 +389,44 @@ export function serialize(state: SimState, pagedLog: readonly LogEntry[] = []): 
  * bytes back must supply the first `state.logOffset` entries.
  */
 export function serializeDetached(state: SimState): Uint8Array {
+  return finish(write(state, null));
+}
+
+/** The work of one snapshot, a part for each `next()`. The last part returns the bytes. */
+export type SnapshotSteps = Generator<undefined, Uint8Array, undefined>;
+
+/**
+ * `serializeDetached` a part at a time, to the same bytes. Writing a large
+ * city takes longer than a host has between two ticks, so a host does one
+ * part between ticks: each `next()` does one, and the last returns the
+ * bytes. `state` must not change until then. A host whose sim steps on
+ * meanwhile passes a copy from `captureState`.
+ */
+export function serializeDetachedSteps(state: SimState): SnapshotSteps {
   return write(state, null);
 }
 
-function write(state: SimState, pagedLog: readonly LogEntry[] | null): Uint8Array {
+/** `serialize` a part at a time. See `serializeDetachedSteps`. */
+export function serializeSteps(state: SimState, pagedLog: readonly LogEntry[] = []): SnapshotSteps {
+  return write(state, pagedLog);
+}
+
+function finish(steps: SnapshotSteps): Uint8Array {
+  for (;;) {
+    const part = steps.next();
+    if (part.done) return part.value;
+  }
+}
+
+/** Writes the code units of `text`. A function of its own, so the engine compiles this loop on its first long run and not along with all of `write`. */
+function writeUnits(text: string, units: Uint16Array): void {
+  for (let i = 0; i < text.length; i++) units[i] = text.charCodeAt(i);
+}
+
+// The parts are the stages that take time on a large city, each a fraction
+// of a tick on 30,000 segments (issue #83): find the typed arrays, write the
+// JSON text, lay out the bytes, take the checksum.
+function* write(state: SimState, pagedLog: readonly LogEntry[] | null): SnapshotSteps {
   if (pagedLog !== null && pagedLog.length !== state.logOffset) {
     throw new RangeError(
       `serialize: pagedLog has ${pagedLog.length} entries but ${state.logOffset} have left live state`,
@@ -311,44 +439,61 @@ function write(state: SimState, pagedLog: readonly LogEntry[] | null): Uint8Arra
   if (!Number.isInteger(state.version) || state.version < 1 || state.version > 0xffff) {
     throw new RangeError(`serialize: state version ${state.version} does not fit the header`);
   }
+  // The header is written last, from what the state held when this began.
+  const { seed, tick, version } = state;
 
   const arrays: Section[] = [];
   const fields = encodeJson(state, "", arrays);
-  const logSections = pagedLog === null ? [] : [jsonSection("pagedLog", encodeJson(pagedLog, "pagedLog", arrays))];
-  const sections = [jsonSection("state", fields), ...logSections, ...arrays];
+  const pagedFields = pagedLog === null ? null : encodeJson(pagedLog, "pagedLog", arrays);
+  yield;
+
+  const logParts = pagedFields === null ? [] : [jsonPart("pagedLog", pagedFields)];
+  const parts = [jsonPart("state", fields), ...logParts, ...arrays.map(arrayPart)];
+  yield;
 
   let bodyLength = 0;
-  for (const section of sections) {
-    if (section.name.length > 255 || !/^[\x20-\x7e]*$/.test(section.name)) {
-      throw new RangeError(`serialize: section name "${section.name}" must be up to 255 ASCII characters`);
+  for (const part of parts) {
+    if (part.name.length > 255 || !/^[\x20-\x7e]*$/.test(part.name)) {
+      throw new RangeError(`serialize: section name "${part.name}" must be up to 255 ASCII characters`);
     }
-    bodyLength = align8(align8(bodyLength + 1 + section.name.length + 1 + 4) + section.bytes.byteLength);
+    bodyLength = align8(align8(bodyLength + 1 + part.name.length + 1 + 4) + part.byteLength);
   }
   if (bodyLength > 0xffffffff) throw new RangeError("serialize: snapshot is larger than 4 GB");
 
   const out = new Uint8Array(HEADER_BYTES + bodyLength);
   const view = new DataView(out.buffer);
   let at = HEADER_BYTES;
-  for (const section of sections) {
-    out[at++] = section.name.length;
-    for (let i = 0; i < section.name.length; i++) out[at++] = section.name.charCodeAt(i);
-    out[at++] = section.kind;
-    view.setUint32(at, section.bytes.byteLength, true);
+  for (const part of parts) {
+    out[at++] = part.name.length;
+    for (let i = 0; i < part.name.length; i++) out[at++] = part.name.charCodeAt(i);
+    out[at++] = part.kind;
+    view.setUint32(at, part.byteLength, true);
     at = align8(at + 4);
-    out.set(section.bytes, at);
-    at = align8(at + section.bytes.byteLength);
+    const { source } = part;
+    if (typeof source === "string") {
+      // Data starts on an 8-byte boundary of a buffer this function made,
+      // so the code units can be written in place, in the platform's order.
+      writeUnits(source, new Uint16Array(out.buffer, at, source.length));
+    } else {
+      out.set(source, at);
+    }
+    at = align8(at + part.byteLength);
   }
 
+  yield;
+
   out.set(MAGIC, 0);
-  // The oldest layout version that can hold this snapshot.
-  view.setUint16(4, pagedLog === null ? SNAPSHOT_FORMAT_VERSION : FORMAT_LOG_INSIDE, true);
-  view.setUint16(6, state.version, true);
-  view.setUint32(8, state.seed, true);
-  view.setUint32(12, sections.length, true);
-  view.setFloat64(16, state.tick, true);
+  // A snapshot with its log inside stays readable by every build. One
+  // without is the save taken between ticks, so it gets the fast checksum.
+  const formatVersion = pagedLog === null ? SNAPSHOT_FORMAT_VERSION : FORMAT_LOG_INSIDE;
+  view.setUint16(4, formatVersion, true);
+  view.setUint16(6, version, true);
+  view.setUint32(8, seed, true);
+  view.setUint32(12, parts.length, true);
+  view.setFloat64(16, tick, true);
   view.setUint32(24, bodyLength, true);
   view.setUint32(28, 0, true);
-  const sum = checksum(out.subarray(HEADER_BYTES));
+  const sum = checksum(out.subarray(HEADER_BYTES), formatVersion);
   view.setUint32(32, sum.hi, true);
   view.setUint32(36, sum.lo, true);
   return out;
@@ -394,7 +539,8 @@ export function readSnapshotHeader(bytes: Uint8Array): SnapshotHeader {
     );
   }
   if (bytes.byteLength > HEADER_BYTES + bodyLength) throw corrupt("it has extra bytes after the end");
-  const sum = checksum(bytes.subarray(HEADER_BYTES));
+  if (formatVersion >= FORMAT_WORD_CHECKSUM && bodyLength % 4 !== 0) throw corrupt("its length is not a whole number of words");
+  const sum = checksum(bytes.subarray(HEADER_BYTES), formatVersion);
   if (sum.hi !== view.getUint32(32, true) || sum.lo !== view.getUint32(36, true)) {
     throw corrupt("its checksum does not match");
   }

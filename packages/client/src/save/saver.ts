@@ -3,8 +3,8 @@
 // so the snapshot is taken there and written straight to IndexedDB without
 // a trip through the page.
 
-import { SnapshotError, createState, deserialize, serialize, type Snapshot } from "@city-council/sim";
-import type { LocalSave, SimHost } from "../protocol/host";
+import { SnapshotError, createState, deserialize, serialize, type Snapshot, type SnapshotSteps } from "@city-council/sim";
+import { PUMP_INTERVAL_MS, type LocalSave, type PendingSave, type SimHost } from "../protocol/host";
 import {
   SAVES_CHANNEL,
   parseSaveRequest,
@@ -55,6 +55,10 @@ export class Saver {
   private queue: Promise<void> = Promise.resolve();
   /** Log pages of the city in the store. Pages are written once, with the first save that needs them. */
   private logPagesStored: number;
+  /** Saves asked for and not yet written that must not wait on a timer. */
+  private urgent = 0;
+  /** Ends the pause between two parts of an autosave early. */
+  private wake: (() => void) | null = null;
 
   constructor(options: SaverOptions) {
     this.options = options;
@@ -296,6 +300,29 @@ export class Saver {
     if (!host) return this.enqueue(() => Promise.resolve(this.send(requestId)));
     const { seed } = host;
     const tick = host.tick;
+    if (reason === "autosave") {
+      // The city is running, and writing a large one at once holds its
+      // ticks up. Copy it now and write the copy a part at a time.
+      let pending: PendingSave | null = null;
+      let snapshotError: string | null = null;
+      try {
+        pending = host.startSave(this.logPagesStored);
+      } catch (error) {
+        snapshotError = String(error);
+      }
+      return this.enqueue(async () => {
+        let save: LocalSave | null = null;
+        try {
+          if (pending) save = { bytes: await this.inParts(pending.steps), pages: pending.pages, pageCount: pending.pageCount };
+        } catch (error) {
+          snapshotError = String(error);
+        }
+        await this.write(reason, seed, tick, save, snapshotError, requestId);
+      });
+    }
+    // Any other save is one the player asked for or one taken as the tab
+    // goes away, where timers may not run again. Write it at once, and do
+    // not leave it waiting behind an autosave that is pausing between parts.
     let save: LocalSave | null = null;
     let snapshotError: string | null = null;
     try {
@@ -303,7 +330,23 @@ export class Saver {
     } catch (error) {
       snapshotError = String(error);
     }
-    return this.enqueue(() => this.write(reason, seed, tick, save, snapshotError, requestId));
+    this.urgent++;
+    this.wake?.();
+    return this.enqueue(() => this.write(reason, seed, tick, save, snapshotError, requestId)).finally(() => this.urgent--);
+  }
+
+  /** Runs `steps` to the end, with time for the host to pump between parts unless a save is waiting that cannot. */
+  private async inParts(steps: SnapshotSteps): Promise<Uint8Array> {
+    for (;;) {
+      const part = steps.next();
+      if (part.done) return part.value;
+      if (this.urgent > 0) continue;
+      await new Promise<void>((resolve) => {
+        this.wake = resolve;
+        setTimeout(resolve, PUMP_INTERVAL_MS);
+      });
+      this.wake = null;
+    }
   }
 
   private async write(

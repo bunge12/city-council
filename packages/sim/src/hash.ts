@@ -39,6 +39,29 @@ export class Fnv64 {
     this.hi = (Math.imul(this.hi, PRIME_LO) + carry + (lo << 8)) >>> 0;
   }
 
+  /**
+   * Feeds every byte of `bytes`, to the same result as `byte` on each in
+   * turn. The low word is kept as two 16-bit halves, so every product fits
+   * an int32 and the loop is integer operations on locals only. On a few
+   * megabytes this is several times faster than a call per byte.
+   */
+  bytes(bytes: Uint8Array): void {
+    let hi = this.hi | 0;
+    let l0 = this.lo & 0xffff;
+    let l1 = this.lo >>> 16;
+    for (let i = 0; i < bytes.length; i++) {
+      l0 ^= bytes[i] ?? 0;
+      // (hi * 2^32 + l1 * 2^16 + l0) * (2^40 + 0x1b3) mod 2^64
+      const p0 = l0 * PRIME_LO; // below 2^25
+      const p1 = l1 * PRIME_LO + (p0 >>> 16); // below 2^26
+      hi = (Math.imul(hi, PRIME_LO) + (p1 >>> 16) + (l1 << 24) + (l0 << 8)) | 0;
+      l0 = p0 & 0xffff;
+      l1 = p1 & 0xffff;
+    }
+    this.hi = hi >>> 0;
+    this.lo = ((l1 << 16) | l0) >>> 0;
+  }
+
   u32(x: number): void {
     this.byte(x);
     this.byte(x >>> 8);
@@ -112,8 +135,7 @@ function feed(h: Fnv64, value: unknown, path: string): void {
     h.u32(value.byteLength);
     // Raw element bytes in the platform's order. Every engine the game
     // targets is little endian.
-    const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-    for (let i = 0; i < bytes.length; i++) h.byte(bytes[i] ?? 0);
+    h.bytes(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
     return;
   }
   const proto: unknown = Object.getPrototypeOf(value);
@@ -145,6 +167,6 @@ export function hashState(value: unknown): string {
 /** 64-bit FNV-1a of raw bytes, as 16 hex digits. Exposed for tests. */
 export function fnv1a64(bytes: Uint8Array): string {
   const h = new Fnv64();
-  for (let i = 0; i < bytes.length; i++) h.byte(bytes[i] ?? 0);
+  h.bytes(bytes);
   return h.hex();
 }

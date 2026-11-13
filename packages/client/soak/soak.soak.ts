@@ -12,7 +12,8 @@
 //
 // Along the way it sends a NoOp every few ticks, which pushes the activity
 // log past its live limit so paging runs, and takes a snapshot on the
-// autosave interval. Every few seconds of game time it sends a road command
+// autosave interval, in parts as the saver does, and fails if a part passes
+// the tick budget. Every few seconds of game time it sends a road command
 // in a fixed cycle: a street through a grid's blocks, a street grid at the
 // cap over existing streets, an upgrade, a bulldoze and an undo. It picks
 // the segments to upgrade and bulldoze from a SimMirror fed by the host's
@@ -38,7 +39,7 @@ import {
   type FromSimMessage,
 } from "@city-council/sim";
 import { expect, test } from "vitest";
-import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
+import { PUMP_INTERVAL_MS, SimHost, type PendingSave } from "../src/protocol/host";
 import { SimMirror } from "../src/protocol/mirror";
 import type { ClientTransport, HostTransport } from "../src/protocol/transport";
 import { AUTOSAVE_INTERVAL_MS } from "../src/save/config";
@@ -109,6 +110,13 @@ function pickSegment(mirror: SimMirror, from: number): number | null {
     if ((flags & SEG_ALIVE) !== 0 && (flags & SEG_FIXED) === 0) return id;
   }
   return null;
+}
+
+function finishSave(save: PendingSave): Uint8Array {
+  for (;;) {
+    const part = save.steps.next();
+    if (part.done) return part.value;
+  }
 }
 
 function quantile(sorted: Float64Array, q: number): number {
@@ -186,7 +194,8 @@ test("soak: one hour of game time at 4x", () => {
   const stepMs = new Float64Array(TICKS);
   let steps = 0;
   const heap: { tick: number; mb: number }[] = [];
-  const snapshotMs: number[] = [];
+  /** Per autosave, the time of each part: the copy, then each step of writing it. */
+  const snapshotParts: number[][] = [];
   let snapshotBytes = 0;
   let pagesStored = 0;
   let lastSnapshotAt = 0;
@@ -238,12 +247,23 @@ test("soak: one hour of game time at 4x", () => {
     received.length = 0;
     if (offset - lastSnapshotAt >= AUTOSAVE_INTERVAL_MS) {
       lastSnapshotAt = offset;
-      // What an autosave does: the live part of the log only. Pages are
-      // counted as stored, as they are after the first save that has them.
-      const t0 = performance.now();
-      const save = host.saveBytes(pagesStored);
-      snapshotMs.push(performance.now() - t0);
-      snapshotBytes = save.bytes.byteLength;
+      // What an autosave does: the live part of the log only, from a copy
+      // taken now, written a part at a time. The saver leaves a pump
+      // between parts, so each part holds the sim up on its own; here they
+      // run back to back and are timed one by one. Pages are counted as
+      // stored, as they are after the first save that has them.
+      let t0 = performance.now();
+      const save = host.startSave(pagesStored);
+      const parts = [performance.now() - t0];
+      for (;;) {
+        t0 = performance.now();
+        const part = save.steps.next();
+        parts.push(performance.now() - t0);
+        if (!part.done) continue;
+        snapshotBytes = part.value.byteLength;
+        break;
+      }
+      snapshotParts.push(parts);
       pagesStored = save.pageCount;
     }
     if (host.tick % SAMPLE_EVERY === 0 && heap.at(-1)?.tick !== host.tick) {
@@ -282,6 +302,12 @@ test("soak: one hour of game time at 4x", () => {
       ];
     }),
   );
+  const snapshotTotals = snapshotParts.map((parts) => parts.reduce((a, b) => a + b, 0)).sort((x, y) => x - y);
+  /** The slowest run of each part, the copy first. */
+  const partMax = (snapshotParts[0] ?? []).map((_, i) => Math.max(...snapshotParts.map((parts) => parts[i] ?? 0)));
+  const slowestPart = Math.max(0, ...partMax);
+  // A save written in parts from a copy is the save written at once.
+  expect(Array.from(finishSave(host.startSave(0)))).toEqual(Array.from(host.saveBytes(0).bytes));
   const report = {
     seed: SEED,
     startSegments: scale.counts.segments,
@@ -307,10 +333,15 @@ test("soak: one hour of game time at 4x", () => {
       overBudget: over,
     },
     snapshot: {
-      count: snapshotMs.length,
+      count: snapshotParts.length,
       bytes: snapshotBytes,
-      medianMs: ms(snapshotMs.slice().sort((x, y) => x - y)[Math.floor(snapshotMs.length / 2)] ?? 0),
-      maxMs: ms(Math.max(0, ...snapshotMs)),
+      // One autosave: the copy and every part of writing it, added up.
+      medianMs: ms(snapshotTotals[Math.floor(snapshotTotals.length / 2)] ?? 0),
+      maxMs: ms(snapshotTotals.at(-1) ?? 0),
+      // The longest the sim waits on a save: the slowest single part.
+      partMaxMs: partMax.map(ms),
+      slowestPartMs: ms(slowestPart),
+      budget: BUDGET_MS,
       // A city file still carries the whole log. Written on download only.
       cityFileBytes: fileBytes,
       cityFileMs: ms(fileMs),
@@ -328,6 +359,10 @@ test("soak: one hour of game time at 4x", () => {
   // The tick budget is an exit number, so the run fails when a step passes
   // it. Checked after the report is written, so a failure still leaves one.
   expect(over, `steps over the ${BUDGET_MS} ms tick budget`).toBe(0);
+  // A part of an autosave runs in the worker between two steps, so it holds
+  // up the next one. It gets the same budget as a step (issue #83).
+  expect(snapshotParts.length, "autosaves taken").toBeGreaterThan(20);
+  expect(slowestPart, `slowest part of an autosave against the ${BUDGET_MS} ms tick budget`).toBeLessThan(BUDGET_MS);
   // Every kind of road command applied often enough to be measured.
   for (const [type, c] of Object.entries(byCommand)) expect(c.applied, `${type} applied`).toBeGreaterThan(20);
 });

@@ -19,6 +19,7 @@ import {
   prepareDerived,
   routingGraphOf,
   serialize,
+  serializeDetached,
   step,
   type BuildRoadPayload,
   type BuildRoadGridPayload,
@@ -151,7 +152,8 @@ test("the M1 scale network", async ({ bench, annotate }) => {
     },
     "one tick with nothing queued": () => step(state),
     "rebuild every block, for comparison": () => void buildBlockIndex(net),
-    "serialize the city, as an autosave does": () => void serialize(state),
+    "serialize the city, as an autosave does": () => void serializeDetached(state),
+    "serialize the city with its log inside, as a city file": () => void serialize(state),
   };
   const meanMs: Record<string, number> = {};
   const p99Ms: Record<string, number> = {};
@@ -194,4 +196,6 @@ test("the M1 scale network", async ({ bench, annotate }) => {
     expect(meanMs[name], name).toBeLessThan(2 * TICK_BUDGET_MS);
   }
   expect(meanMs["one tick with nothing queued"]).toBeLessThan(TICK_BUDGET_MS);
+  // An autosave runs between two ticks and holds up the next one (issue #83).
+  expect(meanMs["serialize the city, as an autosave does"]).toBeLessThan(TICK_BUDGET_MS);
 }, 600_000);
