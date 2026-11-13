@@ -421,6 +421,12 @@ kbd {
   align-items: center;
 }
 
+/* Five toggles: a little narrower than the other buttons, so the whole
+   toolbar stays on one row at 1280 pixels. */
+#ui .build-bar .guides button {
+  padding-inline: 7px;
+}
+
 .build-bar .group-label {
   color: var(--ink-soft);
   font-size: 12px;
