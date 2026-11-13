@@ -11,10 +11,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Decides whether the full check needs to run. A pull request that only
-  # touches Markdown files skips it. The check job is skipped through `if:`
-  # rather than `paths-ignore`, because GitHub reports a skipped job as passing
-  # and a required check that never starts would block the merge.
+  # Decides whether the tests need to run. A pull request that only touches
+  # Markdown files skips them. The jobs are skipped through `if:` rather than
+  # `paths-ignore`, because a required check that never starts would block
+  # the merge.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -37,11 +37,12 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
-  check:
+  # Lint, sim tests, soak, bench and build. About a minute.
+  unit:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -55,21 +56,85 @@ jobs:
       - run: pnpm soak
       - run: pnpm bench
       - run: pnpm build
-      - run: pnpm exec playwright install --with-deps chromium
-      # The M0 walkthrough runs headed (see playwright.config.ts), so give it a display.
-      - run: xvfb-run -a pnpm e2e
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: walkthrough
+          name: soak-and-bench
           path: |
-            walkthrough-screenshots
             packages/client/soak-report.json
             packages/sim/bench-results
+          retention-days: 30
+
+  # The Playwright suite, split over runners. The runners have no GPU, so
+  # every page is drawn in software and the suite is bound by CPU: more
+  # workers on one runner do not help, more runners do.
+  #
+  # Each job runs one project with `--no-deps`. The dependencies between
+  # projects in playwright.config.ts only keep them from sharing a machine,
+  # and here each has its own. `--shard` deals out spec files in name order,
+  # so a new spec file is picked up without a change here.
+  e2e:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: chromium-1, args: "--project chromium --shard=1/4" }
+          - { id: chromium-2, args: "--project chromium --shard=2/4" }
+          - { id: chromium-3, args: "--project chromium --shard=3/4" }
+          - { id: chromium-4, args: "--project chromium --shard=4/4" }
+          # One worker: software WebGPU takes most of a runner's CPU. In CI
+          # the roads project is fully parallel, so its one file is dealt
+          # out test by test.
+          - { id: roads-1, args: "--project roads --no-deps --workers=1 --shard=1/3" }
+          - { id: roads-2, args: "--project roads --no-deps --workers=1 --shard=2/3" }
+          - { id: roads-3, args: "--project roads --no-deps --workers=1 --shard=3/3" }
+          - { id: walkthrough, args: "--project walkthrough --no-deps" }
+    name: e2e (${{ matrix.id }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      # The roads and walkthrough projects run headed (see
+      # playwright.config.ts), so give them a display.
+      - run: xvfb-run -a pnpm e2e ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.id == 'walkthrough'
+        with:
+          name: walkthrough
+          path: walkthrough-screenshots
           retention-days: 30
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.id }}
           path: playwright-report
           retention-days: 7
+
+  # The one required check. It passes when every job above passed, or when
+  # the pull request only changes Markdown and they were skipped.
+  check:
+    needs: [changes, unit, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          UNIT: ${{ needs.unit.result }}
+          E2E: ${{ needs.e2e.result }}
+        run: |
+          echo "changes: $CHANGES (code=$CODE), unit: $UNIT, e2e: $E2E"
+          [ "$CHANGES" = success ] || exit 1
+          if [ "$CODE" = true ]; then
+            [ "$UNIT" = success ] && [ "$E2E" = success ] || exit 1
+          fi
