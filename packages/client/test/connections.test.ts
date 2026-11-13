@@ -15,7 +15,7 @@ const state = createState(SEED);
 const terrain = generateTerrain(SEED);
 
 describe("the start view", () => {
-  it("looks along the first connection's stub into the map, in the district band", () => {
+  it("looks along the first connection's stub into the map, from the city band", () => {
     const pose = startPose(terrain, state.roads, state.connections);
     const edge = state.connections[0] ?? -1;
     const inner = connectionEnd(state.roads, edge);
@@ -32,7 +32,7 @@ describe("the start view", () => {
     const camera = new PerspectiveCamera(45, 16 / 9, 10, 60_000);
     const rig = createCameraRig(camera, terrain, () => ({ width: 1280, height: 720 }));
     rig.setPose(pose.position, pose.target);
-    expect(zoomBand(rig.heightAboveGround())).toBe("district");
+    expect(zoomBand(rig.heightAboveGround())).toBe("city");
     // The edge node is in front of the camera and on screen.
     const p = camera.position.clone().set(r.nodeX[edge] ?? 0, 0, r.nodeZ[edge] ?? 0).project(camera);
     expect(Math.abs(p.x)).toBeLessThan(1);

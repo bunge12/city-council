@@ -54,13 +54,15 @@ export const CURSOR_MARKER_SCALE = 0.012;
 /**
  * Where the camera starts on a new or loaded city (issue M1-16): over the
  * first outside connection, from beyond the map edge, looking into the map
- * along its stub at an angle, in the district band. `lead` is how far past the stub's
- * end the camera looks, so the stub and the land beyond it share the view.
+ * along its stub at an angle. High enough for the city band, where no trees
+ * or grass are drawn, so opening a city costs no more to draw than the whole
+ * map did; the connection's mark is sized in pixels and shows from there.
+ * `lead` is how far past the stub's end the camera looks.
  */
 export const START_VIEW = {
-  lead: 400,
-  distance: 2200,
-  pitch: 52 * DEG,
+  lead: 1200,
+  distance: 4800,
+  pitch: 55 * DEG,
   /**
    * How far the camera swings off the line of the stub. Straight behind
    * it, a band of empty space beyond the edge fills the bottom of the
