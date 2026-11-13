@@ -33,7 +33,7 @@ import {
   paintFor,
   roadMask,
   roadSegmentsAt,
-  segFrame,
+  segPath,
   stations,
   type MeshArrays,
   type RoadNet,
@@ -48,20 +48,25 @@ beforeAll(() => {
 });
 
 let seq = 0;
-function build(state: SimState, from: [number, number], to: [number, number], type = "street"): void {
+function build(state: SimState, from: [number, number], to: [number, number], type = "street", control?: [number, number]): void {
   const result = submit(state, {
     seq: ++seq,
     playerId: "p1",
     type: "BuildRoad",
-    payload: { from: { x: from[0], z: from[1] }, to: { x: to[0], z: to[1] }, type },
+    payload: {
+      from: { x: from[0], z: from[1] },
+      to: { x: to[0], z: to[1] },
+      type,
+      ...(control ? { control: { x: control[0], z: control[1] } } : {}),
+    },
   });
   if (!result.ok) throw new Error(`road refused: ${result.reason}`);
   step(state);
 }
 
-function city(roads: [from: [number, number], to: [number, number], type?: string][]): RoadNetwork {
+function city(roads: [from: [number, number], to: [number, number], type?: string, control?: [number, number]][]): RoadNetwork {
   const state = createState(SEED);
-  for (const [from, to, type] of roads) build(state, from, to, type);
+  for (const [from, to, type, control] of roads) build(state, from, to, type, control);
   return state.roads;
 }
 
@@ -106,18 +111,89 @@ function inside(t: number[], x: number, z: number): boolean {
   return !(neg && pos);
 }
 
-/** True when (x, z) lies on some road's full, untrimmed strip. */
-function onRoad(net: RoadNet, x: number, z: number): boolean {
+/**
+ * A curve is drawn as straight pieces, so its kerbs cut a little inside the
+ * true curve on the outside of a bend. Points this close to a curved road's
+ * kerb may be covered or not.
+ */
+const KERB_SLACK = 0.05;
+
+const walks = new Map<string, number[]>();
+const paths = new WeakMap<RoadNet, Map<number, ReturnType<typeof segPath>>>();
+
+function cachedPath(net: RoadNet, seg: number): ReturnType<typeof segPath> {
+  let byNet = paths.get(net);
+  if (!byNet) {
+    byNet = new Map();
+    paths.set(net, byNet);
+  }
+  let path = byNet.get(seg);
+  if (!path) {
+    path = segPath(net, seg);
+    byNet.set(seg, path);
+  }
+  return path;
+}
+
+/** Points every 0.25 m along a curved path, as x, z and distance triples. */
+function curveWalk(f: ReturnType<typeof segPath>): number[] {
+  const key = `${f.seg}:${f.ax}:${f.az}:${f.length}`;
+  let walk = walks.get(key);
+  if (!walk) {
+    walk = [];
+    for (let s = 0; s <= f.length; s += 0.25) {
+      const p = f.point(s);
+      walk.push(p.x, p.z, s);
+    }
+    walks.set(key, walk);
+  }
+  return walk;
+}
+
+/**
+ * Where (x, z) lies against the roads' full, untrimmed strips: on one, off
+ * every one, or within KERB_SLACK of a curved road's kerb.
+ */
+function onRoad(net: RoadNet, x: number, z: number): "on" | "off" | "edge" {
+  let edge = false;
   for (let seg = 0; seg < net.segFlags.length; seg++) {
     if (!net.segFlags[seg]) continue;
-    const f = segFrame(net, seg);
-    const px = x - f.ax;
-    const pz = z - f.az;
-    const t = px * f.dx + pz * f.dz;
-    const o = px * f.nx + pz * f.nz;
-    if (t >= 0 && t <= f.length && Math.abs(o) <= f.half) return true;
+    const f = cachedPath(net, seg);
+    if (!f.curved) {
+      const px = x - f.ax;
+      const pz = z - f.az;
+      const t = px * f.dx + pz * f.dz;
+      const o = -px * f.dz + pz * f.dx;
+      if (t >= 0 && t <= f.length && Math.abs(o) <= f.half) return "on";
+      continue;
+    }
+    // Distance to the curve, from a fine walk along it and a local refinement.
+    const walk = curveWalk(f);
+    let best = Infinity;
+    let bestS = 0;
+    for (let k = 0; k < walk.length; k += 3) {
+      const d = Math.hypot((walk[k] ?? 0) - x, (walk[k + 1] ?? 0) - z);
+      if (d < best) {
+        best = d;
+        bestS = walk[k + 2] ?? 0;
+      }
+    }
+    if (best > f.half + 1) continue;
+    for (let s = Math.max(0, bestS - 0.25); s <= Math.min(f.length, bestS + 0.25); s += 0.002) {
+      const p = f.point(s);
+      best = Math.min(best, Math.hypot(p.x - x, p.z - z));
+    }
+    // Past an end the strip ends square, which the distance to the end point does not show.
+    const atEnd = bestS <= 0.25 || bestS >= f.length - 0.25;
+    if (atEnd) {
+      const end = bestS <= 0.25 ? f.frame(0) : f.frame(f.length);
+      const along = (x - end.x) * end.dx + (z - end.z) * end.dz;
+      if (bestS <= 0.25 ? along < 0 : along > 0) continue;
+    }
+    if (best <= f.half - KERB_SLACK) return "on";
+    if (best <= f.half + KERB_SLACK) edge = true;
   }
-  return false;
+  return edge ? "edge" : "off";
 }
 
 /**
@@ -132,11 +208,12 @@ function expectTiled(net: RoadNet, x0: number, z0: number, x1: number, z1: numbe
     for (let x = x0 + 0.017; x < x1; x += step) {
       let n = 0;
       for (const t of tris) if (inside(t, x, z)) n++;
-      if (onRoad(net, x, z)) {
+      const where = onRoad(net, x, z);
+      if (where === "on") {
         onCount++;
         expect(n, `road point ${x.toFixed(2)}, ${z.toFixed(2)} covered ${n} times`).toBe(1);
       } else {
-        expect(n, `off-road point ${x.toFixed(2)}, ${z.toFixed(2)} covered ${n} times`).toBeLessThanOrEqual(1);
+        expect(n, `${where} point ${x.toFixed(2)}, ${z.toFixed(2)} covered ${n} times`).toBeLessThanOrEqual(1);
       }
     }
   }
@@ -246,6 +323,86 @@ describe("junctions", () => {
   });
 });
 
+describe("curves", () => {
+  it("draw a curved road with no gaps or overlaps, and on the curve", () => {
+    const net = city([[[4200, 4450], [4400, 4450], "avenue", [4300, 4350]]]);
+    expectTiled(net, 4190, 4380, 4410, 4460, 0.9);
+    // Every surface vertex is a kerb point: half a width from the true curve.
+    const f = segPath(net, 0);
+    expect(f.curved).toBe(true);
+    const g = allChunks(net).get(chunkAt(4300, 4450));
+    const p = g?.surface.positions ?? new Float32Array();
+    expect(p.length).toBeGreaterThan(0);
+    for (let v = 0; v < p.length / 3; v += 7) {
+      const x = p[v * 3] ?? 0;
+      const z = p[v * 3 + 2] ?? 0;
+      let best = Infinity;
+      for (let s = 0; s <= f.length; s += 0.05) best = Math.min(best, Math.hypot(f.point(s).x - x, f.point(s).z - z));
+      expect(Math.abs(best - f.half)).toBeLessThan(0.06);
+    }
+  });
+
+  it("fill junctions with curved arms with no gaps or overlaps", () => {
+    const net = city([
+      // A curve with a straight street ending on its body, and one crossing it.
+      [[4150, 4500], [4350, 4500], "street", [4250, 4600]],
+      [[4250, 4640], [4250, 4551]],
+      [[4190, 4420], [4190, 4620]],
+      // Two curves crossing twice.
+      [[4400, 4700], [4600, 4700], "street", [4500, 4800]],
+      [[4400, 4765], [4600, 4765], "street", [4500, 4665]],
+      // A curved avenue and a curved street off one node.
+      [[4200, 4800], [4350, 4900], "avenue", [4300, 4800]],
+      [[4200, 4800], [4250, 4950], "street", [4180, 4900]],
+    ]);
+    expectTiled(net, 4225, 4525, 4275, 4575, 0.6);
+    expectTiled(net, 4165, 4480, 4215, 4540, 0.6);
+    expectTiled(net, 4400, 4700, 4600, 4770, 0.9);
+    expectTiled(net, 4180, 4780, 4240, 4840, 0.6);
+  }, 60_000);
+
+  it("are cut finer on the surface than in the city band's lines", () => {
+    const f = segPath(city([[[4200, 4450], [4400, 4450], "avenue", [4300, 4350]]]), 0);
+    const surface = f.stations(0, f.length, ROADS.sampleStep);
+    const lines = f.stations(0, f.length, ROADS.cityLines.sampleStep, ROADS.curves.lineTurn);
+    expect(surface.length).toBeGreaterThan(lines.length * 3);
+    // No surface piece turns through more than the limit.
+    for (let k = 0; k + 1 < surface.length; k++) {
+      const a = f.frame(surface[k] ?? 0);
+      const b = f.frame(surface[k + 1] ?? 0);
+      expect(Math.acos(Math.min(1, a.dx * b.dx + a.dz * b.dz))).toBeLessThanOrEqual(ROADS.curves.surfaceTurn + 1e-3);
+    }
+    // Straight roads keep their old pieces.
+    const straight = segPath(city([[[4480, 4490], [4520, 4490]]]), 0);
+    expect(straight.stations(0, 40, 8)).toEqual(stations(4480, 4490, 1, 0, 0, 40, 8));
+  });
+
+  it("split a curve at a chunk line, with each piece in one chunk", () => {
+    // Bulges south over z = 4500 and back.
+    const net = city([[[4200, 4450], [4400, 4450], "avenue", [4300, 4600]]]);
+    const chunks = allChunks(net);
+    expect([...chunks.keys()].sort((a, b) => a - b)).toEqual([chunkAt(4300, 4450), chunkAt(4300, 4520)]);
+    for (const [c, g] of chunks) {
+      const p = g.surface.positions;
+      for (let v = 0; v < p.length / 3; v++) {
+        const z = p[v * 3 + 2] ?? 0;
+        // Kerb vertices lie half a width either side of the centre, which is on the right side of the line.
+        expect(c === chunkAt(4300, 4450) ? z <= 4500 + 9.01 : z >= 4500 - 9.01).toBe(true);
+      }
+    }
+    expectTiled(net, 4220, 4490, 4380, 4530, 0.5);
+  });
+
+  it("mask decoration along the curve, not its chord", () => {
+    const net = city([[[4200, 4450], [4400, 4450], "street", [4300, 4350]]]);
+    const chunk = chunkAt(4300, 4420);
+    const mask = roadMask(net, chunk, [0]);
+    // The apex is at (4300, 4400); the chord's middle, 50 m away, is clear.
+    expect(masked(mask, chunk, 4300, 4400, MASK_TREES)).toBe(true);
+    expect(masked(mask, chunk, 4300, 4450, MASK_TREES)).toBe(false);
+  });
+});
+
 describe("chunks", () => {
   it("split a road at a chunk line, with each piece in one chunk and the line covered once", () => {
     const net = city([[[4450, 4300], [4550, 4300], "avenue"]]);
@@ -271,7 +428,7 @@ describe("chunks", () => {
     const drawn = new Map<number, string>();
     const key = (g: ReturnType<typeof buildRoadChunk>) =>
       JSON.stringify(["surface", "markings", "lines"].map((k) => Array.from((g as unknown as Record<string, MeshArrays>)[k]?.positions ?? [])));
-    const plan: [from: [number, number], to: [number, number], type: string][] = [
+    const plan: [from: [number, number], to: [number, number], type: string, control?: [number, number]][] = [
       [[4150, 4450], [4650, 4450], "street"],
       [[4300, 4420], [4300, 4700], "avenue"],
       [[4520, 4400], [4520, 4600], "oneWay"],
@@ -279,9 +436,11 @@ describe("chunks", () => {
       [[4400, 4480], [4440, 4520], "street"],
       [[4300, 4700], [4450, 4800], "avenue"],
       [[4480, 4560], [4560, 4480], "street"],
+      [[4160, 4760], [4280, 4760], "street", [4220, 4860]],
+      [[4250, 4570], [4250, 4690], "street", [4390, 4630]],
     ];
-    for (const [from, to, type] of plan) {
-      build(state, from, to, type);
+    for (const [from, to, type, control] of plan) {
+      build(state, from, to, type, control);
       const changes = drainRoadChanges(state.roads);
       if (!changes) continue;
       const delta = encodeRoadDelta(state.roads, changes);

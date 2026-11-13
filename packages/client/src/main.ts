@@ -5,8 +5,10 @@ import {
   hashState,
   hashTerrain,
   mapSize,
+  replay,
   snapToGrid,
   type CommandResult,
+  type LogEntry,
   type Terrain,
 } from "@city-council/sim";
 import { Vector3 } from "three/webgpu";
@@ -448,6 +450,16 @@ function terrainCheck(seed: number): TerrainCheck {
   };
 }
 
+/**
+ * Replays a command log from `seed` to `untilTick` in this browser's main
+ * thread and hashes the result, so Playwright can check a replay fixture
+ * gives the same hash here as in Node.
+ */
+function replayCheck(seed: number, log: LogEntry[], untilTick: number): { hash: string; logLength: number } {
+  const state = replay(seed, log, untilTick);
+  return { hash: hashState(state), logLength: state.log.length };
+}
+
 // For Playwright and the console. It only reads the mirror and sends
 // commands, the same as the UI does.
 declare global {
@@ -460,6 +472,7 @@ declare global {
       downloadCity: typeof downloadCity;
       persistence: () => PersistenceResult | null;
       terrainCheck: typeof terrainCheck;
+      replayCheck: typeof replayCheck;
       view: Promise<View>;
       camera: Promise<CameraHooks>;
       renderStatus: () => RenderStatus | null;
@@ -474,6 +487,7 @@ window.cityCouncil = {
   downloadCity,
   persistence: () => persistence,
   terrainCheck,
+  replayCheck,
   view: viewReady,
   camera: cameraReady,
   renderStatus: () => status,

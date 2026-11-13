@@ -16,10 +16,11 @@
 // Answers feed command validation, so only exact arithmetic (CLAUDE.md
 // rule 6). Distances are compared squared; one `Math.sqrt` gives the result.
 //
-// Until curves land (issue 09) every segment is the straight line between its
-// nodes.
+// A curved segment is filed under every cell it touches and tested against a
+// box by its shape (curve.ts); a straight one by the line between its nodes.
 
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "../chunks";
+import { curveBox, curveTouchesBox, nearestOnQuad, segmentQuad, segmentTouchesBox } from "./curve";
 import {
   NETWORK_PATH,
   NETWORK_RAIL,
@@ -96,47 +97,13 @@ function removeSorted(list: number[], id: number): void {
   list.splice(lo, 1);
 }
 
-/**
- * Whether the straight segment from (ax, az) to (bx, bz) touches the box,
- * edges included. The bounding boxes must overlap and the box's corners must
- * not all lie strictly on one side of the line.
- */
-export function segmentTouchesBox(
-  ax: number,
-  az: number,
-  bx: number,
-  bz: number,
-  minX: number,
-  minZ: number,
-  maxX: number,
-  maxZ: number,
-): boolean {
-  if ((ax > bx ? ax : bx) < minX || (ax < bx ? ax : bx) > maxX) return false;
-  if ((az > bz ? az : bz) < minZ || (az < bz ? az : bz) > maxZ) return false;
-  const dx = bx - ax;
-  const dz = bz - az;
-  const c1 = dx * (minZ - az) - dz * (minX - ax);
-  const c2 = dx * (minZ - az) - dz * (maxX - ax);
-  const c3 = dx * (maxZ - az) - dz * (minX - ax);
-  const c4 = dx * (maxZ - az) - dz * (maxX - ax);
-  if (c1 > 0 && c2 > 0 && c3 > 0 && c4 > 0) return false;
-  if (c1 < 0 && c2 < 0 && c3 < 0 && c4 < 0) return false;
-  return true;
-}
+export { segmentTouchesBox };
 
 /** Calls `visit` with each cell index segment `seg` touches. */
 function forSegmentCells(index: Grid, seg: number, visit: (cell: number) => void): void {
   const { net, cellsPerSide: n, cellSize: size } = index;
-  const a = net.segA[seg] ?? NONE;
-  const b = net.segB[seg] ?? NONE;
-  const ax = net.nodeX[a] ?? 0;
-  const az = net.nodeZ[a] ?? 0;
-  const bx = net.nodeX[b] ?? 0;
-  const bz = net.nodeZ[b] ?? 0;
-  const loX = ax < bx ? ax : bx;
-  const hiX = ax > bx ? ax : bx;
-  const loZ = az < bz ? az : bz;
-  const hiZ = az > bz ? az : bz;
+  const q = segmentQuad(net, seg);
+  const { minX: loX, minZ: loZ, maxX: hiX, maxZ: hiZ } = curveBox(q);
   const i0 = cellOf(index, loX);
   const i1 = cellOf(index, hiX);
   const j0 = cellOf(index, loZ);
@@ -148,7 +115,7 @@ function forSegmentCells(index: Grid, seg: number, visit: (cell: number) => void
     for (let ci = i0; ci <= i1; ci++) {
       const x0 = ci === 0 && loX < 0 ? loX : ci * size;
       const x1 = ci === n - 1 && hiX > n * size ? hiX : (ci + 1) * size;
-      if (segmentTouchesBox(ax, az, bx, bz, x0 - CELL_MARGIN, z0 - CELL_MARGIN, x1 + CELL_MARGIN, z1 + CELL_MARGIN)) {
+      if (curveTouchesBox(q, x0 - CELL_MARGIN, z0 - CELL_MARGIN, x1 + CELL_MARGIN, z1 + CELL_MARGIN)) {
         visit(cj * n + ci);
       }
     }
@@ -330,7 +297,7 @@ export interface NearestPoint {
   segment: number;
   x: number;
   z: number;
-  /** How far along the segment from node A to node B, 0 to 1. */
+  /** The curve parameter from node A to node B, 0 to 1. On a straight segment, the share of its length. */
   t: number;
   distance: number;
 }
@@ -371,13 +338,26 @@ export function nearestPointOnSegment(
         const b = net.segB[seg] ?? NONE;
         const ax = net.nodeX[a] ?? 0;
         const az = net.nodeZ[a] ?? 0;
-        const sx = (net.nodeX[b] ?? 0) - ax;
-        const sz = (net.nodeZ[b] ?? 0) - az;
-        const len2 = sx * sx + sz * sz;
-        let t = len2 > 0 ? ((x - ax) * sx + (z - az) * sz) / len2 : 0;
-        t = t < 0 ? 0 : t > 1 ? 1 : t;
-        const px = ax + t * sx;
-        const pz = az + t * sz;
+        const bx = net.nodeX[b] ?? 0;
+        const bz = net.nodeZ[b] ?? 0;
+        let t: number;
+        let px: number;
+        let pz: number;
+        if (net.segCX[seg] === (ax + bx) / 2 && net.segCZ[seg] === (az + bz) / 2) {
+          // Straight, the common case: project onto the line, as `nearestOnQuad` does, without building a curve.
+          const sx = bx - ax;
+          const sz = bz - az;
+          const len2 = sx * sx + sz * sz;
+          t = len2 > 0 ? ((x - ax) * sx + (z - az) * sz) / len2 : 0;
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          px = ax + t * sx;
+          pz = az + t * sz;
+        } else {
+          const near = nearestOnQuad(segmentQuad(net, seg), x, z);
+          t = near.t;
+          px = near.x;
+          pz = near.z;
+        }
         const dx = px - x;
         const dz = pz - z;
         const d2 = dx * dx + dz * dz;
@@ -414,16 +394,14 @@ export function segmentsInBox(
         if (!segmentOnNetworks(net, seg, networks)) continue;
         const a = net.segA[seg] ?? NONE;
         const b = net.segB[seg] ?? NONE;
-        const touches = segmentTouchesBox(
-          net.nodeX[a] ?? 0,
-          net.nodeZ[a] ?? 0,
-          net.nodeX[b] ?? 0,
-          net.nodeZ[b] ?? 0,
-          minX,
-          minZ,
-          maxX,
-          maxZ,
-        );
+        const ax = net.nodeX[a] ?? 0;
+        const az = net.nodeZ[a] ?? 0;
+        const bx = net.nodeX[b] ?? 0;
+        const bz = net.nodeZ[b] ?? 0;
+        const straight = net.segCX[seg] === (ax + bx) / 2 && net.segCZ[seg] === (az + bz) / 2;
+        const touches = straight
+          ? segmentTouchesBox(ax, az, bx, bz, minX, minZ, maxX, maxZ)
+          : curveTouchesBox(segmentQuad(net, seg), minX, minZ, maxX, maxZ);
         if (touches) found.push(seg);
       }
     }

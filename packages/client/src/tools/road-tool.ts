@@ -2,7 +2,7 @@
 // a preview, click again to send `BuildRoad`. Escape or a right-click
 // cancels.
 //
-// The preview is checked with `planStraightRoad`, the same function the sim
+// The preview is checked with `planRoad`, the same function the sim
 // validates `BuildRoad` with, run against the mirror's read-only copy of the
 // roads. The sim still has the final say. Tool state lives in the UI store
 // (ui/store.ts); nothing here writes sim state.
@@ -16,7 +16,7 @@
 import {
   NONE,
   ROAD_TYPES,
-  planStraightRoad,
+  planRoad,
   snapToGrid,
   type BuildPoint,
   type BuildRoadPayload,
@@ -65,7 +65,7 @@ export function previewRoad(net: RoadNet, terrain: Terrain, from: BuildPoint, to
   const payload: BuildRoadPayload = { from, to, type: typeId };
   // The planner only reads the network. It takes the mutable type because
   // the sim calls it on live state; the copy here is never written.
-  const result = planStraightRoad(net as unknown as RoadNetwork, terrain, payload);
+  const result = planRoad(net as unknown as RoadNetwork, terrain, payload);
   if (!result.ok) {
     const a = { x: snapToGrid(from.x), z: snapToGrid(from.z) };
     const b = { x: snapToGrid(to.x), z: snapToGrid(to.z) };

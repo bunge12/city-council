@@ -1,0 +1,15 @@
+{
+  "description": "Two players build curved roads on flat ground: an arch, a street the arch's twin crosses twice, a straight road across the arch and the next curve, a curve that crosses the arch twice, a T-junction on a curve's body and a curved avenue across the street.",
+  "seed": 2026,
+  "untilTick": 8,
+  "log": [
+    { "tick": 0, "seq": 1, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4200, "z": 4500 }, "to": { "x": 4400, "z": 4500 }, "type": "street", "control": { "x": 4300, "z": 4600 } } },
+    { "tick": 0, "seq": 1, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 4150, "z": 4700 }, "to": { "x": 4650, "z": 4700 }, "type": "street" } },
+    { "tick": 1, "seq": 2, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 4250, "z": 4640 }, "to": { "x": 4500, "z": 4640 }, "type": "street", "control": { "x": 4375, "z": 4790 } } },
+    { "tick": 2, "seq": 2, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4270.3, "z": 4430.6 }, "to": { "x": 4270, "z": 4650 }, "type": "street" } },
+    { "tick": 3, "seq": 3, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4200, "z": 4565 }, "to": { "x": 4400, "z": 4565 }, "type": "street", "control": { "x": 4300, "z": 4465 } } },
+    { "tick": 5, "seq": 3, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 4330, "z": 4430 }, "to": { "x": 4330, "z": 4518 }, "type": "street" } },
+    { "tick": 6, "seq": 4, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4550, "z": 4450 }, "to": { "x": 4550, "z": 4950 }, "type": "avenue", "control": { "x": 4680, "z": 4700 } } }
+  ],
+  "hash": "051970ed9e7f06a9"
+}

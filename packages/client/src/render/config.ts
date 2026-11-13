@@ -97,6 +97,15 @@ export const ROADS = {
   /** A reflex corner is mitred when the miter point is within this many half-widths of the node, and bevelled otherwise. */
   miterLimit: 2.5,
   /**
+   * How finely a curved road is cut into straight pieces. A piece turns
+   * through at most `surfaceTurn` radians on the surface and its paint,
+   * which the street band sees up close, and `lineTurn` in the city band's
+   * lines, seen from kilometres up. `minPiece` is the shortest piece, metres.
+   * `tableStep` is the spacing, metres, of the polyline that measures a
+   * curve's length, up to `maxTableSteps` points.
+   */
+  curves: { surfaceTurn: 0.05, lineTurn: 0.25, minPiece: 0.25, tableStep: 0.5, maxTableSteps: 4096 },
+  /**
    * How far road surfaces sit above the terrain mesh, in metres: `base`
    * plus `perMetre` for each metre from the camera. The terrain's coarser
    * levels of detail cut corners the road does not, and depth precision

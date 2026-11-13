@@ -55,7 +55,9 @@ export {
 export type { Terrain, TerrainBalance } from "./terrain/terrain";
 export { ROAD_BALANCE, ROAD_BUILD, ROAD_TYPES, roadTypeIndex } from "./roads/balance";
 export type { BalancePrice, RoadBalance, RoadBuildBalance, RoadType, RoadTypeBalance } from "./roads/balance";
-export { planStraightRoad, snapToGrid } from "./roads/build";
+export { planRoad, snapToGrid } from "./roads/build";
+export { curveBox, isStraight, minRadius, nearestOnQuad, quadPoint, segmentQuad, subControl } from "./roads/curve";
+export type { Box, Quad, QuadNearest } from "./roads/curve";
 export type { BuildPoint, BuildRoadPayload, PlanStop, RoadPlan, RoadPlanResult } from "./roads/build";
 export {
   LEVEL_BRIDGE,

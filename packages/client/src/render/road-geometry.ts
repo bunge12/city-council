@@ -23,8 +23,13 @@
 // to its node's chunk. So each chunk's mesh is built on its own from the
 // graph, and a vertex on a chunk line is computed the same way on both sides.
 //
-// Every segment is the straight line between its nodes until curves arrive
-// (issue 09).
+// A segment is the straight line between its nodes, or one quadratic curve
+// through its control point (issue 09). Either way it is drawn along a path
+// measured in metres from node A: a curve is cut into short straight pieces,
+// closer together where it bends harder, and fewer for the city band's
+// lines than for the street-level surface. A junction cuts a curved road
+// back along the curve, and its polygon meets the cut edge exactly where the
+// strip ends, so there is no gap.
 
 import {
   CHUNKS_PER_SIDE,
@@ -35,6 +40,11 @@ import {
   ROAD_TYPES,
   SEG_ALIVE,
   heightAt,
+  isStraight,
+  minRadius,
+  quadPoint,
+  segmentQuad,
+  type Quad,
   type RoadNetwork,
   type RoadType,
   type Terrain,
@@ -81,33 +91,209 @@ export function chunkAt(x: number, z: number): number {
   return cj * CHUNKS_PER_SIDE + ci;
 }
 
-/** A segment as a straight line: start, unit direction, left normal, length and half-width. */
-export interface SegFrame {
-  seg: number;
-  ax: number;
-  az: number;
+/** A point on a road's centre line, its unit direction toward node B and its left normal, (-dz, dx). */
+export interface PathFrame {
+  x: number;
+  z: number;
   dx: number;
   dz: number;
-  /** The left normal, (-dz, dx). */
   nx: number;
   nz: number;
-  length: number;
-  half: number;
-  type: RoadType;
 }
 
-export function segFrame(net: RoadNet, seg: number): SegFrame {
-  const a = net.segA[seg] ?? 0;
-  const b = net.segB[seg] ?? 0;
-  const ax = net.nodeX[a] ?? 0;
-  const az = net.nodeZ[a] ?? 0;
-  const ex = (net.nodeX[b] ?? 0) - ax;
-  const ez = (net.nodeZ[b] ?? 0) - az;
-  const length = Math.sqrt(ex * ex + ez * ez);
-  const dx = length > 0 ? ex / length : 1;
-  const dz = length > 0 ? ez / length : 0;
-  const type = roadTypeOf(net, seg);
-  return { seg, ax, az, dx, dz, nx: -dz, nz: dx, length, half: type.width / 2, type };
+/**
+ * A road segment's centre line, by distance `s` in metres from node A. A
+ * straight one is the line between its nodes. A curve is measured along a
+ * dense polyline, and a distance maps to the curve parameter through it, so
+ * every point drawn is on the true curve.
+ */
+export class SegPath {
+  readonly seg: number;
+  readonly type: RoadType;
+  readonly half: number;
+  /** Length along the centre line, metres. */
+  readonly length: number;
+  readonly curved: boolean;
+  /** Node A. */
+  readonly ax: number;
+  readonly az: number;
+  /** Straight only: the unit direction from A to B. */
+  readonly dx: number;
+  readonly dz: number;
+  /** Tightest radius, metres. Infinity when straight. */
+  readonly radius: number;
+  private readonly quad: Quad;
+  /** Curve only: distance from A at parameter i / steps. */
+  private readonly dist: Float64Array;
+  private readonly steps: number;
+
+  constructor(net: RoadNet, seg: number) {
+    const quad = segmentQuad(net as RoadNetwork, seg);
+    this.seg = seg;
+    this.quad = quad;
+    this.type = roadTypeOf(net, seg);
+    this.half = this.type.width / 2;
+    this.ax = quad.ax;
+    this.az = quad.az;
+    this.curved = !isStraight(quad);
+    if (!this.curved) {
+      const ex = quad.bx - quad.ax;
+      const ez = quad.bz - quad.az;
+      const length = Math.sqrt(ex * ex + ez * ez);
+      this.length = length;
+      this.dx = length > 0 ? ex / length : 1;
+      this.dz = length > 0 ? ez / length : 0;
+      this.radius = Infinity;
+      this.dist = new Float64Array(0);
+      this.steps = 0;
+      return;
+    }
+    const hull = Math.hypot(quad.cx - quad.ax, quad.cz - quad.az) + Math.hypot(quad.bx - quad.cx, quad.bz - quad.cz);
+    const steps = Math.min(ROADS.curves.maxTableSteps, Math.max(32, Math.ceil(hull / ROADS.curves.tableStep)));
+    const dist = new Float64Array(steps + 1);
+    let prev = quadPoint(quad, 0);
+    for (let i = 1; i <= steps; i++) {
+      const p = quadPoint(quad, i / steps);
+      dist[i] = (dist[i - 1] ?? 0) + Math.hypot(p.x - prev.x, p.z - prev.z);
+      prev = p;
+    }
+    this.steps = steps;
+    this.dist = dist;
+    this.length = dist[steps] ?? 0;
+    const d = quadDirection(quad, 0);
+    this.dx = d.dx;
+    this.dz = d.dz;
+    this.radius = minRadius(quad);
+  }
+
+  /** The curve parameter at distance `s` from node A. */
+  private paramAt(s: number): number {
+    const { dist, steps } = this;
+    if (s <= 0) return 0;
+    if (s >= this.length) return 1;
+    let lo = 0;
+    let hi = steps;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if ((dist[mid] ?? 0) <= s) lo = mid;
+      else hi = mid;
+    }
+    const d0 = dist[lo] ?? 0;
+    const d1 = dist[lo + 1] ?? d0;
+    return (lo + (d1 > d0 ? (s - d0) / (d1 - d0) : 0)) / steps;
+  }
+
+  /** Distance from node A at curve parameter `t`. */
+  private distanceAt(t: number): number {
+    if (!this.curved) return t * this.length;
+    const k = t * this.steps;
+    const i = Math.min(this.steps - 1, Math.max(0, Math.floor(k)));
+    const d0 = this.dist[i] ?? 0;
+    const d1 = this.dist[i + 1] ?? d0;
+    return d0 + (d1 - d0) * (k - i);
+  }
+
+  /** The point at distance `s` from node A. */
+  point(s: number): { x: number; z: number } {
+    if (!this.curved) return { x: this.ax + this.dx * s, z: this.az + this.dz * s };
+    return quadPoint(this.quad, this.paramAt(s));
+  }
+
+  /** The point, direction and left normal at distance `s` from node A. */
+  frame(s: number): PathFrame {
+    if (!this.curved) return { x: this.ax + this.dx * s, z: this.az + this.dz * s, dx: this.dx, dz: this.dz, nx: -this.dz, nz: this.dx };
+    const t = this.paramAt(s);
+    const p = quadPoint(this.quad, t);
+    const d = quadDirection(this.quad, t);
+    return { x: p.x, z: p.z, dx: d.dx, dz: d.dz, nx: -d.dz, nz: d.dx };
+  }
+
+  /** The unit direction leaving node A (`fromA`) or node B, away from the node. */
+  leaving(fromA: boolean): { dx: number; dz: number } {
+    if (!this.curved) return fromA ? { dx: this.dx, dz: this.dz } : { dx: -this.dx, dz: -this.dz };
+    const d = quadDirection(this.quad, fromA ? 0 : 1);
+    return fromA ? d : { dx: -d.dx, dz: -d.dz };
+  }
+
+  /**
+   * Distances from `s0` to `s1` where the road is cut into pieces, in
+   * ascending order: both ends, every chunk line crossing between, and
+   * enough in between that no piece is longer than `step` or, on a curve,
+   * turns through more than `turn` radians. Each piece lies in one chunk.
+   */
+  stations(s0: number, s1: number, step: number, turn: number = ROADS.curves.surfaceTurn): number[] {
+    if (!this.curved) return stations(this.ax, this.az, this.dx, this.dz, s0, s1, step);
+    const bend = Math.max(ROADS.curves.minPiece, this.radius * turn);
+    const spacing = step > 0 ? Math.min(step, bend) : bend;
+    const out = [s0, s1];
+    for (let s = Math.floor(s0 / spacing + 1) * spacing; s < s1; s += spacing) out.push(s);
+    for (const t of chunkLineParams(this.quad)) {
+      const s = this.distanceAt(t);
+      if (s > s0 && s < s1) out.push(s);
+    }
+    return mergeStations(out, s1);
+  }
+}
+
+/** The unit direction of a curve at parameter `t`. */
+function quadDirection(q: Quad, t: number): { dx: number; dz: number } {
+  let vx = q.cx - q.ax + t * (q.ax - 2 * q.cx + q.bx);
+  let vz = q.cz - q.az + t * (q.az - 2 * q.cz + q.bz);
+  let len = Math.hypot(vx, vz);
+  if (len < 1e-12) {
+    // The control point sits on an end, so the direction there is toward the other end.
+    vx = q.bx - q.ax;
+    vz = q.bz - q.az;
+    len = Math.hypot(vx, vz) || 1;
+  }
+  return { dx: vx / len, dz: vz / len };
+}
+
+/** Parameters strictly inside (0, 1) where a curve crosses a chunk line. */
+function chunkLineParams(q: Quad): number[] {
+  const out: number[] = [];
+  for (const [a, c, b] of [
+    [q.ax, q.cx, q.bx],
+    [q.az, q.cz, q.bz],
+  ] as const) {
+    // a(1-t)^2 + 2c t(1-t) + b t^2 = k: (a - 2c + b) t^2 + 2(c - a) t + (a - k) = 0.
+    const lo = Math.ceil(Math.min(a, b, c) / CHUNK_SIZE);
+    const hi = Math.floor(Math.max(a, b, c) / CHUNK_SIZE);
+    const qa = a - 2 * c + b;
+    const qb = 2 * (c - a);
+    for (let k = lo; k <= hi; k++) {
+      const qc = a - k * CHUNK_SIZE;
+      const roots: number[] = [];
+      if (Math.abs(qa) < 1e-12) {
+        if (Math.abs(qb) > 1e-12) roots.push(-qc / qb);
+      } else {
+        const disc = qb * qb - 4 * qa * qc;
+        if (disc >= 0) {
+          const r = Math.sqrt(disc);
+          roots.push((-qb - r) / (2 * qa), (-qb + r) / (2 * qa));
+        }
+      }
+      for (const t of roots) if (t > 0 && t < 1) out.push(t);
+    }
+  }
+  return out;
+}
+
+/** Sorts stations and drops any too close to the one before, keeping `s1` exactly. */
+function mergeStations(out: number[], s1: number): number[] {
+  out.sort((x, y) => x - y);
+  const merged: number[] = [];
+  for (const t of out) {
+    const prev = merged[merged.length - 1];
+    if (prev === undefined || t - prev > 1e-6) merged.push(t);
+    else if (t === s1) merged[merged.length - 1] = s1;
+  }
+  return merged;
+}
+
+/** Segment `seg`'s path. */
+export function segPath(net: RoadNet, seg: number): SegPath {
+  return new SegPath(net, seg);
 }
 
 /**
@@ -132,15 +318,21 @@ export function stations(ax: number, az: number, dx: number, dz: number, t0: num
       if (t > t0 && t < t1) out.push(t);
     }
   }
-  out.sort((x, y) => x - y);
   // Drop stations too close to the one before; keep t1 exactly.
-  const merged: number[] = [];
-  for (const t of out) {
-    const prev = merged[merged.length - 1];
-    if (prev === undefined || t - prev > 1e-6) merged.push(t);
-    else if (t === t1) merged[merged.length - 1] = t1;
+  return mergeStations(out, t1);
+}
+
+/** Chunks the pieces of `path` between `s0` and `s1` lie in. */
+function pathChunks(path: SegPath, s0: number, s1: number, into: Set<number>): void {
+  const st = path.stations(s0, s1, 0);
+  if (st.length < 2) {
+    const p = path.point(s0);
+    into.add(chunkAt(p.x, p.z));
   }
-  return merged;
+  for (let k = 0; k + 1 < st.length; k++) {
+    const p = path.point(((st[k] ?? 0) + (st[k + 1] ?? 0)) / 2);
+    into.add(chunkAt(p.x, p.z));
+  }
 }
 
 /** Chunks a straight line from (ax, az) through `length` metres along (dx, dz) passes through. */
@@ -184,17 +376,19 @@ interface Arm {
   length: number;
   angle: number;
   type: RoadType;
+  /** The road's path, and whether it leaves this node from its node A. */
+  path: SegPath;
+  fromA: boolean;
 }
 
 function armsAt(net: RoadNet, node: number): Arm[] {
   const arms: Arm[] = [];
   for (const seg of roadSegmentsAt(net, node)) {
-    const f = segFrame(net, seg);
-    const away = net.segA[seg] === node ? 1 : -1;
-    const dx = f.dx * away;
-    const dz = f.dz * away;
-    const far = (away === 1 ? net.segB[seg] : net.segA[seg]) ?? NONE;
-    arms.push({ seg, far, dx, dz, nx: -dz, nz: dx, half: f.half, length: f.length, angle: Math.atan2(dz, dx), type: f.type });
+    const path = segPath(net, seg);
+    const fromA = net.segA[seg] === node;
+    const { dx, dz } = path.leaving(fromA);
+    const far = (fromA ? net.segB[seg] : net.segA[seg]) ?? NONE;
+    arms.push({ seg, far, dx, dz, nx: -dz, nz: dx, half: path.half, length: path.length, angle: Math.atan2(dz, dx), type: path.type, path, fromA });
   }
   // By angle, ties by id, so the order never depends on list order.
   arms.sort((p, q) => p.angle - q.angle || p.seg - q.seg);
@@ -211,9 +405,43 @@ function kerbMeet(i: Arm, j: Arm): { ti: number; tj: number } | null {
   const rz = -(j.nz * j.half + i.nz * i.half);
   const det = -(i.dx * j.dz - i.dz * j.dx);
   if (Math.abs(det) < 1e-9) return null;
-  const ti = (-rx * j.dz + j.dx * rz) / det;
-  const tj = (i.dx * rz - i.dz * rx) / det;
+  let ti = (-rx * j.dz + j.dx * rz) / det;
+  let tj = (i.dx * rz - i.dz * rx) / det;
+  if (!i.path.curved && !j.path.curved) return { ti, tj };
+  // A curved kerb bends away from its tangent. Meet the kerbs' tangent
+  // lines where they are now, step to that meeting, and repeat.
+  for (let k = 0; k < KERB_STEPS; k++) {
+    const p = armKerb(i, ti, 1);
+    const q = armKerb(j, tj, -1);
+    const d = -(p.dx * q.dz - p.dz * q.dx);
+    if (Math.abs(d) < 1e-9) break;
+    const ex = q.x - p.x;
+    const ez = q.z - p.z;
+    const a = (-ex * q.dz + q.dx * ez) / d;
+    const b = (p.dx * ez - p.dz * ex) / d;
+    ti += a;
+    tj += b;
+    if (Math.abs(a) < 1e-7 && Math.abs(b) < 1e-7) break;
+  }
   return { ti, tj };
+}
+
+/** Steps that walk a corner along two curved kerbs. */
+const KERB_STEPS = 12;
+
+/**
+ * A kerb of arm `a` at distance `t` from the node: left with `side` 1,
+ * right with -1. The point, and the direction away from the node. Before
+ * the node and on a straight road, along the line the road leaves on.
+ */
+function armKerb(a: Arm, t: number, side: number): { x: number; z: number; dx: number; dz: number } {
+  const node = a.path.frame(a.fromA ? 0 : a.path.length);
+  if (!a.path.curved || t <= 0) {
+    return { x: node.x + a.dx * t + a.nx * a.half * side, z: node.z + a.dz * t + a.nz * a.half * side, dx: a.dx, dz: a.dz };
+  }
+  const f = a.path.frame(a.fromA ? Math.min(t, a.path.length) : Math.max(0, a.path.length - t));
+  const s = a.fromA ? side : -side;
+  return { x: f.x + f.nx * a.half * s, z: f.z + f.nz * a.half * s, dx: a.fromA ? f.dx : -f.dx, dz: a.fromA ? f.dz : -f.dz };
 }
 
 /** Angle from arm `i` round to arm `j`, in (0, 2pi]. */
@@ -236,7 +464,8 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
   const trims = arms.map(() => 0);
   const gaps = arms.map((a, i) => gapAngle(a, arms[(i + 1) % k] as Arm));
   const meets = arms.map((a, i) => kerbMeet(a, arms[(i + 1) % k] as Arm));
-  const at = (a: Arm, t: number) => ({ x: x + a.dx * t + a.nx * a.half, z: z + a.dz * t + a.nz * a.half });
+  const at = (a: Arm, t: number) =>
+    a.path.curved ? armKerb(a, t, 1) : { x: x + a.dx * t + a.nx * a.half, z: z + a.dz * t + a.nz * a.half };
 
   // First the corners under 180 degrees, which set how far each road is cut
   // back. Where a narrow road meets a wide one nearly head on, the kerbs
@@ -287,8 +516,16 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
     const a = arms[i] as Arm;
     if (a.half > widest.half) widest = a;
     const t = trims[i] ?? 0;
-    ring.push(x + a.dx * t - a.nx * a.half, z + a.dz * t - a.nz * a.half);
-    ring.push(x + a.dx * t + a.nx * a.half, z + a.dz * t + a.nz * a.half);
+    if (a.path.curved) {
+      // The strip's cut edge, on the curve: the same points the strip ends on.
+      const f = a.path.frame(a.fromA ? t : a.path.length - t);
+      const side = a.fromA ? 1 : -1;
+      ring.push(f.x - f.nx * a.half * side, f.z - f.nz * a.half * side);
+      ring.push(f.x + f.nx * a.half * side, f.z + f.nz * a.half * side);
+    } else {
+      ring.push(x + a.dx * t - a.nx * a.half, z + a.dz * t - a.nz * a.half);
+      ring.push(x + a.dx * t + a.nx * a.half, z + a.dz * t + a.nz * a.half);
+    }
     const c = corners[i];
     if (c === "bevel") {
       const b = arms[(i + 1) % k] as Arm;
@@ -480,7 +717,7 @@ interface Piece {
 }
 
 /** Height on a strip piece at distance `t` and offset `o` from the centre, on the plane the surface draws. */
-function pieceHeight(f: SegFrame, p: Piece, t: number, o: number): number {
+function pieceHeight(f: SegPath, p: Piece, t: number, o: number): number {
   const u = p.t1 > p.t0 ? (t - p.t0) / (p.t1 - p.t0) : 0;
   const v = (o + f.half) / (2 * f.half);
   const h0 = p.r0 + (p.l0 - p.r0) * v;
@@ -515,12 +752,16 @@ export function buildRoadChunk(
   const sorted = [...segs].sort((a, b) => a - b);
   for (const seg of sorted) {
     if (!liveRoadSegment(net, seg)) continue;
-    const f = segFrame(net, seg);
+    const f = segPath(net, seg);
     const a = net.segA[seg] ?? 0;
     const b = net.segB[seg] ?? 0;
     const t0 = trimAt(junctions(a), seg);
     const t1 = f.length - trimAt(junctions(b), seg);
-    const st = stations(f.ax, f.az, f.dx, f.dz, 0, f.length, ROADS.sampleStep);
+    const st = f.stations(0, f.length, ROADS.sampleStep);
+    const inChunk = (mid: number) => {
+      const p = f.point(mid);
+      return chunkAt(p.x, p.z) === chunk;
+    };
     const lineColour = ROADS.cityLines.colours[f.type.id];
     const lineRgb = lineColour === undefined ? null : linearRgb(lineColour);
     const rgb = surfaceColour(f.type);
@@ -529,25 +770,25 @@ export function buildRoadChunk(
 
     // City lines run the whole centre line; they are one colour and unlit, so overlaps at junctions do not show.
     if (lineRgb) {
-      const lst = stations(f.ax, f.az, f.dx, f.dz, 0, f.length, ROADS.cityLines.sampleStep);
+      // Far away, so a curve gets fewer pieces than its surface.
+      const lst = f.stations(0, f.length, ROADS.cityLines.sampleStep, ROADS.curves.lineTurn);
       let prev: [number, number] | null = null;
       for (let k = 0; k + 1 < lst.length; k++) {
         const s0 = lst[k] ?? 0;
         const s1 = lst[k + 1] ?? 0;
         const mid = (s0 + s1) / 2;
-        if (chunkAt(f.ax + f.dx * mid, f.az + f.dz * mid) !== chunk) {
+        if (!inChunk(mid)) {
           prev = null;
           continue;
         }
         const pair = (t: number): [number, number] => {
-          const x = f.ax + f.dx * t;
-          const z = f.az + f.dz * t;
+          const { x, z, nx, nz } = f.frame(t);
           const y = heightAt(terrain, x, z);
           const r = lines.vertex(x, y, z, lineRgb);
-          lines.sides.push(-f.nx, -f.nz);
+          lines.sides.push(-nx, -nz);
           lines.halves.push(f.half);
           const l = lines.vertex(x, y, z, lineRgb);
-          lines.sides.push(f.nx, f.nz);
+          lines.sides.push(nx, nz);
           lines.halves.push(f.half);
           return [r, l];
         };
@@ -568,15 +809,14 @@ export function buildRoadChunk(
         const s0 = body[k] ?? 0;
         const s1 = body[k + 1] ?? 0;
         const mid = (s0 + s1) / 2;
-        if (chunkAt(f.ax + f.dx * mid, f.az + f.dz * mid) !== chunk) {
+        if (!inChunk(mid)) {
           prev = null;
           continue;
         }
         const edge = (t: number) => {
-          const cx = f.ax + f.dx * t;
-          const cz = f.az + f.dz * t;
-          const r = ground(surface, cx - f.nx * f.half, cz - f.nz * f.half, rgb);
-          const l = ground(surface, cx + f.nx * f.half, cz + f.nz * f.half, rgb);
+          const { x: cx, z: cz, nx, nz } = f.frame(t);
+          const r = ground(surface, cx - nx * f.half, cz - nz * f.half, rgb);
+          const l = ground(surface, cx + nx * f.half, cz + nz * f.half, rgb);
           const p = surface.positions;
           return { r, l, hr: p[r * 3 + 1] ?? 0, hl: p[l * 3 + 1] ?? 0 };
         };
@@ -632,17 +872,16 @@ export function buildRoadChunk(
 }
 
 /** A flat quad painted on a strip piece: from `ta` to `tb` along, from `o0` to `o1` across. */
-function paintQuad(mesh: Mesh, f: SegFrame, p: Piece, ta: number, tb: number, o0: number, o1: number, rgb: readonly number[]): void {
+function paintQuad(mesh: Mesh, f: SegPath, p: Piece, ta: number, tb: number, o0: number, o1: number, rgb: readonly number[]): void {
   const lift = ROADS.markingLift;
   const at = (t: number, o: number) => {
-    const x = f.ax + f.dx * t + f.nx * o;
-    const z = f.az + f.dz * t + f.nz * o;
-    return mesh.vertex(x, pieceHeight(f, p, t, o) + lift, z, rgb);
+    const c = f.frame(t);
+    return mesh.vertex(c.x + c.nx * o, pieceHeight(f, p, t, o) + lift, c.z + c.nz * o, rgb);
   };
   mesh.quad(at(ta, o0), at(tb, o0), at(tb, o1), at(ta, o1));
 }
 
-function paintPiece(mesh: Mesh, f: SegFrame, p: Piece, paint: Paint, width: number): void {
+function paintPiece(mesh: Mesh, f: SegPath, p: Piece, paint: Paint, width: number): void {
   const o0 = paint.offset - width / 2;
   const o1 = paint.offset + width / 2;
   if (!paint.dashed) {
@@ -663,7 +902,7 @@ function paintPiece(mesh: Mesh, f: SegFrame, p: Piece, paint: Paint, width: numb
  * belongs to the piece its tail is on. The sim gives one-ways no direction
  * of their own until issue 12, so A to B is the direction.
  */
-function arrows(mesh: Mesh, f: SegFrame, p: Piece, t0: number, t1: number): void {
+function arrows(mesh: Mesh, f: SegPath, p: Piece, t0: number, t1: number): void {
   const m = ROADS.markings;
   const length = m.arrowShaft.length + m.arrowHead.length;
   const usable = t1 - t0 - length;
@@ -685,9 +924,8 @@ function arrows(mesh: Mesh, f: SegFrame, p: Piece, t0: number, t1: number): void
       const sw = m.arrowShaft.width / 2;
       paintQuad(mesh, f, p, tail, neck, o - sw, o + sw, white);
       const at = (t: number, off: number) => {
-        const x = f.ax + f.dx * t + f.nx * off;
-        const z = f.az + f.dz * t + f.nz * off;
-        return mesh.vertex(x, pieceHeight(f, p, t, off) + lift, z, white);
+        const c = f.frame(t);
+        return mesh.vertex(c.x + c.nx * off, pieceHeight(f, p, t, off) + lift, c.z + c.nz * off, white);
       };
       const hw = m.arrowHead.width / 2;
       mesh.triangle(at(neck, o - hw), at(tip, o), at(neck, o + hw));
@@ -737,9 +975,19 @@ export class RoadChunks {
 
   private indexSeg(net: RoadNet, seg: number): void {
     if (!liveRoadSegment(net, seg)) return;
-    const f = segFrame(net, seg);
+    const f = segPath(net, seg);
     const chunks = new Set<number>();
-    lineChunks(f.ax, f.az, f.dx, f.dz, f.length, chunks);
+    if (f.curved) {
+      // Every chunk a piece is drawn in, cut exactly as the surface and the lines are.
+      for (const st of [f.stations(0, f.length, ROADS.sampleStep), f.stations(0, f.length, ROADS.cityLines.sampleStep, ROADS.curves.lineTurn)]) {
+        for (let k = 0; k + 1 < st.length; k++) {
+          const p = f.point(((st[k] ?? 0) + (st[k + 1] ?? 0)) / 2);
+          chunks.add(chunkAt(p.x, p.z));
+        }
+      }
+    } else {
+      lineChunks(f.ax, f.az, f.dx, f.dz, f.length, chunks);
+    }
     const list = [...chunks].sort((p, q) => p - q);
     this.segs.set(seg, { a: net.segA[seg] ?? NONE, b: net.segB[seg] ?? NONE, chunks: list });
     for (const c of list) this.chunkSegs[c]?.add(seg);
@@ -772,9 +1020,16 @@ export class RoadChunks {
     const z = net.nodeZ[node] ?? 0;
     into.add(chunkAt(x, z));
     for (const seg of roadSegmentsAt(net, node)) {
-      const f = segFrame(net, seg);
-      const away = net.segA[seg] === node ? 1 : -1;
-      lineChunks(x, z, f.dx * away, f.dz * away, Math.min(ROADS.maxTrim, f.length / 2), into);
+      const f = segPath(net, seg);
+      const fromA = net.segA[seg] === node;
+      const reach = Math.min(ROADS.maxTrim, f.length / 2);
+      if (f.curved) {
+        if (fromA) pathChunks(f, 0, reach, into);
+        else pathChunks(f, f.length - reach, f.length, into);
+      } else {
+        const away = fromA ? 1 : -1;
+        lineChunks(x, z, f.dx * away, f.dz * away, reach, into);
+      }
     }
   }
 
@@ -835,27 +1090,39 @@ export function roadMask(net: RoadNet, chunk: number, segs: Iterable<number>): U
   let mask: Uint8Array | null = null;
   for (const seg of segs) {
     if (!liveRoadSegment(net, seg)) continue;
-    const f = segFrame(net, seg);
+    const f = segPath(net, seg);
     const treeReach = f.half + ROADS.decorClearance.trees + slack;
     const grassReach = f.half + ROADS.decorClearance.grass + slack;
-    const bx = f.ax + f.dx * f.length;
-    const bz = f.az + f.dz * f.length;
-    const i0 = Math.max(0, Math.floor((Math.min(f.ax, bx) - treeReach - x0) / cell));
-    const i1 = Math.min(MASK_SIDE - 1, Math.floor((Math.max(f.ax, bx) + treeReach - x0) / cell));
-    const j0 = Math.max(0, Math.floor((Math.min(f.az, bz) - treeReach - z0) / cell));
-    const j1 = Math.min(MASK_SIDE - 1, Math.floor((Math.max(f.az, bz) + treeReach - z0) / cell));
-    for (let j = j0; j <= j1; j++) {
-      for (let i = i0; i <= i1; i++) {
-        const px = x0 + (i + 0.5) * cell - f.ax;
-        const pz = z0 + (j + 0.5) * cell - f.az;
-        const t = Math.min(f.length, Math.max(0, px * f.dx + pz * f.dz));
-        const ex = px - f.dx * t;
-        const ez = pz - f.dz * t;
-        const d = Math.sqrt(ex * ex + ez * ez);
-        if (d > treeReach) continue;
-        mask ??= new Uint8Array(MASK_SIDE * MASK_SIDE);
-        const k = j * MASK_SIDE + i;
-        mask[k] = (mask[k] ?? 0) | MASK_TREES | (d <= grassReach ? MASK_GRASS : 0);
+    // A curve is checked piece by piece, each a straight line.
+    const st = f.curved ? f.stations(0, f.length, ROADS.sampleStep) : [0, f.length];
+    for (let k = 0; k + 1 < st.length; k++) {
+      const p0 = f.point(st[k] ?? 0);
+      const p1 = f.point(st[k + 1] ?? 0);
+      const ex0 = p1.x - p0.x;
+      const ez0 = p1.z - p0.z;
+      const length = Math.hypot(ex0, ez0);
+      const dx = f.curved ? (length > 0 ? ex0 / length : 1) : f.dx;
+      const dz = f.curved ? (length > 0 ? ez0 / length : 0) : f.dz;
+      const piece = f.curved ? length : f.length;
+      const bx = p0.x + dx * piece;
+      const bz = p0.z + dz * piece;
+      const i0 = Math.max(0, Math.floor((Math.min(p0.x, bx) - treeReach - x0) / cell));
+      const i1 = Math.min(MASK_SIDE - 1, Math.floor((Math.max(p0.x, bx) + treeReach - x0) / cell));
+      const j0 = Math.max(0, Math.floor((Math.min(p0.z, bz) - treeReach - z0) / cell));
+      const j1 = Math.min(MASK_SIDE - 1, Math.floor((Math.max(p0.z, bz) + treeReach - z0) / cell));
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const px = x0 + (i + 0.5) * cell - p0.x;
+          const pz = z0 + (j + 0.5) * cell - p0.z;
+          const t = Math.min(piece, Math.max(0, px * dx + pz * dz));
+          const ex = px - dx * t;
+          const ez = pz - dz * t;
+          const d = Math.sqrt(ex * ex + ez * ez);
+          if (d > treeReach) continue;
+          mask ??= new Uint8Array(MASK_SIDE * MASK_SIDE);
+          const m = j * MASK_SIDE + i;
+          mask[m] = (mask[m] ?? 0) | MASK_TREES | (d <= grassReach ? MASK_GRASS : 0);
+        }
       }
     }
   }

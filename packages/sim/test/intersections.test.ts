@@ -6,7 +6,7 @@ import {
   heightAt,
   nextFloat,
   nextInt,
-  planStraightRoad,
+  planRoad,
   replay,
   seedRng,
   step,
@@ -16,6 +16,7 @@ import {
   type SimState,
 } from "../src/index";
 import { crossingPoint, segmentsMeet } from "../src/roads/build";
+import { isStraight, segmentQuad } from "../src/roads/curve";
 import { roadTypeIndex } from "../src/roads/balance";
 import {
   LEVEL_BRIDGE,
@@ -37,6 +38,7 @@ import { buildRoadIndex, roadIndexOf } from "../src/roads/spatial";
 import { terrainOf } from "../src/terrain/cache";
 import fixtureJson from "./fixtures/replay/intersections.json";
 import { expectReplay, type ReplayFixture } from "./replay-helper";
+import { unjoinedCrossings } from "./unjoined";
 
 // Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000).
 // build-road.test.ts checks it is still there.
@@ -82,38 +84,6 @@ function segments(net: RoadNetwork): [number, number][] {
   const out: [number, number][] = [];
   for (let s = 0; s < segmentIdLimit(net); s++) if (isSegment(net, s)) out.push([net.segA[s] ?? NONE, net.segB[s] ?? NONE]);
   return out;
-}
-
-/**
- * Pairs of live segments on the same network and level that meet anywhere
- * but a shared node. After any accepted command there must be none.
- */
-function unjoinedCrossings(net: RoadNetwork): [number, number][] {
-  const bad: [number, number][] = [];
-  const limit = segmentIdLimit(net);
-  for (let s = 0; s < limit; s++) {
-    if (!isSegment(net, s)) continue;
-    const a = net.segA[s] ?? NONE;
-    const b = net.segB[s] ?? NONE;
-    for (let t = s + 1; t < limit; t++) {
-      if (!isSegment(net, t) || net.segNetwork[t] !== net.segNetwork[s] || net.segLevel[t] !== net.segLevel[s]) continue;
-      const c = net.segA[t] ?? NONE;
-      const d = net.segB[t] ?? NONE;
-      if (a === c || a === d || b === c || b === d) continue;
-      const met = segmentsMeet(
-        net.nodeX[a] ?? 0,
-        net.nodeZ[a] ?? 0,
-        net.nodeX[b] ?? 0,
-        net.nodeZ[b] ?? 0,
-        net.nodeX[c] ?? 0,
-        net.nodeZ[c] ?? 0,
-        net.nodeX[d] ?? 0,
-        net.nodeZ[d] ?? 0,
-      );
-      if (met) bad.push([s, t]);
-    }
-  }
-  return bad;
 }
 
 describe("a road across another", () => {
@@ -165,7 +135,7 @@ describe("a road across another", () => {
 
   it("prices only the new road, every piece of it", () => {
     const state = withStreet();
-    const result = planStraightRoad(state.roads, terrainOf(SEED), road([4350, 4400], [4350, 4600]).payload);
+    const result = planRoad(state.roads, terrainOf(SEED), road([4350, 4400], [4350, 4600]).payload);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.plan.stops.map((s) => [s.x, s.z, s.node, s.splits])).toEqual([
@@ -376,11 +346,12 @@ describe("the crossing point", () => {
 });
 
 describe("after any accepted road", () => {
-  it("no two segments on the same level cross without a shared node, over 500 random roads", () => {
+  it("no two segments on the same level cross without a shared node, over 500 random roads, half of them curved", () => {
     const state = createState(SEED);
     const rng = seedRng(2026);
     const net = state.roads;
     let accepted = 0;
+    let acceptedCurves = 0;
     for (let i = 0; i < 500; i++) {
       // Most roads start anywhere in the square. Some start on an existing
       // node, to exercise joins and crossings next to nodes.
@@ -401,13 +372,31 @@ describe("after any accepted road", () => {
       const norm = Math.sqrt(dx * dx + dz * dz) || 1;
       const to: [number, number] = [x + (dx / norm) * length, z + (dz / norm) * length];
       const types = ["street", "avenue", "oneWay"];
-      const result = build(state, road([x, z], to, types[nextInt(rng, 3)]));
+      const command = road([x, z], to, types[nextInt(rng, 3)]);
+      // Half the roads are curves: the control point sits off the middle,
+      // to either side, by up to half the road's length.
+      const curvedRoad = i % 2 === 1;
+      if (curvedRoad) {
+        const bend = (nextFloat(rng) - 0.5) * length;
+        (command.payload as Record<string, unknown>)["control"] = {
+          x: (x + to[0]) / 2 - (dz / norm) * bend,
+          z: (z + to[1]) / 2 + (dx / norm) * bend,
+        };
+      }
+      const result = build(state, command);
       if (!result.ok) continue;
       accepted++;
+      if (curvedRoad) acceptedCurves++;
       expect(unjoinedCrossings(net), `after road ${i}`).toEqual([]);
       expect(checkRoadNetwork(net), `after road ${i}`).toBeNull();
     }
     expect(accepted).toBeGreaterThan(100);
+    expect(acceptedCurves).toBeGreaterThan(40);
+    let curvedSegments = 0;
+    for (let s = 0; s < segmentIdLimit(net); s++) {
+      if (isSegment(net, s) && !isStraight(segmentQuad(net, s))) curvedSegments++;
+    }
+    expect(curvedSegments).toBeGreaterThan(60);
     // The live index kept up with every split.
     expect(roadIndexOf(net).segCells).toEqual(buildRoadIndex(net).segCells);
     expect(roadIndexOf(net).nodeCells).toEqual(buildRoadIndex(net).nodeCells);
