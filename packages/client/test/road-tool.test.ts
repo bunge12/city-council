@@ -8,6 +8,8 @@ import {
   createBareState,
   generateTerrain,
   heightAt,
+  step,
+  submit,
   type BuildRoadPayload,
   type CommandResult,
 } from "@city-council/sim";
@@ -15,7 +17,7 @@ import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror } from "../src/protocol/mirror";
 import { memoryTransportPair } from "../src/protocol/transport";
 import { buildPreviewGeometry, previewKey } from "../src/render/road-preview-geometry";
-import { INITIAL_ROAD_TOOL, RoadToolController, previewRoad, type RoadToolState } from "../src/tools/road-tool";
+import { INITIAL_ROAD_TOOL, RoadToolController, previewRoad, roadPayload, type RoadToolState } from "../src/tools/road-tool";
 
 // Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000).
 const SEED = 2026;
@@ -510,5 +512,25 @@ describe("curved preview geometry", () => {
     expect(nearest).toBeLessThan(0.01);
     expect(sections).toBeGreaterThan(20);
     expect(previewKey([shape])).not.toBe(previewKey([{ ...shape, control: { x: 4300, z: 4610 } }]));
+  });
+});
+
+describe("the road tool's level", () => {
+  it("is left out of the command on the ground, and named on any other level", () => {
+    const from = { x: 4200, z: 4600 };
+    const to = { x: 4400, z: 4600 };
+    expect(INITIAL_ROAD_TOOL.roadLevel).toBe("ground");
+    expect(roadPayload(from, to, "street", null, "ground")).toEqual({ from, to, type: "street" });
+    expect(roadPayload(from, to, "street", null, "elevated2")).toEqual({ from, to, type: "street", level: "elevated2" });
+  });
+
+  it("previews a raised road over a ground one with no junction", () => {
+    const state = createBareState(SEED);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4600, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const ground = previewRoad(state.roads, terrain, { x: 4400, z: 4500 }, { x: 4400, z: 4700 }, "street");
+    expect(ground.junctions).toHaveLength(1);
+    const raised = previewRoad(state.roads, terrain, { x: 4400, z: 4500 }, { x: 4400, z: 4700 }, "street", null, "elevated1");
+    expect(raised).toMatchObject({ ok: true, junctions: [] });
   });
 });

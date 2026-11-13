@@ -88,9 +88,31 @@ export interface RoadBuildBalance {
   gridMinBlockShare: number;
 }
 
+/**
+ * Heights of the levels, in metres above the ground under a segment, and
+ * the clearance two roads need to cross without a junction. A bridge's
+ * height comes from the water instead (`bridgeClearance`).
+ */
+export interface RoadLevelBalance {
+  /** Below the ground, so negative. */
+  tunnel: number;
+  /** Always 0: the ground itself. */
+  ground: number;
+  elevated1: number;
+  /** Above `elevated1`. */
+  elevated2: number;
+  /** Least height between two road surfaces that cross without a junction. */
+  clearance: number;
+  sourceYear: number;
+  source: string;
+  sourceUrl?: string;
+  placeholder?: boolean;
+}
+
 export interface RoadBalance {
   escalation: { toYear: number; annualFactor: number; source: string; sourceUrl?: string; sourceYear: number };
   build: RoadBuildBalance;
+  levels: RoadLevelBalance;
   types: RoadTypeBalance[];
 }
 
@@ -167,6 +189,24 @@ function checkBridge(bridge: unknown, where: string, toYear: number, errors: str
   if (typeof bridge["source"] !== "string" || bridge["source"].trim() === "") errors.push(`${where}.source is missing`);
 }
 
+/** Adds every problem with the level heights to `errors`. */
+function checkLevels(levels: unknown, errors: string[]): void {
+  if (!isRecord(levels)) {
+    errors.push("levels is missing");
+    return;
+  }
+  const { tunnel, ground, elevated1, elevated2, clearance } = levels;
+  if (ground !== 0) errors.push("levels.ground must be 0");
+  if (typeof tunnel !== "number" || !(tunnel < 0) || !Number.isFinite(tunnel)) errors.push("levels.tunnel must be a negative number");
+  if (!isPositive(elevated1)) errors.push("levels.elevated1 must be a positive number");
+  if (!isPositive(elevated2) || !(isPositive(elevated1) && (elevated2 as number) > (elevated1 as number))) {
+    errors.push("levels.elevated2 must be a number above levels.elevated1");
+  }
+  if (!isPositive(clearance)) errors.push("levels.clearance must be a positive number");
+  if (!isYear(levels["sourceYear"])) errors.push("levels.sourceYear is missing");
+  if (typeof levels["source"] !== "string" || levels["source"] === "") errors.push("levels.source is missing");
+}
+
 /**
  * Every problem with a road balance file, or none. A type missing a field,
  * or a price with no source or source year, is a problem.
@@ -208,6 +248,7 @@ export function checkRoadBalance(data: unknown): string[] {
     const step = build["gridStep"];
     if (isPositive(step) && !isPowerOfTwo(1 / step)) errors.push("build.gridStep must be 1 over a power of two");
   }
+  checkLevels(data["levels"], errors);
   const types = data["types"];
   if (!Array.isArray(types) || types.length === 0) return [...errors, "types must be a non-empty list"];
   if (types.length > MAX_TYPES) errors.push(`there are more than ${MAX_TYPES} road types`);
@@ -276,3 +317,6 @@ export function roadTypeIndex(id: string): number {
 
 /** How the sim checks a road before it builds one. Checked with the types above. */
 export const ROAD_BUILD: RoadBuildBalance = ROAD_BALANCE.build;
+
+/** Level heights and the crossing clearance. Checked with the types above. */
+export const ROAD_LEVELS: RoadLevelBalance = ROAD_BALANCE.levels;

@@ -324,7 +324,7 @@ describe("blocks through the commands", () => {
     ok(state, road([3700, 6520], [3400, 6520]));
     ok(state, road([3400, 6520], [3400, 6600]));
     let bridges = 0;
-    for (let seg = 0; seg < segmentIdLimit(state.roads); seg++) if (isSegment(state.roads, seg) && state.roads.segLevel[seg] === LEVEL_BRIDGE) bridges++;
+    for (let seg = 0; seg < segmentIdLimit(state.roads); seg++) if (isSegment(state.roads, seg) && state.roads.segLevelA[seg] === LEVEL_BRIDGE) bridges++;
     expect(bridges).toBeGreaterThan(0);
     expect(blocks(state.roads)).toEqual([]);
   });

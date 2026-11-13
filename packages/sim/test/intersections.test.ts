@@ -123,7 +123,7 @@ describe("a road across another", () => {
     const net = state.roads;
     expect([...net.segType]).toEqual([roadTypeIndex("avenue"), roadTypeIndex("avenue"), roadTypeIndex("oneWay"), roadTypeIndex("oneWay")]);
     expect([...net.segNetwork]).toEqual([NETWORK_ROAD, NETWORK_ROAD, NETWORK_ROAD, NETWORK_ROAD]);
-    expect([...net.segLevel]).toEqual([0, 0, 0, 0]);
+    expect([...net.segLevelA]).toEqual([0, 0, 0, 0]);
   });
 
   it("sets the new node's height from the ground", () => {
@@ -300,16 +300,16 @@ describe("segments on other layers", () => {
     expect(nodeAt(net, 4350, 4500)).toBe(NONE);
   });
 
-  it("refuse a ground road across a bridge instead of passing under it", () => {
+  it("let a ground road pass under a bridge deck high enough above it, with no node", () => {
     const state = createBareState(SEED);
     const net = state.roads;
-    const b0 = addNode(net, 4200, 4600, 0);
-    const b1 = addNode(net, 4500, 4600, 0);
+    // A deck over dry ground, its banks far below it, so it stands well clear.
+    const b0 = addNode(net, 4200, 4600, -100);
+    const b1 = addNode(net, 4500, 4600, -100);
     addSegment(net, b0, b1, { type: roadTypeIndex("street"), level: LEVEL_BRIDGE });
-    expect(submit(state, road([4350, 4400], [4350, 4700]))).toEqual({
-      ok: false,
-      reason: "The road would cross a bridge, and roads cannot pass over or under each other yet",
-    });
+    expect(build(state, road([4350, 4400], [4350, 4700]))).toEqual({ ok: true });
+    expect(segmentCount(net)).toBe(2);
+    expect(nodeAt(net, 4350, 4600)).toBe(NONE);
   });
 });
 

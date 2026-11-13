@@ -18,12 +18,43 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // seed places them but clear of the roads the save already has. They go
   // into its network under new ids and nothing is journalled, so undo
   // never takes them back.
+  //
+  // Placing them runs today's road code, so the network takes today's level
+  // fields first (see version 6).
   4: (old) => {
+    old = levelsAtBothEnds(old);
     const roads = old["roads"] as RoadNetwork;
     const connections = placeConnections(roads, terrainOf(old["seed"] as number), old["seed"] as number);
     return { ...old, version: 5, roads, connections };
   },
+  // Version 6 stores a level at each end of a segment, so a ramp can change
+  // level along its length (issue 22). See `levelsAtBothEnds`.
+  5: (old) => ({ ...levelsAtBothEnds(old), version: 6 }),
 };
+
+/**
+ * The state with each segment's one level made the level at both its ends:
+ * `segLevel` becomes `segLevelA` and `segLevelB`, in the network and in every
+ * segment row the undo history holds. A state already in that shape, as one
+ * an earlier migration built with today's code, is returned as it is.
+ */
+function levelsAtBothEnds(old: Record<string, unknown>): Record<string, unknown> {
+  const net = old["roads"] as Record<string, unknown> & { segLevel?: Uint8Array };
+  if (!net.segLevel) return old;
+  const { segLevel, ...rest } = net;
+  const fields: Record<string, unknown> = { ...rest, segLevelA: segLevel, segLevelB: Uint8Array.from(segLevel) };
+  // In the order a new network has its fields, so it saves the same way.
+  const roads = Object.fromEntries(Object.keys(createRoadNetwork()).map((key) => [key, fields[key]]));
+  const undo = ((old["undo"] ?? []) as { ops: { row?: Record<string, unknown> }[] }[]).map((record) => ({
+    ...record,
+    ops: record.ops.map((op) => {
+      if (!op.row || !("level" in op.row)) return op;
+      const { level, ...row } = op.row;
+      return { ...op, row: { ...row, levelA: level, levelB: level } };
+    }),
+  }));
+  return { ...old, roads, undo };
+}
 
 /**
  * Brings state from any older snapshot version up to `SNAPSHOT_VERSION`.

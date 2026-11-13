@@ -209,7 +209,7 @@ describe("BuildRoadGrid", () => {
     const t = terrainOf(SEED);
     const net = state.roads;
     for (let s = 0; s < segmentIdLimit(net); s++) {
-      expect(net.segLevel[s]).toBe(LEVEL_GROUND);
+      expect(net.segLevelA[s]).toBe(LEVEL_GROUND);
       // Dry all along.
       const a = net.segA[s] ?? 0;
       const b = net.segB[s] ?? 0;

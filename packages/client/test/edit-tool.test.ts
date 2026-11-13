@@ -362,7 +362,7 @@ describe("pickSegment", () => {
   it("picks a bridge where its deck is drawn, above the water the ground pick lands on", () => {
     const state = cityWith([[[3400, 6600], [3700, 6600], "oneWay"]]);
     const net = state.roads;
-    const bridge = Array.from(net.segLevel).indexOf(LEVEL_BRIDGE);
+    const bridge = Array.from(net.segLevelA).indexOf(LEVEL_BRIDGE);
     expect(bridge).toBeGreaterThanOrEqual(0);
     // A camera looking north and down at 45 degrees, close in: a point's screen height falls with its height.
     const mpp = 0.05;
@@ -401,7 +401,7 @@ describe("edit marks on a bridge", () => {
   it("are drawn at the deck's height, not on the water", () => {
     const state = cityWith([[[3400, 6600], [3700, 6600], "street"]]);
     const net = state.roads;
-    const bridge = Array.from(net.segLevel).indexOf(LEVEL_BRIDGE);
+    const bridge = Array.from(net.segLevelA).indexOf(LEVEL_BRIDGE);
     const preview = previewEdit(net, terrain, "bulldoze", [bridge], "street");
     const shapes = editShapes(net, preview, "bulldoze");
     expect(shapes[0]?.deck).toBeDefined();

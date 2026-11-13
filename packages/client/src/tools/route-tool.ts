@@ -12,6 +12,7 @@
 import {
   LEVEL_BRIDGE,
   findRouteBetween,
+  levelOffset,
   quadPoint,
   routingGraphOf,
   segmentQuad,
@@ -21,7 +22,7 @@ import {
   type RoadNetwork,
   type RouteResult,
 } from "@city-council/sim";
-import { roadTypeOf, type RoadNet } from "../render/road-geometry";
+import { isRaised, roadTypeOf, type RoadNet } from "../render/road-geometry";
 import type { PreviewShape } from "../render/road-preview-geometry";
 import type { RoadToolState } from "./road-tool";
 import { ROUTE_TOOL } from "./config";
@@ -123,10 +124,14 @@ function piece(net: RoadNet, seg: number, t0: number, t1: number): PreviewShape 
     bridges: [],
   };
   // A whole bridge is drawn on its deck. A part of one is rare enough in a debug tool to lie on the ground.
-  if (net.segLevel[seg] === LEVEL_BRIDGE && t0 === 0 && t1 === 1) {
+  if (net.segLevelA[seg] === LEVEL_BRIDGE && t0 === 0 && t1 === 1) {
     const na = net.segA[seg] ?? 0;
     const nb = net.segB[seg] ?? 0;
     shape.deck = { hA: net.nodeHeight[na] ?? 0, hB: net.nodeHeight[nb] ?? 0, grade: roadTypeOf(net, seg).maxSlope };
+  } else if (isRaised(net, seg)) {
+    const a = levelOffset(net.segLevelA[seg] ?? 0);
+    const b = levelOffset(net.segLevelB[seg] ?? 0);
+    shape.raise = { a: a + (b - a) * t0, b: a + (b - a) * t1 };
   }
   return shape;
 }

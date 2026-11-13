@@ -10,7 +10,7 @@ import type { SimState, Speed } from "./state";
 import type { UndoRecord } from "./undo";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 // ---- Client to sim ----
 

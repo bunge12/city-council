@@ -104,6 +104,16 @@ function onGrid(p: BuildPoint): BuildPoint {
 }
 
 /**
+ * A BuildRoad payload. The level is left out on the ground, which is all a
+ * player builds in M1; the debug panel can pick another (issue 22).
+ */
+export function roadPayload(from: BuildPoint, to: BuildPoint, type: string, control: BuildPoint | null, level: string): BuildRoadPayload {
+  const payload: BuildRoadPayload = control ? { from, to, type, control } : { from, to, type };
+  if (level !== "ground") payload.level = level;
+  return payload;
+}
+
+/**
  * What the sim would do with `BuildRoad` from `from` to `to`, through
  * `control` for a curve, checked against the mirror's roads. Changes nothing.
  */
@@ -114,9 +124,10 @@ export function previewRoad(
   to: BuildPoint,
   typeId: string,
   control: BuildPoint | null = null,
+  level: string = "ground",
 ): RoadPreview {
   const type = typeById(typeId);
-  const payload: BuildRoadPayload = control ? { from, to, type: typeId, control } : { from, to, type: typeId };
+  const payload = roadPayload(from, to, typeId, control, level);
   // The planner only reads the network. It takes the mutable type because
   // the sim calls it on live state; the copy here is never written.
   const result = planRoad(net as unknown as RoadNetwork, terrain, payload);
@@ -197,6 +208,11 @@ export interface RoadToolState {
   roadNote: string | null;
   /** Which snapping guides are on. Kept for the page's life. */
   guides: GuideToggles;
+  /**
+   * The level roads are built at, a key of the sim's BUILD_LEVELS. Only the
+   * debug panel changes it from "ground"; no player tool sets a level in M1.
+   */
+  roadLevel: string;
 }
 
 export const INITIAL_ROAD_TOOL: RoadToolState = {
@@ -209,6 +225,7 @@ export const INITIAL_ROAD_TOOL: RoadToolState = {
   roadPending: [],
   roadNote: null,
   guides: DEFAULT_GUIDES,
+  roadLevel: "ground",
 };
 
 /** Nothing being drawn. */
@@ -361,7 +378,7 @@ export class RoadToolController {
     const world = this.host.world();
     if (s.tool !== "road" || !s.roadStart || !cursor || !world) return null;
     if (s.roadMode === "curved" && !s.roadControl) return null;
-    return previewRoad(world.net, world.terrain, s.roadStart, cursor, s.roadType, s.roadControl);
+    return previewRoad(world.net, world.terrain, s.roadStart, cursor, s.roadType, s.roadControl, s.roadLevel);
   }
 
   /**
@@ -400,9 +417,7 @@ export class RoadToolController {
       this.host.set(continuous ? { roadNote: preview.reason, ...IDLE } : { roadNote: preview.reason });
       return;
     }
-    const payload: BuildRoadPayload = s.roadControl
-      ? { from: s.roadStart, to: point, type: s.roadType, control: s.roadControl }
-      : { from: s.roadStart, to: point, type: s.roadType };
+    const payload = roadPayload(s.roadStart, point, s.roadType, s.roadControl, s.roadLevel);
     const chain = continuous ? s.roadChain : 0;
     // A continuous road's segment waits for the one before it.
     const waits = chain !== 0 && s.roadPending.some((p) => p.chain === chain);
@@ -467,8 +482,8 @@ export class RoadToolController {
       const mine = pending.filter((p) => p.chain === chain);
       const next = mine[0];
       if (!next || next.status !== "queued") continue;
-      const { from, to, type, control } = next.payload;
-      const preview = previewRoad(world.net, world.terrain, from, to, type, control ?? null);
+      const { from, to, type, control, level } = next.payload;
+      const preview = previewRoad(world.net, world.terrain, from, to, type, control ?? null, level);
       pending = this.host.get().roadPending;
       if (!preview.ok) {
         this.stopChain(

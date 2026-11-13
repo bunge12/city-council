@@ -125,7 +125,7 @@ describe("a road across water", () => {
     const net = state.roads;
     const t = terrainOf(SEED);
     expect(segmentCount(net)).toBe(3);
-    expect(Array.from(net.segLevel)).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
+    expect(Array.from(net.segLevelA)).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
     const a = nth(net.segA, 1);
     const b = nth(net.segB, 1);
     for (const node of [a, b]) {
@@ -222,7 +222,7 @@ describe("a road across water", () => {
   it("bridges each crossing of a curve", () => {
     const state = createBareState(SEED);
     build(state, road([3380, 6640], [3720, 6640], "street", [3550, 6700]));
-    expect(Array.from(state.roads.segLevel)).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
+    expect(Array.from(state.roads.segLevelA)).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
   });
 });
 
@@ -232,26 +232,29 @@ describe("nothing joins a bridge but at its banks", () => {
     const terrain = synthetic((x, z) => (x >= 440 && x <= 560 && z >= 440 && z <= 560 ? 0 : 11));
     const net = createRoadNetwork();
     buildRoad(net, terrain, plan(net, terrain, road([200, 500], [800, 500])));
-    expect(Array.from(net.segLevel)).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
+    expect(Array.from(net.segLevelA)).toEqual([LEVEL_GROUND, LEVEL_BRIDGE, LEVEL_GROUND]);
     return { net, terrain };
   }
-  const CROSSES = "The road would cross a bridge, and roads cannot pass over or under each other yet";
+  const SAME_HEIGHT = "The road would meet a bridge at the same height but cannot join it there, and roads need 6.5 m between them to cross without a junction";
 
   it("refuses a second bridge across the first over the water", () => {
     const { net, terrain } = lake();
     // On its own it would be a bridge.
     expect(plan(createRoadNetwork(), terrain, road([500, 200], [500, 800])).levels).toContain(LEVEL_BRIDGE);
-    expect(reason(net, terrain, road([500, 200], [500, 800]))).toBe(CROSSES);
-    // A curved one too.
-    expect(reason(net, terrain, road([300, 200], [700, 800], "street", [400, 700]))).toBe(CROSSES);
+    // Both decks sit at the same clearance over the water.
+    expect(reason(net, terrain, road([500, 200], [500, 800]))).toBe(SAME_HEIGHT);
+    // A curved one too. It meets the first where its own ramp is still a little below the deck.
+    expect(reason(net, terrain, road([300, 200], [700, 800], "street", [400, 700]))).toMatch(/^The road would pass only [\d.]+ m (over|under) a bridge/);
   });
 
-  it("refuses a ground road across a bridge's ramp", () => {
+  it("refuses a ground road across a bridge's ramp, too close under it to pass", () => {
     const { net, terrain } = lake();
     const bank = nth(net.nodeX, nth(net.segA, 1));
     // Dry all the way, west of the lake, across the land the ramp stands on.
     expect(bank + 10).toBeLessThan(420);
-    expect(reason(net, terrain, road([bank + 10, 300], [bank + 10, 700]))).toBe(CROSSES);
+    expect(reason(net, terrain, road([bank + 10, 300], [bank + 10, 700]))).toMatch(
+      /^The road would pass only [\d.]+ m under a bridge, and roads need 6\.5 m between them to cross without a junction$/,
+    );
   });
 
   it("lets a road join a bank node", () => {
@@ -261,14 +264,14 @@ describe("nothing joins a bridge but at its banks", () => {
     expect(nth(p.stops, 0).node).toBe(node);
     buildRoad(net, terrain, p);
     expect(isSegment(net, 3)).toBe(true);
-    expect(net.segLevel[3]).toBe(LEVEL_GROUND);
+    expect(net.segLevelA[3]).toBe(LEVEL_GROUND);
   });
 });
 
 describe("a bridge in a save and a replay", () => {
   it("survives save and load with the same hash", () => {
     const state = expectReplay(fixture);
-    expect(Array.from(state.roads.segLevel).filter((l) => l === LEVEL_BRIDGE)).toHaveLength(3);
+    expect(Array.from(state.roads.segLevelA).filter((l) => l === LEVEL_BRIDGE)).toHaveLength(3);
     const loaded = deserialize(serialize(state)).state;
     expect(hashState(loaded)).toBe(hashState(state));
     expect(hashState(loaded)).toBe(fixture.hash);

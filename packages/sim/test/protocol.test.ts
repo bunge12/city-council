@@ -3,7 +3,7 @@ import { PROTOCOL_VERSION, parseToSimMessage } from "../src/index";
 
 describe("parseToSimMessage", () => {
   it("refuses other protocol versions and unknown types", () => {
-    expect(parseToSimMessage({ v: 1, type: "requestSnapshot" })).toMatch(/version 1 is not supported, expected 3/);
+    expect(parseToSimMessage({ v: 1, type: "requestSnapshot" })).toMatch(/version 1 is not supported, expected 4/);
     expect(parseToSimMessage({ v: PROTOCOL_VERSION, type: "explode" })).toMatch(/unknown/);
     expect(parseToSimMessage(null)).toMatch(/object/);
     expect(parseToSimMessage({ v: PROTOCOL_VERSION, type: "command" })).toMatch(/command object/);

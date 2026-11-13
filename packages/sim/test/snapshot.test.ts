@@ -26,6 +26,7 @@ import v2Fixture from "./fixtures/snapshots/v2.json";
 import v3Fixture from "./fixtures/snapshots/v3.json";
 import v4Fixture from "./fixtures/snapshots/v4.json";
 import v5Fixture from "./fixtures/snapshots/v5.json";
+import v6Fixture from "./fixtures/snapshots/v6.json";
 import { checkConnections } from "../src/roads/connections";
 import { heldIds } from "../src/undo";
 import { addNode, addSegment, removeSegment, segmentsAt } from "../src/roads/network";
@@ -310,14 +311,14 @@ describe("committed snapshots", () => {
     expect(Array.from(state.roads.segFree)).toEqual([]);
     expect(Array.from(state.roads.nodeFree)).toEqual([]);
     expect(checkConnections(state.connections, state.roads)).toBeNull();
-    expect(hashState(state)).toBe("9901553503370b5a");
+    expect(hashState(state)).toBe("0c9afe4d94feb8b5");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
     const { state, header } = deserialize(fromHex(v4Fixture.hex));
     expect(header.stateVersion).toBe(4);
-    // Migrated, it is the version 5 fixture.
-    expect(hashState(state)).toBe(v5Fixture.hash);
+    // Migrated, it is the version 6 fixture.
+    expect(hashState(state)).toBe(v6Fixture.hash);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(state.undo.map((r) => [r.playerId, r.type])).toEqual([
       ["p1", "BuildRoad"],
@@ -330,23 +331,44 @@ describe("committed snapshots", () => {
     expect(submit(state, { seq: 1, playerId: "p2", type: "Undo", payload: {} })).toEqual({ ok: true });
   });
 
-  it("loads the version 5 fixture to its recorded hash", () => {
+  it("loads the version 5 fixture with each segment's level at both its ends", () => {
     const { state, header } = deserialize(fromHex(v5Fixture.hex));
     expect(header.stateVersion).toBe(5);
-    expect(hashState(state)).toBe(v5Fixture.hash);
+    // Migrated, it is the version 6 fixture.
+    expect(hashState(state)).toBe(v6Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v5Fixture.held);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
+    expect(Array.from(state.roads.segLevelB)).toEqual(Array.from(state.roads.segLevelA));
+    expect("segLevel" in state.roads).toBe(false);
+    for (const record of state.undo) {
+      for (const op of record.ops) {
+        if (op.op === "addSeg" || op.op === "removeSeg") {
+          expect(op.row.levelB).toBe(op.row.levelA);
+          expect("level" in op.row).toBe(false);
+        }
+      }
+    }
+    // An undo of a migrated record still applies.
+    expect(submit(state, { seq: 1, playerId: "p2", type: "Undo", payload: {} })).toEqual({ ok: true });
   });
 
-  it("still writes the version 5 fixture byte for byte", () => {
+  it("loads the version 6 fixture to its recorded hash", () => {
+    const { state, header } = deserialize(fromHex(v6Fixture.hex));
+    expect(header.stateVersion).toBe(6);
+    expect(hashState(state)).toBe(v6Fixture.hash);
+    expect(heldIds(state.undo)).toEqual(v6Fixture.held);
+    expect(Array.from(state.connections)).toEqual(v6Fixture.connections);
+  });
+
+  it("still writes the version 6 fixture byte for byte", () => {
     // If this fails the byte layout changed: bump SNAPSHOT_FORMAT_VERSION and
     // keep reading the old layout, or explain in the pull request why not.
-    const { state } = deserialize(fromHex(v5Fixture.hex));
-    expect(toHex(serialize(state))).toBe(v5Fixture.hex);
+    const { state } = deserialize(fromHex(v6Fixture.hex));
+    expect(toHex(serialize(state))).toBe(v6Fixture.hex);
   });
 
   it("refuses a save whose connection list names a node that is not a connection", () => {
-    const { state } = deserialize(fromHex(v5Fixture.hex));
+    const { state } = deserialize(fromHex(v6Fixture.hex));
     state.connections = Int32Array.of(0);
     const error = refusal(serialize(state));
     expect(error.code).toBe("corrupt");

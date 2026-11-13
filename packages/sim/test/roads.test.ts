@@ -84,7 +84,7 @@ describe("road network segments", () => {
     expect(net.segLength[ab]).toBe(300);
     expect([net.segCX[ab], net.segCZ[ab]]).toEqual([150, 0]);
     const rail = addSegment(net, a, b, { type: 0, network: NETWORK_RAIL, level: LEVEL_BRIDGE });
-    expect([net.segNetwork[rail], net.segLevel[rail]]).toEqual([NETWORK_RAIL, LEVEL_BRIDGE]);
+    expect([net.segNetwork[rail], net.segLevelA[rail]]).toEqual([NETWORK_RAIL, LEVEL_BRIDGE]);
   });
 
   it("measures a curve longer than the straight line between its ends", () => {
@@ -127,7 +127,7 @@ describe("road network segments", () => {
     expect(() => addSegment(net, a, a, { type: 0 })).toThrow(/start and end/);
     expect(() => addSegment(net, a, b, { type: ROAD_TYPES.length })).toThrow(/road type/);
     expect(() => addSegment(net, a, b, { type: 0, network: 3 })).toThrow(/network/);
-    expect(() => addSegment(net, a, b, { type: 0, level: 4 })).toThrow(/level/);
+    expect(() => addSegment(net, a, b, { type: 0, level: 5 })).toThrow(/level/);
     expect(() => addSegment(net, a, b, { type: 0, cx: 1 })).toThrow(/cx and cz/);
     expect(segmentCount(net)).toBe(2);
   });

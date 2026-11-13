@@ -32,7 +32,7 @@ import {
   type RoadNetwork,
   type Terrain,
 } from "@city-council/sim";
-import { liveRoadSegment, segPath, type RoadNet, type SegPath } from "../render/road-geometry";
+import { isRaised, levelLift, liveRoadSegment, segPath, type RoadNet, type SegPath } from "../render/road-geometry";
 import { PICK } from "./config";
 
 /** What picking needs from the view at the pointer. */
@@ -55,13 +55,13 @@ const MAX_HALF_WIDTH = Math.max(...ROAD_TYPES.map((t) => t.width)) / 2;
 /** The height segment `seg` is drawn at, `s` metres along it from node A. */
 export function drawnHeight(net: RoadNet, terrain: Terrain, path: SegPath, s: number): number {
   const seg = path.seg;
-  if (net.segLevel[seg] === LEVEL_BRIDGE) {
+  if (net.segLevelA[seg] === LEVEL_BRIDGE) {
     const hA = net.nodeHeight[net.segA[seg] ?? 0] ?? 0;
     const hB = net.nodeHeight[net.segB[seg] ?? 0] ?? 0;
     return bridgeDeckHeight(hA, hB, path.length, s, bridgeDeckLevel(terrain.waterLevel), path.type.maxSlope);
   }
   const p = path.point(s);
-  return heightAt(terrain, p.x, p.z);
+  return heightAt(terrain, p.x, p.z) + (isRaised(net, seg) ? levelLift(net, seg, s, path.length) : 0);
 }
 
 /** Distance in pixels from `p` to the line from `a` to `b`. */

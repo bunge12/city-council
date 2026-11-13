@@ -27,7 +27,8 @@ import type { SimState } from "./state";
 import { ROAD_BUILD, ROAD_TYPES } from "./roads/balance";
 import { hullBox, isStraight, quadsMeetAwayFrom, type Quad } from "./roads/curve";
 import {
-  LEVEL_ELEVATED,
+  LEVEL_COUNT,
+  LEVEL_BRIDGE,
   NETWORK_PATH,
   NETWORK_ROAD,
   NONE,
@@ -266,9 +267,11 @@ const isRoadType = (v: unknown) => isId(v) && (v as number) < ROAD_TYPES.length;
 
 function isRow(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  if (!["a", "b", "type", "network", "level", "flags"].every((k) => isId(value[k]))) return false;
+  if (!["a", "b", "type", "network", "levelA", "levelB", "flags"].every((k) => isId(value[k]))) return false;
   if (!["cx", "cz", "length"].every((k) => isNumber(value[k]))) return false;
-  if ((value["network"] as number) > NETWORK_PATH || (value["level"] as number) > LEVEL_ELEVATED) return false;
+  if ((value["network"] as number) > NETWORK_PATH) return false;
+  if ((value["levelA"] as number) >= LEVEL_COUNT || (value["levelB"] as number) >= LEVEL_COUNT) return false;
+  if ((value["levelA"] === LEVEL_BRIDGE) !== (value["levelB"] === LEVEL_BRIDGE)) return false;
   if (value["network"] === NETWORK_ROAD && !isRoadType(value["type"])) return false;
   return value["a"] !== value["b"] && ((value["flags"] as number) & SEG_ALIVE) !== 0;
 }

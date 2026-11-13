@@ -5,6 +5,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   CHUNKS_PER_SIDE,
   LEVEL_BRIDGE,
+  LEVEL_ELEVATED_1,
+  ROAD_LEVELS,
   ROAD_TYPES,
   bridgeDeckLevel,
   heightAt,
@@ -31,7 +33,10 @@ import {
   RoadChunks,
   buildRoadChunk,
   chunkAt,
+  isRaised,
   junctionAt,
+  nodeLift,
+  raisedPierStations,
   masked,
   paintFor,
   pierStations,
@@ -542,7 +547,7 @@ describe("a bridge", () => {
   // Seed 2026's inlet: water from x = 3488 to 3600 along z = 6600.
   function bridged(): { net: RoadNetwork; seg: number } {
     const net = city([[[3400, 6600], [3700, 6600]]]);
-    const seg = Array.from(net.segLevel).indexOf(LEVEL_BRIDGE);
+    const seg = Array.from(net.segLevelA).indexOf(LEVEL_BRIDGE);
     expect(seg).toBeGreaterThanOrEqual(0);
     return { net, seg };
   }
@@ -583,5 +588,65 @@ describe("a bridge", () => {
     expect(piers.length).toBeGreaterThanOrEqual(3);
     expect(piers[0]).toBeGreaterThan(40);
     for (let i = 1; i < piers.length; i++) expect((piers[i] ?? 0) - (piers[i - 1] ?? 0)).toBeLessThanOrEqual(ROADS.bridges.pierSpacing + 1e-9);
+  });
+});
+
+describe("a road on another level", () => {
+  /** An elevated avenue over a ground street, both across the flat square, and their segment ids. */
+  function overpass(): { net: RoadNetwork; ground: number; raised: number } {
+    const state = createBareState(SEED);
+    build(state, [4200, 4600], [4400, 4600]);
+    const result = submit(state, {
+      seq: ++seq,
+      playerId: "p1",
+      type: "BuildRoad",
+      payload: { from: { x: 4300, z: 4520 }, to: { x: 4300, z: 4680 }, type: "avenue", level: "elevated1" },
+    });
+    expect(result).toEqual({ ok: true });
+    step(state);
+    const net = state.roads;
+    const raised = Array.from(net.segLevelA).indexOf(LEVEL_ELEVATED_1);
+    return { net, ground: raised === 0 ? 1 : 0, raised };
+  }
+
+  it("is drawn at its level's height over the ground, on piers, and the road under it stays on the ground", () => {
+    const { net, raised } = overpass();
+    expect(isRaised(net, raised)).toBe(true);
+    const g = buildRoadChunk(net, terrain, chunkAt(4300, 4600), [raised], [], () => null);
+    const p = g.surface.positions;
+    let atDeck = 0;
+    let lower = 0;
+    for (let i = 0; i < p.length; i += 3) {
+      const x = p[i] ?? 0;
+      const y = p[i + 1] ?? 0;
+      const z = p[i + 2] ?? 0;
+      // On the centre line's ground plus the level's height, across the whole width.
+      if (Math.abs(y - (heightAt(terrain, 4300, z) + ROAD_LEVELS.elevated1)) < 1e-3 && Math.abs(x - 4300) <= 9.01) atDeck++;
+      if (y < heightAt(terrain, x, z)) lower++;
+    }
+    expect(atDeck).toBeGreaterThan(10);
+    // The piers reach into the ground.
+    expect(lower).toBeGreaterThan(0);
+    // The street beneath is drawn draped, as before.
+    const under = buildRoadChunk(net, terrain, chunkAt(4300, 4600), [overpass().ground], [], () => null).surface.positions;
+    for (let i = 0; i < under.length; i += 3) {
+      expect(under[i + 1]).toBeCloseTo(heightAt(terrain, under[i] ?? 0, under[i + 2] ?? 0), 4);
+    }
+  });
+
+  it("stands piers no further apart than the spacing, away from its ends", () => {
+    for (const length of [10, 36, 37, 160, 1000]) {
+      const st = raisedPierStations(length);
+      expect(st.length).toBeGreaterThan(0);
+      for (const t of st) expect(t > 0 && t < length).toBe(true);
+      const all = [0, ...st, length];
+      for (let i = 1; i < all.length; i++) expect((all[i] ?? 0) - (all[i - 1] ?? 0)).toBeLessThanOrEqual(ROADS.bridges.pierSpacing + 1e-9);
+    }
+  });
+
+  it("lifts a junction whose roads are all on one level, and no other", () => {
+    const { net, ground, raised } = overpass();
+    expect(nodeLift(net, net.segA[raised] ?? 0)).toBe(ROAD_LEVELS.elevated1);
+    expect(nodeLift(net, net.segA[ground] ?? 0)).toBe(0);
   });
 });

@@ -69,6 +69,21 @@ describe("startSource", () => {
     expect(seg?.dirs).toHaveLength(2);
     expect(startSource(net, { x: 4400, z: 4610 })).toBeNull();
   });
+
+  it("ignores a deck overhead, as the sim joins only roads on the ground", () => {
+    const raised = createBareState(SEED);
+    const result = submit(raised, {
+      seq: 1,
+      playerId: "test",
+      type: "BuildRoad",
+      payload: { from: { x: 4200, z: 4600 }, to: { x: 4600, z: 4600 }, type: "street", level: "elevated1" },
+    });
+    expect(result).toEqual({ ok: true });
+    step(raised);
+    expect(startSource(raised.roads, { x: 4601, z: 4602 })).toBeNull();
+    expect(startSource(raised.roads, { x: 4400, z: 4603 })).toBeNull();
+    expect(previewRoad(raised.roads, terrain, { x: 4400, z: 4603 }, { x: 4400, z: 4800 }, "street").junctions).toEqual([]);
+  });
 });
 
 describe("snapPoint targets", () => {

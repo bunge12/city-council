@@ -21,6 +21,7 @@
 
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "../chunks";
 import { curveBox, curveTouchesBox, nearestOnQuad, segmentQuad, segmentTouchesBox } from "./curve";
+import { LEVELS_ALL, levelAtNode, segmentLevelBits } from "./levels";
 import {
   NETWORK_PATH,
   NETWORK_RAIL,
@@ -232,18 +233,27 @@ function checkNetworks(networks: number): void {
   }
 }
 
-function segmentOnNetworks(net: RoadNetwork, seg: number, networks: number): boolean {
-  return ((1 << (net.segNetwork[seg] ?? 0)) & networks) !== 0;
+function checkLevels(levels: number): void {
+  if (!Number.isInteger(levels) || levels < 0 || levels > LEVELS_ALL) {
+    throw new RangeError(`bad level filter ${levels}`);
+  }
+}
+
+function segmentOnNetworks(net: RoadNetwork, seg: number, networks: number, levels: number = LEVELS_ALL): boolean {
+  if (((1 << (net.segNetwork[seg] ?? 0)) & networks) === 0) return false;
+  return levels === LEVELS_ALL || (segmentLevelBits(net, seg) & levels) !== 0;
 }
 
 /**
- * Whether node `node` belongs to a network in the filter: at least one
- * segment on it does. A node with no segments matches only NETWORKS_ALL.
+ * Whether node `node` belongs to a network and level in the filters: at
+ * least one segment on it does, and on a level filter by its level at this
+ * node. A node with no segments matches only NETWORKS_ALL and LEVELS_ALL.
  */
-export function nodeOnNetworks(net: RoadNetwork, node: number, networks: number): boolean {
-  if (networks === NETWORKS_ALL) return true;
+export function nodeOnNetworks(net: RoadNetwork, node: number, networks: number, levels: number = LEVELS_ALL): boolean {
+  if (networks === NETWORKS_ALL && levels === LEVELS_ALL) return true;
   for (let seg = net.nodeFirstSeg[node] ?? NONE; seg !== NONE; seg = nextSegmentAt(net, seg, node)) {
-    if (segmentOnNetworks(net, seg, networks)) return true;
+    if (((1 << (net.segNetwork[seg] ?? 0)) & networks) === 0) continue;
+    if (((1 << levelAtNode(net, seg, node)) & levels) !== 0) return true;
   }
   return false;
 }
@@ -256,7 +266,8 @@ export interface NearestNode {
 
 /**
  * The node nearest (x, z) no further than `radius` metres away, on a network
- * in the filter, or null. Of nodes at the same distance, the lowest id.
+ * and a level in the filters, or null. Of nodes at the same distance, the
+ * lowest id.
  */
 export function nearestNode(
   index: RoadIndex,
@@ -264,10 +275,12 @@ export function nearestNode(
   z: number,
   radius: number,
   networks: number = NETWORKS_ALL,
+  levels: number = LEVELS_ALL,
 ): NearestNode | null {
   checkPoint(x, z);
   checkRadius(radius);
   checkNetworks(networks);
+  checkLevels(levels);
   const { net, cellsPerSide: n } = index;
   const r2 = radius * radius;
   let best = NONE;
@@ -283,7 +296,7 @@ export function nearestNode(
         const dz = (net.nodeZ[node] ?? 0) - z;
         const d2 = dx * dx + dz * dz;
         if (d2 > r2 || d2 > bestD2 || (d2 === bestD2 && node > best)) continue;
-        if (!nodeOnNetworks(net, node, networks)) continue;
+        if (!nodeOnNetworks(net, node, networks, levels)) continue;
         best = node;
         bestD2 = d2;
       }
@@ -304,8 +317,9 @@ export interface NearestPoint {
 
 /**
  * The point on a segment nearest (x, z), no further than `radius` metres
- * away, on a network in the filter, or null. Of segments at the same
- * distance, the lowest id.
+ * away, on a network and a level in the filters, or null. A segment matches
+ * a level filter by either end's level. Of segments at the same distance,
+ * the lowest id.
  */
 export function nearestPointOnSegment(
   index: RoadIndex,
@@ -313,10 +327,12 @@ export function nearestPointOnSegment(
   z: number,
   radius: number,
   networks: number = NETWORKS_ALL,
+  levels: number = LEVELS_ALL,
 ): NearestPoint | null {
   checkPoint(x, z);
   checkRadius(radius);
   checkNetworks(networks);
+  checkLevels(levels);
   const { net, cellsPerSide: n } = index;
   const r2 = radius * radius;
   let best = NONE;
@@ -333,7 +349,7 @@ export function nearestPointOnSegment(
       for (const seg of index.segCells[cj * n + ci] ?? []) {
         // A segment in several cells is seen more than once; the second look
         // finds the same distance and the same id, so changes nothing.
-        if (seg === best || !segmentOnNetworks(net, seg, networks)) continue;
+        if (seg === best || !segmentOnNetworks(net, seg, networks, levels)) continue;
         const a = net.segA[seg] ?? NONE;
         const b = net.segB[seg] ?? NONE;
         const ax = net.nodeX[a] ?? 0;
@@ -373,7 +389,11 @@ export function nearestPointOnSegment(
   return best === NONE ? null : { segment: best, x: bestX, z: bestZ, t: bestT, distance: Math.sqrt(bestD2) };
 }
 
-/** Ids of the segments that touch the box, edges included, ascending. */
+/**
+ * Ids of the segments that touch the box, edges included, ascending, on a
+ * network and a level in the filters. A segment matches a level filter by
+ * either end's level.
+ */
 export function segmentsInBox(
   index: RoadIndex,
   minX: number,
@@ -381,17 +401,19 @@ export function segmentsInBox(
   maxX: number,
   maxZ: number,
   networks: number = NETWORKS_ALL,
+  levels: number = LEVELS_ALL,
 ): number[] {
   checkPoint(minX, minZ);
   checkPoint(maxX, maxZ);
   if (minX > maxX || minZ > maxZ) throw new RangeError("the box's minimum is past its maximum");
   checkNetworks(networks);
+  checkLevels(levels);
   const { net, cellsPerSide: n } = index;
   const found: number[] = [];
   for (let cj = cellOf(index, minZ); cj <= cellOf(index, maxZ); cj++) {
     for (let ci = cellOf(index, minX); ci <= cellOf(index, maxX); ci++) {
       for (const seg of index.segCells[cj * n + ci] ?? []) {
-        if (!segmentOnNetworks(net, seg, networks)) continue;
+        if (!segmentOnNetworks(net, seg, networks, levels)) continue;
         const a = net.segA[seg] ?? NONE;
         const b = net.segB[seg] ?? NONE;
         const ax = net.nodeX[a] ?? 0;

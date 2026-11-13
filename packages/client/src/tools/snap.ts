@@ -34,6 +34,7 @@
 // which it rounds to its build grid.
 
 import {
+  LEVELS_GROUND,
   NETWORKS_ROAD,
   NONE,
   ROAD_BUILD,
@@ -41,7 +42,6 @@ import {
   isStraight,
   nearestOnQuad,
   roadIndexOf,
-  LEVEL_BRIDGE,
   segmentQuad,
   segmentsInBox,
   type BuildPoint,
@@ -174,9 +174,11 @@ function segmentDir(net: RoadNet, seg: number, t = 0): { dx: number; dz: number 
 
 /** Road segments touching the square of half-side `r` around (x, z). */
 function roadSegmentsNear(net: RoadNet, x: number, z: number, r: number): number[] {
-  // Nothing joins a bridge but at its bank nodes, so a bridge's body catches nothing.
-  return segmentsInBox(roadIndexOf(asNetwork(net)), x - r, z - r, x + r, z + r, NETWORKS_ROAD).filter(
-    (s) => liveRoadSegment(net, s) && net.segLevel[s] !== LEVEL_BRIDGE,
+  // The road tool builds on the ground. Nothing joins a bridge but at its
+  // bank nodes, so a bridge's body catches nothing, and a deck or tunnel on
+  // another level is ignored, as the sim ignores it.
+  return segmentsInBox(roadIndexOf(asNetwork(net)), x - r, z - r, x + r, z + r, NETWORKS_ROAD, LEVELS_GROUND).filter((s) =>
+    liveRoadSegment(net, s),
   );
 }
 

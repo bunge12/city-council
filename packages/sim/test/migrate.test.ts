@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SNAPSHOT_VERSION, connectionEnd, createBareState, createState, hashState, migrateState, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
-import { addNode, addSegment, createRoadNetwork, isNode, segmentCount } from "../src/roads/network";
+import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 
 /** `state` as an older version: its fields minus the ones that version did not have. */
@@ -21,9 +21,9 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(5);
+    expect(SNAPSHOT_VERSION).toBe(6);
     const fresh = createState(5);
-    expect(state).toEqual({ ...v1, version: 5, log: [], logOffset: 0, roads: fresh.roads, undo: [], connections: fresh.connections });
+    expect(state).toEqual({ ...v1, version: 6, log: [], logOffset: 0, roads: fresh.roads, undo: [], connections: fresh.connections });
     expect(() => hashState(state)).not.toThrow();
   });
 
@@ -31,14 +31,14 @@ describe("migrateState", () => {
     const v2 = older(createBareState(9), 2, "roads", "undo", "connections");
     const state = migrateState(v2);
     const fresh = createState(9);
-    expect(state).toEqual({ ...v2, version: 5, roads: fresh.roads, undo: [], connections: fresh.connections });
+    expect(state).toEqual({ ...v2, version: 6, roads: fresh.roads, undo: [], connections: fresh.connections });
     expect(() => hashState(state)).not.toThrow();
   });
 
   it("upgrades a version 3 state by adding an empty undo history", () => {
     const state = migrateState(older(createBareState(9), 3, "undo", "connections"));
     expect(state.undo).toEqual([]);
-    expect(state.version).toBe(5);
+    expect(state.version).toBe(6);
     expect(() => hashState(state)).not.toThrow();
   });
 
@@ -72,6 +72,28 @@ describe("migrateState", () => {
       expect([state.roads.nodeX[edge], state.roads.nodeZ[edge]]).not.toEqual([first.x, first.z]);
       expect(connectionEnd(state.roads, edge)).toBeGreaterThan(b);
     }
+  });
+
+  it("upgrades a version 5 state by giving each segment its level at both ends, in the network and the undo history", () => {
+    const state = createState(9);
+    const net = state.roads;
+    const a = addNode(net, 1000, 1000, 10);
+    const b = addNode(net, 1100, 1000, 10);
+    addSegment(net, a, b, { type: 0, level: LEVEL_BRIDGE });
+    // The version 5 shape: one level per segment and per undo row.
+    const roads5: Record<string, unknown> = { ...net, segLevel: net.segLevelA };
+    delete roads5["segLevelA"];
+    delete roads5["segLevelB"];
+    const row = { a, b, type: 0, network: 0, level: LEVEL_BRIDGE, flags: 1, cx: 1050, cz: 1000, length: 100 };
+    const undo5 = [{ playerId: "p1", entry: 0, type: "BuildRoad", ops: [{ op: "addNode", id: a, grown: true }, { op: "addSeg", id: 9, grown: true, row }] }];
+    const migrated = migrateState({ ...older(state, 5, "roads", "undo"), roads: roads5, undo: undo5 });
+    expect(migrated.version).toBe(6);
+    expect(Object.keys(migrated.roads)).toEqual(Object.keys(createRoadNetwork()));
+    expect(migrated.roads).toEqual(net);
+    expect(migrated.undo[0]?.ops[0]).toEqual({ op: "addNode", id: a, grown: true });
+    const want: Record<string, unknown> = { ...row, levelA: LEVEL_BRIDGE, levelB: LEVEL_BRIDGE };
+    delete want["level"];
+    expect(migrated.undo[0]?.ops[1]).toEqual({ op: "addSeg", id: 9, grown: true, row: want });
   });
 
   it("leaves a current state as it is", () => {

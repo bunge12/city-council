@@ -35,11 +35,18 @@
 // `bridgeDeckHeight` gives from its bank nodes and the water, not on the
 // ground: the deck, a fascia and railing along each edge, and piers from
 // under the deck down to the ground or the lake bed below.
+//
+// A segment on another level (issue 22) is drawn the same way at its own
+// height, `levelOffset` above the ground under it, with piers along it when
+// it is above the ground. A junction whose roads are all on one such level
+// is drawn at that height too. A tunnel is drawn below the ground, where the
+// terrain hides it until M5's underground view.
 
 import {
   CHUNKS_PER_SIDE,
   CHUNK_SIZE,
   LEVEL_BRIDGE,
+  LEVEL_GROUND,
   NETWORK_ROAD,
   NODE_ALIVE,
   NONE,
@@ -50,6 +57,7 @@ import {
   bridgeRamps,
   heightAt,
   isStraight,
+  levelOffset,
   minRadius,
   quadPoint,
   segmentQuad,
@@ -74,6 +82,39 @@ export function liveRoadSegment(net: RoadNet, seg: number): boolean {
 
 export function liveNode(net: RoadNet, node: number): boolean {
   return node >= 0 && node < net.nodeFlags.length && ((net.nodeFlags[node] ?? 0) & NODE_ALIVE) !== 0;
+}
+
+/**
+ * How far above the ground under it segment `seg` is drawn, `s` metres
+ * along it, when it is on a level other than the ground and not a bridge.
+ * Runs evenly from one end's level to the other's on a ramp.
+ */
+export function levelLift(net: RoadNet, seg: number, s: number, length: number): number {
+  const a = levelOffset(net.segLevelA[seg] ?? LEVEL_GROUND);
+  const b = levelOffset(net.segLevelB[seg] ?? LEVEL_GROUND);
+  return length > 0 ? a + ((b - a) * s) / length : a;
+}
+
+/** Whether segment `seg` is off the ground at either end and not a bridge: an elevated road, a tunnel or a ramp. */
+export function isRaised(net: RoadNet, seg: number): boolean {
+  const a = net.segLevelA[seg] ?? LEVEL_GROUND;
+  const b = net.segLevelB[seg] ?? LEVEL_GROUND;
+  return a !== LEVEL_BRIDGE && (a !== LEVEL_GROUND || b !== LEVEL_GROUND);
+}
+
+/**
+ * How far above the ground a junction at `node` is drawn: the height of the
+ * level its road segments all have there, or 0 when they are on the ground
+ * or do not agree.
+ */
+export function nodeLift(net: RoadNet, node: number): number {
+  let level = -1;
+  for (const seg of roadSegmentsAt(net, node)) {
+    const here = (net.segA[seg] === node ? net.segLevelA[seg] : net.segLevelB[seg]) ?? LEVEL_GROUND;
+    if (level === -1) level = here;
+    else if (level !== here) return 0;
+  }
+  return level === -1 || level === LEVEL_BRIDGE ? 0 : levelOffset(level);
 }
 
 /** Road segments at `node`, in list order. */
@@ -767,13 +808,20 @@ export function buildRoadChunk(
     const b = net.segB[seg] ?? 0;
     const t0 = trimAt(junctions(a), seg);
     const t1 = f.length - trimAt(junctions(b), seg);
-    const bridge = net.segLevel[seg] === LEVEL_BRIDGE;
+    const isBridge = net.segLevelA[seg] === LEVEL_BRIDGE;
+    const raised = isRaised(net, seg);
+    // Drawn as a deck rather than draped on the ground.
+    const bridge = isBridge || raised;
     const hA = net.nodeHeight[a] ?? 0;
     const hB = net.nodeHeight[b] ?? 0;
-    /** The deck's height at distance `t` along a bridge. */
-    const deckAt = (t: number): number => bridgeDeckHeight(hA, hB, f.length, t, deck, f.type.maxSlope);
+    /** The deck's height at distance `t` along a bridge, or along a raised road over the ground under its centre line. */
+    const deckAt = (t: number): number => {
+      if (isBridge) return bridgeDeckHeight(hA, hB, f.length, t, deck, f.type.maxSlope);
+      const p = f.point(t);
+      return heightAt(terrain, p.x, p.z) + levelLift(net, seg, t, f.length);
+    };
     let st = f.stations(0, f.length, ROADS.sampleStep);
-    if (bridge) {
+    if (isBridge) {
       // A station where each ramp meets the level deck, so the kink is drawn where it is.
       const ramps = bridgeRamps(hA, hB, f.length, deck, f.type.maxSlope);
       st = [...st, ramps.a, f.length - ramps.b].filter((t) => t > 1e-3 && t < f.length - 1e-3);
@@ -859,10 +907,18 @@ export function buildRoadChunk(
         if (bridge) bridgeSides(surface, f, s0, s1, deckAt);
       }
     }
-    if (bridge) {
+    if (isBridge) {
       for (const t of pierStations(f.length, deckAt, deck)) {
         const p = f.point(t);
         if (chunkAt(p.x, p.z) === chunk) pier(surface, f, t, deckAt(t), heightAt(terrain, p.x, p.z));
+      }
+    } else if (raised) {
+      for (const t of raisedPierStations(f.length)) {
+        const p = f.point(t);
+        const ground = heightAt(terrain, p.x, p.z);
+        const top = deckAt(t);
+        // A pier only where the deck stands above the ground: none under a tunnel or a ramp's foot.
+        if (chunkAt(p.x, p.z) === chunk && top - ROADS.bridges.deckDepth > ground) pier(surface, f, t, top, ground);
       }
     }
     if (drew) segCount++;
@@ -879,7 +935,7 @@ export function buildRoadChunk(
       const lineRgb = linearRgb(ROADS.cityLines.colours[widest.id] ?? 0);
       const x = net.nodeX[node] ?? 0;
       const z = net.nodeZ[node] ?? 0;
-      const y = heightAt(terrain, x, z);
+      const y = heightAt(terrain, x, z) + nodeLift(net, node);
       const centre = lines.vertex(x, y, z, lineRgb);
       lines.sides.push(0, 0);
       lines.halves.push(widest.width / 2);
@@ -895,9 +951,17 @@ export function buildRoadChunk(
     }
     if (!j || j.ring.length < 6) continue;
     const rgb = surfaceColour(j.type);
-    const centre = ground(surface, j.x, j.z, rgb);
+    const lift = nodeLift(net, node);
+    const atJunction = (x: number, z: number): number => {
+      if (lift === 0) return ground(surface, x, z, rgb);
+      // Level with the decks that meet here, which take the ground under their centre lines.
+      const v = surface.vertex(x, heightAt(terrain, j.x, j.z) + lift, z, rgb);
+      surface.normals.push(0, 1, 0);
+      return v;
+    };
+    const centre = atJunction(j.x, j.z);
     const ring: number[] = [];
-    for (let k = 0; k < j.ring.length; k += 2) ring.push(ground(surface, j.ring[k] ?? 0, j.ring[k + 1] ?? 0, rgb));
+    for (let k = 0; k < j.ring.length; k += 2) ring.push(atJunction(j.ring[k] ?? 0, j.ring[k + 1] ?? 0));
     const before = surface.indices.length;
     for (let k = 0; k < ring.length; k++) surface.triangle(centre, ring[k] ?? 0, ring[(k + 1) % ring.length] ?? 0);
     if (surface.indices.length > before) junctionCount++;
@@ -983,6 +1047,14 @@ export function pierStations(length: number, deckAt: (t: number) => number, deck
   const out: number[] = [];
   for (let k = 0; k <= gaps; k++) out.push(from + (span * k) / gaps);
   return out;
+}
+
+/** Where a raised road's piers stand, metres along it: evenly spaced, at most `ROADS.bridges.pierSpacing` apart, not at its ends. */
+export function raisedPierStations(length: number): number[] {
+  const gaps = Math.max(1, Math.ceil(length / ROADS.bridges.pierSpacing));
+  const out: number[] = [];
+  for (let k = 1; k < gaps; k++) out.push((length * k) / gaps);
+  return out.length > 0 ? out : [length / 2];
 }
 
 /** A pier at `t` along a bridge: a box from under the deck at `top` down into the ground at `bottom`. */
