@@ -10,7 +10,7 @@ import { SEED, buildRoads, groundAt } from "./road-fixtures";
 // the sim refuses, and switching mode or tool part way through a road leaves
 // nothing behind.
 
-type Vec3 = [number, number, number];
+type Vec3 = readonly [number, number, number];
 interface Net {
   nodeX: ArrayLike<number>;
   nodeZ: ArrayLike<number>;
