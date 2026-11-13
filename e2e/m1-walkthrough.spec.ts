@@ -147,6 +147,14 @@ async function screenAt(page: Page, x: number, z: number): Promise<{ x: number; 
 /** Moves the pointer to ground point (x, z), `off` CSS pixels away on screen, and returns where it snapped. */
 async function hover(page: Page, x: number, z: number, off: [number, number] = [0, 0]): Promise<SnapInfo | null> {
   const p = await screenAt(page, x, z);
+  // A panel over the point would take the pointer off the map, and the tool
+  // would see nothing. Say which one rather than fail later on the readout.
+  const over = await page.evaluate(([px, py]) => {
+    const el = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { id: string; tagName: string; closest(s: string): { id: string } | null } | null } }).document.elementFromPoint(px, py);
+    if (!el || el.id === "view") return null;
+    return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""} in ${el.closest("[id]")?.id ?? "the page"}`;
+  }, [p.x + off[0], p.y + off[1]] as const);
+  expect(over, `ground point (${x}, ${z}) is under a panel at (${Math.round(p.x)}, ${Math.round(p.y)})`).toBeNull();
   await page.mouse.move(p.x + off[0], p.y + off[1], { steps: 4 });
   await frames(page);
   return page.evaluate(async () => (await window.cityCouncil.camera).snap());
@@ -390,6 +398,10 @@ for (const variant of [
       expect([built[0]?.ax, built[0]?.az, built[0]?.bx, built[0]?.bz]).toEqual([A.x0, A.z, A.x1, A.z]);
       await away(page);
       await shot(page, info, dir, "1-street-built");
+      // The log stays closed from here, so it does not cover the map. Its
+      // panel is only hidden, and its rows are still read below.
+      await page.keyboard.press("KeyL");
+      await expect(page.locator("#activity-log")).toBeHidden();
     });
 
     await test.step("2. draw a second street across the first: the first splits and a four-way intersection forms", async () => {
@@ -645,9 +657,7 @@ for (const variant of [
       expect(after.loadedTick).toBe(tick);
       expect(await roads(page)).toEqual(saved.roads);
       expect(await log(page)).toEqual(saved.log);
-      // The panels are page state and start closed again. The log stays
-      // closed from here, so it does not cover the roads drawn on the
-      // right of the screen; its rows are still read below.
+      // The panels are page state and start closed again.
       await look(page, 4372, 4600, 420);
       await shot(page, info, dir, "9-after-reload");
     });
