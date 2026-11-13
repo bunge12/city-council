@@ -327,7 +327,7 @@ describe("UpgradeRoad", () => {
     const state = createBareState(SEED);
     ok(state, road([3400, 6600], [3700, 6600], "street"));
     const net = state.roads;
-    const bridge = liveSegments(net).find((s) => net.segLevel[s] === LEVEL_BRIDGE) ?? -1;
+    const bridge = liveSegments(net).find((s) => net.segLevelA[s] === LEVEL_BRIDGE) ?? -1;
     expect(bridge).toBeGreaterThanOrEqual(0);
     // Avenue ramps are held to 10% rather than 12%, so either the bridge fits
     // or the reason names the ramp. A one-way has the street's limits.

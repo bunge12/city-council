@@ -46,6 +46,7 @@ import {
   nextSegmentAt,
   nodeIdLimit,
   observeNetwork,
+  segmentAtLevel,
   segmentIdLimit,
   type RoadNetwork,
 } from "./network";
@@ -95,7 +96,7 @@ export interface BlockIndex {
 
 /** Whether segment `seg` bounds blocks: a live road segment at ground level. */
 export function boundsBlocks(net: RoadNetwork, seg: number): boolean {
-  return isSegment(net, seg) && net.segNetwork[seg] === NETWORK_ROAD && net.segLevel[seg] === LEVEL_GROUND;
+  return isSegment(net, seg) && net.segNetwork[seg] === NETWORK_ROAD && segmentAtLevel(net, seg, LEVEL_GROUND);
 }
 
 function ensureSegments(index: BlockIndex, seg: number): void {

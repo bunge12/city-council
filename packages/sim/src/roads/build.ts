@@ -24,16 +24,27 @@
 // water from which a ramp at the type's slope limit reaches the deck by the
 // shore; failing that the road is refused. Two runs too close together for
 // ground between them share one bridge. Only the ground pieces get the slope
-// check, and no new piece may meet an existing bridge away from a shared node.
+// check.
+//
+// Every segment has a level (issue 22, levels.ts). A road splits and joins
+// only segments on its own level. Where it crosses one on another level, or
+// a bridge, their heights there are compared: with `levels.clearance` between
+// them they pass with no junction, and closer than that the road is refused.
+// A BuildRoad payload may name a level other than the ground; no player tool
+// does in M1, but tests and the debug panel build raised roads that way. A
+// road at any level but the ground makes no bridges, so it may not cross
+// water.
 //
 // Checks feed command validation, so only exact arithmetic (CLAUDE.md
 // rule 6). Lint enforces it in this folder.
 
-import { ROAD_BUILD, ROAD_TYPES, type RoadType } from "./balance";
+import { ROAD_BUILD, ROAD_LEVELS, ROAD_TYPES, type RoadType } from "./balance";
 import { bridgeDeckLevel } from "./bridge";
+import { BUILD_LEVELS, LEVELS_ALL, LEVELS_SURFACE, clearanceReason, heightAlong, segmentShape, type LevelledShape } from "./levels";
 import {
   LEVEL_BRIDGE,
   LEVEL_GROUND,
+  segmentAtLevel,
   NETWORK_ROAD,
   NODE_FIXED,
   NONE,
@@ -82,6 +93,11 @@ export interface BuildRoadPayload {
    * The road is the quadratic curve from its start through this to its end.
    */
   control?: BuildPoint;
+  /**
+   * The level to build at, a key of BUILD_LEVELS such as "elevated1". The
+   * ground if left out. No player tool sets it in M1.
+   */
+  level?: string;
 }
 
 /**
@@ -118,9 +134,11 @@ export interface RoadPlan {
   stops: PlanStop[];
   /**
    * The level of each piece of the new road: `levels[i]` is the piece from
-   * stop i to stop i + 1. LEVEL_BRIDGE over water, LEVEL_GROUND elsewhere.
+   * stop i to stop i + 1. LEVEL_BRIDGE over water, the road's level elsewhere.
    */
   levels: number[];
+  /** The level the road was asked for: LEVEL_GROUND unless the payload named another. */
+  level: number;
   /** Plan length of the new road in metres, every piece added up. */
   length: number;
   /** The part of `length` that is bridge, metres. */
@@ -162,15 +180,23 @@ function isPoint(value: unknown): value is BuildPoint {
   return Number.isFinite(p["x"]) && Number.isFinite(p["z"]);
 }
 
-function readPayload(payload: unknown): BuildRoadPayload | string {
+function readPayload(payload: unknown): (BuildRoadPayload & { levelValue: number }) | string {
   if (typeof payload !== "object" || payload === null) return "BuildRoad needs a start, an end and a road type";
   const p = payload as Record<string, unknown>;
   if (!isPoint(p["from"]) || !isPoint(p["to"])) return "BuildRoad needs a start and an end, each with a finite x and z";
   if (typeof p["type"] !== "string") return "BuildRoad needs a road type";
+  const level = p["level"];
+  let levelValue = LEVEL_GROUND;
+  if (level !== undefined) {
+    if (typeof level !== "string" || !Object.hasOwn(BUILD_LEVELS, level)) {
+      return `A road's level must be one of ${Object.keys(BUILD_LEVELS).join(", ")}`;
+    }
+    levelValue = BUILD_LEVELS[level] ?? LEVEL_GROUND;
+  }
   const control = p["control"];
-  if (control === undefined) return { from: p["from"], to: p["to"], type: p["type"] };
+  if (control === undefined) return { from: p["from"], to: p["to"], type: p["type"], levelValue };
   if (!isPoint(control)) return "A curved road's control point needs a finite x and z";
-  return { from: p["from"], to: p["to"], type: p["type"], control };
+  return { from: p["from"], to: p["to"], type: p["type"], control, levelValue };
 }
 
 function onMap(terrain: Terrain, x: number, z: number): boolean {
@@ -214,10 +240,9 @@ export function crossingPoint(
 }
 
 // What the new road is built as. Its pieces over water are bridges instead,
-// but only ground segments split or are split: nothing branches off a
-// bridge. Only segments on the same network and level split each other.
+// but only segments on the road's level split or are split: nothing branches
+// off a bridge. Only segments on the same network and level split each other.
 const NEW_NETWORK = NETWORK_ROAD;
-const NEW_LEVEL = LEVEL_GROUND;
 
 const SHORT_ROAD = `Too short: a road must be at least ${ROAD_BUILD.minLength} m long`;
 const SHORT_PIECE = `Too close to a junction: every piece of road between junctions must be at least ${ROAD_BUILD.minLength} m long`;
@@ -228,9 +253,21 @@ const SHARP = `The angle with the road it joins is too sharp: it must be at leas
 const SHALLOW = `The road crosses another road at too shallow an angle: it must be at least ${ROAD_BUILD.minAngleDegrees} degrees`;
 const TANGLED = "The road passes too close to another junction to join it cleanly";
 
-/** Whether a segment is on the layer the new road is built on, and so can split or be split. */
-function onNewLayer(net: RoadNetwork, seg: number): boolean {
-  return net.segNetwork[seg] === NEW_NETWORK && net.segLevel[seg] === NEW_LEVEL;
+/**
+ * Whether a segment is on the layer the new road is built on, `level` at both
+ * ends, and so can split or be split.
+ */
+function onNewLayer(net: RoadNetwork, seg: number, level: number): boolean {
+  return net.segNetwork[seg] === NEW_NETWORK && segmentAtLevel(net, seg, level);
+}
+
+/**
+ * The level filter for the nodes a road at `level` can join: those with a
+ * segment at that level there. A bridge's bank nodes sit on the ground, so a
+ * ground road joins them too.
+ */
+function nodeLevels(level: number): number {
+  return level === LEVEL_GROUND ? LEVELS_SURFACE : 1 << level;
 }
 
 function distance(ax: number, az: number, bx: number, bz: number): number {
@@ -298,10 +335,10 @@ function subQuadTo(q: Quad, t0: number, t1: number, x: number, z: number, toSpli
  * a new node. On a straight segment the junction is rounded to the grid; on
  * a curve it is the exact point on the curve, so the pieces trace it.
  */
-function resolveEnd(net: RoadNetwork, x: number, z: number, t: number): PlanStop | string {
+function resolveEnd(net: RoadNetwork, x: number, z: number, t: number, level: number): PlanStop | string {
   const index = roadIndexOf(net);
   const radius = ROAD_BUILD.mergeDistance;
-  const near = nearestNode(index, x, z, radius, NETWORKS_ROAD);
+  const near = nearestNode(index, x, z, radius, NETWORKS_ROAD, nodeLevels(level));
   if (near) return { x: net.nodeX[near.node] ?? 0, z: net.nodeZ[near.node] ?? 0, node: near.node, splits: [], splitAt: [], t };
 
   // The nearest point on a segment body, as `nearestPointOnSegment` finds it
@@ -311,8 +348,8 @@ function resolveEnd(net: RoadNetwork, x: number, z: number, t: number): PlanStop
   let bestX = 0;
   let bestZ = 0;
   let bestU = 0;
-  for (const seg of segmentsInBox(index, x - radius, z - radius, x + radius, z + radius, NETWORKS_ROAD)) {
-    if (!onNewLayer(net, seg)) continue;
+  for (const seg of segmentsInBox(index, x - radius, z - radius, x + radius, z + radius, NETWORKS_ROAD, 1 << level)) {
+    if (!onNewLayer(net, seg, level)) continue;
     const found = nearestOnQuad(segmentQuad(net, seg), x, z);
     if (found.d2 > bestD2 || (found.d2 === bestD2 && best !== NONE)) continue;
     best = seg;
@@ -372,14 +409,14 @@ function placeCrossing(stop: PlanStop, start: PlanStop, end: PlanStop, seg: numb
  * than once. A crossing on a curved segment is the exact point on it; one
  * on a straight segment is rounded to the grid.
  */
-function crossings(net: RoadNetwork, start: PlanStop, end: PlanStop, road: Quad, curved: boolean): PlanStop[] | string {
+function crossings(net: RoadNetwork, start: PlanStop, end: PlanStop, road: Quad, curved: boolean, level: number): PlanStop[] | string {
   const { x: ax, z: az } = start;
   const { x: bx, z: bz } = end;
   const box = curveBox(road);
-  const found = segmentsInBox(roadIndexOf(net), box.minX, box.minZ, box.maxX, box.maxZ, NETWORKS_ROAD);
+  const found = segmentsInBox(roadIndexOf(net), box.minX, box.minZ, box.maxX, box.maxZ, NETWORKS_ROAD, 1 << level);
   const stops: PlanStop[] = [];
   for (const seg of found) {
-    if (!onNewLayer(net, seg)) continue;
+    if (!onNewLayer(net, seg, level)) continue;
     const p = net.segA[seg] ?? NONE;
     const q = net.segB[seg] ?? NONE;
     const shape = segmentQuad(net, seg);
@@ -565,16 +602,16 @@ function angleProblem(net: RoadNetwork, planned: PlannedSegment[], removed: numb
  * meet elsewhere, so where a curve is involved only the shared points are
  * let off.
  */
-function tangled(net: RoadNetwork, planned: PlannedSegment[], removed: number[]): boolean {
+function tangled(net: RoadNetwork, planned: PlannedSegment[], removed: number[], level: number): boolean {
   const index = roadIndexOf(net);
   for (let i = 0; i < planned.length; i++) {
     const s = planned[i] as PlannedSegment;
     const { a, b } = s;
     const shape = plannedQuad(s);
     const box = hullBox(shape);
-    const near = segmentsInBox(index, box.minX, box.minZ, box.maxX, box.maxZ, NETWORKS_ROAD);
+    const near = segmentsInBox(index, box.minX, box.minZ, box.maxX, box.maxZ, NETWORKS_ROAD, 1 << level);
     for (const seg of near) {
-      if (!onNewLayer(net, seg) || removed.includes(seg)) continue;
+      if (!onNewLayer(net, seg, level) || removed.includes(seg)) continue;
       const p = net.segA[seg] ?? NONE;
       const q = net.segB[seg] ?? NONE;
       const other = segmentQuad(net, seg);
@@ -610,7 +647,6 @@ function percent(grade: number): string {
 const WATER = "The road runs too close along the water's edge";
 const END_IN_WATER = "A road cannot start or end in water";
 const JUNCTION_IN_WATER = "The road would meet another road over water";
-const CROSSES_BRIDGE = "The road would cross a bridge, and roads cannot pass over or under each other yet";
 
 export function bridgeTooLong(type: RoadType, length: number): string {
   return `Too long for a bridge: ${Math.round(length)} m, and the ${type.name.toLowerCase()} limit is ${type.bridge.maxLength} m`;
@@ -749,7 +785,11 @@ function placeBridges(
   type: RoadType,
   stops: PlanStop[],
   control: BuildPoint | null,
+  level: number,
 ): { stops: PlanStop[]; levels: number[] } | string {
+  // Only a ground road becomes a bridge over water. Any other level keeps
+  // its level, and the ground check refuses it over water.
+  if (level !== LEVEL_GROUND) return { stops, levels: stops.slice(1).map(() => level) };
   const road = roadQuad(stops, control);
   const deck = bridgeDeckLevel(terrain.waterLevel);
   const out: PlanStop[] = [stops[0] as PlanStop];
@@ -778,7 +818,7 @@ function placeBridges(
     for (const [sa, sb] of spans) {
       if (sa > 0) {
         out.push(bank(sa));
-        levels.push(NEW_LEVEL);
+        levels.push(LEVEL_GROUND);
       }
       if (sb < n) out.push(bank(sb));
       else {
@@ -789,36 +829,90 @@ function placeBridges(
     }
     if (!reachedEnd) {
       out.push(b);
-      levels.push(NEW_LEVEL);
+      levels.push(LEVEL_GROUND);
     }
   }
   return { stops: out, levels };
 }
 
 /**
- * Whether a new piece would meet an existing bridge anywhere but a node
- * they share. One road may not pass over or under another in M1.
+ * Why a new piece may not cross a road on another level, or null. Each
+ * piece is met with every road segment near it that the plan does not
+ * split, away from the nodes they share. At each meeting the two surfaces'
+ * heights are compared (levels.ts): `levels.clearance` apart or more, they
+ * pass with no junction. Closer than that the road is refused, and so is a
+ * meeting at the same height with a segment the road cannot split, such as
+ * a bridge. Segments on the road's own level at both ends that it meets
+ * were split by `crossings`, so they meet it only at a shared stop, and the
+ * index query leaves them out: in a city mostly on the ground this check
+ * then looks at almost nothing.
  */
-function crossesBridge(net: RoadNetwork, pieces: PlannedSegment[]): boolean {
+function levelProblem(
+  net: RoadNetwork,
+  terrain: Terrain,
+  type: RoadType,
+  pieces: PlannedSegment[],
+  levels: number[],
+  removed: number[],
+  level: number,
+): string | null {
   const index = roadIndexOf(net);
-  for (const s of pieces) {
-    const shape = plannedQuad(s);
-    const box = hullBox(shape);
-    for (const seg of segmentsInBox(index, box.minX, box.minZ, box.maxX, box.maxZ, NETWORKS_ROAD)) {
-      if (net.segLevel[seg] !== LEVEL_BRIDGE) continue;
+  const clearance = ROAD_LEVELS.clearance;
+  // Every level but the road's own. A ramp with the road's level at one end
+  // still has another level's bit, so it is kept.
+  const others = LEVELS_ALL & ~(1 << level);
+  // One query over the box round every piece, which on a city mostly on the
+  // road's own level finds nothing, then each piece in order.
+  const shapes = pieces.map(plannedQuad);
+  const boxes = shapes.map(hullBox);
+  let minX = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxZ = -Infinity;
+  for (const b of boxes) {
+    minX = b.minX < minX ? b.minX : minX;
+    minZ = b.minZ < minZ ? b.minZ : minZ;
+    maxX = b.maxX > maxX ? b.maxX : maxX;
+    maxZ = b.maxZ > maxZ ? b.maxZ : maxZ;
+  }
+  if (pieces.length === 0) return null;
+  const near = segmentsInBox(index, minX, minZ, maxX, maxZ, NETWORKS_ROAD, others).filter((seg) => !removed.includes(seg));
+  if (near.length === 0) return null;
+  for (let i = 0; i < pieces.length; i++) {
+    const s = pieces[i] as PlannedSegment;
+    const pieceLevel = levels[i] ?? level;
+    const q = shapes[i] as Quad;
+    let mine: LevelledShape | null = null;
+    for (const seg of near) {
       const p = net.segA[seg] ?? NONE;
-      const q = net.segB[seg] ?? NONE;
+      const r = net.segB[seg] ?? NONE;
       const other = segmentQuad(net, seg);
-      const shared = [s.a, s.b].filter((e) => e.key === p || e.key === q);
+      const shared = [s.a, s.b].filter((e) => e.key === p || e.key === r);
       if (s.control === null && isStraight(other)) {
+        // The common case: two straight lines meet once at most.
         if (shared.length > 0) continue;
-        if (segmentsMeet(s.a.x, s.a.z, s.b.x, s.b.z, other.ax, other.az, other.bx, other.bz)) return true;
-        continue;
+        if (!segmentsMeet(s.a.x, s.a.z, s.b.x, s.b.z, other.ax, other.az, other.bx, other.bz)) continue;
       }
-      if (quadsMeetAwayFrom(shape, other, shared)) return true;
+      const met = quadMeetings(q, other);
+      for (const m of met.at) {
+        const at = quadPoint(other, m.u);
+        if (shared.some((e) => samePlace(at.x, at.z, e.x, e.z))) continue;
+        mine ??= plannedShape(net, terrain, type, s, pieceLevel);
+        const gap = heightAlong(terrain, mine, m.t) - heightAlong(terrain, segmentShape(net, seg), m.u);
+        if ((gap < 0 ? -gap : gap) >= clearance) continue;
+        return clearanceReason(gap, net.segLevelA[seg] ?? LEVEL_GROUND, net.segLevelB[seg] ?? LEVEL_GROUND);
+      }
+      // Running along a road on another level is no crossing: they never meet.
     }
   }
-  return false;
+  return null;
+}
+
+/** The levelled shape a planned piece would have once built at `level`. */
+function plannedShape(net: RoadNetwork, terrain: Terrain, type: RoadType, s: PlannedSegment, level: number): LevelledShape {
+  const q = plannedQuad(s);
+  const h = (e: PlannedEnd): number => (e.node !== NONE ? (net.nodeHeight[e.node] ?? 0) : heightAt(terrain, e.x, e.z));
+  return { q, levelA: level, levelB: level, hA: h(s.a), hB: h(s.b), length: quadLength(q), type: type.index };
 }
 
 function tooSteep(type: RoadType, steepest: number): string | null {
@@ -935,9 +1029,10 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
 
   // Too short as drawn, before either end moves to join something.
   if (distance(fx, fz, tx, tz) < ROAD_BUILD.minLength) return { ok: false, reason: SHORT_ROAD };
-  const start = resolveEnd(net, fx, fz, 0);
+  const level = input.levelValue;
+  const start = resolveEnd(net, fx, fz, 0, level);
   if (typeof start === "string") return { ok: false, reason: start };
-  const end = resolveEnd(net, tx, tz, 1);
+  const end = resolveEnd(net, tx, tz, 1, level);
   if (typeof end === "string") return { ok: false, reason: end };
   if (distance(start.x, start.z, end.x, end.z) < ROAD_BUILD.minLength) return { ok: false, reason: SHORT_ROAD };
   if (start.node !== NONE && end.node !== NONE && joined(net, start.node, end.node)) {
@@ -963,9 +1058,9 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
   }
   const curved = control !== null;
 
-  const middle = crossings(net, start, end, road, curved);
+  const middle = crossings(net, start, end, road, curved, level);
   if (typeof middle === "string") return { ok: false, reason: middle };
-  const bridged = placeBridges(terrain, type, orderStops(start, end, middle, curved), control);
+  const bridged = placeBridges(terrain, type, orderStops(start, end, middle, curved), control, level);
   if (typeof bridged === "string") return { ok: false, reason: bridged };
   const { stops, levels } = bridged;
   // A fixed node or segment, as at an outside connection, never gains a road.
@@ -1031,8 +1126,9 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
 
   const angle = angleProblem(net, planned, removed, crossingKeys);
   if (angle !== null) return { ok: false, reason: angle };
-  if (tangled(net, planned, removed)) return { ok: false, reason: TANGLED };
-  if (crossesBridge(net, pieces)) return { ok: false, reason: CROSSES_BRIDGE };
+  if (tangled(net, planned, removed, level)) return { ok: false, reason: TANGLED };
+  const passing = levelProblem(net, terrain, type, pieces, levels, removed, level);
+  if (passing !== null) return { ok: false, reason: passing };
   // Only the new road's ground is checked. A split piece follows the line of
   // the segment it came from to within a few metres, and that was checked
   // when it was built. A bridge's ramps were checked when its banks were
@@ -1044,7 +1140,7 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
   }
   const price = type.buildCostPerMetre;
   const cost = Math.round(groundLength * price + bridgeLength * price * type.bridge.costMultiplier);
-  return { ok: true, plan: { type, control, stops, levels, length, bridgeLength, cost } };
+  return { ok: true, plan: { type, control, stops, levels, level, length, bridgeLength, cost } };
 }
 
 /**
@@ -1090,7 +1186,8 @@ export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan): n
     const base = {
       type: net.segType[seg] ?? 0,
       network: net.segNetwork[seg] ?? 0,
-      level: net.segLevel[seg] ?? 0,
+      level: net.segLevelA[seg] ?? 0,
+      levelB: net.segLevelB[seg] ?? 0,
       fixed: ((net.segFlags[seg] ?? 0) & SEG_FIXED) !== 0,
     };
     removeSegment(net, seg);
@@ -1102,7 +1199,7 @@ export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan): n
   const road: number[] = [];
   for (let i = 1; i < nodes.length; i++) {
     const c = pieceControl(plan.stops, plan.control, i);
-    const spec = { type: plan.type.index, network: NEW_NETWORK, level: plan.levels[i - 1] ?? NEW_LEVEL };
+    const spec = { type: plan.type.index, network: NEW_NETWORK, level: plan.levels[i - 1] ?? plan.level };
     road.push(addSegment(net, nodes[i - 1] ?? NONE, nodes[i] ?? NONE, c ? { ...spec, cx: c.x, cz: c.z } : spec));
   }
   return road;

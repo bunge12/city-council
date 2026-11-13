@@ -1,4 +1,4 @@
-import { simInfo } from "@city-council/sim";
+import { BUILD_LEVELS, simInfo } from "@city-council/sim";
 import { useEffect, useState } from "react";
 import { blocksReadout } from "../tools/block-overlay";
 import { routeReadout } from "../tools/route-tool";
@@ -144,6 +144,38 @@ function BlockOverlay() {
   );
 }
 
+/** Labels for the levels the debug panel can build at, in the order shown. */
+const LEVEL_LABELS: Readonly<Record<string, string>> = {
+  ground: "Ground",
+  elevated1: "Elevated 1",
+  elevated2: "Elevated 2",
+  tunnel: "Tunnel",
+};
+
+/**
+ * The level the road tool builds at. No player tool sets a level in M1
+ * (issue 22): this is for seeing raised roads and crossings in the debug view.
+ */
+function RoadLevel() {
+  const level = useUi((s) => s.roadLevel);
+  return (
+    <div className="route-tool">
+      <select
+        id="road-level"
+        value={level}
+        title="The level the road tool builds at. Roads on different levels cross without a junction when there is room between them."
+        onChange={(e) => useUi.setState({ roadLevel: e.target.value, roadNote: null })}
+      >
+        {Object.keys(BUILD_LEVELS).map((key) => (
+          <option key={key} value={key}>
+            {LEVEL_LABELS[key] ?? key}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /** Numbers for whoever is building the next module. Toggled with the backquote key. */
 export function DebugPanel() {
   const open = useUi((s) => s.debugOpen);
@@ -203,6 +235,10 @@ export function DebugPanel() {
         <dt>Blocks</dt>
         <dd>
           <BlockOverlay />
+        </dd>
+        <dt>Road level</dt>
+        <dd>
+          <RoadLevel />
         </dd>
       </dl>
       <h3>Keys</h3>

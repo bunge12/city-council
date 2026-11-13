@@ -20,6 +20,18 @@
     "gridMaxStreets": 14,
     "gridMinBlockShare": 0.5
   },
+  "levels": {
+    "_about": "Heights of a segment's levels, in metres above the ground under it: a tunnel below, two elevated levels above. A bridge is not here: its deck height comes from the water (`build.bridgeClearance`). `clearance` is the least height, road surface to road surface, at which two roads cross without a junction; closer than that but not level, the road is refused. It is the 16 ft (4.9 m) vertical clearance FHWA sets for Interstates plus 1.6 m of deck structure, which is a placeholder. The heights are placeholders chosen so each level clears the one below it.",
+    "tunnel": -10,
+    "ground": 0,
+    "elevated1": 7.5,
+    "elevated2": 15,
+    "clearance": 6.5,
+    "sourceYear": 2016,
+    "source": "FHWA, Interstate design standards: 16 ft vertical clearance on rural Interstates and one urban routing, from the 2016 revision of the controlling criteria. The 1.6 m deck depth is a placeholder.",
+    "sourceUrl": "https://www.fhwa.dot.gov/design/design_standards.cfm",
+    "placeholder": true
+  },
   "types": [
     {
       "id": "street",

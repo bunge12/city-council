@@ -1,0 +1,103 @@
+{
+  "description": "An overpass on seed 2026's flat square: a ground street, an elevated avenue over it with no junction, a second ground street under the avenue, an elevated street that joins the avenue at its own level, and a tunnel under all three that its builder then takes back.",
+  "seed": 2026,
+  "untilTick": 5,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4500
+        },
+        "to": {
+          "x": 4600,
+          "z": 4500
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 0,
+      "seq": 2,
+      "playerId": "p2",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4400,
+          "z": 4420
+        },
+        "to": {
+          "x": 4400,
+          "z": 4800
+        },
+        "type": "avenue",
+        "level": "elevated1"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 3,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4700
+        },
+        "to": {
+          "x": 4600,
+          "z": 4700
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 4,
+      "playerId": "p2",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4250,
+          "z": 4600
+        },
+        "to": {
+          "x": 4550,
+          "z": 4600
+        },
+        "type": "street",
+        "level": "elevated1"
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 5,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4300,
+          "z": 4450
+        },
+        "to": {
+          "x": 4300,
+          "z": 4750
+        },
+        "type": "street",
+        "level": "tunnel"
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 6,
+      "playerId": "p1",
+      "type": "Undo",
+      "payload": {}
+    }
+  ],
+  "hash": "af7942d9af9d4363"
+}

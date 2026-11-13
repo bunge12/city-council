@@ -26,12 +26,30 @@
 
 import { ROAD_TYPES } from "./balance";
 
-/** Ground, bridge, tunnel or elevated. M1 writes only ground and bridge. */
+/**
+ * A segment's vertical level at each end (issue 22, PRD "Levels and grade
+ * separation"). Ground, tunnel and the two elevated levels sit a fixed
+ * height above or below the ground under them, from `levels` in
+ * `roads.json`. A bridge is its own level: its deck height comes from the
+ * water under it (bridge.ts), and it is a bridge at both ends. The values
+ * are what saves hold, so never renumber them.
+ */
 export const LEVEL_GROUND = 0;
 export const LEVEL_BRIDGE = 1;
 export const LEVEL_TUNNEL = 2;
-export const LEVEL_ELEVATED = 3;
-const LEVEL_COUNT = 4;
+export const LEVEL_ELEVATED_1 = 3;
+export const LEVEL_ELEVATED_2 = 4;
+export const LEVEL_COUNT = 5;
+
+/** Whether `level` is one of the level values. */
+export function isLevel(level: number): boolean {
+  return Number.isInteger(level) && level >= 0 && level < LEVEL_COUNT;
+}
+
+/** Whether segment `seg` has the same level `level` at both ends. */
+export function segmentAtLevel(net: RoadNetwork, seg: number, level: number): boolean {
+  return net.segLevelA[seg] === level && net.segLevelB[seg] === level;
+}
 
 /** Which network a segment belongs to. M1 builds only road. */
 export const NETWORK_ROAD = 0;
@@ -80,8 +98,12 @@ export interface RoadNetwork {
   segType: Uint8Array;
   /** NETWORK_ROAD, NETWORK_RAIL or NETWORK_PATH. */
   segNetwork: Uint8Array;
-  /** LEVEL_GROUND and the rest. */
-  segLevel: Uint8Array;
+  /**
+   * The level at node A and at node B: LEVEL_GROUND and the rest. They
+   * differ only on a ramp, which M5 builds; every M1 segment has one level.
+   */
+  segLevelA: Uint8Array;
+  segLevelB: Uint8Array;
   /** SEG_ALIVE, SEG_FIXED. */
   segFlags: Uint8Array;
   /**
@@ -139,7 +161,8 @@ export function createRoadNetwork(): RoadNetwork {
     segNextB: new Int32Array(0),
     segType: new Uint8Array(0),
     segNetwork: new Uint8Array(0),
-    segLevel: new Uint8Array(0),
+    segLevelA: new Uint8Array(0),
+    segLevelB: new Uint8Array(0),
     segFlags: new Uint8Array(0),
     segCX: new Float64Array(0),
     segCZ: new Float64Array(0),
@@ -213,7 +236,8 @@ export const SEG_ARRAYS = [
   "segNextB",
   "segType",
   "segNetwork",
-  "segLevel",
+  "segLevelA",
+  "segLevelB",
   "segFlags",
   "segCX",
   "segCZ",
@@ -226,7 +250,8 @@ export interface SegmentRow {
   b: number;
   type: number;
   network: number;
-  level: number;
+  levelA: number;
+  levelB: number;
   flags: number;
   cx: number;
   cz: number;
@@ -299,7 +324,8 @@ export function readSegment(net: RoadNetwork, id: number): SegmentRow {
     b: net.segB[id] ?? NONE,
     type: net.segType[id] ?? 0,
     network: net.segNetwork[id] ?? 0,
-    level: net.segLevel[id] ?? 0,
+    levelA: net.segLevelA[id] ?? 0,
+    levelB: net.segLevelB[id] ?? 0,
     flags: net.segFlags[id] ?? 0,
     cx: net.segCX[id] ?? 0,
     cz: net.segCZ[id] ?? 0,
@@ -314,7 +340,8 @@ export function sameRow(p: SegmentRow, q: SegmentRow): boolean {
     p.b === q.b &&
     p.type === q.type &&
     p.network === q.network &&
-    p.level === q.level &&
+    p.levelA === q.levelA &&
+    p.levelB === q.levelB &&
     p.flags === q.flags &&
     Object.is(p.cx, q.cx) &&
     Object.is(p.cz, q.cz) &&
@@ -426,7 +453,10 @@ export interface SegmentSpec {
   /** Index into ROAD_TYPES. */
   type: number;
   network?: number;
+  /** The level at both ends, or at node A when `levelB` is given. Ground if left out. */
   level?: number;
+  /** The level at node B, for a ramp. Defaults to `level`. */
+  levelB?: number;
   /** Control point. Leave out both for a straight segment. */
   cx?: number;
   cz?: number;
@@ -473,9 +503,12 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   if (a === b) throw new RangeError(`a segment cannot start and end at node ${a}`);
   const network = spec.network ?? NETWORK_ROAD;
   const level = spec.level ?? LEVEL_GROUND;
+  const levelB = spec.levelB ?? level;
   if (!Number.isInteger(spec.type) || spec.type < 0 || spec.type > 255) throw new RangeError(`bad segment type ${spec.type}`);
   if (!Number.isInteger(network) || network < 0 || network >= NETWORK_COUNT) throw new RangeError(`bad network ${network}`);
-  if (!Number.isInteger(level) || level < 0 || level >= LEVEL_COUNT) throw new RangeError(`bad level ${level}`);
+  if (!isLevel(level)) throw new RangeError(`bad level ${level}`);
+  if (!isLevel(levelB)) throw new RangeError(`bad level ${levelB}`);
+  if ((level === LEVEL_BRIDGE) !== (levelB === LEVEL_BRIDGE)) throw new RangeError("a bridge is a bridge at both ends");
   if (network === NETWORK_ROAD && spec.type >= ROAD_TYPES.length) throw new RangeError(`no road type ${spec.type}`);
   if ((spec.cx === undefined) !== (spec.cz === undefined)) throw new RangeError("give both cx and cz, or neither");
   const ax = net.nodeX[a] ?? 0;
@@ -492,7 +525,8 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   net.segB[id] = b;
   net.segType[id] = spec.type;
   net.segNetwork[id] = network;
-  net.segLevel[id] = level;
+  net.segLevelA[id] = level;
+  net.segLevelB[id] = levelB;
   net.segFlags[id] = SEG_ALIVE | (spec.fixed ? SEG_FIXED : 0);
   net.segCX[id] = cx;
   net.segCZ[id] = cz;
@@ -609,7 +643,8 @@ export function restoreSegment(net: RoadNetwork, id: number, row: SegmentRow, at
   net.segB[id] = row.b;
   net.segType[id] = row.type;
   net.segNetwork[id] = row.network;
-  net.segLevel[id] = row.level;
+  net.segLevelA[id] = row.levelA;
+  net.segLevelB[id] = row.levelB;
   net.segFlags[id] = row.flags;
   net.segCX[id] = row.cx;
   net.segCZ[id] = row.cz;
@@ -621,8 +656,9 @@ export function restoreSegment(net: RoadNetwork, id: number, row: SegmentRow, at
 
 /**
  * Changes a segment in place: gives it road type `type` and, with `reverse`,
- * swaps its two ends so it runs the other way. A one-way runs from node A to
- * node B. The id, shape, length, level and place in each node's list stay.
+ * swaps its two ends so it runs the other way, each keeping its level. A
+ * one-way runs from node A to node B. The id, shape, length, levels and place
+ * in each node's list stay.
  * Observers see the segment go and come back, so derived data refiles it.
  */
 export function restyleSegment(net: RoadNetwork, id: number, type: number, reverse: boolean): void {
@@ -641,6 +677,9 @@ export function restyleSegment(net: RoadNetwork, id: number, type: number, rever
     net.segNextA[id] = net.segNextB[id] ?? NONE;
     net.segB[id] = a;
     net.segNextB[id] = nextA;
+    const levelA = net.segLevelA[id] ?? 0;
+    net.segLevelA[id] = net.segLevelB[id] ?? 0;
+    net.segLevelB[id] = levelA;
   }
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
 }
@@ -699,7 +738,8 @@ const ARRAY_TYPES: Readonly<Record<keyof RoadNetwork, new (n: number) => AnyType
   segNextB: Int32Array,
   segType: Uint8Array,
   segNetwork: Uint8Array,
-  segLevel: Uint8Array,
+  segLevelA: Uint8Array,
+  segLevelB: Uint8Array,
   segFlags: Uint8Array,
   segCX: Float64Array,
   segCZ: Float64Array,
@@ -770,9 +810,12 @@ export function checkRoadNetwork(value: unknown, held: HeldIds = { nodes: [], se
     const b = n.segB[seg] ?? NONE;
     if (!isNode(n, a) || !isNode(n, b) || a === b) return `segment ${seg} has bad nodes`;
     if (inList[seg] !== 2) return `segment ${seg} is not in its nodes' lists`;
-    if ((n.segNetwork[seg] ?? 0) >= NETWORK_COUNT || (n.segLevel[seg] ?? 0) >= LEVEL_COUNT) {
+    const levelA = n.segLevelA[seg] ?? 0;
+    const levelB = n.segLevelB[seg] ?? 0;
+    if ((n.segNetwork[seg] ?? 0) >= NETWORK_COUNT || levelA >= LEVEL_COUNT || levelB >= LEVEL_COUNT) {
       return `segment ${seg} has a bad network or level`;
     }
+    if ((levelA === LEVEL_BRIDGE) !== (levelB === LEVEL_BRIDGE)) return `segment ${seg} is a bridge at one end only`;
     if (n.segNetwork[seg] === NETWORK_ROAD && (n.segType[seg] ?? 0) >= ROAD_TYPES.length) {
       return `segment ${seg} has an unknown road type`;
     }

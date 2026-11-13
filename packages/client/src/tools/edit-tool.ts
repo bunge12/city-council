@@ -28,6 +28,7 @@ import {
   NONE,
   ROAD_TYPES,
   SEG_FIXED,
+  levelOffset,
   planBulldoze,
   planUpgrade,
   type CommandResult,
@@ -35,7 +36,7 @@ import {
   type RoadType,
   type Terrain,
 } from "@city-council/sim";
-import { liveRoadSegment, roadTypeOf, type RoadNet } from "../render/road-geometry";
+import { isRaised, liveRoadSegment, roadTypeOf, type RoadNet } from "../render/road-geometry";
 import type { PreviewLook, PreviewShape } from "../render/road-preview-geometry";
 import type { RoadToolState, ToolRoadType } from "./road-tool";
 
@@ -346,8 +347,10 @@ export function editShapes(net: RoadNet, preview: EditPreview, look: PreviewLook
       junctions: [],
       bridges: [],
     };
-    if (net.segLevel[seg] === LEVEL_BRIDGE) {
+    if (net.segLevelA[seg] === LEVEL_BRIDGE) {
       shape.deck = { hA: net.nodeHeight[a] ?? 0, hB: net.nodeHeight[b] ?? 0, grade: type.maxSlope };
+    } else if (isRaised(net, seg)) {
+      shape.raise = { a: levelOffset(net.segLevelA[seg] ?? 0), b: levelOffset(net.segLevelB[seg] ?? 0) };
     }
     out.push(shape);
   }

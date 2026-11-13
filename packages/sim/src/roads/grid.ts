@@ -32,7 +32,7 @@
 import { ROAD_BUILD, ROAD_TYPES, type RoadType } from "./balance";
 import { buildRoad, cosDegrees, groundProblem, planRoad, snapToGrid, type BuildPoint } from "./build";
 import { isStraight, nearestOnQuad, segmentQuad, straightQuad, type Quad } from "./curve";
-import { LEVEL_GROUND, NETWORK_ROAD, endJournal, reverseOps, startJournal, type RoadNetwork } from "./network";
+import { LEVEL_GROUND, NETWORK_ROAD, endJournal, reverseOps, segmentAtLevel, startJournal, type RoadNetwork } from "./network";
 import { NETWORKS_ROAD, nearestNode, roadIndexOf, segmentsInBox } from "./spatial";
 import { heightAt, mapSize, type Terrain } from "../terrain/terrain";
 
@@ -191,7 +191,7 @@ function coverage(net: RoadNetwork, a: BuildPoint, b: BuildPoint): { covered: bo
   const minZ = a.z < b.z ? a.z : b.z;
   const maxZ = a.z < b.z ? b.z : a.z;
   for (const seg of segmentsInBox(roadIndexOf(net), minX - r, minZ - r, maxX + r, maxZ + r, NETWORKS_ROAD)) {
-    if (net.segNetwork[seg] !== NETWORK_ROAD || net.segLevel[seg] !== LEVEL_GROUND) continue;
+    if (net.segNetwork[seg] !== NETWORK_ROAD || !segmentAtLevel(net, seg, LEVEL_GROUND)) continue;
     const q = segmentQuad(net, seg);
     if (isStraight(q) && !runsAlong(q.bx - q.ax, q.bz - q.az, dx, dz)) continue;
     near.push(q);

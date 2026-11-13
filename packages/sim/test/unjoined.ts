@@ -18,7 +18,7 @@ export function unjoinedCrossings(net: RoadNetwork): [number, number][] {
     const b = net.segB[s] ?? NONE;
     const p = segmentQuad(net, s);
     for (let t = s + 1; t < limit; t++) {
-      if (!isSegment(net, t) || net.segNetwork[t] !== net.segNetwork[s] || net.segLevel[t] !== net.segLevel[s]) continue;
+      if (!isSegment(net, t) || net.segNetwork[t] !== net.segNetwork[s] || net.segLevelA[t] !== net.segLevelA[s] || net.segLevelB[t] !== net.segLevelB[s]) continue;
       const c = net.segA[t] ?? NONE;
       const d = net.segB[t] ?? NONE;
       const shared = [a, b]

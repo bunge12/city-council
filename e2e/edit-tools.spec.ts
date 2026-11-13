@@ -233,7 +233,7 @@ test("picks a curve along the curve, a bridge at its deck, and the nearer of two
   const curve = segmentNear(state, 4250, 4850);
   const south = segmentNear(state, 4300, 4600);
   const north = segmentNear(state, 4300, 4616);
-  const bridge = Array.from(state.roads.segLevel).indexOf(LEVEL_BRIDGE);
+  const bridge = Array.from(state.roads.segLevelA).indexOf(LEVEL_BRIDGE);
   expect(bridge).toBeGreaterThanOrEqual(0);
   await openCity(page, state);
   await page.keyboard.press("KeyN");

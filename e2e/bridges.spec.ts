@@ -12,7 +12,7 @@ import { SEED, buildRoads, groundAt } from "./road-fixtures";
 type Vec3 = readonly [number, number, number];
 declare const window: {
   cityCouncil: {
-    mirror: { state: { log: { type: string }[]; roads: { segLevel: ArrayLike<number>; segFlags: ArrayLike<number> } } | null };
+    mirror: { state: { log: { type: string }[]; roads: { segLevelA: ArrayLike<number>; segFlags: ArrayLike<number> } } | null };
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
       project(x: number, y: number, z: number): { x: number; y: number };
@@ -86,7 +86,7 @@ async function levels(page: Page): Promise<number[]> {
     const out: number[] = [];
     if (!net) return out;
     // Live segments the player built: alive (1) and not an outside connection's fixed stub (2).
-    for (let s = 0; s < net.segFlags.length; s++) if (((net.segFlags[s] ?? 0) & 3) === 1) out.push(net.segLevel[s] ?? 0);
+    for (let s = 0; s < net.segFlags.length; s++) if (((net.segFlags[s] ?? 0) & 3) === 1) out.push(net.segLevelA[s] ?? 0);
     return out;
   });
 }
@@ -153,7 +153,7 @@ test("a second bridge across the first, and a road that ends in the water, are r
   await click(page, 3420, 6480);
   await hover(page, 3680, 6720);
   await expect(readout).toHaveAttribute("data-ok", "false");
-  await expect(page.locator("#road-reason")).toHaveText("The road would cross a bridge, and roads cannot pass over or under each other yet");
+  await expect(page.locator("#road-reason")).toHaveText(/^The road would (meet a bridge at the same height|pass only [\d.]+ m (over|under) a bridge)/);
   await attach(page, testInfo, "5 a bridge across the bridge is refused");
 
   await page.keyboard.press("Escape");

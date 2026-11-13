@@ -52,6 +52,11 @@ export interface PreviewShape extends PreviewSpanShape {
   bridges: readonly PreviewSpanShape[];
   /** Set when the shape marks a built bridge: the whole strip is drawn at its deck. */
   deck?: PreviewDeck;
+  /**
+   * Set when the shape marks a road on another level (issue 22): metres
+   * above the ground at its start and end, drawn evenly between.
+   */
+  raise?: { a: number; b: number };
 }
 
 export interface PreviewArrays {
@@ -63,7 +68,7 @@ export interface PreviewArrays {
 /** A stable text key for a list of shapes, so the mesh rebuilds only when one changes. */
 export function previewKey(shapes: readonly PreviewShape[]): string {
   return shapes
-    .map((s) => `${spanKey(s)},${s.width},${s.look},${s.deck ? `${s.deck.hA},${s.deck.hB},${s.deck.grade}` : "-"};${s.junctions.map((j) => `${j.x},${j.z}`).join(";")};${s.bridges.map(spanKey).join(";")}`)
+    .map((s) => `${spanKey(s)},${s.width},${s.look},${s.deck ? `${s.deck.hA},${s.deck.hB},${s.deck.grade}` : "-"},${s.raise ? `${s.raise.a},${s.raise.b}` : "-"};${s.junctions.map((j) => `${j.x},${j.z}`).join(";")};${s.bridges.map(spanKey).join(";")}`)
     .join("|");
 }
 
@@ -79,9 +84,12 @@ export function buildPreviewGeometry(terrain: Terrain, shapes: readonly PreviewS
   const deckLevel = bridgeDeckLevel(terrain.waterLevel);
   /** The deck of the shape being built, with its length, or null to lay it on the ground. */
   let deck: { d: PreviewDeck; length: number } | null = null;
+  /** The raise of the shape being built, with its length, or null. */
+  let raise: { a: number; b: number; length: number } | null = null;
   /** A vertex `s` metres along the shape being built, on the ground or on its deck. */
   const vertex = (x: number, z: number, rgb: readonly [number, number, number], extra = 0, s = 0): number => {
-    const ground = deck ? bridgeDeckHeight(deck.d.hA, deck.d.hB, deck.length, s, deckLevel, deck.d.grade) : heightAt(terrain, x, z);
+    let ground = deck ? bridgeDeckHeight(deck.d.hA, deck.d.hB, deck.length, s, deckLevel, deck.d.grade) : heightAt(terrain, x, z);
+    if (raise) ground += raise.length > 0 ? raise.a + ((raise.b - raise.a) * s) / raise.length : raise.a;
     positions.push(x, ground + lift + extra, z);
     colours.push(rgb[0], rgb[1], rgb[2]);
     return positions.length / 3 - 1;
@@ -90,8 +98,10 @@ export function buildPreviewGeometry(terrain: Terrain, shapes: readonly PreviewS
   for (const shape of shapes) {
     const rgb = linearRgb(ROAD_PREVIEW.colours[shape.look]);
     deck = shape.deck ? { d: shape.deck, length: spanLength(shape) } : null;
+    raise = shape.raise ? { ...shape.raise, length: spanLength(shape) } : null;
     strip(shape, shape.width, rgb, 0);
     deck = null;
+    raise = null;
     // The parts that would be bridges, over the strip in their own colour.
     const bridge = linearRgb(ROAD_PREVIEW.colours.bridge);
     for (const b of shape.bridges) strip(b, shape.width * ROAD_PREVIEW.bridgeScale, bridge, ROAD_PREVIEW.bridgeLift);

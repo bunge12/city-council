@@ -53,7 +53,7 @@ export {
   slopeAt,
 } from "./terrain/terrain";
 export type { Terrain, TerrainBalance } from "./terrain/terrain";
-export { ROAD_BALANCE, ROAD_BUILD, ROAD_TYPES, roadTypeIndex } from "./roads/balance";
+export { ROAD_BALANCE, ROAD_BUILD, ROAD_LEVELS, ROAD_TYPES, roadTypeIndex } from "./roads/balance";
 export type { BalancePrice, BridgeBalance, RoadBalance, RoadBuildBalance, RoadType, RoadTypeBalance } from "./roads/balance";
 export { planRoad, snapToGrid } from "./roads/build";
 export { bridgeDeckHeight, bridgeDeckLevel, bridgeRamps } from "./roads/bridge";
@@ -73,7 +73,9 @@ export type {
 } from "./roads/edit";
 export {
   LEVEL_BRIDGE,
-  LEVEL_ELEVATED,
+  LEVEL_COUNT,
+  LEVEL_ELEVATED_1,
+  LEVEL_ELEVATED_2,
   LEVEL_GROUND,
   LEVEL_TUNNEL,
   NETWORK_PATH,
@@ -87,6 +89,21 @@ export {
   curveLength,
 } from "./roads/network";
 export type { RoadNetwork } from "./roads/network";
+export {
+  BUILD_LEVELS,
+  LEVELS_ALL,
+  LEVELS_BRIDGE,
+  LEVELS_ELEVATED_1,
+  LEVELS_ELEVATED_2,
+  LEVELS_GROUND,
+  LEVELS_SURFACE,
+  LEVELS_TUNNEL,
+  clearanceReason,
+  heightAlong,
+  levelOffset,
+  segmentShape,
+} from "./roads/levels";
+export type { LevelledShape } from "./roads/levels";
 export { applyRoadDelta, drainRoadChanges, encodeRoadDelta, mergeRoadChanges, recordRoadChanges } from "./roads/delta";
 export type { RoadChanges, RoadDelta } from "./roads/delta";
 export { CHUNKS_PER_SIDE, CHUNK_SIZE } from "./chunks";

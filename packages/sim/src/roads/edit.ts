@@ -31,7 +31,6 @@ import { TIGHT, bridgeTooLong, groundProblem, rampProblem, sampleGround, type Sa
 import { minRadius, segmentQuad } from "./curve";
 import {
   LEVEL_BRIDGE,
-  LEVEL_GROUND,
   NETWORK_ROAD,
   NODE_FIXED,
   NONE,
@@ -117,7 +116,7 @@ function typeAt(net: RoadNetwork, seg: number): RoadType {
 
 /** `price` per metre of segment `seg` as type `type`: on a bridge, times its type's bridge multiplier. */
 function perMetre(net: RoadNetwork, seg: number, type: RoadType, price: number): number {
-  return net.segLevel[seg] === LEVEL_BRIDGE ? price * type.bridge.costMultiplier : price;
+  return net.segLevelA[seg] === LEVEL_BRIDGE ? price * type.bridge.costMultiplier : price;
 }
 
 function isFixedSegment(net: RoadNetwork, seg: number): boolean {
@@ -210,8 +209,9 @@ function limitProblem(terrain: Terrain, net: RoadNetwork, seg: number, type: Roa
   const shape = segmentQuad(net, seg);
   const radius = minRadius(shape);
   if (radius < type.minCurveRadius) return TIGHT(type, radius);
-  const level = net.segLevel[seg];
-  if (level === LEVEL_GROUND) return groundProblem(terrain, type, shape);
+  const level = net.segLevelA[seg];
+  // A road at one level, ground or not, was built with the ground check.
+  if (level !== LEVEL_BRIDGE && level === net.segLevelB[seg]) return groundProblem(terrain, type, shape);
   if (level === LEVEL_BRIDGE) {
     const length = net.segLength[seg] ?? 0;
     if (length > type.bridge.maxLength) return bridgeTooLong(type, length);

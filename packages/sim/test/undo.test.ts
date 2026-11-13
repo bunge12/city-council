@@ -173,7 +173,7 @@ describe("Undo of BuildRoad", () => {
     const state = createBareState(SEED);
     const before = cityHash(state);
     ok(state, road([3400, 6600], [3700, 6600]));
-    expect([...state.roads.segLevel]).toContain(LEVEL_BRIDGE);
+    expect([...state.roads.segLevelA]).toContain(LEVEL_BRIDGE);
     ok(state, undo());
     expect(cityHash(state)).toBe(before);
     sound(state);
