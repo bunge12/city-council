@@ -396,6 +396,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     width: p.type.width,
     look,
     junctions: look === "refused" ? [] : p.junctions,
+    bridges: look === "refused" ? [] : p.bridges.map((b) => ({ ax: b.from.x, az: b.from.z, bx: b.to.x, bz: b.to.z, control: b.control })),
   });
   view.onBeforeFrame((seconds) => {
     controls.update(seconds);

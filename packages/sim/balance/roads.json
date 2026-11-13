@@ -1,5 +1,5 @@
 {
-  "_about": "Road types. Lengths and widths are metres, speeds km/h, capacity vehicles per hour per lane, slopes rise over run. Prices are whole dollars in their source year; `escalation` brings them to 2026. A type's place in `types` is its id in saves, so append new types and never reorder. Speeds, capacities, widths and limits are starting values to tune.",
+  "_about": "Road types. Lengths and widths are metres, speeds km/h, capacity vehicles per hour per lane, slopes rise over run. Prices are whole dollars in their source year; `escalation` brings them to 2026. A type's place in `types` is its id in saves, so append new types and never reorder. A type's `bridge` sets the longest bridge it can make, in metres, and how many times its price per metre a bridge costs. Speeds, capacities, widths and limits are starting values to tune.",
   "escalation": {
     "toYear": 2026,
     "annualFactor": 1.1085,
@@ -8,12 +8,13 @@
     "sourceYear": 2025
   },
   "build": {
-    "_about": "How the sim checks a road before it builds one. Lengths are metres, angles degrees. Starting values to tune.",
+    "_about": "How the sim checks a road before it builds one. Lengths are metres, angles degrees. `bridgeClearance` is how far a bridge deck sits above the water. Starting values to tune.",
     "gridStep": 0.125,
     "mergeDistance": 4,
     "minLength": 10,
     "minAngleDegrees": 25,
-    "groundSampleStep": 8
+    "groundSampleStep": 8,
+    "bridgeClearance": 5
   },
   "types": [
     {
@@ -40,6 +41,14 @@
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
         "placeholder": true
+      },
+      "bridge": {
+        "maxLength": 300,
+        "costMultiplier": 31,
+        "sourceYear": 2023,
+        "source": "Arkansas DOT, Bridge Cost 2023: $339.54 per square foot of deck ($3,655 per square metre) for off-NHS bridges let in the 2023 federal fiscal year. Deck width is the road width plus 2 m of barriers; the multiplier is that cost per metre over the road's own price per metre.",
+        "sourceUrl": "https://media.ark.org/ardot/Bridge-Cost-2023.pdf",
+        "note": "12 m of deck is $43,860 a metre, over the street's $1,400. The street price is a placeholder, so this is too."
       }
     },
     {
@@ -65,6 +74,14 @@
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
         "placeholder": true
+      },
+      "bridge": {
+        "maxLength": 400,
+        "costMultiplier": 26,
+        "sourceYear": 2023,
+        "source": "Arkansas DOT, Bridge Cost 2023: $339.54 per square foot of deck ($3,655 per square metre) for off-NHS bridges let in the 2023 federal fiscal year. Deck width is the road width plus 2 m of barriers; the multiplier is that cost per metre over the road's own price per metre.",
+        "sourceUrl": "https://media.ark.org/ardot/Bridge-Cost-2023.pdf",
+        "note": "20 m of deck is $73,100 a metre, over the avenue's $2,800."
       }
     },
     {
@@ -90,6 +107,14 @@
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
         "placeholder": true
+      },
+      "bridge": {
+        "maxLength": 300,
+        "costMultiplier": 26,
+        "sourceYear": 2023,
+        "source": "Arkansas DOT, Bridge Cost 2023: $339.54 per square foot of deck ($3,655 per square metre) for off-NHS bridges let in the 2023 federal fiscal year. Deck width is the road width plus 2 m of barriers; the multiplier is that cost per metre over the road's own price per metre.",
+        "sourceUrl": "https://media.ark.org/ardot/Bridge-Cost-2023.pdf",
+        "note": "10 m of deck is $36,550 a metre, over the one-way's $1,400. The one-way price is a placeholder, so this is too."
       }
     },
     {
@@ -115,6 +140,14 @@
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
         "placeholder": true
+      },
+      "bridge": {
+        "maxLength": 800,
+        "costMultiplier": 9,
+        "sourceYear": 2023,
+        "source": "Arkansas DOT, Bridge Cost 2023: $339.54 per square foot of deck ($3,655 per square metre) for off-NHS bridges let in the 2023 federal fiscal year. Deck width is the road width plus 2 m of barriers; the multiplier is that cost per metre over the road's own price per metre.",
+        "sourceUrl": "https://media.ark.org/ardot/Bridge-Cost-2023.pdf",
+        "note": "32 m of deck is $116,960 a metre in 2023, about $159,000 in 2026, over the highway's $18,000."
       }
     }
   ]

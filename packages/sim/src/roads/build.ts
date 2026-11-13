@@ -17,11 +17,22 @@
 // each piece takes the control point of its part of the curve (curve.ts).
 // Where only straight segments meet, everything is as it was before curves.
 //
+// A road that crosses water becomes a bridge there (issue 11, bridge.ts).
+// Each piece between junctions is sampled as the slope check samples it.
+// Each run of wet samples is spanned by one bridge segment, at the bridge
+// level, from a new node on each bank. A bank node is the sample nearest the
+// water from which a ramp at the type's slope limit reaches the deck by the
+// shore; failing that the road is refused. Two runs too close together for
+// ground between them share one bridge. Only the ground pieces get the slope
+// check, and no new piece may meet an existing bridge away from a shared node.
+//
 // Checks feed command validation, so only exact arithmetic (CLAUDE.md
 // rule 6). Lint enforces it in this folder.
 
 import { ROAD_BUILD, ROAD_TYPES, type RoadType } from "./balance";
+import { bridgeDeckLevel } from "./bridge";
 import {
+  LEVEL_BRIDGE,
   LEVEL_GROUND,
   NETWORK_ROAD,
   NONE,
@@ -103,8 +114,15 @@ export interface RoadPlan {
   control: BuildPoint | null;
   /** From the start to the end, in order along the road. At least two. */
   stops: PlanStop[];
+  /**
+   * The level of each piece of the new road: `levels[i]` is the piece from
+   * stop i to stop i + 1. LEVEL_BRIDGE over water, LEVEL_GROUND elsewhere.
+   */
+  levels: number[];
   /** Plan length of the new road in metres, every piece added up. */
   length: number;
+  /** The part of `length` that is bridge, metres. */
+  bridgeLength: number;
   /** Whole 2026 dollars. Not charged until the treasury arrives in M4. */
   cost: number;
 }
@@ -193,8 +211,9 @@ export function crossingPoint(
   return { x: snapToGrid(ax + (bx - ax) * t), z: snapToGrid(az + (bz - az) * t) };
 }
 
-// What the new road is built as. M1 builds ground roads only; bridges are
-// issue 11. Only segments on the same network and level split each other.
+// What the new road is built as. Its pieces over water are bridges instead,
+// but only ground segments split or are split: nothing branches off a
+// bridge. Only segments on the same network and level split each other.
 const NEW_NETWORK = NETWORK_ROAD;
 const NEW_LEVEL = LEVEL_GROUND;
 
@@ -585,7 +604,219 @@ function percent(grade: number): string {
   return `${Math.round(grade * 100)}%`;
 }
 
-const WATER = "The road crosses water, and bridges are not available yet";
+const WATER = "The road runs too close along the water's edge";
+const END_IN_WATER = "A road cannot start or end in water";
+const JUNCTION_IN_WATER = "The road would meet another road over water";
+const CROSSES_BRIDGE = "The road would cross a bridge, and roads cannot pass over or under each other yet";
+
+function bridgeTooLong(type: RoadType, length: number): string {
+  return `Too long for a bridge: ${Math.round(length)} m, and the ${type.name.toLowerCase()} limit is ${type.bridge.maxLength} m`;
+}
+
+function rampProblem(type: RoadType, grade: number, up: boolean): string {
+  const limit = `the ${type.name.toLowerCase()} limit is ${percent(type.maxSlope)}`;
+  if (grade === Infinity) return `There is no room on the bank for the ramp ${up ? "up" : "down"} to the bridge`;
+  if (up) return `Not enough room on the bank for the ramp up to the bridge: it would be a ${percent(grade)} grade, and ${limit}`;
+  return `The bank is too steep for the bridge: the ramp down to the deck would be a ${percent(grade)} grade, and ${limit}`;
+}
+
+/** A ground sample along a piece of road. */
+interface Sample {
+  /** The piece's curve parameter, 0 to 1. */
+  tau: number;
+  x: number;
+  z: number;
+  h: number;
+  /** Metres along the piece. */
+  s: number;
+  wet: boolean;
+}
+
+/**
+ * The ground under `q` at the same points `groundProblem` reads: even steps
+ * of no more than `groundSampleStep` on a straight piece, and even steps of
+ * the parameter on a curve.
+ */
+function sampleGround(terrain: Terrain, q: Quad): Sample[] {
+  const step = ROAD_BUILD.groundSampleStep;
+  const out: Sample[] = [];
+  const at = (tau: number, x: number, z: number, s: number): void => {
+    const h = heightAt(terrain, x, z);
+    out.push({ tau, x, z, h, s, wet: h <= terrain.waterLevel });
+  };
+  if (isStraight(q)) {
+    const length = distance(q.ax, q.az, q.bx, q.bz);
+    const steps = Math.ceil(length / step);
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      at(t, q.ax + (q.bx - q.ax) * t, q.az + (q.bz - q.az) * t, length * t);
+    }
+    return out;
+  }
+  const ea = distance(q.ax, q.az, q.cx, q.cz);
+  const eb = distance(q.cx, q.cz, q.bx, q.bz);
+  const steps = Math.ceil((2 * (ea > eb ? ea : eb)) / step);
+  let s = 0;
+  let px = q.ax;
+  let pz = q.az;
+  for (let i = 0; i <= steps; i++) {
+    const p = quadPoint(q, i / steps);
+    s += distance(px, pz, p.x, p.z);
+    at(i / steps, p.x, p.z, s);
+    px = p.x;
+    pz = p.z;
+  }
+  return out;
+}
+
+/**
+ * The bridges a piece needs, as pairs of sample indices from bank to bank,
+ * in order. Both ends of the piece must be dry. A bank is the sample nearest
+ * the water from which a ramp at `grade` reaches `deck` by the shore sample,
+ * and it leaves at least the minimum length of ground to the piece's ends
+ * and to the bridge before. A run of water with no room for its first bank
+ * after the bridge before joins that bridge, and one whose second bank would
+ * be past more water takes that water in too.
+ */
+function findSpans(smp: Sample[], deck: number, grade: number): [number, number][] | { grade: number; up: boolean } {
+  const minLength = ROAD_BUILD.minLength;
+  const n = smp.length - 1;
+  const get = (k: number): Sample => smp[k] as Sample;
+  const fits = (k: number, run: number): boolean => {
+    const h = get(k).h;
+    return (deck > h ? deck - h : h - deck) <= grade * run;
+  };
+  const failure = (k: number, run: number) => {
+    const h = get(k).h;
+    const rise = deck > h ? deck - h : h - deck;
+    return { grade: run > 0 ? rise / run : Infinity, up: deck > h };
+  };
+  const spans: [number, number][] = [];
+  let i = 1;
+  while (i < n) {
+    if (!get(i).wet) {
+      i++;
+      continue;
+    }
+    const shoreA = i - 1;
+    const last = spans[spans.length - 1];
+    const floor = last ? last[1] : 0;
+    let bankA = NONE;
+    for (let k = shoreA; k >= floor; k--) {
+      const room = get(k).s - get(floor).s;
+      if (last ? room < minLength : k !== 0 && room < minLength) continue;
+      if (fits(k, get(shoreA).s - get(k).s)) {
+        bankA = k;
+        break;
+      }
+    }
+    if (bankA === NONE && !last) return failure(0, get(shoreA).s);
+    let j = i;
+    let bankB = NONE;
+    for (;;) {
+      while (get(j).wet) j++;
+      const shoreB = j;
+      let k = shoreB;
+      for (; k <= n && !get(k).wet; k++) {
+        if (k !== n && get(n).s - get(k).s < minLength) continue;
+        if (fits(k, get(k).s - get(shoreB).s)) {
+          bankB = k;
+          break;
+        }
+      }
+      if (bankB !== NONE) break;
+      if (k > n) return failure(n, get(n).s - get(shoreB).s);
+      j = k;
+    }
+    if (bankA === NONE && last) last[1] = bankB;
+    else spans.push([bankA, bankB]);
+    i = bankB + 1;
+  }
+  return spans;
+}
+
+/**
+ * The stops with a bank node added at each end of every bridge, and the
+ * level of each piece between them, or the reason the road cannot cross the
+ * water. On a straight road a bank node is on the build grid. On a curve it
+ * is the exact point on the whole road's curve, so the pieces trace it.
+ */
+function placeBridges(
+  terrain: Terrain,
+  type: RoadType,
+  stops: PlanStop[],
+  control: BuildPoint | null,
+): { stops: PlanStop[]; levels: number[] } | string {
+  const road = roadQuad(stops, control);
+  const deck = bridgeDeckLevel(terrain.waterLevel);
+  const out: PlanStop[] = [stops[0] as PlanStop];
+  const levels: number[] = [];
+  for (let i = 1; i < stops.length; i++) {
+    const a = stops[i - 1] as PlanStop;
+    const b = stops[i] as PlanStop;
+    const c = pieceControl(stops, control, i);
+    const q = c ? { ax: a.x, az: a.z, cx: c.x, cz: c.z, bx: b.x, bz: b.z } : straightQuad(a.x, a.z, b.x, b.z);
+    const smp = sampleGround(terrain, q);
+    const n = smp.length - 1;
+    if ((smp[0] as Sample).wet) return i === 1 ? END_IN_WATER : JUNCTION_IN_WATER;
+    if ((smp[n] as Sample).wet) return i === stops.length - 1 ? END_IN_WATER : JUNCTION_IN_WATER;
+    const spans = findSpans(smp, deck, type.maxSlope);
+    if (!Array.isArray(spans)) return rampProblem(type, spans.grade, spans.up);
+    const bank = (k: number): PlanStop => {
+      const sample = smp[k] as Sample;
+      const t = a.t + sample.tau * (b.t - a.t);
+      if (control) {
+        const p = quadPoint(road, t);
+        return newStop(p.x, p.z, t);
+      }
+      return newStop(snapToGrid(sample.x), snapToGrid(sample.z), t);
+    };
+    let reachedEnd = false;
+    for (const [sa, sb] of spans) {
+      if (sa > 0) {
+        out.push(bank(sa));
+        levels.push(NEW_LEVEL);
+      }
+      if (sb < n) out.push(bank(sb));
+      else {
+        out.push(b);
+        reachedEnd = true;
+      }
+      levels.push(LEVEL_BRIDGE);
+    }
+    if (!reachedEnd) {
+      out.push(b);
+      levels.push(NEW_LEVEL);
+    }
+  }
+  return { stops: out, levels };
+}
+
+/**
+ * Whether a new piece would meet an existing bridge anywhere but a node
+ * they share. One road may not pass over or under another in M1.
+ */
+function crossesBridge(net: RoadNetwork, pieces: PlannedSegment[]): boolean {
+  const index = roadIndexOf(net);
+  for (const s of pieces) {
+    const shape = plannedQuad(s);
+    const box = hullBox(shape);
+    for (const seg of segmentsInBox(index, box.minX, box.minZ, box.maxX, box.maxZ, NETWORKS_ROAD)) {
+      if (net.segLevel[seg] !== LEVEL_BRIDGE) continue;
+      const p = net.segA[seg] ?? NONE;
+      const q = net.segB[seg] ?? NONE;
+      const other = segmentQuad(net, seg);
+      const shared = [s.a, s.b].filter((e) => e.key === p || e.key === q);
+      if (s.control === null && isStraight(other)) {
+        if (shared.length > 0) continue;
+        if (segmentsMeet(s.a.x, s.a.z, s.b.x, s.b.z, other.ax, other.az, other.bx, other.bz)) return true;
+        continue;
+      }
+      if (quadsMeetAwayFrom(shape, other, shared)) return true;
+    }
+  }
+  return false;
+}
 
 function tooSteep(type: RoadType, steepest: number): string | null {
   if (steepest <= type.maxSlope) return null;
@@ -731,7 +962,9 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
 
   const middle = crossings(net, start, end, road, curved);
   if (typeof middle === "string") return { ok: false, reason: middle };
-  const stops = orderStops(start, end, middle, curved);
+  const bridged = placeBridges(terrain, type, orderStops(start, end, middle, curved), control);
+  if (typeof bridged === "string") return { ok: false, reason: bridged };
+  const { stops, levels } = bridged;
 
   // A segment split at its own end runs along the road. So does a straight
   // one split twice by a straight road. A curve can meet a segment twice,
@@ -755,6 +988,8 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
   const planned: PlannedSegment[] = [];
   const crossingKeys: number[] = [];
   let length = 0;
+  let groundLength = 0;
+  let bridgeLength = 0;
   for (let i = 0; i < stops.length; i++) {
     const here = stopEnd(stops, i);
     if (i > 0) {
@@ -766,6 +1001,10 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
         return { ok: false, reason: stops.length === 2 ? DUPLICATE : ALONG };
       }
       length += pieceLength;
+      if (levels[i - 1] === LEVEL_BRIDGE) {
+        if (pieceLength > type.bridge.maxLength) return { ok: false, reason: bridgeTooLong(type, pieceLength) };
+        bridgeLength += pieceLength;
+      } else groundLength += pieceLength;
       pieces.push(piece);
     }
     const splits = stops[i]?.splits ?? [];
@@ -785,14 +1024,19 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
   const angle = angleProblem(net, planned, removed, crossingKeys);
   if (angle !== null) return { ok: false, reason: angle };
   if (tangled(net, planned, removed)) return { ok: false, reason: TANGLED };
+  if (crossesBridge(net, pieces)) return { ok: false, reason: CROSSES_BRIDGE };
   // Only the new road's ground is checked. A split piece follows the line of
   // the segment it came from to within a few metres, and that was checked
-  // when it was built.
-  for (const piece of pieces) {
-    const ground = groundProblem(terrain, type, plannedQuad(piece));
+  // when it was built. A bridge's ramps were checked when its banks were
+  // placed.
+  for (let i = 0; i < pieces.length; i++) {
+    if (levels[i] === LEVEL_BRIDGE) continue;
+    const ground = groundProblem(terrain, type, plannedQuad(pieces[i] as PlannedSegment));
     if (ground !== null) return { ok: false, reason: ground };
   }
-  return { ok: true, plan: { type, control, stops, length, cost: Math.round(length * type.buildCostPerMetre) } };
+  const price = type.buildCostPerMetre;
+  const cost = Math.round(groundLength * price + bridgeLength * price * type.bridge.costMultiplier);
+  return { ok: true, plan: { type, control, stops, levels, length, bridgeLength, cost } };
 }
 
 /**
@@ -825,7 +1069,8 @@ function splitPieces(net: RoadNetwork, stops: PlanStop[], seg: number, at: { sto
  * end. Then each split segment, in the order of the first stop that splits
  * it and by ascending id within a stop: the segment is removed and its
  * pieces added from its node A to its node B, so the first takes back the id
- * the removal freed. Then the pieces of the new road from start to end.
+ * the removal freed. Then the pieces of the new road from start to end,
+ * each at its level, so the ones over water are bridges.
  */
 export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan): number[] {
   const nodes = plan.stops.map((s) => (s.node !== NONE ? s.node : addNode(net, s.x, s.z, heightAt(terrain, s.x, s.z))));
@@ -844,7 +1089,7 @@ export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan): n
   const road: number[] = [];
   for (let i = 1; i < nodes.length; i++) {
     const c = pieceControl(plan.stops, plan.control, i);
-    const spec = { type: plan.type.index, network: NEW_NETWORK, level: NEW_LEVEL };
+    const spec = { type: plan.type.index, network: NEW_NETWORK, level: plan.levels[i - 1] ?? NEW_LEVEL };
     road.push(addSegment(net, nodes[i - 1] ?? NONE, nodes[i] ?? NONE, c ? { ...spec, cx: c.x, cz: c.z } : spec));
   }
   return road;

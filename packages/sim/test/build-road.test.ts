@@ -205,9 +205,9 @@ describe("BuildRoad refuses", () => {
     expect(rejection(state, road([4100, 4500], [4600, 4500]))).toBe("The road runs along another road");
   });
 
-  it("a road over water", () => {
+  it("a road that ends in water", () => {
     expect(rejection(createState(SEED), road([SHORE.x, SHORE.z], [SHORE.x + 200, SHORE.z]))).toBe(
-      "The road crosses water, and bridges are not available yet",
+      "A road cannot start or end in water",
     );
   });
 

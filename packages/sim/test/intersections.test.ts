@@ -294,13 +294,21 @@ describe("segments on other layers", () => {
     const r0 = addNode(net, 4200, 4500, 0);
     const r1 = addNode(net, 4500, 4500, 0);
     addSegment(net, r0, r1, { type: 0, network: NETWORK_RAIL });
+    expect(build(state, road([4350, 4400], [4350, 4700]))).toEqual({ ok: true });
+    expect(segmentCount(net)).toBe(2);
+    expect(nodeAt(net, 4350, 4500)).toBe(NONE);
+  });
+
+  it("refuse a ground road across a bridge instead of passing under it", () => {
+    const state = createState(SEED);
+    const net = state.roads;
     const b0 = addNode(net, 4200, 4600, 0);
     const b1 = addNode(net, 4500, 4600, 0);
     addSegment(net, b0, b1, { type: roadTypeIndex("street"), level: LEVEL_BRIDGE });
-    expect(build(state, road([4350, 4400], [4350, 4700]))).toEqual({ ok: true });
-    expect(segmentCount(net)).toBe(3);
-    expect(nodeAt(net, 4350, 4500)).toBe(NONE);
-    expect(nodeAt(net, 4350, 4600)).toBe(NONE);
+    expect(submit(state, road([4350, 4400], [4350, 4700]))).toEqual({
+      ok: false,
+      reason: "The road would cross a bridge, and roads cannot pass over or under each other yet",
+    });
   });
 });
 

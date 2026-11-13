@@ -35,15 +35,18 @@
 // dropped.
 
 import {
+  LEVEL_BRIDGE,
   NONE,
   ROAD_BUILD,
   ROAD_TYPES,
   curveLength,
   planRoad,
   snapToGrid,
+  subControl,
   type BuildPoint,
   type BuildRoadPayload,
   type CommandResult,
+  type Quad,
   type RoadNetwork,
   type RoadType,
   type Terrain,
@@ -77,6 +80,17 @@ export interface RoadPreview {
   cost: number;
   /** Where the road would meet another road: a split, or an existing node it joins or passes. */
   junctions: BuildPoint[];
+  /** The parts that would be bridges, bank to bank, each with its control point or null. */
+  bridges: PreviewSpan[];
+  /** Metres of `length` that would be bridge. */
+  bridgeLength: number;
+}
+
+/** A part of a previewed road between two of its stops. */
+export interface PreviewSpan {
+  from: BuildPoint;
+  to: BuildPoint;
+  control: BuildPoint | null;
 }
 
 function typeById(id: string): RoadType {
@@ -111,24 +125,40 @@ export function previewRoad(
     const b = onGrid(to);
     const c = control ? onGrid(control) : null;
     const length = c ? curveLength(a.x, a.z, c.x, c.z, b.x, b.z) : Math.hypot(b.x - a.x, b.z - a.z);
-    return { from: a, to: b, control: c, type, ok: false, reason: result.reason, length, cost: 0, junctions: [] };
+    return { from: a, to: b, control: c, type, ok: false, reason: result.reason, length, cost: 0, junctions: [], bridges: [], bridgeLength: 0 };
   }
-  const { stops, length, cost } = result.plan;
+  const { stops, length, cost, levels, bridgeLength } = result.plan;
   const first = stops[0];
   const last = stops[stops.length - 1];
   if (!first || !last) throw new Error("a road plan has at least two stops");
   const junctions = stops.filter((s) => s.node !== NONE || s.splits.length > 0).map((s) => ({ x: s.x, z: s.z }));
+  const bridges: PreviewSpan[] = [];
+  const planned = result.plan.control;
+  levels.forEach((level, i) => {
+    const a = stops[i];
+    const b = stops[i + 1];
+    if (level !== LEVEL_BRIDGE || !a || !b) return;
+    // A piece of a curve takes the control point of its part of the curve, as the sim builds it.
+    const c = planned ? subControl(roadQuad(first, last, planned), a.t, b.t) : null;
+    bridges.push({ from: { x: a.x, z: a.z }, to: { x: b.x, z: b.z }, control: c });
+  });
   return {
     from: { x: first.x, z: first.z },
     to: { x: last.x, z: last.z },
-    control: result.plan.control,
+    control: planned,
     type,
     ok: true,
     reason: null,
     length,
     cost,
     junctions,
+    bridges,
+    bridgeLength,
   };
+}
+
+function roadQuad(a: BuildPoint, b: BuildPoint, c: BuildPoint): Quad {
+  return { ax: a.x, az: a.z, cx: c.x, cz: c.z, bx: b.x, bz: b.z };
 }
 
 /** A road the tool has sent, or will send, and the sim has not yet built or refused. */
