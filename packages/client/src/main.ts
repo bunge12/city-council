@@ -1,11 +1,13 @@
 import {
   bridgeDeckLevel,
+  connectionEnd,
+  createState,
   deserialize,
   fnv1a64,
   generateTerrain,
   hashState,
   hashTerrain,
-  mapSize,
+  heightAt,
   replay,
   snapToGrid,
   type CommandResult,
@@ -21,9 +23,12 @@ import type { SaveStatus } from "./save/channel";
 import { createCameraControls, type CameraControls } from "./camera/controls";
 import type { GroundHit } from "./camera/pick";
 import { createCameraRig, type CameraRig } from "./camera/rig";
+import { startPose } from "./camera/start-pose";
 import { createView, wantsWebGL, type View } from "./render/view";
 import { createRoadPreviewLayer } from "./render/road-preview";
 import type { PreviewShape } from "./render/road-preview-geometry";
+import { createConnectionMarkLayer } from "./render/connection-marks";
+import { connectionMarks } from "./render/connection-marks-geometry";
 import { createSnapMarkLayer } from "./render/snap-marks";
 import { snapMarks } from "./render/snap-marks-geometry";
 import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
@@ -329,9 +334,9 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
       hooks = startCamera(view, canvas, terrain);
       resolveCamera(hooks);
     }
-    // Start on a view of the whole map from the south.
-    const size = mapSize(terrain);
-    hooks.rig.setPose([size / 2, size * 0.7, size * 1.32], [size / 2, 0, size * 0.47]);
+    // Start looking at the first outside connection, where the player builds from.
+    const start = startPose(terrain, state.roads, state.connections);
+    hooks.rig.setPose(start.position, start.target);
     requestAnimationFrame(() => {
       status = {
         backend: view.backend,
@@ -456,6 +461,9 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   controls.onDoubleClick(() => roadTool.finish());
   const previews = createRoadPreviewLayer(view.scene, () => hooks.terrain);
   const marks = createSnapMarkLayer(view.scene, () => hooks.terrain);
+  const connectionLayer = createConnectionMarkLayer(view.scene, () => hooks.terrain);
+  /** Metres one CSS pixel covers on the ground at (x, z). */
+  const scaleAt = (x: number, z: number): number => metresPerPixel({ x, y: heightAt(hooks.terrain, x, z), z, distance: 0 });
   // The live preview, worked out again only when what it depends on changes.
   let mirrorVersion = 0;
   mirror.subscribe(() => mirrorVersion++);
@@ -547,6 +555,11 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       shown.push({ shape: "line", ax: c.x, az: c.z, bx: snap.x, bz: snap.z, look: "angle" });
     }
     marks.show(shown, scale);
+    // The outside connections, marked at every zoom.
+    const state = mirror.state;
+    const connections = state ? connectionMarks(state.roads, state.connections, scaleAt) : [];
+    connectionLayer.show(connections, connections.map((m) => scaleAt(m.edgeX, m.edgeZ)));
+    document.body.dataset["connectionMarks"] = String(connections.length);
     const pointer = controls.pointer();
     setRoadHover(live && pointer ? { x: pointer.x, y: pointer.y, preview: live, snap } : null);
     setViewReadout({
@@ -596,6 +609,19 @@ function replayCheck(seed: number, log: LogEntry[], untilTick: number): { hash: 
   return { hash: hashState(state), logLength: state.log.length };
 }
 
+/**
+ * Where a new city from `seed` puts its outside connections, worked out in
+ * this browser's main thread, so Playwright can compare them with the
+ * places Node gives.
+ */
+function connectionsCheck(seed: number): { x: number; z: number; innerX: number; innerZ: number }[] {
+  const { roads, connections } = createState(seed);
+  return Array.from(connections, (edge) => {
+    const inner = connectionEnd(roads, edge);
+    return { x: roads.nodeX[edge] ?? NaN, z: roads.nodeZ[edge] ?? NaN, innerX: roads.nodeX[inner] ?? NaN, innerZ: roads.nodeZ[inner] ?? NaN };
+  });
+}
+
 // For Playwright and the console. It only reads the mirror and sends
 // commands, the same as the UI does.
 declare global {
@@ -609,6 +635,7 @@ declare global {
       persistence: () => PersistenceResult | null;
       terrainCheck: typeof terrainCheck;
       replayCheck: typeof replayCheck;
+      connectionsCheck: typeof connectionsCheck;
       view: Promise<View>;
       camera: Promise<CameraHooks>;
       renderStatus: () => RenderStatus | null;
@@ -624,6 +651,7 @@ window.cityCouncil = {
   persistence: () => persistence,
   terrainCheck,
   replayCheck,
+  connectionsCheck,
   view: viewReady,
   camera: cameraReady,
   renderStatus: () => status,

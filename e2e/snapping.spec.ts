@@ -125,6 +125,12 @@ async function nodes(page: Page): Promise<NodeInfo[]> {
     const out: NodeInfo[] = [];
     for (let n = 0; n < net.nodeFlags.length; n++) {
       if (((net.nodeFlags[n] ?? 0) & 1) === 0) continue;
+      // Not a node on an outside connection's fixed stub (segment flag 2).
+      let onStub = false;
+      for (let s = 0; s < net.segFlags.length; s++) {
+        if (((net.segFlags[s] ?? 0) & 3) === 3 && (net.segA[s] === n || net.segB[s] === n)) onStub = true;
+      }
+      if (onStub) continue;
       const x = net.nodeX[n] ?? 0;
       const z = net.nodeZ[n] ?? 0;
       const dirs: [number, number][] = [];

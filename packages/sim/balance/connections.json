@@ -1,0 +1,12 @@
+{
+  "_about": "Outside connections: the highway stubs at the map edge where people and goods will arrive. Lengths are metres, slopes rise over run. `count` is how many a map gets, chosen from the seed between `min` and `max`. Candidates sit every `candidateStep` along each side, no closer than `cornerMargin` to a corner. A candidate's whole stub must be dry, at least `minHeightAboveWater` above the water, and no steeper than `maxSlope` anywhere along it. Two connections are at least `minSpacing` apart. `clearance` is how far a stub keeps from roads already built, which only matters when an old save gains its connections. No prices here, so no source years. Starting values to tune.",
+  "count": { "min": 2, "max": 3 },
+  "stubLength": 200,
+  "candidateStep": 64,
+  "cornerMargin": 600,
+  "minSpacing": 2500,
+  "maxSlope": 0.05,
+  "minHeightAboveWater": 1,
+  "clearance": 60,
+  "type": "highway"
+}

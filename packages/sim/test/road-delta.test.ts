@@ -4,7 +4,7 @@ import {
   CHUNK_SIZE,
   applyRoadDelta,
   buildRoadIndex,
-  createState,
+  createBareState,
   drainRoadChanges,
   encodeRoadDelta,
   hashState,
@@ -22,7 +22,7 @@ import { churnNetwork, growNetwork } from "./road-network-helper";
 
 /** A deep copy of a network. */
 function cloneNetwork(net: RoadNetwork): RoadNetwork {
-  return cloneState({ ...createState(0), roads: net }).roads;
+  return cloneState({ ...createBareState(0), roads: net }).roads;
 }
 
 /** Changes drained from `net`, which the test knows has some. */
@@ -135,7 +135,7 @@ describe("road change recording", () => {
 
   it("is not state: a city hashes and plays the same whether or not changes are read", () => {
     const run = (record: boolean) => {
-      const state = createState(2026);
+      const state = createBareState(2026);
       if (record) recordRoadChanges(state.roads);
       let seq = 0;
       for (let i = 0; i < 6; i++) {

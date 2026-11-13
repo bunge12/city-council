@@ -4,7 +4,7 @@ import {
   ROAD_BUILD,
   ROAD_TYPES,
   SEG_FIXED,
-  createState,
+  createBareState,
   deserialize,
   hashState,
   planBulldoze,
@@ -98,7 +98,7 @@ function rejection(state: SimState, c: Command): string {
  * Returns the segment ids by where they run from the crossing.
  */
 function crossroads(): { state: SimState; centre: number; west: number; east: number; north: number; south: number } {
-  const state = createState(SEED);
+  const state = createBareState(SEED);
   ok(state, road([4200, 4500], [4500, 4500]));
   ok(state, road([4300, 4400], [4300, 4700]));
   const net = state.roads;
@@ -183,7 +183,7 @@ describe("BulldozeRoad", () => {
   });
 
   it("removes the last segment at a node, and the node with it", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500]));
     const net = state.roads;
     ok(state, bulldoze(0));
@@ -192,7 +192,7 @@ describe("BulldozeRoad", () => {
   });
 
   it("refuses a fixed segment, and keeps a fixed node its segments leave", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     const net = state.roads;
     const a = addNode(net, 4200, 4500, 0, true);
     const b = addNode(net, 4300, 4500, 0);
@@ -246,7 +246,7 @@ describe("BulldozeRoad", () => {
   });
 
   it("prices a demolition from the balance file", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500], "avenue"));
     const result = planBulldoze(state.roads, { segments: [0] });
     expect(result.ok).toBe(true);
@@ -286,7 +286,7 @@ describe("UpgradeRoad", () => {
   });
 
   it("never prices a downgrade below zero", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500], "avenue"));
     const plan = planUpgrade(state.roads, terrainOf(SEED), { segments: [0], type: "street" });
     expect(plan.ok && plan.plan.cost).toBe(0);
@@ -295,7 +295,7 @@ describe("UpgradeRoad", () => {
   it("refuses a type whose slope limit the road breaks", () => {
     // A short run whose grade is between the avenue limit and the street limit.
     const t = terrainOf(SEED);
-    const net = createState(SEED).roads;
+    const net = createBareState(SEED).roads;
     let found: [number, number] | null = null;
     for (let x = 1000; x < 11000 && !found; x += 16) {
       for (let z = 1000; z < 11000 && !found; z += 64) {
@@ -305,7 +305,7 @@ describe("UpgradeRoad", () => {
       }
     }
     const [x, z] = found ?? [0, 0];
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([x, z], [x + 16, z]));
     expect(rejection(state, upgrade("avenue", [0]))).toMatch(/^Too steep: .* the avenue limit is 10%$/);
     expect(state.roads.segType[0]).toBe(typeOf("street").index);
@@ -314,7 +314,7 @@ describe("UpgradeRoad", () => {
   });
 
   it("refuses a type whose curve limit the road breaks", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     // A street curve with a radius between the street and avenue limits.
     ok(state, road([4200, 4600], [4260, 4600], "street", [4230, 4640]));
     const radius = minRadius(segmentQuad(state.roads, 0));
@@ -324,7 +324,7 @@ describe("UpgradeRoad", () => {
   });
 
   it("refuses a bridge too long for the new type, or whose ramps it cannot climb", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([3400, 6600], [3700, 6600], "street"));
     const net = state.roads;
     const bridge = liveSegments(net).find((s) => net.segLevel[s] === LEVEL_BRIDGE) ?? -1;
@@ -348,7 +348,7 @@ describe("UpgradeRoad", () => {
     // Ground at 20 m with the water at 10 m from x = 160 to 240, so the deck
     // is at 15 m and each ramp falls 5 m.
     const terrain = synthetic((x) => (x >= 160 && x <= 240 ? 0 : 20));
-    const net = createState(SEED).roads;
+    const net = createBareState(SEED).roads;
     const bridgeAt = (x0: number, x1: number, z: number) =>
       addSegment(net, addNode(net, x0, z, 20), addNode(net, x1, z, 20), { type: typeOf("avenue").index, level: LEVEL_BRIDGE });
     // 350 m: an avenue spans it, a street cannot.
@@ -370,7 +370,7 @@ describe("UpgradeRoad", () => {
   });
 
   it("sets a one-way's direction, and reverses it when upgraded to its own type", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500]));
     const net = state.roads;
     const [a, b] = [net.segA[0] ?? -1, net.segB[0] ?? -1];
@@ -433,7 +433,7 @@ describe("UpgradeRoad", () => {
 
 describe("builds, upgrades and bulldozes together", () => {
   it("keep a spatial index equal to a rebuilt one, and survive a save", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     const net = state.roads;
     roadIndexOf(net);
     let rng = 12345;

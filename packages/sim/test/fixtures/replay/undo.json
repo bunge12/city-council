@@ -61,7 +61,7 @@
       "type": "UpgradeRoad",
       "payload": {
         "segments": [
-          0
+          2
         ],
         "type": "oneWay"
       }
@@ -73,7 +73,7 @@
       "type": "BulldozeRoad",
       "payload": {
         "segments": [
-          5
+          7
         ]
       }
     },
@@ -123,5 +123,5 @@
       "payload": {}
     }
   ],
-  "hash": "c7571a82911ded2e"
+  "hash": "b187e39d276ddba7"
 }

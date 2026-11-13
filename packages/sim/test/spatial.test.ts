@@ -32,7 +32,7 @@ import {
   type RoadIndex,
 } from "../src/roads/spatial";
 import * as entry from "../src/index";
-import { createState } from "../src/state";
+import { createBareState } from "../src/state";
 import { deserialize, serialize } from "../src/snapshot";
 import { hashState } from "../src/hash";
 import { churnNetwork, growNetwork } from "./road-network-helper";
@@ -247,7 +247,7 @@ describe("spatial index kept current", () => {
   });
 
   it("is not part of state: saving, hashing and cloning ignore it", () => {
-    const state = createState(5);
+    const state = createBareState(5);
     growNetwork(state.roads, 3, 300);
     const before = hashState(state);
     const bytes = serialize(state);
@@ -257,7 +257,7 @@ describe("spatial index kept current", () => {
   });
 
   it("gives a city saved and loaded mid-run the same answers as one that never stopped", () => {
-    const state = createState(9);
+    const state = createBareState(9);
     growNetwork(state.roads, 21, 1500);
     entry.prepareDerived(state);
     churnNetwork(state.roads, 22, 300);

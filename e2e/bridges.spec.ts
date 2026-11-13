@@ -85,7 +85,8 @@ async function levels(page: Page): Promise<number[]> {
     const net = window.cityCouncil.mirror.state?.roads;
     const out: number[] = [];
     if (!net) return out;
-    for (let s = 0; s < net.segFlags.length; s++) if (((net.segFlags[s] ?? 0) & 1) !== 0) out.push(net.segLevel[s] ?? 0);
+    // Live segments the player built: alive (1) and not an outside connection's fixed stub (2).
+    for (let s = 0; s < net.segFlags.length; s++) if (((net.segFlags[s] ?? 0) & 3) === 1) out.push(net.segLevel[s] ?? 0);
     return out;
   });
 }

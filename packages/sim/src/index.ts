@@ -9,7 +9,7 @@ export function simInfo(): { name: string; tickMs: number } {
   return { name: "city-council sim", tickMs: TICK_MS };
 }
 
-export { SNAPSHOT_VERSION, SPEEDS, createState } from "./state";
+export { SNAPSHOT_VERSION, SPEEDS, createBareState, createState } from "./state";
 export type { SimState, Speed } from "./state";
 export { COMMANDS, MAX_PENDING_COMMANDS, submit, validateCommand } from "./commands";
 export type { Command, CommandDef, CommandResult } from "./commands";
@@ -125,3 +125,17 @@ export {
   sameRoutingGraph,
 } from "./roads/routing";
 export type { EdgeCost, PointRoute, PointRouteOptions, Route, RouteEnd, RouteResult, RoutingBalance, RoutingGraph } from "./roads/routing";
+export {
+  CONNECTION_BALANCE,
+  SIDE_EAST,
+  SIDE_NORTH,
+  SIDE_SOUTH,
+  SIDE_WEST,
+  chooseConnectionSites,
+  connectionEnd,
+  connectionStub,
+  mapEdge,
+  nearestOutside,
+  reachesOutside,
+} from "./roads/connections";
+export type { ConnectionBalance, ConnectionSite } from "./roads/connections";

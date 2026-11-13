@@ -7,6 +7,7 @@ import {
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
   PROTOCOL_VERSION,
+  createBareState,
   createState,
   deserialize,
   hashState,
@@ -25,7 +26,7 @@ function setup(seed = 7) {
   const received: FromSimMessage[] = [];
   client.onMessage((m) => received.push(m));
   let now = 0;
-  const host = new SimHost(createState(seed), hostEnd, () => now);
+  const host = new SimHost(createBareState(seed), hostEnd, () => now);
   const mirror = new SimMirror(client, "p1");
   /** Advances real time in pump-sized steps, as the worker's timer would. */
   const run = (ms: number) => {
@@ -215,7 +216,7 @@ describe("road deltas", () => {
         }),
     };
     let now = 0;
-    const host = new SimHost(createState(2026), hostEnd, () => now);
+    const host = new SimHost(createBareState(2026), hostEnd, () => now);
     const mirror = new SimMirror(filtered, "p1");
     const updates: MirrorUpdate[] = [];
     mirror.subscribe((u) => updates.push(u));
@@ -403,7 +404,7 @@ describe("a host that knows who is on its connection", () => {
     const received: FromSimMessage[] = [];
     client.onMessage((m) => received.push(m));
     let now = 0;
-    const host = new SimHost(createState(3), hostEnd, () => now, [], "local");
+    const host = new SimHost(createBareState(3), hostEnd, () => now, [], "local");
     client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq: 1, playerId: "someone else", type: "NoOp", payload: {} } });
     client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq: 2, playerId: "", type: "NoOp", payload: {} } });
     now += 100;
@@ -468,9 +469,9 @@ describe("a host resumed from its own save", () => {
 
 describe("snapshot transfer", () => {
   it("lists the state's typed array buffers so a worker can move them", () => {
-    const state = createState(3);
+    const state = createBareState(3);
     const roadBuffers = Object.values(state.roads).map((array) => array.buffer);
-    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers]);
+    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer]);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });
 });

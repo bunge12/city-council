@@ -1,0 +1,96 @@
+{
+  "description": "Where the outside connections of a new city go for a few seeds: each connection's edge node and the inner end of its stub, in placement order, in metres. Node and the browser must both give these.",
+  "seeds": [
+    {
+      "seed": 0,
+      "connections": [
+        {
+          "x": 0,
+          "z": 11224,
+          "innerX": 200,
+          "innerZ": 11224
+        },
+        {
+          "x": 10840,
+          "z": 11984,
+          "innerX": 10840,
+          "innerZ": 11784
+        }
+      ]
+    },
+    {
+      "seed": 1,
+      "connections": [
+        {
+          "x": 5464,
+          "z": 11984,
+          "innerX": 5464,
+          "innerZ": 11784
+        },
+        {
+          "x": 11984,
+          "z": 10584,
+          "innerX": 11784,
+          "innerZ": 10584
+        }
+      ]
+    },
+    {
+      "seed": 2026,
+      "connections": [
+        {
+          "x": 0,
+          "z": 3608,
+          "innerX": 200,
+          "innerZ": 3608
+        },
+        {
+          "x": 5592,
+          "z": 0,
+          "innerX": 5592,
+          "innerZ": 200
+        }
+      ]
+    },
+    {
+      "seed": 123456789,
+      "connections": [
+        {
+          "x": 5848,
+          "z": 0,
+          "innerX": 5848,
+          "innerZ": 200
+        },
+        {
+          "x": 0,
+          "z": 1816,
+          "innerX": 200,
+          "innerZ": 1816
+        },
+        {
+          "x": 11984,
+          "z": 3288,
+          "innerX": 11784,
+          "innerZ": 3288
+        }
+      ]
+    },
+    {
+      "seed": 4294967295,
+      "connections": [
+        {
+          "x": 6936,
+          "z": 0,
+          "innerX": 6936,
+          "innerZ": 200
+        },
+        {
+          "x": 0,
+          "z": 4760,
+          "innerX": 200,
+          "innerZ": 4760
+        }
+      ]
+    }
+  ]
+}

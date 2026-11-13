@@ -3,6 +3,7 @@ import {
   LEVEL_BRIDGE,
   ROAD_TYPES,
   UNDO_STEPS,
+  createBareState,
   createState,
   deserialize,
   hashState,
@@ -108,7 +109,7 @@ function sound(state: SimState): void {
 
 /** Two parallel east-west streets, at z = 4450 and z = 4550. */
 function parallels(): SimState {
-  const state = createState(SEED);
+  const state = createBareState(SEED);
   ok(state, road([4200, 4450], [4500, 4450]));
   ok(state, road([4200, 4550], [4500, 4550]));
   return state;
@@ -116,7 +117,7 @@ function parallels(): SimState {
 
 describe("Undo of BuildRoad", () => {
   it("takes back a road on open ground, leaving the network byte for byte as before", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     const before = cityHash(state);
     ok(state, road([4200, 4500], [4500, 4500]));
     expect(segmentCount(state.roads)).toBe(1);
@@ -144,7 +145,7 @@ describe("Undo of BuildRoad", () => {
   });
 
   it("rejoins a curve it split into two curves, exactly", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4600], [4500, 4600], "street", "p1", [4350, 4450]));
     const before = cityHash(state);
     ok(state, road([4350, 4400], [4350, 4700]));
@@ -155,7 +156,7 @@ describe("Undo of BuildRoad", () => {
   });
 
   it("takes back a T-junction on a road's body and a road that joined an existing node", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500]));
     const start = cityHash(state);
     ok(state, road([4300, 4500], [4300, 4700]));
@@ -169,7 +170,7 @@ describe("Undo of BuildRoad", () => {
   });
 
   it("takes back a bridge", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     const before = cityHash(state);
     ok(state, road([3400, 6600], [3700, 6600]));
     expect([...state.roads.segLevel]).toContain(LEVEL_BRIDGE);
@@ -219,7 +220,7 @@ describe("Undo of BulldozeRoad", () => {
 
 describe("Undo of UpgradeRoad", () => {
   it("restores the old type", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500]));
     const before = cityHash(state);
     ok(state, upgrade("avenue", [0]));
@@ -229,7 +230,7 @@ describe("Undo of UpgradeRoad", () => {
   });
 
   it("turns a one-way back round, and back into a street", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500]));
     const start = cityHash(state);
     const b = state.roads.segB[0] ?? -1;
@@ -248,7 +249,7 @@ describe("Undo of UpgradeRoad", () => {
 
 describe("Undo across players", () => {
   it("takes back only the sender's own commands, newest first", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4450], [4500, 4450], "street", "p1"));
     ok(state, road([4200, 4550], [4500, 4550], "street", "p2"));
     ok(state, road([4200, 4650], [4500, 4650], "street", "p1"));
@@ -267,7 +268,7 @@ describe("Undo across players", () => {
   });
 
   it("is recorded in the activity log with the sender", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500]));
     ok(state, undo());
     expect(state.log.map((e) => [e.type, e.playerId])).toEqual([
@@ -277,7 +278,7 @@ describe("Undo across players", () => {
   });
 
   it("ties each record to its command's log entry", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, command("SetSpeed", { speed: 2 }));
     ok(state, road([4200, 4500], [4500, 4500]));
     expect(state.undo.map((r) => [r.entry, r.type, r.playerId])).toEqual([[1, "BuildRoad", "p1"]]);
@@ -298,7 +299,7 @@ describe("An undo that is no longer valid", () => {
   }
 
   it("is refused when another road now joins a junction it would remove", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500], "street", "p1"));
     ok(state, road([4500, 4500], [4500, 4700], "street", "p2"));
     refusedAndUnchanged(state, "p1", /another road now joins/);
@@ -319,7 +320,7 @@ describe("An undo that is no longer valid", () => {
   });
 
   it("is refused when someone else changed or removed the road", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500], "street", "p1"));
     ok(state, upgrade("avenue", [0], "p2"));
     refusedAndUnchanged(state, "p1", /changed or removed/);
@@ -328,7 +329,7 @@ describe("An undo that is no longer valid", () => {
   });
 
   it("is refused when a road built since is in the way of what it would put back", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500], "street", "p1"));
     ok(state, bulldoze([0], "p1"));
     ok(state, road([4300, 4400], [4300, 4600], "street", "p2"));
@@ -344,7 +345,7 @@ describe("An undo that is no longer valid", () => {
   });
 
   it("is refused with nothing to undo, and SetSpeed leaves nothing to undo", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(planUndo(state, "p1")).toEqual({ ok: false, reason: "Nothing to undo" });
     ok(state, command("SetSpeed", { speed: 4 }));
     expect(refusal(state, undo())).toBe("Nothing to undo");
@@ -352,7 +353,7 @@ describe("An undo that is no longer valid", () => {
   });
 
   it("is dropped at apply time when an earlier command in the same tick made it invalid", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500], "street", "p1"));
     expect(submit(state, road([4500, 4500], [4500, 4700], "street", "p2"))).toEqual({ ok: true });
     expect(submit(state, undo("p1"))).toEqual({ ok: true });
@@ -364,7 +365,7 @@ describe("An undo that is no longer valid", () => {
 
 describe("Undo history", () => {
   it(`keeps at most ${UNDO_STEPS} steps per player and frees what the forgotten ones held`, () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500], "street", "p2"));
     for (let i = 0; i <= UNDO_STEPS; i++) {
       // Bulldoze and rebuild, so each record holds ids.
@@ -394,7 +395,7 @@ describe("Undo history", () => {
   });
 
   it("refuses a save whose undo record holds a live id", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500]));
     ok(state, bulldoze([0]));
     ok(state, road([4200, 4600], [4500, 4600]));

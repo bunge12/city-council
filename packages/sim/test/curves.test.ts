@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createState, planRoad, step, submit, type Command, type CommandResult, type SimState } from "../src/index";
+import { createBareState, planRoad, step, submit, type Command, type CommandResult, type SimState } from "../src/index";
 import {
   curveBox,
   isStraight,
@@ -100,7 +100,7 @@ const ARCH: [[number, number], [number, number], [number, number]] = [
 ];
 
 function withArch(): SimState {
-  const state = createState(SEED);
+  const state = createBareState(SEED);
   expect(build(state, road(...ARCH))).toEqual({ ok: true });
   return state;
 }
@@ -202,7 +202,7 @@ describe("BuildRoad with a control point", () => {
   });
 
   it("prices the curve by its length along the curve", () => {
-    const plan = planRoad(createState(SEED).roads, terrainOf(SEED), road(...ARCH).payload);
+    const plan = planRoad(createBareState(SEED).roads, terrainOf(SEED), road(...ARCH).payload);
     if (!plan.ok) throw new Error(plan.reason);
     const street = ROAD_TYPES.find((t) => t.id === "street");
     expect(plan.plan.length).toBe(curveLength(4200, 4500, 4300, 4600, 4400, 4500));
@@ -211,7 +211,7 @@ describe("BuildRoad with a control point", () => {
   });
 
   it("builds a straight road when the control point is on the line between the ends", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(build(state, road([4200, 4500], [4400, 4500], [4250, 4500]))).toEqual({ ok: true });
     expect(isStraight(segmentQuad(state.roads, 0))).toBe(true);
     expect(state.roads.segLength[0]).toBe(200);
@@ -220,14 +220,14 @@ describe("BuildRoad with a control point", () => {
   it("refuses a control point that is not a point", () => {
     const command = road([4200, 4500], [4400, 4500]);
     (command.payload as Record<string, unknown>)["control"] = { x: 4300 };
-    expect(rejection(createState(SEED), command)).toBe("A curved road's control point needs a finite x and z");
+    expect(rejection(createBareState(SEED), command)).toBe("A curved road's control point needs a finite x and z");
   });
 });
 
 describe("the radius limit", () => {
   it("refuses a curve tighter than the road type allows", () => {
     // Radius 10 m at its apex; a street needs 20 m.
-    expect(rejection(createState(SEED), road([4200, 4500], [4240, 4500], [4220, 4540]))).toBe(
+    expect(rejection(createBareState(SEED), road([4200, 4500], [4240, 4500], [4220, 4540]))).toBe(
       "The curve is too tight: a 10 m radius, and the street limit is 20 m",
     );
   });
@@ -235,37 +235,37 @@ describe("the radius limit", () => {
   it("comes from the road type", () => {
     // Radius 30 m: wide enough for a street, too tight for an avenue.
     const curve = (type: string) => road([4200, 4500], [4260, 4500], [4230, 4530], type);
-    expect(build(createState(SEED), curve("street"))).toEqual({ ok: true });
-    expect(rejection(createState(SEED), curve("avenue"))).toBe(
+    expect(build(createBareState(SEED), curve("street"))).toEqual({ ok: true });
+    expect(rejection(createBareState(SEED), curve("avenue"))).toBe(
       "The curve is too tight: a 30 m radius, and the avenue limit is 40 m",
     );
   });
 
   it("refuses a curve that folds back on itself", () => {
-    expect(rejection(createState(SEED), road([4200, 4500], [4300, 4500], [4350, 4500]))).toMatch(/^The curve is too tight: a 0 m radius/);
+    expect(rejection(createBareState(SEED), road([4200, 4500], [4300, 4500], [4350, 4500]))).toMatch(/^The curve is too tight: a 0 m radius/);
   });
 });
 
 describe("the ground under a curve", () => {
   it("is checked along the curve, not the chord, for water", () => {
     const straight = road([SHORE.x, SHORE.z0], [SHORE.x, SHORE.z1]);
-    expect(planRoad(createState(SEED).roads, terrainOf(SEED), straight.payload).ok).toBe(true);
+    expect(planRoad(createBareState(SEED).roads, terrainOf(SEED), straight.payload).ok).toBe(true);
     const bulging = road([SHORE.x, SHORE.z0], [SHORE.x, SHORE.z1], [SHORE.x + 100, (SHORE.z0 + SHORE.z1) / 2]);
     // Over the water it would be a bridge, but the curve leaves no room on the banks for its ramps.
-    expect(rejection(createState(SEED), bulging)).toMatch(/^Not enough room on the bank for the ramp up to the bridge/);
+    expect(rejection(createBareState(SEED), bulging)).toMatch(/^Not enough room on the bank for the ramp up to the bridge/);
   });
 
   it("is checked along the curve, not the chord, for slope", () => {
     const straight = road([SLOPE.x, SLOPE.z0], [SLOPE.x, SLOPE.z1]);
-    expect(planRoad(createState(SEED).roads, terrainOf(SEED), straight.payload).ok).toBe(true);
+    expect(planRoad(createBareState(SEED).roads, terrainOf(SEED), straight.payload).ok).toBe(true);
     const bulging = road([SLOPE.x, SLOPE.z0], [SLOPE.x, SLOPE.z1], [SLOPE.x - 80, (SLOPE.z0 + SLOPE.z1) / 2]);
-    expect(rejection(createState(SEED), bulging)).toMatch(/^Too steep: a \d+% grade, and the street limit is 12%$/);
+    expect(rejection(createBareState(SEED), bulging)).toMatch(/^Too steep: a \d+% grade, and the street limit is 12%$/);
   });
 });
 
 describe("crossings with curves", () => {
   it("splits a street a curve crosses twice, and the curve at both crossings", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(build(state, road([4200, 4500], [4500, 4500]))).toEqual({ ok: true });
     // An arch from z = 4420 bulging to z = 4520: it crosses z = 4500 twice.
     expect(build(state, road([4250, 4420], [4450, 4420], [4350, 4620]))).toEqual({ ok: true });
@@ -347,7 +347,7 @@ describe("crossings with curves", () => {
   });
 
   it("refuses a curve that leaves a node too close to the road already there", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(build(state, road([4200, 4500], [4400, 4500]))).toEqual({ ok: true });
     // Starts at the street's end and leaves it at 0 degrees, then curves away.
     expect(rejection(state, road([4400, 4500], [4300, 4600], [4300, 4500]))).toMatch(/too sharp/);
@@ -357,7 +357,7 @@ describe("crossings with curves", () => {
 describe("the spatial index and curves", () => {
   // From (4200, 4450) to (4400, 4450), bulging south over the chunk line z = 4500 to z = 4525.
   function bulge(): SimState {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     expect(build(state, road([4200, 4450], [4400, 4450], [4300, 4600]))).toEqual({ ok: true });
     return state;
   }

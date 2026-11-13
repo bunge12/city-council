@@ -115,7 +115,8 @@ async function segments(page: Page): Promise<SegInfo[]> {
     if (!net) return [];
     const out: SegInfo[] = [];
     for (let s = 0; s < net.segFlags.length; s++) {
-      if (((net.segFlags[s] ?? 0) & 1) === 0) continue;
+      // Live (1) and built by the player, not an outside connection's fixed stub (2).
+      if (((net.segFlags[s] ?? 0) & 3) !== 1) continue;
       const a = net.segA[s] ?? 0;
       const b = net.segB[s] ?? 0;
       out.push({
@@ -130,9 +131,15 @@ async function segments(page: Page): Promise<SegInfo[]> {
 
 async function liveNodes(page: Page): Promise<number> {
   return page.evaluate(() => {
-    const flags = window.cityCouncil.mirror.state?.roads.nodeFlags;
+    const net = window.cityCouncil.mirror.state?.roads;
+    if (!net) return 0;
+    // Nodes on an outside connection's fixed stub (segment flag 2) are not the player's.
+    const stub = new Set<number>();
+    for (let s = 0; s < net.segFlags.length; s++) {
+      if (((net.segFlags[s] ?? 0) & 3) === 3) stub.add(net.segA[s] ?? -1).add(net.segB[s] ?? -1);
+    }
     let n = 0;
-    for (let i = 0; i < (flags?.length ?? 0); i++) if (((flags?.[i] ?? 0) & 1) !== 0) n++;
+    for (let i = 0; i < net.nodeFlags.length; i++) if (((net.nodeFlags[i] ?? 0) & 1) !== 0 && !stub.has(i)) n++;
     return n;
   });
 }

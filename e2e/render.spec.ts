@@ -23,6 +23,9 @@ async function ready(page: Page, url: string) {
   return status;
 }
 
+/** The whole map from the south, as the camera started before cities had connections. */
+const WHOLE_MAP: { position: Vec3; target: Vec3 } = { position: [6000, 8400, 15_840], target: [6000, 0, 5640] };
+
 async function setCamera(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.view).setCamera(p, t), [position, target] as const);
 }
@@ -42,9 +45,11 @@ for (const { name, url, backend } of [
     expect(status.backend).toMatch(backend);
     // M0 exit test: the map is on screen within 5 seconds of opening the page.
     expect(status.readyMs).toBeLessThan(5000);
+    // A new city opens on an outside connection (issue M1-16). Look at the whole map.
+    await setCamera(page, WHOLE_MAP.position, WHOLE_MAP.target);
     await expect(page.locator("#render-backend")).toHaveText(status.backend === "webgpu" ? "WebGPU" : "WebGL 2");
     await expect(page.locator("#render-frame")).toHaveText(/ms \(\d+ fps\)/);
-    // 576 chunks plus the water, all in view from the default camera.
+    // 576 chunks plus the water, all in view.
     await expect(page.locator("#render-draws")).toHaveText(/^5[0-9]{2}, \d+k triangles$/);
     expect(await lodCounts(page)).toEqual([0, 0, 576]);
     console.log(`${name}: ${status.backend}, terrain ${status.terrainMs.toFixed(0)} ms, meshes ${status.buildMs.toFixed(0)} ms, ready at ${status.readyMs.toFixed(0)} ms`);

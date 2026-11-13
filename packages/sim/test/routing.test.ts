@@ -36,7 +36,7 @@ import {
 } from "../src/roads/routing";
 import { NETWORKS_ALL, NETWORKS_RAIL, NETWORKS_ROAD } from "../src/roads/spatial";
 import { deserialize, serialize } from "../src/snapshot";
-import { cloneState, createState } from "../src/state";
+import { cloneState, createBareState } from "../src/state";
 import { churnNetwork, growNetwork } from "./road-network-helper";
 
 // Issue M1-15: the routing graph and the pathfinder.
@@ -433,7 +433,7 @@ describe("routing graph kept current", () => {
   });
 
   it("is not part of state: saving, hashing and cloning ignore it", () => {
-    const state = createState(5);
+    const state = createBareState(5);
     growNetwork(state.roads, 3, 300);
     const before = hashState(state);
     const bytes = serialize(state);
@@ -444,7 +444,7 @@ describe("routing graph kept current", () => {
   });
 
   it("gives a city saved and loaded mid-run the same routes as one that never stopped", () => {
-    const state = createState(9);
+    const state = createBareState(9);
     growNetwork(state.roads, 21, 1500);
     entry.prepareDerived(state);
     expect(existingRoutingGraph(state.roads)).not.toBeNull();
@@ -462,7 +462,7 @@ describe("routing graph kept current", () => {
   it("follows road deltas on a client's copy", () => {
     const net = createRoadNetwork();
     growNetwork(net, 50, 400);
-    const copy = cloneState({ ...createState(0), roads: net }).roads;
+    const copy = cloneState({ ...createBareState(0), roads: net }).roads;
     const graph = routingGraphOf(copy);
     recordRoadChanges(net);
     for (let round = 0; round < 5; round++) {

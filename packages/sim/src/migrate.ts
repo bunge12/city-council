@@ -1,4 +1,6 @@
-import { createRoadNetwork } from "./roads/network";
+import { placeConnections } from "./roads/connections";
+import { createRoadNetwork, type RoadNetwork } from "./roads/network";
+import { terrainOf } from "./terrain/cache";
 import { SNAPSHOT_VERSION, type SimState } from "./state";
 
 type Migration = (old: Record<string, unknown>) => Record<string, unknown>;
@@ -12,6 +14,15 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 4 adds every player's undo history, empty. Ids a version 3
   // network removed are all on its free lists, so none is held.
   3: (old) => ({ ...old, version: 4, undo: [] }),
+  // Version 5 adds the outside connections, placed as a new city of the
+  // seed places them but clear of the roads the save already has. They go
+  // into its network under new ids and nothing is journalled, so undo
+  // never takes them back.
+  4: (old) => {
+    const roads = old["roads"] as RoadNetwork;
+    const connections = placeConnections(roads, terrainOf(old["seed"] as number), old["seed"] as number);
+    return { ...old, version: 5, roads, connections };
+  },
 };
 
 /**

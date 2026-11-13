@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ROAD_BUILD,
+  createBareState,
   createState,
   hashState,
   heightAt,
@@ -66,7 +67,7 @@ function rejection(state: SimState, command: Command): string {
 
 /** A state with one street from (4200, 4500) to (4500, 4500): nodes 0 and 1, segment 0. */
 function withStreet(type = "street"): SimState {
-  const state = createState(SEED);
+  const state = createBareState(SEED);
   expect(build(state, road([4200, 4500], [4500, 4500], type))).toEqual({ ok: true });
   return state;
 }
@@ -148,7 +149,7 @@ describe("a road across another", () => {
   });
 
   it("goes through three parallel roads as a chain in order along the line", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     for (const z of [4500, 4600, 4700]) expect(build(state, road([4200, z], [4600, z]))).toEqual({ ok: true });
     const before = segmentCount(state.roads);
     const result = submit(state, road([4300.3, 4420.7], [4520.1, 4781.9]));
@@ -209,7 +210,7 @@ describe("a road that ends on another", () => {
   });
 
   it("splits at both ends when it runs between two roads", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     build(state, road([4200, 4500], [4500, 4500]));
     build(state, road([4200, 4700], [4500, 4700]));
     expect(build(state, road([4350, 4500], [4350, 4700]))).toEqual({ ok: true });
@@ -222,7 +223,7 @@ describe("a road that ends on another", () => {
 describe("a crossing near an existing node", () => {
   // Two segments meeting in a straight line at node (4350, 4500).
   const withNode = (): SimState => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     build(state, road([4200, 4500], [4350, 4500]));
     build(state, road([4350, 4500], [4500, 4500]));
     return state;
@@ -254,7 +255,7 @@ describe("a crossing near an existing node", () => {
   });
 
   it("joins the new road's end when that is within the merge distance", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     build(state, road([4200, 4500], [4500, 4500]));
     // Ends 3 m past the street's body, more than the merge distance from it
     // only along the slant.
@@ -280,7 +281,7 @@ describe("a crossing is refused", () => {
   });
 
   it("when two roads it crosses are too close together", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     build(state, road([4200, 4500], [4500, 4500]));
     build(state, road([4200, 4506], [4500, 4506]));
     expect(rejection(state, road([4350, 4400], [4350, 4600]))).toMatch(/^Too close to a junction/);
@@ -289,7 +290,7 @@ describe("a crossing is refused", () => {
 
 describe("segments on other layers", () => {
   it("are not split by a ground road", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     const net = state.roads;
     const r0 = addNode(net, 4200, 4500, 0);
     const r1 = addNode(net, 4500, 4500, 0);
@@ -300,7 +301,7 @@ describe("segments on other layers", () => {
   });
 
   it("refuse a ground road across a bridge instead of passing under it", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     const net = state.roads;
     const b0 = addNode(net, 4200, 4600, 0);
     const b1 = addNode(net, 4500, 4600, 0);
@@ -335,8 +336,8 @@ describe("the crossing point", () => {
       // A road across the square from west to east, and one from north to south.
       const first = road([at(4150, 4250), at(4450, 4950)], [at(4550, 4650), at(4450, 4950)]);
       const second = road([at(4350, 4450), at(4420, 4440)], [at(4350, 4450), at(4960, 4980)]);
-      const ab = createState(SEED);
-      const ba = createState(SEED);
+      const ab = createBareState(SEED);
+      const ba = createBareState(SEED);
       const okAB = build(ab, first).ok && build(ab, second).ok;
       const okBA = build(ba, second).ok && build(ba, first).ok;
       expect(okBA).toBe(okAB);
@@ -355,7 +356,7 @@ describe("the crossing point", () => {
 
 describe("after any accepted road", () => {
   it("no two segments on the same level cross without a shared node, over 500 random roads, half of them curved", () => {
-    const state = createState(SEED);
+    const state = createBareState(SEED);
     const rng = seedRng(2026);
     const net = state.roads;
     let accepted = 0;
