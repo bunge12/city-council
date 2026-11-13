@@ -39,7 +39,8 @@ import {
 import { liveNode, liveRoadSegment, roadSegmentsAt, type RoadNet } from "../render/road-geometry";
 import { SNAP, type GuideToggles } from "./config";
 
-export type SnapKind = "node" | "segment" | "angle" | "grid" | "none";
+/** `tangent` is the curve tool's lock: a control point held in line with the road a curve leaves from (issue M1-10). */
+export type SnapKind = "node" | "segment" | "angle" | "tangent" | "grid" | "none";
 
 /** What a source caught. */
 export interface SnapHit {
@@ -54,7 +55,7 @@ export interface SnapHit {
   perpendicular?: boolean;
   /** For a segment snap, the segment's unit direction, for the marker. */
   along?: { dx: number; dz: number };
-  /** For an angle snap, the guide ray's unit direction from the start. Length snap slides along it. */
+  /** For an angle or tangent snap, the guide ray's unit direction from the start. Length snap slides along it. */
   ray?: { dx: number; dz: number };
 }
 
@@ -165,6 +166,19 @@ export function startSource(net: RoadNet, start: BuildPoint): StartSource | null
   if (best === NONE) return null;
   const d = segmentDir(net, best, bestT);
   return { kind: "segment", id: best, dirs: [d, { dx: -d.dx, dz: -d.dz }] };
+}
+
+/**
+ * Where a road leaving `source` carries straight on, when the source is the
+ * end of a road: a node with one road segment. The unit direction out of the
+ * node, opposite the segment's tangent there, and the node itself. Null for a
+ * junction, a segment's body or open ground.
+ */
+export function roadEnd(net: RoadNet, source: StartSource | null): { x: number; z: number; dx: number; dz: number } | null {
+  if (source?.kind !== "node" || source.dirs.length !== 1) return null;
+  const dir = source.dirs[0];
+  if (!dir) return null;
+  return { x: net.nodeX[source.id] ?? 0, z: net.nodeZ[source.id] ?? 0, dx: -dir.dx, dz: -dir.dz };
 }
 
 /** The live road node nearest (x, z) within `r` metres, other than `skip`, or NONE. Ties go to the lower id. */

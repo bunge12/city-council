@@ -184,6 +184,8 @@ export const ROAD_PREVIEW = {
   opacity: 0.72,
   /** Metres above the ground. */
   lift: 0.6,
+  /** Most pieces a curved preview is cut into, so a very tight refused curve stays cheap. */
+  maxCurvePieces: 400,
   /** Junction markers: radius as a share of the road width, sides, and extra height. */
   junctionScale: 0.75,
   junctionSides: 20,
