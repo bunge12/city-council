@@ -36,6 +36,7 @@ import {
   LEVEL_GROUND,
   NETWORK_ROAD,
   NONE,
+  SEG_FIXED,
   addNode,
   addSegment,
   curveLength,
@@ -244,7 +245,7 @@ function joined(net: RoadNetwork, a: number, b: number): boolean {
   return false;
 }
 
-const TIGHT = (type: RoadType, radius: number) =>
+export const TIGHT = (type: RoadType, radius: number) =>
   `The curve is too tight: a ${Math.round(radius)} m radius, and the ${type.name.toLowerCase()} limit is ${type.minCurveRadius} m`;
 
 /** A new stop with no existing node. */
@@ -609,11 +610,11 @@ const END_IN_WATER = "A road cannot start or end in water";
 const JUNCTION_IN_WATER = "The road would meet another road over water";
 const CROSSES_BRIDGE = "The road would cross a bridge, and roads cannot pass over or under each other yet";
 
-function bridgeTooLong(type: RoadType, length: number): string {
+export function bridgeTooLong(type: RoadType, length: number): string {
   return `Too long for a bridge: ${Math.round(length)} m, and the ${type.name.toLowerCase()} limit is ${type.bridge.maxLength} m`;
 }
 
-function rampProblem(type: RoadType, grade: number, up: boolean): string {
+export function rampProblem(type: RoadType, grade: number, up: boolean): string {
   const limit = `the ${type.name.toLowerCase()} limit is ${percent(type.maxSlope)}`;
   if (grade === Infinity) return `There is no room on the bank for the ramp ${up ? "up" : "down"} to the bridge`;
   if (up) return `Not enough room on the bank for the ramp up to the bridge: it would be a ${percent(grade)} grade, and ${limit}`;
@@ -621,7 +622,7 @@ function rampProblem(type: RoadType, grade: number, up: boolean): string {
 }
 
 /** A ground sample along a piece of road. */
-interface Sample {
+export interface Sample {
   /** The piece's curve parameter, 0 to 1. */
   tau: number;
   x: number;
@@ -637,7 +638,7 @@ interface Sample {
  * of no more than `groundSampleStep` on a straight piece, and even steps of
  * the parameter on a curve.
  */
-function sampleGround(terrain: Terrain, q: Quad): Sample[] {
+export function sampleGround(terrain: Terrain, q: Quad): Sample[] {
   const step = ROAD_BUILD.groundSampleStep;
   const out: Sample[] = [];
   const at = (tau: number, x: number, z: number, s: number): void => {
@@ -830,7 +831,7 @@ function tooSteep(type: RoadType, steepest: number): string | null {
  * of them that even its fastest stretch, at an end, has samples close
  * enough, and each grade is over the distance between its two samples.
  */
-function groundProblem(terrain: Terrain, type: RoadType, q: Quad): string | null {
+export function groundProblem(terrain: Terrain, type: RoadType, q: Quad): string | null {
   const step = ROAD_BUILD.groundSampleStep;
   if (isStraight(q)) {
     const { ax, az, bx, bz } = q;
@@ -1079,7 +1080,12 @@ export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan): n
     const straight = isStraight(shape);
     const ends = [net.segA[seg] ?? NONE, ...at.map((s) => nodes[s.stop] ?? NONE), net.segB[seg] ?? NONE];
     const params = [0, ...at.map((s) => s.u), 1];
-    const base = { type: net.segType[seg] ?? 0, network: net.segNetwork[seg] ?? 0, level: net.segLevel[seg] ?? 0 };
+    const base = {
+      type: net.segType[seg] ?? 0,
+      network: net.segNetwork[seg] ?? 0,
+      level: net.segLevel[seg] ?? 0,
+      fixed: ((net.segFlags[seg] ?? 0) & SEG_FIXED) !== 0,
+    };
     removeSegment(net, seg);
     for (let k = 1; k < ends.length; k++) {
       const c = straight ? null : subControl(shape, params[k - 1] ?? 0, params[k] ?? 1);

@@ -1,5 +1,5 @@
 {
-  "_about": "Road types. Lengths and widths are metres, speeds km/h, capacity vehicles per hour per lane, slopes rise over run. Prices are whole dollars in their source year; `escalation` brings them to 2026. A type's place in `types` is its id in saves, so append new types and never reorder. A type's `bridge` sets the longest bridge it can make, in metres, and how many times its price per metre a bridge costs. Speeds, capacities, widths and limits are starting values to tune.",
+  "_about": "Road types. Lengths and widths are metres, speeds km/h, capacity vehicles per hour per lane, slopes rise over run. Prices are whole dollars in their source year; `escalation` brings them to 2026. A type's place in `types` is its id in saves, so append new types and never reorder. `demolitionCostPerMetre` is what bulldozing a metre costs, times the bridge multiplier on a bridge. A type's `bridge` sets the longest bridge it can make, in metres, and how many times its price per metre a bridge costs. Speeds, capacities, widths and limits are starting values to tune.",
   "escalation": {
     "toYear": 2026,
     "annualFactor": 1.1085,
@@ -8,13 +8,14 @@
     "sourceYear": 2025
   },
   "build": {
-    "_about": "How the sim checks a road before it builds one. Lengths are metres, angles degrees. `bridgeClearance` is how far a bridge deck sits above the water. Starting values to tune.",
+    "_about": "How the sim checks a road before it builds one. Lengths are metres, angles degrees. `bridgeClearance` is how far a bridge deck sits above the water. `upgradeCredit` is the share of the old road's build cost taken off an upgrade's price, because the roadbed is reused; a placeholder with no source. Starting values to tune.",
     "gridStep": 0.125,
     "mergeDistance": 4,
     "minLength": 10,
     "minAngleDegrees": 25,
     "groundSampleStep": 8,
-    "bridgeClearance": 5
+    "bridgeClearance": 5,
+    "upgradeCredit": 0.5
   },
   "types": [
     {
@@ -40,6 +41,12 @@
         "amount": 14,
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
+        "placeholder": true
+      },
+      "demolitionCostPerMetre": {
+        "amount": 300,
+        "sourceYear": 2026,
+        "source": "Placeholder. $30 per square metre of pavement removed, times the 10 m width, until M4 prices demolition.",
         "placeholder": true
       },
       "bridge": {
@@ -75,6 +82,12 @@
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
         "placeholder": true
       },
+      "demolitionCostPerMetre": {
+        "amount": 540,
+        "sourceYear": 2026,
+        "source": "Placeholder. $30 per square metre of pavement removed, times the 18 m width, until M4 prices demolition.",
+        "placeholder": true
+      },
       "bridge": {
         "maxLength": 400,
         "costMultiplier": 26,
@@ -108,6 +121,12 @@
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
         "placeholder": true
       },
+      "demolitionCostPerMetre": {
+        "amount": 240,
+        "sourceYear": 2026,
+        "source": "Placeholder. $30 per square metre of pavement removed, times the 8 m width, until M4 prices demolition.",
+        "placeholder": true
+      },
       "bridge": {
         "maxLength": 300,
         "costMultiplier": 26,
@@ -139,6 +158,12 @@
         "amount": 180,
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
+        "placeholder": true
+      },
+      "demolitionCostPerMetre": {
+        "amount": 900,
+        "sourceYear": 2026,
+        "source": "Placeholder. $30 per square metre of pavement removed, times the 30 m width, until M4 prices demolition.",
         "placeholder": true
       },
       "bridge": {
