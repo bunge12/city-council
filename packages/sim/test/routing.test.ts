@@ -273,9 +273,9 @@ describe("findRouteBetween points", () => {
 // ---- A plain Dijkstra, for checking the real one ----
 
 /**
- * The quickest route by a textbook Dijkstra: scan every node for the
- * nearest unsettled one, and read edges from a scan of every segment rather
- * than the node lists. The same tie rules: the lower node id settles first,
+ * The quickest route by a textbook Dijkstra: scan the unsettled nodes for
+ * the nearest one, and read edges from a scan of every segment rather than
+ * the node lists. The same tie rules: the lower node id settles first,
  * and of two equal ways into a node the lower segment id.
  */
 function plainDijkstra(graph: RoutingGraph, from: number, to: number, networks: number): RouteResult {
@@ -295,18 +295,27 @@ function plainDijkstra(graph: RoutingGraph, from: number, to: number, networks: 
     if (back !== NO_EDGE) out[b]?.push([a, back, seg]);
   }
   time[from] = 0;
+  // Nodes reached but not settled. Picking from it by a linear scan, not a
+  // heap, keeps this the textbook search.
+  const open = [from];
   for (;;) {
-    let u = NONE;
-    for (let v = 0; v < n; v++) {
-      if (!done[v] && isNode(net, v) && (time[v] ?? Infinity) < (u === NONE ? Infinity : (time[u] ?? Infinity))) u = v;
+    let pick = -1;
+    for (let i = 0; i < open.length; i++) {
+      const v = open[i] ?? 0;
+      const u = open[pick] ?? 0;
+      if (pick < 0 || (time[v] ?? 0) < (time[u] ?? 0) || (time[v] === time[u] && v < u)) pick = i;
     }
-    if (u === NONE) return { ok: false, reason: NO_ROUTE };
+    if (pick < 0) return { ok: false, reason: NO_ROUTE };
+    const u = open[pick] ?? 0;
+    open[pick] = open[open.length - 1] ?? 0;
+    open.pop();
     done[u] = 1;
     if (u === to) break;
     for (const [v, cost, seg] of out[u] ?? []) {
       if (done[v]) continue;
       const t = (time[u] ?? 0) + cost;
       if (t < (time[v] ?? Infinity) || (t === time[v] && seg < (via[v] ?? NONE))) {
+        if (time[v] === Infinity) open.push(v);
         time[v] = t;
         via[v] = seg;
       }
