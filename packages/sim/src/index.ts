@@ -71,6 +71,7 @@ export {
   NODE_FIXED,
   NONE,
   SEG_ALIVE,
+  curveLength,
 } from "./roads/network";
 export type { RoadNetwork } from "./roads/network";
 export { applyRoadDelta, drainRoadChanges, encodeRoadDelta, mergeRoadChanges, recordRoadChanges } from "./roads/delta";

@@ -58,6 +58,9 @@ function useShortcuts(): void {
         case "roadType":
           roadTool.pickType(action.type);
           return;
+        case "drawMode":
+          roadTool.pickMode(action.mode);
+          return;
         case "escape":
           roadTool.escape();
           return;

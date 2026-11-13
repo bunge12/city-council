@@ -2,7 +2,7 @@
 // and the list in the debug panel, so the list cannot drift from the keys.
 
 import type { Speed } from "@city-council/sim";
-import type { ToolRoadType } from "../tools/road-tool";
+import type { DrawMode, ToolRoadType } from "../tools/road-tool";
 
 export type ShortcutAction =
   | { kind: "speed"; speed: Speed }
@@ -11,6 +11,7 @@ export type ShortcutAction =
   | { kind: "toggleLog" }
   | { kind: "roadTool" }
   | { kind: "roadType"; type: ToolRoadType }
+  | { kind: "drawMode"; mode: DrawMode }
   | { kind: "escape" };
 
 export interface Shortcut {
@@ -33,6 +34,9 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["KeyZ"], label: "Z", description: "draw streets", action: { kind: "roadType", type: "street" } },
   { codes: ["KeyX"], label: "X", description: "draw avenues", action: { kind: "roadType", type: "avenue" } },
   { codes: ["KeyC"], label: "C", description: "draw one-way roads", action: { kind: "roadType", type: "oneWay" } },
+  { codes: ["KeyT"], label: "T", description: "draw straight roads", action: { kind: "drawMode", mode: "straight" } },
+  { codes: ["KeyY"], label: "Y", description: "draw curved roads", action: { kind: "drawMode", mode: "curved" } },
+  { codes: ["KeyU"], label: "U", description: "draw continuous roads", action: { kind: "drawMode", mode: "continuous" } },
   {
     codes: ["Escape"],
     label: "Esc",
@@ -49,6 +53,7 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "+ -", description: "zoom" },
   { label: "Drag, right-drag, wheel", description: "pan, orbit, zoom" },
   { label: "Click, right-click", description: "with the road tool: start or end a road, drop it" },
+  { label: "Double click", description: "with the road tool: end a continuous road" },
   { label: "Hold Alt", description: "with the road tool: draw free-hand, without guides" },
 ];
 

@@ -33,7 +33,7 @@ export function snapMarks(snap: Snap, start: BuildPoint | null, metresPerPixel: 
   if (len < 1e-6) return marks;
   const ux = dx / len;
   const uz = dz / len;
-  if (snap.kind === "angle") {
+  if (snap.kind === "angle" || snap.kind === "tangent") {
     const reach = len + SNAP_MARKS.guideOvershootPx * metresPerPixel;
     marks.push({ shape: "line", ax: start.x, az: start.z, bx: start.x + ux * reach, bz: start.z + uz * reach, look: "angle" });
   }

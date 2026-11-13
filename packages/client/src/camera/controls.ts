@@ -4,7 +4,7 @@
 // Mouse: left drag pans (the ground under the cursor follows it), right or
 // middle drag orbits, wheel zooms towards the cursor, a left click picks the
 // ground and a right click without a drag is reported too, so a tool can
-// use it to cancel. Keyboard: WASD or arrows pan, Q and E turn, R and F tilt, + and -
+// use it to cancel, and so is a double click, which ends a continuous road. Keyboard: WASD or arrows pan, Q and E turn, R and F tilt, + and -
 // zoom on the screen centre.
 
 import { Mesh, MeshBasicNodeMaterial, RingGeometry, type Scene } from "three/webgpu";
@@ -28,6 +28,8 @@ export interface CameraControls {
   onPick(listener: (hit: GroundHit | null) => void): void;
   /** Called for each right click that did not orbit the camera. */
   onRightClick(listener: () => void): void;
+  /** Called for a double click whose second press was a click, after both clicks have been picked. */
+  onDoubleClick(listener: () => void): void;
   dispose(): void;
 }
 
@@ -56,6 +58,9 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   const held = new Set<string>();
   const pickListeners: ((hit: GroundHit | null) => void)[] = [];
   const rightClickListeners: (() => void)[] = [];
+  const doubleClickListeners: (() => void)[] = [];
+  /** The last left release was a click, not the end of a drag. */
+  let lastWasClick = false;
   let drag: Drag | null = null;
   /** Pointer position over the canvas, in CSS pixels, or null when it is elsewhere. */
   let pointer: { x: number; y: number } | null = null;
@@ -108,6 +113,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     const released = e.type === "pointerup";
     const wasClick = released && drag.kind === "pan" && !drag.moved;
     const wasRightClick = released && drag.kind === "orbit" && drag.button === 2 && !drag.moved;
+    if (released && drag.button === 0) lastWasClick = wasClick;
     drag = null;
     if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
     if (wasClick) {
@@ -164,6 +170,11 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   }
 
   const noMenu = (e: Event) => e.preventDefault();
+  // The browser sends this after the second click's pointerup, so both
+  // clicks have already been picked.
+  const onDblClick = () => {
+    if (lastWasClick) for (const l of doubleClickListeners) l();
+  };
 
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointermove", onPointerMove);
@@ -172,6 +183,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   canvas.addEventListener("pointerleave", onPointerLeave);
   canvas.addEventListener("wheel", onWheel, { passive: false });
   canvas.addEventListener("contextmenu", noMenu);
+  canvas.addEventListener("dblclick", onDblClick);
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
   window.addEventListener("blur", onBlur);
@@ -219,6 +231,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     altHeld: () => alt,
     onPick: (l) => pickListeners.push(l),
     onRightClick: (l) => rightClickListeners.push(l),
+    onDoubleClick: (l) => doubleClickListeners.push(l),
     dispose() {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
@@ -227,6 +240,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", noMenu);
+      canvas.removeEventListener("dblclick", onDblClick);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
