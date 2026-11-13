@@ -1,14 +1,15 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
-// Issue 47: the build dock. With no tool on it shows only the tool buttons.
-// The road tool's options open in a menu above its button, in labelled
-// groups, and bulldoze and upgrade are actions in that menu. The grid tool's
-// options open above its own button.
+// Issue 47: the build dock. With no tool on it shows only the road button.
+// The road tools open in a menu above it, in labelled groups: bulldoze and
+// upgrade are actions, and the grid is a build mode beside straight, curved
+// and continuous.
 
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: { width: 1280, height: 800 } });
+test.setTimeout(120_000);
 
 async function open(page: Page): Promise<void> {
   await page.goto("/?webgl");
@@ -27,11 +28,10 @@ async function groups(page: Page, menu: string): Promise<string[]> {
   return page.locator(`${menu} .menu-group`).evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? ""));
 }
 
-test("the dock hides tool options until a tool is on, and opens them above its button", async ({ page }, testInfo) => {
+test("the dock shows only the road button until a road tool is on, and opens the road menu above it", async ({ page }, testInfo) => {
   await open(page);
   await expect(page.locator("#road-tool")).toBeVisible();
-  await expect(page.locator("#grid-tool")).toBeVisible();
-  for (const id of ["#road-menu", "#grid-menu", "#road-type-street", "#draw-mode-straight", "#guide-angle", "#bulldoze-tool"]) {
+  for (const id of ["#road-menu", "#road-type-street", "#draw-mode-straight", "#grid-tool", "#guide-angle", "#bulldoze-tool"]) {
     await expect(page.locator(id)).toHaveCount(0);
   }
   await attach(page, testInfo, "1 the dock with no tool on");
@@ -61,21 +61,22 @@ test("the dock hides tool options until a tool is on, and opens them above its b
   await page.keyboard.press("KeyV");
   expect(await groups(page, "#road-menu")).toEqual(["Actions", "Road type"]);
 
-  // The grid tool's menu replaces it, above the grid button.
+  // The grid is a build mode: the menu stays, with the grid's sizes and no snapping toggles.
   await page.keyboard.press("KeyG");
-  await expect(page.locator("#road-menu")).toHaveCount(0);
-  await expect(page.locator("#grid-menu")).toBeVisible();
-  await expect(page.locator("#grid-panel")).toBeVisible();
-  const gridMenu = await page.locator("#grid-menu").boundingBox();
-  const gridButton = await page.locator("#grid-tool").boundingBox();
-  if (!gridMenu || !gridButton) throw new Error("grid menu not laid out");
-  expect(gridMenu.y + gridMenu.height).toBeLessThanOrEqual(gridButton.y);
-  await attach(page, testInfo, "4 the grid menu");
+  await expect(page.locator("#grid-tool")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#draw-mode-straight")).toHaveAttribute("aria-pressed", "false");
+  expect(await groups(page, "#road-menu")).toEqual(["Actions", "Road type", "Build mode"]);
+  await expect(page.locator("#road-menu #grid-panel")).toBeVisible();
+  await attach(page, testInfo, "4 the grid as a build mode");
+  // Pressing it again goes back to drawing roads.
+  await page.locator("#grid-tool").click();
+  await expect(page.locator("#draw-mode-straight")).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("KeyG");
 
   // Escape closes it, and the dock is clean again.
   await page.keyboard.press("Escape");
-  await expect(page.locator("#grid-menu")).toHaveCount(0);
   await expect(page.locator("#road-menu")).toHaveCount(0);
+  await expect(page.locator("#grid-tool")).toHaveCount(0);
 });
 
 test("a city opens in the district band", async ({ page }, testInfo) => {

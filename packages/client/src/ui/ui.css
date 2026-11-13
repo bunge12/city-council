@@ -418,7 +418,10 @@ kbd {
 .build-bar .tool-menu {
   position: absolute;
   bottom: calc(100% + 14px);
-  left: -12px;
+  /* Centred over the road button, which sits mid-screen, so a menu that
+     grows (the grid's summary) has room on both sides. */
+  left: 50%;
+  transform: translateX(-50%);
   display: grid;
   grid-template-columns: max-content max-content;
   align-items: center;

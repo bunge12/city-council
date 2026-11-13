@@ -49,10 +49,10 @@ function MenuGroup({ label, id, children }: { label: string; id: string; childre
 }
 
 /**
- * The build dock: a button per tool along the bottom edge. A tool's options
- * open in a menu above its button while the tool is on, and are hidden
- * otherwise, so the dock stays short (issue 47). Bulldoze and upgrade are
- * actions in the road menu.
+ * The build dock along the bottom edge. Its road button opens the road menu
+ * above it, and the menu is hidden while no road tool is on, so the dock
+ * stays short (issue 47). Bulldoze and upgrade are actions in the menu, and
+ * the grid is a build mode beside straight, curved and continuous.
  */
 export function BuildBar() {
   const { roadTool, gridTool, editTool } = useServices();
@@ -77,7 +77,7 @@ export function BuildBar() {
   const active = tool === "road";
   const gridding = tool === "grid";
   const editing = tool === "bulldoze" || tool === "upgrade";
-  const roadMenu = active || editing;
+  const roadMenu = active || editing || gridding;
 
   let hint = "Pick the road tool to draw roads.";
   if (active) {
@@ -90,10 +90,14 @@ export function BuildBar() {
   }
   const shownNote = editing ? editNote : gridding ? gridNote : note;
 
-  // An action that is on goes back to drawing roads rather than closing the menu.
+  // An action or the grid that is on goes back to drawing roads rather than closing the menu.
   const action = (id: "upgrade" | "bulldoze") => {
     editTool.toggle(id);
     if (tool === id) roadTool.toggle();
+  };
+  const grid = () => {
+    gridTool.toggle();
+    if (gridding) roadTool.toggle();
   };
 
   const roadTypes = (
@@ -143,14 +147,14 @@ export function BuildBar() {
                 </button>
               </MenuGroup>
               {tool !== "bulldoze" && roadTypes}
-              {active && (
+              {(active || gridding) && (
                 <MenuGroup label="Build mode" id="draw-modes">
                   {DRAW_MODES.map((mode) => (
                     <button
                       key={mode}
                       type="button"
                       id={`draw-mode-${mode}`}
-                      aria-pressed={roadMode === mode}
+                      aria-pressed={active && roadMode === mode}
                       disabled={!ready}
                       title={`${MODES[mode].title} (${MODES[mode].key})`}
                       onClick={() => roadTool.pickMode(mode)}
@@ -158,8 +162,19 @@ export function BuildBar() {
                       {MODES[mode].label} <kbd>{MODES[mode].key}</kbd>
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    id="grid-tool"
+                    aria-pressed={gridding}
+                    disabled={!ready}
+                    title="Grid (G): drag out a rectangle to lay a street grid"
+                    onClick={grid}
+                  >
+                    Grid <kbd>G</kbd>
+                  </button>
                 </MenuGroup>
               )}
+              {gridding && <GridPanel />}
               {active && (
                 <MenuGroup label="Snapping" id="guides">
                   {GUIDES.map((g) => (
@@ -189,26 +204,6 @@ export function BuildBar() {
             onClick={() => roadTool.toggle()}
           >
             Road <kbd>B</kbd>
-          </button>
-        </div>
-        <div className="dock-slot">
-          {gridding && (
-            <div className="panel tool-menu" id="grid-menu" aria-label="Grid tool options">
-              {roadTypes}
-              <GridPanel />
-            </div>
-          )}
-          <button
-            type="button"
-            id="grid-tool"
-            aria-pressed={gridding}
-            aria-expanded={gridding}
-            aria-controls={gridding ? "grid-menu" : undefined}
-            disabled={!ready}
-            title="Grid tool (G): drag out a rectangle to lay a street grid"
-            onClick={() => gridTool.toggle()}
-          >
-            Grid <kbd>G</kbd>
           </button>
         </div>
       </div>

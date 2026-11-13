@@ -14,6 +14,7 @@ import {
 } from "../packages/sim/src/index";
 import { formatMoneyShort } from "../packages/client/src/ui/format";
 import { SEED, groundAt } from "./road-fixtures";
+import { MENU_SHIFT } from "./dock";
 
 // The M1 exit test from docs/milestones/M1.md (issue M1-17), as one
 // walkthrough a player could do by hand, run once on WebGPU (when the
@@ -129,13 +130,16 @@ async function frames(page: Page): Promise<void> {
 }
 
 /** Looks at (x, z) from `height` metres up and to the south, `back` times as far south as up. */
-async function look(page: Page, x: number, z: number, height: number, back = 0.75): Promise<void> {
+async function look(page: Page, x: number, z: number, height: number, back = 0.75, menuShift = MENU_SHIFT): Promise<void> {
   const g = groundAt(x, z);
+  // Issue 47: the road menu covers the bottom middle of the screen, so the
+  // view sits a quarter of its height further back and the work area higher up.
+  const shift = height * menuShift;
   await page.evaluate(
     async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t),
     [
-      [x, g + height, z + height * back],
-      [x, g, z],
+      [x, g + height, z + height * back + shift],
+      [x, g, z + shift],
     ] as const,
   );
   await frames(page);
@@ -728,8 +732,8 @@ for (const variant of [
       await page.evaluate(
         async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t),
         [
-          [4372, g + 470, 4880],
-          [4372, g, 4730],
+          [4372, g + 470, 4880 + 470 * MENU_SHIFT],
+          [4372, g, 4730 + 470 * MENU_SHIFT],
         ] as const,
       );
       await frames(page);
@@ -774,7 +778,9 @@ for (const variant of [
     });
 
     await test.step("13. drag a grid from a street and confirm: one log entry, joined, stopped at water, one undo removes it", async () => {
-      await look(page, 3640, 6770, 560);
+      // Not shifted for the road menu: the drag's corners snap to the street at
+      // this exact view, and the work area here sits clear of the menu anyway.
+      await look(page, 3640, 6770, 560, 0.75, 0);
       await roadTool(page);
       await click(page, GRID_STREET.x, GRID_STREET.z0);
       await click(page, GRID_STREET.x, GRID_STREET.z1);
