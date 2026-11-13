@@ -29,6 +29,7 @@ const UI_WRITES_STATE = [
   "nextU32",
   "nextInt",
   "nextFloat",
+  "buildScaleCity",
   "COMMANDS",
 ];
 

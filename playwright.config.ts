@@ -38,7 +38,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: ["walkthrough.spec.ts", "roads.spec.ts"],
+      testIgnore: [/walkthrough\.spec\.ts$/, "roads.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -62,12 +62,12 @@ export default defineConfig({
       },
     },
     {
-      // The M0 exit test, on the built client, on WebGPU and on WebGL 2.
+      // The M0 and M1 exit tests, on the built client, on WebGPU and on WebGL 2.
       // It runs headed in the full Chromium build: the headless shell loses
       // its WebGPU device, and a headless page's screenshots leave out a
       // WebGPU canvas. On Linux without a display, run it under `xvfb-run`.
       name: "walkthrough",
-      testMatch: "walkthrough.spec.ts",
+      testMatch: /walkthrough\.spec\.ts$/,
       // Software WebGPU takes most of a CI runner's CPU, and a page in
       // another test then misses key presses. So the walkthrough starts
       // after the other projects finish. Against a public address it runs
