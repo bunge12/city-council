@@ -37,6 +37,7 @@ import { RoadToolController, type RoadPreview } from "./tools/road-tool";
 import { RouteToolController, routeShapes } from "./tools/route-tool";
 import type { Snap } from "./tools/snap";
 import { mountUi } from "./ui/App";
+import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
 import { setEditHover, setRoadHover, setViewReadout, useUi } from "./ui/store";
 
@@ -561,7 +562,9 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     connectionLayer.show(connections, connections.map((m) => scaleAt(m.edgeX, m.edgeZ)));
     document.body.dataset["connectionMarks"] = String(connections.length);
     const pointer = controls.pointer();
-    setRoadHover(live && pointer ? { x: pointer.x, y: pointer.y, preview: live, snap } : null);
+    // Before the first click there is no road to read out, but a parallel offset still shows its gap.
+    const shownSnap = snap && !routeTool.active() ? snap : null;
+    setRoadHover(pointer && (live || offsetCells(shownSnap) !== null) ? { x: pointer.x, y: pointer.y, preview: live, snap: shownSnap } : null);
     setViewReadout({
       camPosition: `${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} m`,
       camHeight: `${rig.heightAboveGround().toFixed(0)} m`,

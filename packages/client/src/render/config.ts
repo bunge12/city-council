@@ -233,6 +233,10 @@ export const SNAP_MARKS = {
     square: 0xffffff,
     /** Caught the terrain grid. */
     grid: 0xd5dde6,
+    /** A guide line from a nearby node, faint blue. */
+    line: 0x8fc7ff,
+    /** A parallel offset beside a road, and the gap it measures. */
+    offset: 0xffa64d,
   },
   opacity: 0.95,
   /** Metres above the ground, over the road preview. */
