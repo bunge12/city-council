@@ -47,14 +47,36 @@ function rgb(hex: number): Node<"vec3"> {
   return vec3(c.r, c.g, c.b);
 }
 
+/** Samples each side of a texel the forest mask is averaged over, so a forest's outline is a curve and not 16 m steps. */
+const FOREST_BLUR = 2;
+
 /**
- * The forest mask as a one-channel texture, one texel per height sample,
- * filtered linearly so a forest's edge is a soft line and not a staircase.
+ * The forest mask as a one-channel texture, one texel per height sample.
+ * Each texel is the share of forest in the (2 * FOREST_BLUR + 1) square
+ * around its sample, and the texture filters linearly, so a forest's edge is
+ * a smooth line rather than the staircase a 0 or 1 mask draws.
  */
 export function forestTexture(terrain: Terrain): DataTexture {
   const n = terrain.samples;
+  const r = FOREST_BLUR;
+  // A box blur in two passes, rows then columns, clamped at the map edge.
+  const rows = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let d = -r; d <= r; d++) sum += terrain.forest[j * n + Math.min(Math.max(i + d, 0), n - 1)] ?? 0;
+      rows[j * n + i] = sum;
+    }
+  }
   const data = new Uint8Array(n * n);
-  for (let k = 0; k < n * n; k++) data[k] = (terrain.forest[k] ?? 0) * 255;
+  const cells = (2 * r + 1) * (2 * r + 1);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let d = -r; d <= r; d++) sum += rows[Math.min(Math.max(j + d, 0), n - 1) * n + i] ?? 0;
+      data[j * n + i] = Math.round((sum / cells) * 255);
+    }
+  }
   const t = new DataTexture(data, n, n, RedFormat, UnsignedByteType);
   t.magFilter = LinearFilter;
   t.minFilter = LinearFilter;
@@ -87,7 +109,9 @@ export function createTerrainMaterial(terrain: Terrain): MeshLambertNodeMaterial
   const n = terrain.samples;
   const uv = vec2(positionWorld.x, positionWorld.z).div(terrain.spacing).add(0.5).div(n);
   const forestMap = forestTexture(terrain);
-  const forest = texture(forestMap, uv).r;
+  // The blurred mask is a gentle ramp across the edge; this firms it up
+  // again around the half-way line, where the mask's own edge was.
+  const forest = smoothstep(0.3, 0.7, texture(forestMap, uv).r);
   land = mix(land, rgb(canopy.colour), forest.mul(far).mul(canopy.cover));
 
   const bed = mix(rgb(PALETTE.wetSand), rgb(PALETTE.deep), smoothstep(0, BANDS.deepAt, above.negate()));
