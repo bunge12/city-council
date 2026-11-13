@@ -21,7 +21,7 @@
 
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "../chunks";
 import { curveBox, curveTouchesBox, nearestOnQuad, segmentQuad, segmentTouchesBox } from "./curve";
-import { LEVELS_ALL, levelAtNode, segmentLevelBits } from "./levels";
+import { LEVELS_ALL } from "./levels";
 import {
   NETWORK_PATH,
   NETWORK_RAIL,
@@ -239,9 +239,11 @@ function checkLevels(levels: number): void {
   }
 }
 
-function segmentOnNetworks(net: RoadNetwork, seg: number, networks: number, levels: number = LEVELS_ALL): boolean {
+/** Whether segment `seg` is on a network and a level in the filters. On the hot path of every query, so the level bits are read inline. */
+function segmentOnNetworks(net: RoadNetwork, seg: number, networks: number, levels: number): boolean {
   if (((1 << (net.segNetwork[seg] ?? 0)) & networks) === 0) return false;
-  return levels === LEVELS_ALL || (segmentLevelBits(net, seg) & levels) !== 0;
+  if (levels === LEVELS_ALL) return true;
+  return (((1 << (net.segLevelA[seg] ?? 0)) | (1 << (net.segLevelB[seg] ?? 0))) & levels) !== 0;
 }
 
 /**
@@ -253,7 +255,8 @@ export function nodeOnNetworks(net: RoadNetwork, node: number, networks: number,
   if (networks === NETWORKS_ALL && levels === LEVELS_ALL) return true;
   for (let seg = net.nodeFirstSeg[node] ?? NONE; seg !== NONE; seg = nextSegmentAt(net, seg, node)) {
     if (((1 << (net.segNetwork[seg] ?? 0)) & networks) === 0) continue;
-    if (((1 << levelAtNode(net, seg, node)) & levels) !== 0) return true;
+    const level = (net.segA[seg] === node ? net.segLevelA[seg] : net.segLevelB[seg]) ?? 0;
+    if (((1 << level) & levels) !== 0) return true;
   }
   return false;
 }

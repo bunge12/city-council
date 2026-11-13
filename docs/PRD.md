@@ -338,7 +338,7 @@ Decided in issue 22:
 - **Index filter.** The spatial index queries take a level filter beside the network filter. A segment matches by either end's level and a node by the level of any segment at it. The road tool's snapping looks at ground-level roads only, as the sim joins them.
 - **Drawing.** A segment on another level is drawn as a deck at its height, with the bridge's fascia and railing and plain piers at most 36 m apart where it stands above the ground. A junction whose roads all share a level is drawn at that height. A tunnel is drawn below the ground, where the terrain hides it until the underground view in M5.
 - **Cost.** A raised road costs what the same road on the ground does until elevated roads and tunnels are priced.
-- **Speed.** On the 30,000 segment grid, planning a 5 km elevated road over 52 streets takes about 0.34 ms with its 52 height checks, against about 4.6 ms for the same road on the ground, which splits them all (`pnpm bench`).
+- **Speed.** On the 30,000 segment grid, planning a 5 km elevated road over 52 streets takes about 0.2 ms with its 52 height checks, against about 2.6 ms for the same road on the ground, which splits them all (`pnpm bench`). The check asks the spatial index once per road for segments on other levels only, so on a city mostly at one level it finds nothing and costs next to nothing.
 
 The M5 additions, their costs and their side effects are specified under M5.
 

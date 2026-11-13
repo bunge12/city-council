@@ -7,8 +7,12 @@
 // long raised road over a dense street grid, so this times one 5 km long
 // over 52 streets, beside the ground road on the same line, which splits
 // all 52 instead. On the development container the raised road plans in
-// about 0.34 ms (p99 0.6 ms), and the step that builds it and takes it back
-// in about 0.3 ms; the ground road on the same line takes about 4.6 ms.
+// about 0.2 ms (p99 0.5 ms), and the step that builds it and takes it back
+// in about 0.26 ms; the ground road on the same line takes about 2.6 ms.
+//
+// The check costs almost nothing on a city mostly on one level: it asks the
+// index once per road for segments on other levels, and the grid bench
+// (grid.bench.ts) shows no more than noise from it.
 
 import { expect, test } from "vitest";
 import { blockIndexOf, listBlocks } from "../src/roads/blocks";

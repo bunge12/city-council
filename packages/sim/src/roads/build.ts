@@ -40,7 +40,7 @@
 
 import { ROAD_BUILD, ROAD_LEVELS, ROAD_TYPES, type RoadType } from "./balance";
 import { bridgeDeckLevel } from "./bridge";
-import { BUILD_LEVELS, LEVELS_SURFACE, clearanceReason, heightAlong, segmentShape, type LevelledShape } from "./levels";
+import { BUILD_LEVELS, LEVELS_ALL, LEVELS_SURFACE, clearanceReason, heightAlong, segmentShape, type LevelledShape } from "./levels";
 import {
   LEVEL_BRIDGE,
   LEVEL_GROUND,
@@ -842,8 +842,10 @@ function placeBridges(
  * heights are compared (levels.ts): `levels.clearance` apart or more, they
  * pass with no junction. Closer than that the road is refused, and so is a
  * meeting at the same height with a segment the road cannot split, such as
- * a bridge. Segments on the road's own level that it meets were split by
- * `crossings`, so they meet it only at a shared stop.
+ * a bridge. Segments on the road's own level at both ends that it meets
+ * were split by `crossings`, so they meet it only at a shared stop, and the
+ * index query leaves them out: in a city mostly on the ground this check
+ * then looks at almost nothing.
  */
 function levelProblem(
   net: RoadNetwork,
@@ -852,17 +854,36 @@ function levelProblem(
   pieces: PlannedSegment[],
   levels: number[],
   removed: number[],
+  level: number,
 ): string | null {
   const index = roadIndexOf(net);
   const clearance = ROAD_LEVELS.clearance;
+  // Every level but the road's own. A ramp with the road's level at one end
+  // still has another level's bit, so it is kept.
+  const others = LEVELS_ALL & ~(1 << level);
+  // One query over the box round every piece, which on a city mostly on the
+  // road's own level finds nothing, then each piece in order.
+  const shapes = pieces.map(plannedQuad);
+  const boxes = shapes.map(hullBox);
+  let minX = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxZ = -Infinity;
+  for (const b of boxes) {
+    minX = b.minX < minX ? b.minX : minX;
+    minZ = b.minZ < minZ ? b.minZ : minZ;
+    maxX = b.maxX > maxX ? b.maxX : maxX;
+    maxZ = b.maxZ > maxZ ? b.maxZ : maxZ;
+  }
+  if (pieces.length === 0) return null;
+  const near = segmentsInBox(index, minX, minZ, maxX, maxZ, NETWORKS_ROAD, others).filter((seg) => !removed.includes(seg));
+  if (near.length === 0) return null;
   for (let i = 0; i < pieces.length; i++) {
     const s = pieces[i] as PlannedSegment;
-    const level = levels[i] ?? LEVEL_GROUND;
-    const q = plannedQuad(s);
+    const pieceLevel = levels[i] ?? level;
+    const q = shapes[i] as Quad;
     let mine: LevelledShape | null = null;
-    const box = hullBox(q);
-    for (const seg of segmentsInBox(index, box.minX, box.minZ, box.maxX, box.maxZ, NETWORKS_ROAD)) {
-      if (removed.includes(seg)) continue;
+    for (const seg of near) {
       const p = net.segA[seg] ?? NONE;
       const r = net.segB[seg] ?? NONE;
       const other = segmentQuad(net, seg);
@@ -876,7 +897,7 @@ function levelProblem(
       for (const m of met.at) {
         const at = quadPoint(other, m.u);
         if (shared.some((e) => samePlace(at.x, at.z, e.x, e.z))) continue;
-        mine ??= plannedShape(net, terrain, type, s, level);
+        mine ??= plannedShape(net, terrain, type, s, pieceLevel);
         const gap = heightAlong(terrain, mine, m.t) - heightAlong(terrain, segmentShape(net, seg), m.u);
         if ((gap < 0 ? -gap : gap) >= clearance) continue;
         return clearanceReason(gap, net.segLevelA[seg] ?? LEVEL_GROUND, net.segLevelB[seg] ?? LEVEL_GROUND);
@@ -1106,7 +1127,7 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
   const angle = angleProblem(net, planned, removed, crossingKeys);
   if (angle !== null) return { ok: false, reason: angle };
   if (tangled(net, planned, removed, level)) return { ok: false, reason: TANGLED };
-  const passing = levelProblem(net, terrain, type, pieces, levels, removed);
+  const passing = levelProblem(net, terrain, type, pieces, levels, removed, level);
   if (passing !== null) return { ok: false, reason: passing };
   // Only the new road's ground is checked. A split piece follows the line of
   // the segment it came from to within a few metres, and that was checked
