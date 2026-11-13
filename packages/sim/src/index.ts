@@ -158,5 +158,7 @@ export {
   reachesOutside,
 } from "./roads/connections";
 export type { ConnectionBalance, ConnectionSite } from "./roads/connections";
+export { SCALE_PLAYER, SCALE_SEED, SCALE_SEGMENTS, buildScaleCity } from "./scale";
+export type { ScaleCity, ScaleCounts } from "./scale";
 export { BLOCK_MIN_AREA, blockById, blockIndexOf, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
 export type { Block, BlockIndex } from "./roads/blocks";

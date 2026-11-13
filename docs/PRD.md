@@ -165,7 +165,7 @@ Your list put Map & Zoning first. I split it. With free-form roads, zoning cells
 | # | Milestone | Depends on | Exit test |
 | --- | --- | --- | --- |
 | M0 ✓ | Foundation and terrain | none | A seeded map renders with camera controls. The sim runs in a worker, accepts a no-op command, and the state saves and reloads from IndexedDB. |
-| M1 | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Angle guides hold a road at 90 degrees, and the grid tool lays out a block grid in one action. Roads at different levels cross without forming an intersection. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
+| M1 ✓ | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Angle guides hold a road at 90 degrees, and the grid tool lays out a block grid in one action. Roads at different levels cross without forming an intersection. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
 | M2 | Zoning and buildings | M1 | Paint R, C, I, O, and M on cells along roads. Buildings appear on zoned cells at a fixed rate and disappear when the road is removed. Each zone can have a level 1-3 which indicates density & impact |
 | M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. |
 | M4 | Economy | M3 | Taxes, upkeep and construction costs hit one treasury. A monthly budget panel balances. Running out of money blocks building. Allow borrowing. Demolishing an occupied building charges compensation. Property and business taxes and development charges work. The first population milestones unlock density 2 and pay grants. |
@@ -234,7 +234,7 @@ Roads are a graph of nodes and segments. A segment is a straight line or a singl
 The build tool needs most of the work here.
 
 - Straight, curved and continuous drawing modes
-- Snapping to nodes, segments, angles, the terrain grid and existing zoning cells
+- Snapping to nodes, segments, angles and the terrain grid. Snapping to zoning cells moved to M2, since the cells arrive there
 - Splitting a segment when a new road crosses it, which creates an intersection
 - Slope limits against terrain, and automatic bridges over water, with the deck a set height above it
 - Upgrade in place, bulldoze, and a cost preview before the click
@@ -356,9 +356,26 @@ The map has two or three fixed highway connections at its edge. They are where n
 
 **Outside connections** (issue 16). Each connection is a fixed node on the map edge and one fixed highway segment, 200 m long, running straight in to a node the player builds from. A new city has no other roads. `SimState.connections` lists the edge nodes in the order they were placed. Placement is a function of the seed alone, with its own generator seeded from it rather than the one in state, so it uses only exact arithmetic and gives the same places on every machine. Candidates sit every 64 m along each side, at least 600 m from a corner. One qualifies when its whole stub is dry, a metre or more above the water, and no steeper than 5 percent at every ground sample, and passes the highway's own grade check. The seed picks the count, two or three, and an order of the four sides. Each side in turn gives one qualifying candidate at random that is at least 2.5 km from those already chosen, and only once every side has had a turn does a side give a second. The coast lies on one side, so some cities have all their connections on two or three sides. If too few qualify the slope limit relaxes to the highway's 6 percent. The numbers are in `packages/sim/balance/connections.json`. The player cannot bulldoze or upgrade a stub, and a new road may not join a stub's edge node or meet the stub anywhere but its inner end. `reachesOutside` and `nearestOutside` say whether, and which, connection a node reaches by road, one-ways included. A save from before version 5 gains its connections in the migration: placed as a new city of its seed would place them, but clear of the roads it already has, under new ids. Its command log was recorded without them, so it no longer replays to the migrated state. The client marks each connection with a blue disc and an arrow pointing in, sized in screen pixels so it shows from the city band, and the camera opens on the first connection from the city band, looking in along its stub from beyond the edge. Opening any lower costs software rendering thousands of trees on every load.
 
+**M1 exit numbers** (issue M1-17). Every number here was measured, not estimated, on one generated city: `buildScaleCity` in the sim builds 30,000 segments on seed 2026 through ordinary commands, so the city has a log and replays from its seed. It is 217 street grids at the 14-street cap, avenues joining them, a curved one-way through some of their blocks, avenues along the middle of their blocks and 13 bridges. That gives 777 curved segments and 11,826 blocks. Nothing in the game calls it; the bench, the sim tests, the soak run and the e2e scale test do. On the development container (`pnpm bench`):
+
+| Measurement | Result | Budget |
+| --- | --- | --- |
+| One `BuildRoad` that splits ten segments, with the spatial index, routing graph and blocks kept current | 3.2 to 3.6 ms, including taking it back | 20 ms tick |
+| One `BuildRoadGrid` at the cap over existing streets | 12.7 ms at worst as the step that applies it, timed in the soak; 24 ms including taking it back in the bench | 20 ms tick |
+| A route across the map, from the north-west grid to the south-east one, 22 km over 312 segments | 10 to 19 ms. Not part of a tick in M1: the route tool runs it on the client's copy | none in M1 |
+| Bringing the blocks up to date after one `BuildRoad` through a block | about 0.8 ms | 20 ms tick |
+| A tick with nothing queued | under 0.001 ms. M1 has no per-tick systems | 20 ms tick |
+| Snapshot of the city | 3.3 MB, serialised in about 50 ms | see below |
+
+The soak run now hosts this city for one hour of game time at 4x and sends a road command every 40 ticks in a fixed cycle: a street through a grid's blocks, a grid at the cap, an upgrade, two bulldozes and an undo. It picks the segments to change from a `SimMirror` fed by the host's messages, as the page does, and times the step that applies each command on its own. In that run no step passed the budget (worst 12.7 ms, a grid), the city ended about 1,800 segments larger, the heap stayed under 80 MB and came back to about 29 MB after GC, and a replay of the full log, the city's own commands included, gave the live city's hash. An autosave of this city takes 60 ms of worker time at the median and writes 3.6 MB. That is over the 20 ms tick budget: the host catches up on the late steps afterwards, but the tick stalls while it runs. It has its own issue. A save of this city taken half way through a scripted session of builds, grids, upgrades, bulldozes and undos, loaded into a new state and run on, ends on the same hash as the same session run straight through (`scale.test.ts`).
+
+The M1 walkthrough (`e2e/m1-walkthrough.spec.ts`) runs the thirteen exit test steps in M1.md on the production build, on WebGPU where the browser has an adapter and on WebGL 2, with a screenshot of each step.
+
 ### M2 Zoning and buildings
 
 Every zonable segment generates 8 m cells along both sides, six cells deep. Where two roads compete for the same ground, the older segment keeps its cells. Cells are blocked by water, steep slopes and other roads.
+
+The road tool snaps to existing zoning cells once they exist. This was in the M1 list but moved here, since M1 has no cells. It joins the snap sources from M1 ("How snapping works" under M1) as one more source, and the parallel offset already reads its strip depth from the zoning depth, so a change to the six-cell depth carries over.
 
 The player paints cells with a zone type. v1 has five, each at three densities.
 
@@ -1004,8 +1021,8 @@ Overlays work in every band. In the city band the map reads much like an info vi
 - **Unit tests on sim systems.** Given this state and this command, expect that state. They run headless in Vitest.
 - **Replay tests.** A recorded command log plus a seed must produce the same state hash on every run. This catches accidental nondeterminism and most regressions. The hash is 64-bit FNV-1a over every field of state, typed arrays as raw bytes, object keys in sorted order.
 - **Scenario tests.** Scripted cities that assert outcomes. A city with no jobs must lose population. A bus line beside a jammed road must take riders.
-- **Soak test.** A bot that plays for an hour of game time at 4x and reports tick time and memory.
-- **Benchmarks.** `pnpm bench` times hot sim queries on the M1 scale network and fails when one passes its target. CI runs it and keeps the report.
+- **Soak test.** A bot that plays for an hour of game time at 4x and reports tick time and memory. Since M1 it plays on the scale city and builds, upgrades, bulldozes and undoes roads as it goes.
+- **Benchmarks.** `pnpm bench` times hot sim queries on the M1 scale network and fails when one passes its target. CI runs it and keeps the report. `scale.bench.ts` takes the M1 exit measurements on the generated scale city.
 - **Playwright walkthroughs.** One per milestone exit test, with screenshots attached to the pull request.
 - **Balance checks.** A script that runs a standard city for ten game years and prints population, treasury and average commute, so a tuning change shows its effect.
 
