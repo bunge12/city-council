@@ -15,6 +15,7 @@ The M1 exit test runs automatically, the network holds up at full size, and the 
 - A save and resume test: run a scripted session straight through, and separately save and reload half way. The final hashes must match
 - The soak script from M0 extended to build and bulldoze roads while it runs
 - Check the three things M7 needs: segments carry a network type, segments carry a vertical level, and curve and slope limits come from the road type. A test builds a segment of each network type through the internal functions and routes with the filter
+- Check the crossing rule from issue 22 on the generated network: a test adds an elevated segment across it and no intersection forms
 - Update the PRD with every decision M1 made, and move snapping to zoning cells into the M2 section
 
 ## Out of scope

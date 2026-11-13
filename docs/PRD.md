@@ -165,11 +165,11 @@ Your list put Map & Zoning first. I split it. With free-form roads, zoning cells
 | # | Milestone | Depends on | Exit test |
 | --- | --- | --- | --- |
 | M0 ✓ | Foundation and terrain | none | A seeded map renders with camera controls. The sim runs in a worker, accepts a no-op command, and the state saves and reloads from IndexedDB. |
-| M1 | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Angle guides hold a road at 90 degrees, and the grid tool lays out a block grid in one action. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
+| M1 | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Angle guides hold a road at 90 degrees, and the grid tool lays out a block grid in one action. Roads at different levels cross without forming an intersection. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
 | M2 | Zoning and buildings | M1 | Paint R, C, I, O, and M on cells along roads. Buildings appear on zoned cells at a fixed rate and disappear when the road is removed. Each zone can have a level 1-3 which indicates density & impact |
 | M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. |
 | M4 | Economy | M3 | Taxes, upkeep and construction costs hit one treasury. A monthly budget panel balances. Running out of money blocks building. Allow borrowing. Demolishing an occupied building charges compensation. Property and business taxes and development charges work. The first population milestones unlock density 2 and pay grants. |
-| M5 | Traffic | M3 | Commutes load onto roads. A traffic overlay shows congested segments. Widening a road or adding a bypass visibly changes the overlay. Long commutes lower demand. Decorative cars visualize the traffic levels. Assignment stays inside its time budget on a 500,000 resident test city. |
+| M5 | Traffic | M3 | Commutes load onto roads. A traffic overlay shows congested segments. Widening a road or adding a bypass visibly changes the overlay. Long commutes lower demand. Decorative cars visualize the traffic levels. Assignment stays inside its time budget on a 500,000 resident test city. Roads can be raised and lowered, with ramps, overpasses and tunnels, so a highway interchange can be built. |
 | M6 | Public transport: buses | M5 | Draw a bus line with stops. Pops choose it when it beats driving. Road volume on the parallel route drops. Fares show in the budget. Bike lanes on a street shift short trips from cars to cycling. |
 | M7 | Rail transport | M1, M6 | Lay tram, subway and commuter rail track with the same tools as roads. Stations, tunnels and elevated track work. Lines, mode choice and fares from M6 also work for heavy (commuter) rail, trams, and subways. A subway line carries more people per hour than the avenue above it. Off-street bike paths work, and a station reached by bike lanes draws riders from further away. |
 | M8 | Services | M4, M5 | Clinics, schools, childcare, fire and police have capacity and network coverage. Parks and recreation raise satisfaction and land value within walking distance. Each changes a number the player can see, such as health, education level or the share of parents who work. |
@@ -287,6 +287,29 @@ The grid bends to what is there. Streets stop at water and at slopes too steep t
 One grid is one command. It costs the sum of its streets, it is validated as a whole, and one undo removes it. That matters in multiplayer, where a half-built grid would be a mess for everyone else.
 
 The guides come first in M1, since ordinary road drawing needs them. The grid tool follows once straight roads and intersections are solid.
+
+#### Levels and grade separation
+
+Roads can pass over and under each other. The work is split across three milestones so that M1, already the heaviest, takes only the part that is painful to add later.
+
+| Milestone | What is built |
+| --- | --- |
+| M1, after bridges are complete | Every segment stores a vertical level. Segments at different levels cross without forming an intersection. |
+| M5, with highways | The control to raise and lower a road, ramps, overpasses, underpasses, road tunnels and the underground view |
+| M7 | Rail reuses all of it for elevated track and subway tunnels |
+
+The M1 part slots in after the bridge work now in progress. A bridge is the first elevated segment, with its level set automatically by the water beneath it. Once bridges are done, the same level field is made general.
+
+| Piece | Rule |
+| --- | --- |
+| Levels | Tunnel, ground, and two elevated levels. The height of each is a config value. |
+| Crossing | Where two segments cross, the tool compares their heights at that point. With enough clearance they pass with no intersection. At the same height they split and join as now. In between, the build is refused with a message. |
+| Ramps | A ramp is a segment that changes level along its length, held to the slope limit of its road type. It is what joins a highway to the street below. |
+| Zoning | Elevated segments, tunnels and ramps get no zoning cells. |
+| Blocks | Only segments wholly at ground level bound a block. |
+| Routing | Nothing changes. Segments connect only where they share a node, so an overpass is simply two roads that do not share one. |
+
+The M5 additions, their costs and their side effects are specified under M5.
 
 The sim side stores the graph in typed arrays and keeps a spatial index for snapping and picking. The index is a grid with one cell per 500 m chunk, the grid the renderer uses. Each cell lists the nodes inside it and the segments that touch it, and positions off the map fall in the nearest edge cell. It answers three queries, each with a network type filter: the nearest node within a radius, the nearest point on any segment within a radius, and every segment that touches a box. The queries are pure functions exported from the sim entry, so the client runs the same ones on its read-only copy. On a 30,000 segment network a nearest-segment query averages about 0.006 ms at a 50 m radius and 0.02 ms at 250 m, and rebuilding the whole index takes about 13 ms (`pnpm bench`, on the development container). It also derives a routing graph with one edge per direction per segment. That is enough for pops and aggregate traffic, so we do not model individual lanes.
 
@@ -533,7 +556,7 @@ The reference figures below are the starting point. They come from different yea
 
 Older figures need raising. The US highway construction cost index rose about 59 percent from mid 2021 to the end of 2025, according to the [Eno Center](https://enotrans.org/?p=72173). The balance file stores each price with its source year and applies one escalation factor to reach 2026. The factor is yearly: 59 percent over 4.5 years is 1.1085 a year, applied once for each year between the source year and 2026. The road prices in `packages/sim/balance/roads.json` work this way. The avenue starts from the low end of the Phoenix figure. The highway uses the low end of the freeway range for six lanes, and because that source has no date it is taken as a 2026 price. Upkeep has no source yet, so every upkeep figure is a placeholder.
 
-Still to price, because the research found no usable source: local two-lane streets (FDOT's cost-per-mile models price a two-lane urban arterial, which is a bigger road, so the street is a placeholder scaled from Phoenix by lane count), road upkeep, commuter rail per km, bus operating cost per hour and household property tax.
+Still to price, because the research found no usable source: local two-lane streets (FDOT's cost-per-mile models price a two-lane urban arterial, which is a bigger road, so the street is a placeholder scaled from Phoenix by lane count), elevated roads and road tunnels, road upkeep, commuter rail per km, bus operating cost per hour and household property tax.
 
 What this does to the game:
 
@@ -584,6 +607,28 @@ Three things keep this inside the budget at full size.
 - Long trips route on a coarse graph of arterials and highways, then on local streets only at each end.
 
 Intersections add a fixed delay by type. Signals cost more than a priority junction, and a roundabout or a grade-separated ramp costs less. That is what makes junction design matter without lane simulation.
+
+#### Overpasses, underpasses and tunnels
+
+Highways need grade separation, so the tools for it arrive here. They build on the level field and the crossing rule from M1.
+
+- **Raise and lower.** A key steps the road's level up or down while drawing. The cursor shows the height, and the preview shows pillars or a tunnel mouth.
+- **Ramps.** Changing level partway along a road creates a ramp over the length its slope limit needs. The preview shows where the ramp starts and lands.
+- **Underground view.** A view that hides buildings and shows tunnels, for laying and inspecting them. Rail reuses it in M7.
+
+|  | Ground road | Elevated road | Road tunnel |
+| --- | --- | --- | --- |
+| Cost | 1x | Several times a ground road | Much more again |
+| Land beneath | Its own right-of-way | Must be clear of buildings | Passes under buildings with no eminent domain |
+| Noise and land value nearby | Normal for the road type | Worse than a ground road | None along the tunnel, some at each mouth |
+| Zoning along it | Yes, where the type allows | No | No |
+| Cycling and walking | Yes | Only where the road type allows | No |
+
+The cost multiples are placeholders until elevated roads and tunnels are priced.
+
+This gives the player a real choice in a built-up district. An elevated road is cheaper but needs a cleared strip and drags down the blocks beside it. A tunnel costs far more and disturbs nothing above. An interchange is built from ramps and overpasses by hand, with no prefabricated pieces in v1.
+
+In traffic assignment a grade-separated crossing has no intersection delay, which is the whole reason to build one.
 
 What the player sees:
 
@@ -662,7 +707,7 @@ Track is a second network type in the same graph that holds roads. It uses the M
 Lines, headways, mode choice, capacity and fares all come from M6 unchanged. A rail line is a line whose vehicles run on track. What M7 adds:
 
 - Track segment types, with tunnel and elevated variants and their costs
-- An underground view for laying and inspecting tunnels
+- Track in the underground view that M5 built for road tunnels
 - Stations as placed buildings that join track to the street network, with a walking catchment
 - Depots, which cap how many vehicles a line can run
 - Transfers between lines and modes at shared or nearby stations
