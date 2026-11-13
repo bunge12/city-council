@@ -428,6 +428,32 @@ kbd {
   font-size: 12px;
 }
 
+.build-bar .grid-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+
+.build-bar .grid-panel label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.build-bar .grid-panel input {
+  width: 4.5em;
+}
+
+.build-bar .grid-summary.refused {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bad-bg);
+  color: var(--bad-ink);
+}
+
 .build-bar .group-label {
   color: var(--ink-soft);
   font-size: 12px;

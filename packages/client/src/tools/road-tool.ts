@@ -177,8 +177,8 @@ export interface PendingRoad {
   status: "queued" | "sending" | "accepted";
 }
 
-/** The tools: the road tool here, bulldoze and upgrade in edit-tool.ts, and the debug route tool in route-tool.ts. */
-export type ToolId = "road" | "bulldoze" | "upgrade" | "route";
+/** The tools: the road tool here, the grid tool in grid-tool.ts, bulldoze and upgrade in edit-tool.ts, and the debug route tool in route-tool.ts. */
+export type ToolId = "road" | "grid" | "bulldoze" | "upgrade" | "route";
 
 /** The tool's part of the UI store. */
 export interface RoadToolState {
@@ -253,11 +253,12 @@ export class RoadToolController {
 
   /**
    * Picks a road type and turns the road tool on, unless the upgrade tool is
-   * on, which upgrades to the type picked. A road being drawn keeps going in
-   * the new type.
+   * on, which upgrades to the type picked, or the grid tool, which lays its
+   * streets in it. A road being drawn keeps going in the new type.
    */
   pickType(type: ToolRoadType): void {
-    const tool = this.host.get().tool === "upgrade" ? "upgrade" : "road";
+    const current = this.host.get().tool;
+    const tool = current === "upgrade" || current === "grid" ? current : "road";
     this.host.set({ tool, roadType: type, roadNote: null });
   }
 

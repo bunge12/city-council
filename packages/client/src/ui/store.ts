@@ -6,11 +6,12 @@
 import { create } from "zustand";
 import { INITIAL_BLOCK_OVERLAY, type BlockOverlayState } from "../tools/block-overlay";
 import { INITIAL_EDIT_TOOL, type EditPreview, type EditToolState } from "../tools/edit-tool";
+import { INITIAL_GRID_TOOL, type GridToolState } from "../tools/grid-tool";
 import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tools/road-tool";
 import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
 
-export interface UiState extends RoadToolState, EditToolState, RouteToolState, BlockOverlayState {
+export interface UiState extends RoadToolState, GridToolState, EditToolState, RouteToolState, BlockOverlayState {
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
@@ -41,6 +42,7 @@ export const useUi = create<UiState>(() => ({
   busy: false,
   undoNote: null,
   ...INITIAL_ROAD_TOOL,
+  ...INITIAL_GRID_TOOL,
   ...INITIAL_EDIT_TOOL,
   ...INITIAL_ROUTE_TOOL,
   ...INITIAL_BLOCK_OVERLAY,

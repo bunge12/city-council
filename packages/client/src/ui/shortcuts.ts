@@ -10,6 +10,8 @@ export type ShortcutAction =
   | { kind: "toggleDebug" }
   | { kind: "toggleLog" }
   | { kind: "roadTool" }
+  | { kind: "gridTool" }
+  | { kind: "confirm" }
   | { kind: "bulldozeTool" }
   | { kind: "upgradeTool" }
   | { kind: "roadType"; type: ToolRoadType }
@@ -34,6 +36,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["Backquote"], label: "`", description: "show or hide this panel", action: { kind: "toggleDebug" } },
   { codes: ["KeyL"], label: "L", description: "show or hide the activity log", action: { kind: "toggleLog" } },
   { codes: ["KeyB"], label: "B", description: "road tool on or off", action: { kind: "roadTool" } },
+  { codes: ["KeyG"], label: "G", description: "grid tool on or off", action: { kind: "gridTool" } },
+  { codes: ["Enter", "NumpadEnter"], label: "Enter", description: "build the grid drawn with the grid tool", action: { kind: "confirm" } },
   { codes: ["KeyV"], label: "V", description: "upgrade tool on or off", action: { kind: "upgradeTool" } },
   { codes: ["KeyN"], label: "N", description: "bulldoze tool on or off", action: { kind: "bulldozeTool" } },
   { codes: ["KeyZ"], label: "Z", description: "draw streets, or upgrade to one", action: { kind: "roadType", type: "street" } },
@@ -45,7 +49,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     codes: ["Escape"],
     label: "Esc",
-    description: "drop the road being drawn or the drag, or leave the tool",
+    description: "drop the road or grid being drawn or the drag, or leave the tool",
     action: { kind: "escape" },
   },
 ];
@@ -60,6 +64,8 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "Click, right-click", description: "with the road tool: start or end a road, drop it" },
   { label: "Double click", description: "with the road tool: end a continuous road" },
   { label: "Hold Alt", description: "with the road tool: draw free-hand, without guides" },
+  { label: "Drag", description: "with the grid tool: lay out a grid's rectangle" },
+  { label: "Hold Alt while dragging", description: "with the grid tool on open ground: turn the rectangle" },
   { label: "Click, drag", description: "with bulldoze or upgrade: one road, or every road the drag passes over" },
   { label: "Right-click", description: "with upgrade: reverse a one-way" },
   { label: "Shift-drag", description: "with bulldoze or upgrade: orbit, since a drag picks roads" },
@@ -92,6 +98,8 @@ export function shortcutFor(press: KeyPress): ShortcutAction | null {
   // Ctrl Z, or Cmd Z on a Mac. Held down it does not repeat, so one press is one step.
   if ((press.ctrlKey || press.metaKey) && press.code === "KeyZ" && !press.shiftKey) return { kind: "undo" };
   if (press.ctrlKey || press.metaKey) return null;
+  // Enter on a button presses the button.
+  if ((press.code === "Enter" || press.code === "NumpadEnter") && (tag === "BUTTON" || tag === "SUMMARY" || tag === "A")) return null;
   if (press.code === "Space" && (tag === "BUTTON" || tag === "SUMMARY" || tag === "A" || tag === "LABEL")) return null;
   return SHORTCUTS.find((s) => s.codes.includes(press.code))?.action ?? null;
 }
