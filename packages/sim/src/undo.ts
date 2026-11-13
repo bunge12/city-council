@@ -1,7 +1,7 @@
 // Undo (issue 14): each player takes back their own road changes, newest
 // first, while the result still makes sense.
 //
-// Every BuildRoad, BulldozeRoad and UpgradeRoad that applies leaves an undo
+// Every BuildRoad, BuildRoadGrid, BulldozeRoad and UpgradeRoad that applies leaves an undo
 // record: the journal of network changes it made (roads/network.ts), tied to
 // its log entry. An `Undo` command finds its sender's newest record and runs
 // the reverse of each change, last first. A segment or node the command
@@ -38,12 +38,8 @@ import {
   nextSegmentAt,
   readSegment,
   releaseHeld,
-  restoreNode,
-  restoreSegment,
-  restyleSegment,
+  reverseOps,
   sameRow,
-  unaddNode,
-  unaddSegment,
   type HeldIds,
   type NetworkOp,
   type RoadNetwork,
@@ -136,27 +132,7 @@ export function planUndo(state: SimState, playerId: string): UndoPlanResult {
 export function applyUndo(state: SimState, index: number): void {
   const record = state.undo[index];
   if (!record) return;
-  const net = state.roads;
-  for (let i = record.ops.length - 1; i >= 0; i--) {
-    const op = record.ops[i] as NetworkOp;
-    switch (op.op) {
-      case "addNode":
-        unaddNode(net, op.id, op.grown);
-        break;
-      case "removeNode":
-        restoreNode(net, op.id, op.x, op.z, op.height, op.flags);
-        break;
-      case "addSeg":
-        unaddSegment(net, op.id, op.grown);
-        break;
-      case "removeSeg":
-        restoreSegment(net, op.id, op.row, op.atA, op.atB);
-        break;
-      case "restyle":
-        restyleSegment(net, op.id, op.from, op.reverse);
-        break;
-    }
-  }
+  reverseOps(state.roads, record.ops);
   state.undo = state.undo.filter((_, i) => i !== index);
 }
 

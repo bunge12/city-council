@@ -645,6 +645,34 @@ export function restyleSegment(net: RoadNetwork, id: number, type: number, rever
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
 }
 
+/**
+ * Runs the reverse of each change in `ops`, newest first, as a journal wrote
+ * them. Built and then reversed with nothing in between, the network is byte
+ * for byte what it was. The caller checks first that the reverse makes sense.
+ */
+export function reverseOps(net: RoadNetwork, ops: readonly NetworkOp[]): void {
+  for (let i = ops.length - 1; i >= 0; i--) {
+    const op = ops[i] as NetworkOp;
+    switch (op.op) {
+      case "addNode":
+        unaddNode(net, op.id, op.grown);
+        break;
+      case "removeNode":
+        restoreNode(net, op.id, op.x, op.z, op.height, op.flags);
+        break;
+      case "addSeg":
+        unaddSegment(net, op.id, op.grown);
+        break;
+      case "removeSeg":
+        restoreSegment(net, op.id, op.row, op.atA, op.atB);
+        break;
+      case "restyle":
+        restyleSegment(net, op.id, op.from, op.reverse);
+        break;
+    }
+  }
+}
+
 /** The segments touching `node`, newest first. */
 export function segmentsAt(net: RoadNetwork, node: number): number[] {
   if (!isNode(net, node)) throw new RangeError(`node ${node} does not exist`);

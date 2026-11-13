@@ -75,6 +75,17 @@ export interface RoadBuildBalance {
   upgradeCredit: number;
   /** How many of their own road changes each player can undo. The oldest past this are forgotten. */
   undoSteps: number;
+  /**
+   * Most streets one BuildRoadGrid may lay: one for each grid line, counted
+   * before water or a slope cuts it. Keeps the step that applies a grid
+   * inside the tick budget.
+   */
+  gridMaxStreets: number;
+  /**
+   * The last block along a side of a grid takes what is left. Smaller than
+   * this share of the asked-for block, it joins its neighbour instead.
+   */
+  gridMinBlockShare: number;
 }
 
 export interface RoadBalance {
@@ -188,6 +199,10 @@ export function checkRoadBalance(data: unknown): string[] {
     if (typeof credit !== "number" || !(credit >= 0 && credit <= 1)) errors.push("build.upgradeCredit must be a number from 0 to 1");
     const undoSteps = build["undoSteps"];
     if (!Number.isSafeInteger(undoSteps) || (undoSteps as number) < 1) errors.push("build.undoSteps must be a whole number of at least 1");
+    const gridMax = build["gridMaxStreets"];
+    if (!Number.isSafeInteger(gridMax) || (gridMax as number) < 4) errors.push("build.gridMaxStreets must be a whole number of at least 4");
+    const share = build["gridMinBlockShare"];
+    if (typeof share !== "number" || !(share > 0 && share <= 1)) errors.push("build.gridMinBlockShare must be a number over 0 and at most 1");
     // Positions are whole multiples of the step, so it must divide a metre
     // into a power of two for them to be exact in a float64.
     const step = build["gridStep"];

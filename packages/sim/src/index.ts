@@ -60,6 +60,8 @@ export { bridgeDeckHeight, bridgeDeckLevel, bridgeRamps } from "./roads/bridge";
 export { curveBox, isStraight, minRadius, nearestOnQuad, quadPoint, segmentQuad, subControl } from "./roads/curve";
 export type { Box, Quad, QuadNearest } from "./roads/curve";
 export type { BuildPoint, BuildRoadPayload, PlanStop, RoadPlan, RoadPlanResult } from "./roads/build";
+export { gridLines, planRoadGrid } from "./roads/grid";
+export type { BuildRoadGridPayload, GridPlan, GridPlanResult, GridProblem, GridStreet } from "./roads/grid";
 export { planBulldoze, planUpgrade } from "./roads/edit";
 export type {
   BulldozePlan,
