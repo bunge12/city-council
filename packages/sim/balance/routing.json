@@ -1,0 +1,15 @@
+{
+  "_about": "How the pathfinder prices a trip before traffic exists. Road segments take their free-flow speed from their type in roads.json. Rail and path segments have no types until M7 and M8, so each network gets one speed here, in km/h. Both are placeholders with no source, there only so a route filtered to rail or path has a cost. M5 replaces free-flow time with congested time.",
+  "networkSpeedKmh": {
+    "rail": {
+      "speedKmh": 60,
+      "source": "Placeholder. A rough average for urban rail with stops, until M7 gives rail its own types.",
+      "placeholder": true
+    },
+    "path": {
+      "speedKmh": 5,
+      "source": "Placeholder. Walking pace, until M8 gives paths their own types.",
+      "placeholder": true
+    }
+  }
+}

@@ -481,3 +481,11 @@ kbd {
 .road-readout .junctions {
   color: var(--ink-soft);
 }
+
+/* The debug panel's route tool (issue M1-15). */
+.route-tool {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}

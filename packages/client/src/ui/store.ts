@@ -6,9 +6,10 @@
 import { create } from "zustand";
 import { INITIAL_EDIT_TOOL, type EditPreview, type EditToolState } from "../tools/edit-tool";
 import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tools/road-tool";
+import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
 
-export interface UiState extends RoadToolState, EditToolState {
+export interface UiState extends RoadToolState, EditToolState, RouteToolState {
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
@@ -40,6 +41,7 @@ export const useUi = create<UiState>(() => ({
   undoNote: null,
   ...INITIAL_ROAD_TOOL,
   ...INITIAL_EDIT_TOOL,
+  ...INITIAL_ROUTE_TOOL,
 }));
 
 export function toggleDebug(): void {

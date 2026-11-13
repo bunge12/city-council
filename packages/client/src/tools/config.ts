@@ -5,6 +5,14 @@
 // Distances in pixels are CSS pixels on screen, turned into metres at the
 // cursor each frame, so a snap feels the same in every zoom band.
 
+/** The route tool in the debug panel (issue M1-15). */
+export const ROUTE_TOOL = {
+  /** A clicked point joins the nearest road no further than this, in metres. */
+  attachRadius: 300,
+  /** The highlight's width as a share of the road's, so the road shows at its edges. */
+  widthScale: 1.25,
+} as const;
+
 export const SNAP = {
   /** An existing node catches the cursor this near. */
   nodePx: 16,

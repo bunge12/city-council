@@ -203,6 +203,8 @@ export const ROAD_PREVIEW = {
     bridge: 0xb48cff,
     /** A road the bulldoze tool would remove (issue M1-13). */
     bulldoze: 0xff8a1f,
+    /** A route the debug panel's route tool found (issue M1-15). */
+    route: 0x2ee06f,
   },
   /** The bridge strip: width as a share of the road's, and extra height over the strip. */
   bridgeScale: 0.6,

@@ -44,6 +44,7 @@ import {
   unindexNode,
   unindexSegment,
 } from "./spatial";
+import { NO_EDGE, existingRoutingGraph, refreshRoutingSegment } from "./routing";
 
 type NodeKey = (typeof NODE_ARRAYS)[number];
 type SegKey = (typeof SEG_ARRAYS)[number];
@@ -272,6 +273,13 @@ export function applyRoadDelta(net: RoadNetwork, delta: RoadDelta): number[] | s
   if (index) {
     for (const node of delta.nodeIds) if (isNode(net, node)) indexNode(index, node);
     for (const seg of delta.segIds) if (isSegment(net, seg)) indexSegment(index, seg);
+  }
+  // The routing graph keeps per-segment numbers only, so each changed row is
+  // worked out again, and ids past a smaller limit lose their edges.
+  const graph = existingRoutingGraph(net);
+  if (graph) {
+    for (const seg of delta.segIds) refreshRoutingSegment(graph, seg);
+    for (let e = 2 * segmentIdLimit(net); e < graph.edgeTime.length; e++) graph.edgeTime[e] = NO_EDGE;
   }
   touchedChunks(net, delta.nodeIds, delta.segIds, chunks);
   return [...chunks].sort((a, b) => a - b);

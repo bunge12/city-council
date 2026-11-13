@@ -112,3 +112,16 @@ export {
   unindexSegment,
 } from "./roads/spatial";
 export type { NearestNode, NearestPoint, RoadIndex } from "./roads/spatial";
+export {
+  NO_EDGE,
+  NO_ROUTE,
+  ROUTING_BALANCE,
+  buildRoutingGraph,
+  findRoute,
+  findRouteBetween,
+  freeFlowSpeedKmh,
+  freeFlowTime,
+  routingGraphOf,
+  sameRoutingGraph,
+} from "./roads/routing";
+export type { EdgeCost, PointRoute, PointRouteOptions, Route, RouteEnd, RouteResult, RoutingBalance, RoutingGraph } from "./roads/routing";
