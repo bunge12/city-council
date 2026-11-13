@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { ROAD_TYPES, createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { formatMoneyShort } from "../packages/client/src/ui/format";
 import { FLAT, SEED, groundAt } from "./road-fixtures";
+import { MENU_SHIFT } from "./dock";
 
 // Issue M1-07: the straight road tool. A player draws a street, crosses it
 // with an avenue and sees a four-way junction and two log entries, then
@@ -79,7 +80,12 @@ async function openEmptyCity(page: Page): Promise<void> {
 }
 
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
-  await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
+  // Issue 47: the road menu covers the bottom middle of the screen, so the
+  // view sits a quarter of its height further back and the work area higher up.
+  const back = (position[1] - target[1]) * MENU_SHIFT;
+  const p: Vec3 = [position[0], position[1], position[2] + back];
+  const t: Vec3 = [target[0], target[1], target[2] + back];
+  await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [p, t] as const);
   await frames(page);
 }
 
@@ -241,7 +247,7 @@ test("Escape drops a road being drawn, and the keys are listed with the others",
   await openEmptyCity(page);
   const ground = groundAt(4350, 4600);
   await setPose(page, [4350, ground + 330, 4860], [4350, ground, 4600]);
-  await page.locator("#road-type-oneWay").click();
+  await page.keyboard.press("KeyC");
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "true");
   await clickGround(page, FLAT.x0 + 100, 4600);
   await hover(page, FLAT.x0 + 300, 4600);

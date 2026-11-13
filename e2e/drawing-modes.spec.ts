@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { MENU_SHIFT } from "./dock";
 
 // Issue M1-10: curved and continuous drawing modes. A curved avenue drawn
 // from open ground ends on an existing node, a curved street leaves the end
@@ -69,11 +70,14 @@ async function frames(page: Page): Promise<void> {
 
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
   const g = groundAt(x, z);
+  // Issue 47: the road menu covers the bottom middle of the screen, so the
+  // view sits a quarter of its height further back and the work area higher up.
+  const back = height * MENU_SHIFT;
   await page.evaluate(
     async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t),
     [
-      [x, g + height, z + height * 0.75],
-      [x, g, z],
+      [x, g + height, z + height * 0.75 + back],
+      [x, g, z + back],
     ] as const,
   );
   await frames(page);

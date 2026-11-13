@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { MENU_SHIFT } from "./dock";
 
 // Issue M1-22: roads on different levels cross without a junction. No player
 // tool sets a level in M1, so the debug panel's road level picker builds an
@@ -55,11 +56,14 @@ async function frames(page: Page): Promise<void> {
 /** Looks at (x, z) from `height` metres up, `back` times as far to the south as up and `side` times as far to the east. */
 async function look(page: Page, x: number, z: number, height: number, back = 0.75, side = 0): Promise<void> {
   const g = groundAt(x, z);
+  // Issue 47: the road menu covers the bottom middle of the screen, so the
+  // view sits a quarter of its height further back and the work area higher up.
+  const shift = height * MENU_SHIFT;
   await page.evaluate(
     async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t),
     [
-      [x + height * side, g + height, z + height * back],
-      [x, g, z],
+      [x + height * side, g + height, z + height * back + shift],
+      [x, g, z + shift],
     ] as const,
   );
   await frames(page);

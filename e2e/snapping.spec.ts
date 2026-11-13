@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { MENU_SHIFT } from "./dock";
 
 // Issue M1-08: snapping. A player draws a block of four streets with every
 // click up to 10 pixels off where they aim, and gets four nodes and right
@@ -74,7 +75,12 @@ async function frames(page: Page): Promise<void> {
 }
 
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
-  await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
+  // Issue 47: the road menu covers the bottom middle of the screen, so the
+  // view sits a quarter of its height further back and the work area higher up.
+  const back = (position[1] - target[1]) * MENU_SHIFT;
+  const p: Vec3 = [position[0], position[1], position[2] + back];
+  const t: Vec3 = [target[0], target[1], target[2] + back];
+  await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [p, t] as const);
   await frames(page);
 }
 

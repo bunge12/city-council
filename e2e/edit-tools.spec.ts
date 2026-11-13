@@ -207,7 +207,7 @@ test("a drag across four segments bulldozes them in one log entry", async ({ pag
   await openCity(page, state);
   await look(page, 4350, MAIN_Z, 320);
   const start = (await logEntries(page)).length;
-  await page.locator("#bulldoze-tool").click();
+  await page.keyboard.press("KeyN");
   const a = await screenAt(page, 4165, MAIN_Z);
   const b = await screenAt(page, 4535, MAIN_Z);
   await page.mouse.move(a.x, a.y);
