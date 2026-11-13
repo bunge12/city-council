@@ -19,8 +19,8 @@ A road drawn across water becomes a bridge without the player picking a bridge t
 
 ## Out of scope
 
-- Bridges over dry valleys, tunnels and elevated roads. The level field is ready for them and M7 builds them
-- One road passing over another
+- Bridges over dry valleys, tunnels and elevated roads. M5 builds them for roads and M7 reuses them for rail
+- One road passing over another, which is issue 22
 - Ships and bridge height classes
 
 ## Done when
