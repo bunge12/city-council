@@ -204,7 +204,10 @@ test("draws a square block with clicks up to 10 pixels off target", async ({ pag
   // The fourth, square off the second street, back toward the first corner's side.
   await click(page, c.x, c.z, MISS[4]);
   const d = await click(page, c.x - ux * SIDE, c.z - uz * SIDE, MISS[0]);
-  expect(d?.kind).toBe("angle");
+  // The 90 degree ray crosses the guide line square to the first street at
+  // the first corner (issue M1-19), so the crossing catches it where it lines up.
+  expect(["angle", "crossing"]).toContain(d?.kind);
+  expect(d?.square).toBe(true);
   await expect.poll(() => logLength(page)).toBe(3);
   if (!d) throw new Error("no snap at the fourth click");
   // Close the block on the first corner's node.
@@ -309,10 +312,10 @@ test("node, segment and grid snaps show their markers, and a segment snap makes 
   await expect(page.locator("body")).toHaveAttribute("data-snap", "segment");
   await attach(page, testInfo, "point on a segment marker");
 
-  // The terrain grid, off by default, snaps to 16 m when on.
-  expect((await hover(page, 4421, 4705))?.kind).toBe("none");
+  // The terrain grid, off by default, snaps to 16 m when on. Clear of the street's parallel offsets.
+  expect((await hover(page, 4421, 4745))?.kind).toBe("none");
   await page.locator("#guide-grid").click();
-  const grid = await hover(page, 4421, 4705);
+  const grid = await hover(page, 4421, 4745);
   expect(grid?.kind).toBe("grid");
   expect([(grid?.x ?? 0) % 16, (grid?.z ?? 0) % 16]).toEqual([0, 0]);
   await attach(page, testInfo, "terrain grid marker");

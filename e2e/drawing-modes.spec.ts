@@ -322,7 +322,8 @@ test("switching mode or tool part way through a road cancels it and leaves nothi
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "false");
   await page.locator("#road-tool").click();
   await hover(page, 4400, 4660);
-  await expect(page.locator("#road-readout")).toBeHidden();
+  // No road at the cursor. A parallel offset beside the street may still show its gap.
+  await expect(page.locator("#road-cells")).toBeHidden();
   await expect(hint(page)).toContainText("Click on the map to start a road.");
   // Only the street and the one segment clicked before the switch.
   expect(await logLength(page)).toBe(2);
