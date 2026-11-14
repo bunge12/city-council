@@ -171,6 +171,8 @@ export interface CellIndex {
   segs: (SegShape | null)[];
   /** Segment ids the network has added or removed since the index last looked. */
   readonly touched: Set<number>;
+  /** Cells still to walk after a change too big for one tick, in claim order; null when settled. */
+  pending: ClaimQueue | null;
 }
 
 // Scratch space. The sim runs on one thread, and no two users of one of
@@ -579,6 +581,7 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     surfaceBuckets: new Map(),
     segs: [],
     touched: new Set<number>(),
+    pending: null,
   };
   const limit = segmentIdLimit(net);
   const order: number[] = [];
@@ -651,6 +654,11 @@ class ClaimQueue {
     heap[i] = key;
   }
 
+  /** Whether nothing is left to walk. */
+  empty(): boolean {
+    return this.heap.length === 0;
+  }
+
   pop(): number | undefined {
     const heap = this.heap;
     const top = heap[0];
@@ -690,7 +698,7 @@ interface Before {
  * cell, not by segment id (`claimsBefore`), so such a cell claims in the
  * same place in the order as the cell it replaces.
  */
-function update(index: CellIndex, cells: CellState): CellState {
+function update(index: CellIndex, cells: CellState): { cells: CellState; work: number } {
   const net = index.net;
   const limit = segmentIdLimit(net);
   const oldLimit = index.segs.length;
@@ -705,7 +713,9 @@ function update(index: CellIndex, cells: CellState): CellState {
     const s = index.segs[id] ?? null;
     if (!sameAsNet(s, net, id)) changed.push({ id, shape: s, start: id < oldLimit ? (cells.offset[id] ?? 0) : 0 });
   }
-  if (changed.length === 0 && limit === oldLimit) return cells;
+  if (changed.length === 0 && limit === oldLimit) return { cells, work: 0 };
+  // A change still settling finishes first: the walk below starts from settled cells.
+  drain(index, Infinity);
 
   const queue = new ClaimQueue(index);
   const box = new Float64Array(4);
@@ -834,9 +844,39 @@ function update(index: CellIndex, cells: CellState): CellState {
       seedOverlapping(q, LOST_GROUND);
     }
   }
-  // Walk in claim order. A cell that gains or loses its claim sends every
-  // later cell it overlaps round again.
-  for (let key = queue.pop(); key !== undefined; key = queue.pop()) {
+  index.pending = queue;
+  // How big the change is, so every machine that applies it agrees how many
+  // ticks it may take to settle: the new cells with nothing to start from,
+  // and the removed cells no new cell took over. Both follow from the road
+  // shapes alone, not from how far an earlier change has settled.
+  let work = 0;
+  for (const c of changed) {
+    const fresh = index.segs[c.id]?.status;
+    // Nothing has been walked yet, so a cell with nothing to start from is still unset.
+    if (fresh) for (let local = 0; local < fresh.length; local++) if (fresh[local] === UNSET) work++;
+    const gone = c.shape?.status;
+    if (!gone) continue;
+    const marks = kept.get(c);
+    for (let local = 0; local < gone.length; local++) if (marks?.[local] !== 1) work++;
+  }
+  return { cells: relayout(index, cells, changed, byAnchor), work };
+}
+
+/**
+ * Walks up to `limit` of the cells a change left to walk, in claim order.
+ * A cell that gains or loses its claim sends every later cell it overlaps
+ * round again. Returns whether the change has settled.
+ */
+function drain(index: CellIndex, limit: number): boolean {
+  const queue = index.pending;
+  if (!queue) return true;
+  const q = new Float64Array(8);
+  const box = new Float64Array(4);
+  let walked = 0;
+  while (walked < limit) {
+    const key = queue.pop();
+    if (key === undefined) break;
+    walked++;
     const seg = segOfKey(key);
     const s = index.segs[seg];
     if (!s?.status) continue;
@@ -860,8 +900,9 @@ function update(index: CellIndex, cells: CellState): CellState {
       (other) => queue.has(other),
     );
   }
-
-  return relayout(index, cells, changed, byAnchor);
+  if (!queue.empty()) return false;
+  index.pending = null;
+  return true;
 }
 
 /**
@@ -943,29 +984,76 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
 const live = new WeakMap<RoadNetwork, CellIndex>();
 
 /**
- * The cell index of `state`'s roads, built on first use, with the cells in
- * state laid out for the roads as they are now. Every query goes through
- * here, so a query never sees cells older than the roads.
- *
- * The step calls this before and after every command (commands.ts), so
- * state always holds the cells of its roads. A state whose roads were
- * changed without a step, as a test may, and whose index was never built,
- * has its cells laid out afresh here: a segment keeps its zones if it has as
- * many cells as it had, and starts unzoned otherwise.
+ * The cell index of `state`'s roads, built on first use, without walking
+ * any change the roads have had since it last looked. A state whose roads
+ * were changed without a step, as a test may, and whose index was never
+ * built, has its cells laid out afresh here: a segment keeps its zones if it
+ * has as many cells as it had, and starts unzoned otherwise.
+ */
+function indexOf(state: SimState): { index: CellIndex; built: boolean } {
+  const known = live.get(state.roads);
+  if (known) return { index: known, built: false };
+  const index = buildCellIndex(state.roads, terrainOf(state.seed));
+  const touch = (id: number) => index.touched.add(id);
+  observeNetwork(state.roads, { nodeAdded: () => undefined, nodeRemoving: () => undefined, segmentAdded: touch, segmentRemoving: touch });
+  live.set(state.roads, index);
+  state.cells = fitCells(index, state.cells);
+  return { index, built: true };
+}
+
+/**
+ * The cell index of `state`'s roads with every cell settled, and the cells
+ * in state laid out for the roads as they are now. Every query goes
+ * through here, so a query never sees cells older than the roads, nor a
+ * change half walked.
  */
 export function syncCells(state: SimState): CellIndex {
-  let index = live.get(state.roads);
-  if (!index) {
-    const built = buildCellIndex(state.roads, terrainOf(state.seed));
-    const touch = (id: number) => built.touched.add(id);
-    observeNetwork(state.roads, { nodeAdded: () => undefined, nodeRemoving: () => undefined, segmentAdded: touch, segmentRemoving: touch });
-    live.set(state.roads, built);
-    index = built;
-    state.cells = fitCells(index, state.cells);
-    return index;
-  }
-  state.cells = update(index, state.cells);
+  const { index, built } = indexOf(state);
+  if (!built) state.cells = update(index, state.cells).cells;
+  drain(index, Infinity);
   return index;
+}
+
+/**
+ * Brings the cells up to date after a command that may have changed the
+ * roads (commands.ts). The zone and density arrays in state are laid out
+ * for the new roads at once. A change that walks no more than
+ * `settleCellsPerTick` cells settles at once too. A bigger one is given
+ * `state.cellsReadyAt`, the tick by which it must be settled, from its size
+ * alone, so every machine gives it the same tick; until then `settleCells`
+ * walks one slice of it a step. Nothing in the sim may read whether a cell
+ * is blocked before that tick (`cellsSettled`).
+ */
+export function stepCells(state: SimState): void {
+  const { index, built } = indexOf(state);
+  if (built) return;
+  const { cells, work } = update(index, state.cells);
+  state.cells = cells;
+  const per = ZONING_BALANCE.settleCellsPerTick;
+  const ticks = Math.ceil(work / per);
+  if (ticks <= 1) {
+    drain(index, Infinity);
+    return;
+  }
+  const ready = state.tick + ticks;
+  if (ready > state.cellsReadyAt) state.cellsReadyAt = ready;
+}
+
+/**
+ * Walks one slice of a change still settling, once a step, paused or not.
+ * The step whose tick is the last before `state.cellsReadyAt` walks
+ * whatever is left, however much that is, so the cells are settled on that
+ * tick on every machine, whatever its speed (CLAUDE.md rule 5).
+ */
+export function settleCells(state: SimState): void {
+  const index = live.get(state.roads);
+  if (!index?.pending) return;
+  drain(index, state.tick + 1 >= state.cellsReadyAt ? Infinity : ZONING_BALANCE.settleCellsPerTick);
+}
+
+/** Whether the sim may read which cells are blocked: no change of roads is still settling. */
+export function cellsSettled(state: SimState): boolean {
+  return state.tick >= state.cellsReadyAt;
 }
 
 /** `cells` as they are when they fit the roads, or laid out afresh as `syncCells` says. */

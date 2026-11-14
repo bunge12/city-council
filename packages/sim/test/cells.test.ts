@@ -16,6 +16,7 @@ import {
   cellStatuses,
   cellsInBox,
   cellsInChunk,
+  cellsSettled,
   createState,
   deserialize,
   hashState,
@@ -521,6 +522,65 @@ describe("keeping cells current", () => {
     }
     expect(cellStatuses(loaded)).toEqual(cellStatuses(state));
     expect(zonedGround(loaded).size).toBeGreaterThan(0);
+  });
+});
+
+describe("settling a big change over a few ticks", () => {
+  /** A 4 by 4 street grid on the flat square: more cells than one tick walks. */
+  const bigGrid = () =>
+    command("BuildRoadGrid", {
+      origin: { x: 4200, z: 4500 },
+      along: { x: 4200 + 4 * 96, z: 4500 },
+      across: { x: 4200, z: 4500 + 4 * 96 },
+      depth: 86,
+      width: 86,
+      type: "street",
+    });
+
+  it("settles a single street at once", () => {
+    const state = createState(SEED);
+    ok(state, road([4200, 4600], [4392, 4600]));
+    expect(state.cellsReadyAt).toBe(0);
+    expect(cellsSettled(state)).toBe(true);
+  });
+
+  it("gives a grid too big for one tick the tick it settles by, and walks it a slice a step", () => {
+    const state = createState(SEED);
+    const tick = state.tick;
+    ok(state, bigGrid());
+    expect(state.cellsReadyAt).toBeGreaterThan(tick + 1);
+    expect(cellsSettled(state)).toBe(false);
+    while (state.tick < state.cellsReadyAt) step(state);
+    expect(cellsSettled(state)).toBe(true);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
+    expect(overlappingOpenCells(state)).toBe(0);
+  });
+
+  it("settles while paused, and the ready tick waits for the clock", () => {
+    const state = createState(SEED);
+    ok(state, command("SetSpeed", { speed: 0 }));
+    ok(state, bigGrid());
+    const ready = state.cellsReadyAt;
+    for (let i = 0; i < 20; i++) step(state);
+    expect(state.cellsReadyAt).toBe(ready);
+    expect(cellsSettled(state)).toBe(false);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
+  });
+
+  it("hashes the same saved and reloaded while settling as a city that never stopped", () => {
+    const state = createState(SEED);
+    ok(state, bigGrid());
+    expect(cellsSettled(state)).toBe(false);
+    const loaded = deserialize(serialize(state)).state;
+    expect(loaded.cellsReadyAt).toBe(state.cellsReadyAt);
+    const later = road([4150, 4548], [4650, 4548]);
+    for (const s of [state, loaded]) {
+      expect(submit(s, { ...later, payload: JSON.parse(JSON.stringify(later.payload)) as unknown })).toEqual({ ok: true });
+      for (let i = 0; i < 6; i++) step(s);
+      expect(cellsSettled(s)).toBe(true);
+    }
+    expect(hashState(loaded)).toBe(hashState(state));
+    expect(cellStatuses(loaded)).toEqual(cellStatuses(state));
   });
 });
 

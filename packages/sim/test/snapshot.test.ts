@@ -352,6 +352,7 @@ describe("committed snapshots", () => {
       connections: fresh.connections,
       balance: "",
       cells: fresh.cells,
+      cellsReadyAt: 0,
     });
   });
 
@@ -359,13 +360,14 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v2Fixture.hex));
     expect(header.stateVersion).toBe(2);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    const { roads, undo, connections, balance, cells, ...rest } = state;
+    const { roads, undo, connections, balance, cells, cellsReadyAt, ...rest } = state;
     const fresh = createState(state.seed);
     expect(roads).toEqual(fresh.roads);
     expect(connections).toEqual(fresh.connections);
     expect(undo).toEqual([]);
     expect(balance).toBe("");
     expect(cells).toEqual(fresh.cells);
+    expect(cellsReadyAt).toBe(0);
     // Everything the version 2 save held comes back unchanged.
     expect(hashState({ ...rest, version: 2 })).toBe(v2Fixture.hash);
   });
@@ -380,7 +382,7 @@ describe("committed snapshots", () => {
     expect(Array.from(state.roads.segFree)).toEqual([]);
     expect(Array.from(state.roads.nodeFree)).toEqual([]);
     expect(checkConnections(state.connections, state.roads)).toBeNull();
-    expect(hashState(state)).toBe("190ce9c72b3ca69d");
+    expect(hashState(state)).toBe("9d12e1449c050dbb");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {

@@ -26,6 +26,8 @@ export interface ZoningBalance {
   zoneDepthCells: number;
   /** The steepest ground a cell can be zoned on, rise over run at its centre. */
   maxSlope: number;
+  /** How many cells a change of roads may walk in one tick before the rest wait for the next. */
+  settleCellsPerTick: number;
   zones: ZoneBalance[];
   /** In level order, from 1. */
   densities: DensityBalance[];
@@ -53,6 +55,8 @@ export function checkZoningBalance(data: unknown): string[] {
   if (typeof maxSlope !== "number" || !Number.isFinite(maxSlope) || !(maxSlope > 0)) {
     errors.push("maxSlope must be a positive rise over run");
   }
+  const settle = data["settleCellsPerTick"];
+  if (!Number.isSafeInteger(settle) || (settle as number) < 1) errors.push("settleCellsPerTick must be a whole number of at least 1");
 
   const zones = data["zones"];
   if (!Array.isArray(zones) || zones.length === 0) {

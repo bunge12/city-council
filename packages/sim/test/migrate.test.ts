@@ -6,10 +6,10 @@ import { terrainOf } from "../src/terrain/cache";
 
 /**
  * `state` as an older version: its fields minus the ones that version did
- * not have. Every version before 10 also lacks the zoning cells.
+ * not have. Every version before 10 also lacks the zoning cells and the tick they settle by.
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
-  const gone: string[] = version < 10 ? [...drop, "cells"] : drop;
+  const gone: string[] = version < 10 ? [...drop, "cells", "cellsReadyAt"] : drop;
   const kept = Object.entries(state).filter(([key]) => !gone.includes(key));
   return { ...Object.fromEntries(kept), version };
 }
@@ -40,6 +40,7 @@ describe("migrateState", () => {
       connections: fresh.connections,
       balance: "",
       cells: fresh.cells,
+      cellsReadyAt: 0,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -48,7 +49,7 @@ describe("migrateState", () => {
     const v2 = older(createBareState(9), 2, "roads", "undo", "connections", "balance");
     const state = migrateState(v2);
     const fresh = createState(9);
-    expect(state).toEqual({ ...v2, version: 10, roads: fresh.roads, undo: [], connections: fresh.connections, balance: "", cells: fresh.cells });
+    expect(state).toEqual({ ...v2, version: 10, roads: fresh.roads, undo: [], connections: fresh.connections, balance: "", cells: fresh.cells, cellsReadyAt: 0 });
     expect(() => hashState(state)).not.toThrow();
   });
 

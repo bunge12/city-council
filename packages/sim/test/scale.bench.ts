@@ -33,7 +33,7 @@ import { endJournal, reverseOps, segmentCount, startJournal, type NetworkOp, typ
 import { roadIndexOf } from "../src/roads/spatial";
 import { ROAD_BUILD } from "../src/roads/balance";
 import { terrainOf } from "../src/terrain/cache";
-import { buildCellIndex, syncCells } from "../src/zoning/cell-index";
+import { buildCellIndex, settleCells, stepCells, syncCells } from "../src/zoning/cell-index";
 
 /** What one tick may spend, in milliseconds. */
 const TICK_BUDGET_MS = 20;
@@ -121,6 +121,52 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   // Each run changes the network and takes the change back, so every run
   // starts from the same city. Taking back costs about what building does,
   // so the build times are up to twice what the step itself spends.
+  // A grid at the cap over the city's streets is too big a change to walk
+  // its cells in one tick, so they settle over the next few (M2-03). These
+  // cases time one step each: the one that applies the grid, the one that
+  // takes it back, and one slice of the walk in between. Hooks outside the
+  // timing put the city back.
+  let gridOps: NetworkOp[] = [];
+  const hooked: Record<string, { fn: () => void; beforeEach?: () => void; afterEach?: () => void }> = {
+    "the step that applies one BuildRoadGrid at the cap over existing streets, its cells left to settle": {
+      fn: () => {
+        gridOps = applyGrid(grid);
+        blockById(blocks, 0);
+        stepCells(state);
+      },
+      afterEach: () => {
+        syncCells(state);
+        reverseOps(net, gridOps);
+        blockById(blocks, 0);
+        syncCells(state);
+      },
+    },
+    "the step that takes that grid back, its cells left to settle": {
+      beforeEach: () => {
+        gridOps = applyGrid(grid);
+        blockById(blocks, 0);
+        syncCells(state);
+      },
+      fn: () => {
+        reverseOps(net, gridOps);
+        blockById(blocks, 0);
+        stepCells(state);
+      },
+      afterEach: () => void syncCells(state),
+    },
+    "one step's slice of that grid's cells settling": {
+      beforeEach: () => {
+        gridOps = applyGrid(grid);
+        stepCells(state);
+      },
+      fn: () => settleCells(state),
+      afterEach: () => {
+        syncCells(state);
+        reverseOps(net, gridOps);
+        syncCells(state);
+      },
+    },
+  };
   const cases: Record<string, () => void> = {
     // Plan and build, with the spatial index, the routing graph, the
     // blocks and the zoning cells kept current, then the take-back.
@@ -129,12 +175,12 @@ test("the M1 scale network", async ({ bench, annotate }) => {
       if (!result.ok) throw new Error(result.reason);
       const ops = build(result.plan);
       blockById(blocks, 0);
-      syncCells(state);
+      stepCells(state);
       reverseOps(net, ops);
       blockById(blocks, 0);
-      syncCells(state);
+      stepCells(state);
     },
-    "the step that applies one BuildRoadGrid at the cap over existing streets, and taking it back": () => {
+    "one BuildRoadGrid at the cap over existing streets with every cell settled, and taking it back, for comparison": () => {
       const ops = applyGrid(grid);
       blockById(blocks, 0);
       syncCells(state);
@@ -173,9 +219,13 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   };
   const meanMs: Record<string, number> = {};
   const p99Ms: Record<string, number> = {};
-  for (const [name, fn] of Object.entries(cases)) {
+  const all: [string, { fn: () => void; beforeEach?: () => void; afterEach?: () => void }][] = [
+    ...Object.entries(cases).map(([name, fn]) => [name, { fn }] as [string, { fn: () => void }]),
+    ...Object.entries(hooked),
+  ];
+  for (const [name, { fn, ...hooks }] of all) {
     const file = `bench-results/scale-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
-    const result = await bench(name, { writeResult: file }, fn).run();
+    const result = await bench(name, { writeResult: file, ...hooks }, fn).run();
     meanMs[name] = result.latency.mean;
     p99Ms[name] = result.latency.p99;
   }
@@ -206,13 +256,14 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   // holds every step to the budget itself.
   for (const name of [
     "the step that applies one BuildRoad crossing ten segments, and taking it back",
-    "the step that applies one BuildRoadGrid at the cap over existing streets, and taking it back",
     "one BuildRoad through a block, blocks brought up to date, and taking it back",
     "one BuildRoad crossing ten segments with the zoning cells kept current, and taking it back",
   ]) {
     expect(meanMs[name], name).toBeLessThan(2 * TICK_BUDGET_MS);
   }
   expect(meanMs["one tick with nothing queued"]).toBeLessThan(TICK_BUDGET_MS);
+  // A big grid's steps, each on its own: applying it, taking it back, and a slice of its cells settling.
+  for (const name of Object.keys(hooked)) expect(meanMs[name], name).toBeLessThan(TICK_BUDGET_MS);
   // An autosave runs between two ticks and holds up the next one (issue #83).
   expect(meanMs["serialize the city, as an autosave does"]).toBeLessThan(TICK_BUDGET_MS);
 }, 600_000);

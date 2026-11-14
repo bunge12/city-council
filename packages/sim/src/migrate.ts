@@ -47,7 +47,7 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // could be painted before them. See `cellAnchors`.
   9: (old) => {
     const next = cellAnchors(old);
-    return { ...next, version: 10, cells: unzonedCells(next["roads"] as RoadNetwork) };
+    return { ...next, version: 10, cells: unzonedCells(next["roads"] as RoadNetwork), cellsReadyAt: 0 };
   },
 };
 

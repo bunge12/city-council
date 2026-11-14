@@ -13,7 +13,7 @@ export { SNAPSHOT_VERSION, SPEEDS, captureState, createBareState, createState } 
 export type { SimState, Speed } from "./state";
 export { COMMANDS, MAX_PENDING_COMMANDS, submit, validateCommand } from "./commands";
 export type { Command, CommandDef, CommandResult } from "./commands";
-export { COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
+export { CELLS_SYSTEM, COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
 export type { System, SystemTimer } from "./step";
 export { RNG_WORDS, nextFloat, nextInt, nextU32, seedRng } from "./rng";
 export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, isLogEntry, logLength, readLog } from "./log";
@@ -73,6 +73,7 @@ export {
   cellStatuses,
   cellsInBox,
   cellsInChunk,
+  cellsSettled,
   syncCells,
 } from "./zoning/cell-index";
 export type { CellIndex, CellInfo } from "./zoning/cell-index";

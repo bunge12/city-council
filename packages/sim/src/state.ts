@@ -69,6 +69,12 @@ export interface SimState {
    * every command that changes the roads.
    */
   cells: CellState;
+  /**
+   * The tick from which the sim may read which cells are blocked. A change
+   * of roads too big to walk in one tick settles over the ticks up to this
+   * one (zoning/cell-index.ts). At or below `tick` when nothing is settling.
+   */
+  cellsReadyAt: number;
 }
 
 /**
@@ -107,6 +113,7 @@ export function createBareState(seed: number): SimState {
     connections: new Int32Array(0),
     balance: BALANCE_STAMP,
     cells: unzonedCells(roads),
+    cellsReadyAt: 0,
   };
 }
 

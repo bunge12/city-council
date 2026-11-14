@@ -11,6 +11,6 @@
     { "tick": 5, "seq": 3, "playerId": "p2", "type": "BuildRoad", "payload": { "from": { "x": 4330, "z": 4430 }, "to": { "x": 4330, "z": 4518 }, "type": "street" } },
     { "tick": 6, "seq": 4, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4550, "z": 4450 }, "to": { "x": 4550, "z": 4950 }, "type": "avenue", "control": { "x": 4680, "z": 4700 } } }
   ],
-  "balance": "582173b8d4941024",
-  "hash": "4024aad9f8a9967b"
+  "balance": "a4452b53ef8acf54",
+  "hash": "0de9d839aec487ef"
 }
