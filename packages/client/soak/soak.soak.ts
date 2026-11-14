@@ -291,6 +291,7 @@ test("soak: one hour of game time at 4x", () => {
   expect(host.fullLog.length).toBeGreaterThan(LOG_LIVE_LIMIT);
   // The mirror kept up with every road change.
   expect(hashState(mirror.state?.roads)).toBe(hashState(live.state.roads));
+  expect(hashState(mirror.state?.cells)).toBe(hashState(live.state.cells));
 
   const sorted = stepMs.slice(0, steps).sort();
   const over = sorted.filter((t) => t > BUDGET_MS).length;

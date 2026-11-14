@@ -18,7 +18,7 @@
 // it is now. A cell delta is built together with the road delta of the same
 // steps and applied right after it.
 
-import { segmentIdLimit } from "../roads/network";
+import { segmentIdLimit, type RoadNetwork } from "../roads/network";
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "./balance";
 import { CELL_KEY_STRIDE, drainCellChanges, recordCellChangesOf } from "./cell-changes";
@@ -105,6 +105,23 @@ export function drainCellDelta(state: SimState): CellDelta | null {
 
 const NO_IDS = new Int32Array(0);
 
+// The zone and density buffers a copy held before its last new layout, by
+// its network, kept to write the next one into, as the sim keeps its own
+// (cell-index.ts, `spare`). A layout is about 6 MB on a big city, and a new
+// one for every road change keeps the garbage collector busy enough to
+// stall whatever shares the thread. Not state.
+const spares = new WeakMap<RoadNetwork, { zone: Uint8Array; density: Uint8Array }>();
+
+/**
+ * An array of `length` for a new layout: a view on the spare buffer when it
+ * is big enough, else a new buffer with room to grow. Not cleared: the
+ * caller writes every cell.
+ */
+function layoutBuffer(spare: Uint8Array | undefined, length: number): Uint8Array {
+  if (spare && spare.buffer.byteLength >= length) return new Uint8Array(spare.buffer, 0, length);
+  return new Uint8Array(new ArrayBuffer(Math.floor(length * 1.25) + 1024), 0, length);
+}
+
 /** Whether `list` holds ids from 0 up to `limit`, ascending without repeats. */
 function ascendingBelow(list: Int32Array, limit: number): boolean {
   return list.every((id, i) => id >= 0 && id < limit && (i === 0 || id > (list[i - 1] ?? 0)));
@@ -181,7 +198,10 @@ export function applyCellDelta(state: SimState, delta: CellDelta | null, roadSeg
   let next: CellState = cells;
   if (moved) {
     const total = offset[limit] ?? 0;
-    next = { offset, zone: new Uint8Array(total), density: new Uint8Array(total) };
+    const spare = spares.get(net);
+    next = { offset, zone: layoutBuffer(spare?.zone, total), density: layoutBuffer(spare?.density, total) };
+    // The copy lets go of the old arrays below, so they become the spare.
+    spares.set(net, { zone: cells.zone, density: cells.density });
     // Segments in a row that kept their cells have their runs side by side
     // in both layouts, so each such stretch is one copy.
     const known = limit < oldLimit ? limit : oldLimit;
@@ -194,7 +214,10 @@ export function applyCellDelta(state: SimState, delta: CellDelta | null, roadSeg
       next.density.set(cells.density.subarray(from, upTo), offset[stretch] ?? 0);
     };
     for (const seg of relaid) {
-      if (seg >= known) break;
+      // The buffers are not cleared, so a run laid out again starts unzoned here.
+      next.zone.fill(0, offset[seg] ?? 0, offset[seg + 1] ?? 0);
+      next.density.fill(0, offset[seg] ?? 0, offset[seg + 1] ?? 0);
+      if (seg >= known) continue;
       copyStretch(seg);
       stretch = seg + 1;
     }
