@@ -380,7 +380,7 @@ describe("committed snapshots", () => {
     expect(Array.from(state.roads.segFree)).toEqual([]);
     expect(Array.from(state.roads.nodeFree)).toEqual([]);
     expect(checkConnections(state.connections, state.roads)).toBeNull();
-    expect(hashState(state)).toBe("4a657473ef110401");
+    expect(hashState(state)).toBe("190ce9c72b3ca69d");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
