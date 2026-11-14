@@ -497,12 +497,46 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
       });
     }
   };
+  // The zoning overlay reads cells from the mirror alone: a snapshot redraws
+  // every chunk, a delta the chunks the mirror says it changed. A chunk that
+  // changes while the overlay is off is redrawn when it comes back on.
+  view.setCellSource({
+    shapes: (chunk) => mirror.cellShapesInChunk(chunk),
+    cells: () => mirror.state?.cells ?? null,
+  });
+  const cellReadout = () => {
+    const cells = view.cellStats();
+    document.body.dataset["zoningOverlay"] = String(cells?.visible ?? false);
+    if (!cells || cells.totalRebuilt === 0) return;
+    setViewReadout({
+      cells: `${cells.zoned} zoned and ${cells.unzoned} unzoned in ${cells.chunks} chunks`,
+      cellRebuilds: `${cells.lastRebuilt} last, ${cells.totalRebuilt} total, ${cells.lastBuildMs.toFixed(1)} ms`,
+    });
+  };
+  const showCells = (update: MirrorUpdate) => {
+    if (update.kind === "snapshot") view.showCells();
+    else if (update.cellChunks.length > 0) view.updateCells(update.cellChunks);
+    else return;
+    cellReadout();
+  };
+  const setCellsVisible = (on: boolean) => {
+    view.setCellsVisible(on);
+    cellReadout();
+  };
+  useUi.subscribe((now, before) => {
+    if (now.zoningOverlay !== before.zoningOverlay) setCellsVisible(now.zoningOverlay);
+  });
   mirror.subscribe((update) => {
     showMap();
     showRoads(update);
+    showCells(update);
   });
   showMap();
-  if (mirror.state) showRoads({ kind: "snapshot" });
+  if (mirror.state) {
+    showRoads({ kind: "snapshot" });
+    showCells({ kind: "snapshot" });
+  }
+  setCellsVisible(useUi.getState().zoningOverlay);
   return view;
 });
 viewReady.catch((error: unknown) => {

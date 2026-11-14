@@ -12,8 +12,9 @@ import { Notes } from "./Notes";
 import { RoadReadout } from "./RoadReadout";
 import type { AppServices } from "./services";
 import { shortcutFor, toggledSpeed } from "./shortcuts";
-import { toggleDebug, toggleLog } from "./store";
+import { toggleDebug, toggleLog, toggleZoningOverlay } from "./store";
 import { TopBar } from "./TopBar";
+import { ZoneLegend } from "./ZoneLegend";
 import "./ui.css";
 
 /** Turns key presses into shortcut actions. Speed keys send `SetSpeed`, like the buttons. */
@@ -54,6 +55,9 @@ function useShortcuts(): void {
           return;
         case "toggleLog":
           toggleLog();
+          return;
+        case "toggleZoning":
+          toggleZoningOverlay();
           return;
         case "roadTool":
           roadTool.toggle();
@@ -105,6 +109,7 @@ function Shell() {
         <ActivityLog />
       </div>
       <BuildBar />
+      <ZoneLegend />
       <RoadReadout />
       <EditReadout />
     </>

@@ -4,7 +4,7 @@ import { FREE_HAND_KEY_LABEL, GUIDES } from "../tools/config";
 import { DRAW_MODES, TOOL_ROAD_TYPES, type DrawMode } from "../tools/road-tool";
 import { GridPanel, gridHint } from "./GridPanel";
 import { useServices, useSim } from "./hooks";
-import { useUi } from "./store";
+import { toggleZoningOverlay, useUi } from "./store";
 
 const TYPE_KEYS: Record<string, string> = { street: "Z", avenue: "X", oneWay: "C" };
 
@@ -59,6 +59,7 @@ export function BuildBar() {
   const ready = useSim((s) => s !== null);
   const undoNote = useUi((s) => s.undoNote);
   const tool = useUi((s) => s.tool);
+  const zoning = useUi((s) => s.zoningOverlay);
   const roadType = useUi((s) => s.roadType);
   const roadMode = useUi((s) => s.roadMode);
   const drawing = useUi((s) => s.roadStart !== null);
@@ -204,6 +205,18 @@ export function BuildBar() {
             onClick={() => roadTool.toggle()}
           >
             Road <kbd>B</kbd>
+          </button>
+        </div>
+        <div className="dock-slot">
+          <button
+            type="button"
+            id="zoning-overlay"
+            aria-pressed={zoning}
+            disabled={!ready}
+            title="Zoning overlay (O): show the cells along every street and what each is zoned for"
+            onClick={toggleZoningOverlay}
+          >
+            Zoning <kbd>O</kbd>
           </button>
         </div>
       </div>

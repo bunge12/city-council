@@ -54,7 +54,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: [/walkthrough\.spec\.ts$/, "roads.spec.ts", ...(process.env["SCALE_WEBGPU"] ? ["scale.spec.ts"] : [])],
+      testIgnore: [/walkthrough\.spec\.ts$/, "roads.spec.ts", "cells.spec.ts", ...(process.env["SCALE_WEBGPU"] ? ["scale.spec.ts"] : [])],
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -68,7 +68,7 @@ export default defineConfig({
       // when the project is fully parallel, and each runs one worker.
       name: "roads",
       // With SCALE_WEBGPU set, the scale check runs here too, for its WebGPU numbers (see scale.spec.ts).
-      testMatch: process.env["SCALE_WEBGPU"] ? ["roads.spec.ts", "scale.spec.ts"] : "roads.spec.ts",
+      testMatch: process.env["SCALE_WEBGPU"] ? ["roads.spec.ts", "cells.spec.ts", "scale.spec.ts"] : ["roads.spec.ts", "cells.spec.ts"],
       fullyParallel: isCI,
       dependencies: remoteBase ? [] : ["chromium"],
       use: {

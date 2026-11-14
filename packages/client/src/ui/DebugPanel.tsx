@@ -232,6 +232,10 @@ export function DebugPanel() {
         <dd id="road-stats">{view.roads}</dd>
         <dt>Road chunk rebuilds</dt>
         <dd id="road-rebuilds">{view.roadRebuilds}</dd>
+        <dt>Zoning cells</dt>
+        <dd id="cell-stats">{view.cells}</dd>
+        <dt>Cell chunk rebuilds</dt>
+        <dd id="cell-rebuilds">{view.cellRebuilds}</dd>
         <dt>Memory</dt>
         <dd id="memory">
           {memory ? `${mb(memory.usedJSHeapSize)} of ${mb(memory.jsHeapSizeLimit)} heap` : "not reported by this browser"}

@@ -1573,8 +1573,47 @@ export function chunkAt(x: number, z: number): number {
  * is in exactly one chunk.
  */
 export function cellsInChunk(state: SimState, chunk: number): CellInfo[] {
-  if (!Number.isInteger(chunk) || chunk < 0 || chunk >= CHUNKS_PER_SIDE * CHUNKS_PER_SIDE) throw new RangeError(`no chunk ${chunk}`);
   const index = syncCells(state);
+  return keysInChunk(index, chunk).map((key) => infoOf(index, state.cells, key));
+}
+
+/**
+ * The cells of 500 m chunk `chunk`, as `cellsInChunk` finds them and in its
+ * order, laid out flat for drawing: where each sits in `state.cells.zone`
+ * and `state.cells.density`, its CELL_ value, and its corners as
+ * `cellCorners` gives them, eight numbers a cell.
+ */
+export interface ChunkCellShapes {
+  slots: Int32Array;
+  statuses: Uint8Array;
+  corners: Float64Array;
+}
+
+/** Every cell in chunk `chunk` with its corners, in one pass. See `ChunkCellShapes`. */
+export function cellShapesInChunk(state: SimState, chunk: number): ChunkCellShapes {
+  const index = syncCells(state);
+  const keys = keysInChunk(index, chunk);
+  const slots = new Int32Array(keys.length);
+  const statuses = new Uint8Array(keys.length);
+  const corners = new Float64Array(keys.length * 8);
+  const q = quadW;
+  keys.forEach((key, k) => {
+    const seg = segOfKey(key);
+    const s = index.segs[seg];
+    const local = key - seg * KEY_STRIDE;
+    slots[k] = (state.cells.offset[seg] ?? 0) + local;
+    statuses[k] = s?.status?.[local] ?? UNSET;
+    if (s) {
+      cellQuad(s, local, q);
+      corners.set(q, k * 8);
+    }
+  });
+  return { slots, statuses, corners };
+}
+
+/** Keys of the cells whose centres are in chunk `chunk`, as `cellsInChunk` orders them. */
+function keysInChunk(index: CellIndex, chunk: number): number[] {
+  if (!Number.isInteger(chunk) || chunk < 0 || chunk >= CHUNKS_PER_SIDE * CHUNKS_PER_SIDE) throw new RangeError(`no chunk ${chunk}`);
   const ci = chunk % CHUNKS_PER_SIDE;
   const cj = (chunk - ci) / CHUNKS_PER_SIDE;
   // An edge chunk reaches out over the edge buckets, which hold everything off the map.
@@ -1583,8 +1622,7 @@ export function cellsInChunk(state: SimState, chunk: number): CellInfo[] {
   const minZ = cj === 0 ? -far : cj * CHUNK_SIZE;
   const maxX = ci === CHUNKS_PER_SIDE - 1 ? far : (ci + 1) * CHUNK_SIZE;
   const maxZ = cj === CHUNKS_PER_SIDE - 1 ? far : (cj + 1) * CHUNK_SIZE;
-  const keys = keysInBox(index, minX, minZ, maxX, maxZ, (x, z) => chunkAt(x, z) === chunk);
-  return keys.map((key) => infoOf(index, state.cells, key));
+  return keysInBox(index, minX, minZ, maxX, maxZ, (x, z) => chunkAt(x, z) === chunk);
 }
 
 /** The corners of the cell `ref` names, as x0, z0, ..., x3, z3, or null if there is no such cell. */

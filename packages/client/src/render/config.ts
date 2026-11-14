@@ -437,3 +437,43 @@ export const PRESET_BENCHMARK = {
   lowAbove: 12,
   highBelow: 4,
 } as const;
+
+/**
+ * The zoning overlay (issue M2-06): the cells along every street, coloured by
+ * what they are zoned for. Colours are sRGB hex, keyed by the zone ids in the
+ * sim's `zoning.json`, one per density from 1 to 3. The legend in the UI
+ * reads them from here.
+ *
+ * Each zone has its own hue and density changes lightness only: 1 is the
+ * lightest. The five hues, yellow, blue, cyan, magenta and orange, were
+ * picked so that two cells of one zone, or of one density, stay apart from
+ * each other and from the grass, sand and road greys under normal vision and
+ * under simulated protanopia, deuteranopia and tritanopia. The test in
+ * `test/cell-geometry.test.ts` holds them to that.
+ */
+export const CELLS = {
+  zones: {
+    residential: [0xeae039, 0xbbb201, 0x8c8612],
+    commercial: [0x8db3fd, 0x4d82f0, 0x2656c0],
+    office: [0x53effe, 0x0cc0ce, 0x0d8f9a],
+    industrial: [0xfb85d9, 0xca58ac, 0x9b2a80],
+    mixed: [0xfead6d, 0xdc7805, 0x9f5606],
+  } as Readonly<Record<string, readonly [number, number, number]>>,
+  /** The outline of a cell nobody has zoned. */
+  unzoned: 0xf4f4ec,
+  /** A zoned cell's lines are its own colour times this, so they read on every hue. */
+  lineShade: 0.55,
+  /**
+   * Width of a cell line in screen pixels, in the street and district bands.
+   * Where a cell is only a few pixels across, a line takes at most
+   * `lineMaxShare` of it, so the colour still shows. The city band has no lines.
+   */
+  linePx: 1.25,
+  lineMaxShare: 0.1,
+  /**
+   * Height over the ground, as the roads have it (`ROADS.lift`) but lower at
+   * every distance, so a cell lies over the terrain without flicker and
+   * under the road beside it.
+   */
+  lift: { base: 0.12, perMetre: 0.0009 },
+} as const;

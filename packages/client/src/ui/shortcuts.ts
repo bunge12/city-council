@@ -9,6 +9,7 @@ export type ShortcutAction =
   | { kind: "togglePause" }
   | { kind: "toggleDebug" }
   | { kind: "toggleLog" }
+  | { kind: "toggleZoning" }
   | { kind: "roadTool" }
   | { kind: "gridTool" }
   | { kind: "confirm" }
@@ -35,6 +36,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["Digit3", "Numpad3"], label: "3", description: "speed 4x", action: { kind: "speed", speed: 4 } },
   { codes: ["Backquote"], label: "`", description: "show or hide this panel", action: { kind: "toggleDebug" } },
   { codes: ["KeyL"], label: "L", description: "show or hide the activity log", action: { kind: "toggleLog" } },
+  { codes: ["KeyO"], label: "O", description: "show or hide the zoning overlay", action: { kind: "toggleZoning" } },
   { codes: ["KeyB"], label: "B", description: "road tool on or off", action: { kind: "roadTool" } },
   { codes: ["KeyG"], label: "G", description: "grid tool on or off", action: { kind: "gridTool" } },
   { codes: ["Enter", "NumpadEnter"], label: "Enter", description: "build the grid drawn with the grid tool", action: { kind: "confirm" } },
