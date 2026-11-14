@@ -11,32 +11,36 @@
 //   - the surface of another segment on the ground or a bridge covers it,
 //     whatever its network: road, rail or path,
 //   - or it overlaps a cell that claimed the ground first.
-// Cells claim ground in a fixed order: the older segment first, by build
-// order and then by lower id, since the pieces of one split and the streets
-// of one grid share an age. Within a segment, nearer node A first, so where
-// the cells of one strip close up on the inside of a bend the earlier one
-// stays. A cell that is blocked for any reason claims nothing, so the next
-// cell in the order can have that ground.
+// Cells claim ground in a fixed order (`claimsBefore`): the older segment
+// first, by build order. Between roads of one age, the pieces of a split and
+// the streets of a grid, the anchor that starts further west, then further
+// north, then by its other end and control point. On one anchor, the cell
+// nearer its start, then its left side, then nearer the road, so where the
+// cells of one strip close up on the inside of a bend the earlier one stays.
+// None of that changes when a road is cut. A cell that is blocked for any
+// reason claims nothing, so the next cell in the order can have that ground.
 //
 // The result is the same as walking every cell in that order once and
 // giving each the ground no earlier cell holds. `buildCellIndex` does that.
-// `syncCells` keeps it current after the roads change. It finds the
-// segments that changed, from the ones the network reported adding or
-// removing, each compared with the copy it took last time, and walks again only the cells that could have changed: the changed
-// segments' own, the ones their road surfaces cover or covered, the ones
-// their old cells overlapped, and then, in claim order, any cell whose
-// overlapping neighbour gained or lost its claim. Each is looked at only
-// after every cell that claims before it is settled, so the answer is the
-// one a full walk gives, whatever order the changes came in.
+// After the roads change, `update` finds the segments that changed, from the
+// ones the network reported adding or removing, each compared with the copy
+// the index took last time. A new cell on the same anchor cell as a removed
+// one, with the same road width, has the same corners and the same place in
+// the claim order, so it starts from that cell's status. The rest are
+// walked again: new cells with nothing to start from, the cells a surface
+// that went used to block, the cells a removed cell held ground against,
+// and then, in claim order, any cell whose overlapping neighbour gained or
+// lost its claim. Cells a new surface covers are blocked without a walk.
+// Each cell is looked at only after every cell that claims before it is
+// settled, so the answer is the one a full walk gives, whatever order the
+// changes came in. A change too big for one tick is walked a slice a step
+// (`stepCells`, `settleCells`).
 //
-// `syncCells` also lays out the zone and density arrays in state for the new
-// roads (cells.ts). A segment that is unchanged keeps its cells. A segment
-// changed in place, as by an upgrade or a reverse, keeps its cells by name:
-// they move out with a wider road's edge, and a reverse turns place k on the
-// left into place n - 1 - k on the right. Any other new segment takes the
-// zone of the cell of a removed segment of the same build order whose ground
-// its cell's centre lies on. That is how the pieces of a split, and a road
-// an undo brings back, take over the cells that were there.
+// `update` also lays out the zone and density arrays in state for the new
+// roads (cells.ts). An unchanged segment keeps its run. A changed one takes,
+// cell by cell, the zone of the removed cell on the same anchor cell,
+// whatever the road's width: so a split, an upgrade, a reverse and an undo
+// that joins pieces again all keep each zone on its ground.
 //
 // Shapes use only exact arithmetic (shape.ts), so every machine walks the
 // same cells to the same answer (CLAUDE.md rule 6).
@@ -63,6 +67,7 @@ import {
   STATION_FLOATS,
   anchorSpan,
   anchorStations,
+  ceilOf,
   cellCornersInto,
   measureCurve,
   isConvexQuad,
@@ -161,12 +166,24 @@ type Buckets = Map<number, number[]>;
  */
 interface SettleJob {
   queue: ClaimQueue;
-  seeds: (() => void)[];
+  seeds: Seed[];
   nextSeed: number;
 }
 
-/** What one seeding task counts for against a slice of `settleCellsPerTick`, in cells walked. */
-const SEED_COST = 16;
+/**
+ * One task of a settling job, with what it counts for against a slice of
+ * `settleCellsPerTick`, in cells walked. The weights are in zoning.json,
+ * since they decide `cellsReadyAt`, which is state.
+ */
+interface Seed {
+  run: () => void;
+  cost: number;
+}
+
+/** What filing or unfiling a shape's cells and surface counts for. */
+function fileCost(s: SegShape): number {
+  return (s.status?.length ?? 0) * ZONING_BALANCE.settleFiledCellCost + (s.surface ? s.surface.length / 8 : 0) * ZONING_BALANCE.settleSurfacePieceCost;
+}
 
 /** The cells of one network. Derived data: not state. */
 export interface CellIndex {
@@ -250,7 +267,7 @@ function shapeOf(net: RoadNetwork, id: number): SegShape | null {
   if (covers && stations) {
     const last = stations.length / STATION_FLOATS - 1;
     const step = straight ? STRAIGHT_PIECE : 1;
-    const pieces = Math.ceil(last / step);
+    const pieces = ceilOf(last / step);
     surface = new Float64Array(pieces * 8);
     surfaceBoxes = new Float64Array(pieces * 4);
     for (let i = 0; i < pieces; i++) {
@@ -591,7 +608,7 @@ function forOverlappingCells(
 
 /** Every cell of `net` walked from scratch. */
 export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
-  const perSide = Math.ceil(mapSize(terrain) / BUCKET);
+  const perSide = ceilOf(mapSize(terrain) / BUCKET);
   const index: CellIndex = {
     net,
     terrain,
@@ -639,45 +656,61 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
   return index;
 }
 
-/** A queue of cell keys, the one that claims first at the front. */
+/** A cell waiting to be walked, with the segment shape it was queued under. */
+interface Waiting {
+  key: number;
+  shape: SegShape;
+}
+
+/**
+ * A queue of cells to walk, the one that claims first at the front. Each
+ * entry keeps the shape its segment had when it was queued and is ordered
+ * by that, so a change of roads that arrives while a walk is under way
+ * leaves the queue in order: the entries of a replaced segment are skipped
+ * when they come up, and its new cells are queued afresh.
+ */
 class ClaimQueue {
-  private readonly heap: number[] = [];
-  /** A mark per cell of each segment that has had one queued. Faster than a set of keys this large. */
-  private readonly seen = new Map<number, Uint8Array>();
+  private readonly heap: Waiting[] = [];
+  /** For each segment with cells waiting, the shape they were queued under and a mark per cell. */
+  private readonly waiting = new Map<number, { shape: SegShape; marks: Uint8Array }>();
   constructor(private readonly index: CellIndex) {}
 
-  /** Whether `key` has been queued, and maybe walked already. */
-  has(key: number): boolean {
-    const seg = Math.floor(key / KEY_STRIDE);
-    return this.seen.get(seg)?.[key - seg * KEY_STRIDE] === 1;
+  private marksOf(seg: number, shape: SegShape): Uint8Array {
+    const known = this.waiting.get(seg);
+    if (known?.shape === shape) return known.marks;
+    const marks = new Uint8Array(shape.status?.length ?? 0);
+    this.waiting.set(seg, { shape, marks });
+    return marks;
   }
 
-  /** Queues `key` unless it has been queued before. */
+  /** Whether cell `key` of shape `shape` is waiting to be walked. Its segment's current shape when left out. */
+  has(key: number, shape?: SegShape): boolean {
+    const seg = Math.floor(key / KEY_STRIDE);
+    const known = this.waiting.get(seg);
+    const s = shape ?? this.index.segs[seg];
+    return known !== undefined && known.shape === s && known.marks[key - seg * KEY_STRIDE] === 1;
+  }
+
+  /** Queues `key` of its segment's current shape unless it is waiting already. */
   push(key: number): void {
     const seg = Math.floor(key / KEY_STRIDE);
-    let marks = this.seen.get(seg);
-    if (!marks) {
-      marks = new Uint8Array(this.index.segs[seg]?.status?.length ?? 0);
-      this.seen.set(seg, marks);
-    }
+    const shape = this.index.segs[seg];
+    if (!shape?.status) return;
+    const marks = this.marksOf(seg, shape);
     const local = key - seg * KEY_STRIDE;
     if (marks[local] === 1) return;
     marks[local] = 1;
+    const item = { key, shape };
     const heap = this.heap;
-    heap.push(key);
+    heap.push(item);
     let i = heap.length - 1;
     while (i > 0) {
       const parent = (i - 1) >> 1;
-      if (!claimsFirst(this.index, key, heap[parent] as number)) break;
-      heap[i] = heap[parent] as number;
+      if (!entryFirst(item, heap[parent] as Waiting)) break;
+      heap[i] = heap[parent] as Waiting;
       i = parent;
     }
-    heap[i] = key;
-  }
-
-  /** The keys still to walk, in no particular order. */
-  remaining(): number[] {
-    return this.heap.slice();
+    heap[i] = item;
   }
 
   /** Whether nothing is left to walk. */
@@ -685,7 +718,20 @@ class ClaimQueue {
     return this.heap.length === 0;
   }
 
+  /** The next cell to walk, still a cell of its segment's current shape, or undefined when none is left. */
   pop(): number | undefined {
+    for (;;) {
+      const item = this.popEntry();
+      if (!item) return undefined;
+      const seg = Math.floor(item.key / KEY_STRIDE);
+      const known = this.waiting.get(seg);
+      if (known?.shape === item.shape) known.marks[item.key - seg * KEY_STRIDE] = 0;
+      // A segment replaced since: its new cells are queued on their own.
+      if (this.index.segs[seg] === item.shape) return item.key;
+    }
+  }
+
+  private popEntry(): Waiting | undefined {
     const heap = this.heap;
     const top = heap[0];
     const last = heap.pop();
@@ -695,14 +741,21 @@ class ClaimQueue {
       const l = 2 * i + 1;
       if (l >= heap.length) break;
       const r = l + 1;
-      const child = r < heap.length && claimsFirst(this.index, heap[r] as number, heap[l] as number) ? r : l;
-      if (!claimsFirst(this.index, heap[child] as number, last)) break;
-      heap[i] = heap[child] as number;
+      const child = r < heap.length && entryFirst(heap[r] as Waiting, heap[l] as Waiting) ? r : l;
+      if (!entryFirst(heap[child] as Waiting, last)) break;
+      heap[i] = heap[child] as Waiting;
       i = child;
     }
     heap[i] = last;
     return top;
   }
+}
+
+/** Whether queue entry `p` claims before `q`, each by the shape it was queued under. */
+function entryFirst(p: Waiting, q: Waiting): boolean {
+  const ps = Math.floor(p.key / KEY_STRIDE);
+  const qs = Math.floor(q.key / KEY_STRIDE);
+  return claimsBefore(p.shape, p.key - ps * KEY_STRIDE, p.key, q.shape, q.key - qs * KEY_STRIDE, q.key);
 }
 
 /** A segment the roads changed, as it was before. */
@@ -746,10 +799,8 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   // walk. The walk is right from any statuses, so long as every cell that
   // may be wrong is in the queue or is sent there by a neighbour that
   // changes, and that holds for both changes' cells.
-  const carried = takeOver(index);
-
-  const queue = new ClaimQueue(index);
-  for (const key of carried) queue.push(key);
+  const earlier = index.pending;
+  const queue = earlier ? finishTasks(earlier) : new ClaimQueue(index);
   const box = new Float64Array(4);
   const q = new Float64Array(8);
   const seedOverlapping = (quad: Float64Array, statuses: number) => {
@@ -776,13 +827,16 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   // time, in this order, before its walk starts. Nothing reads the buckets
   // until the job is done: a query, a step's slice and the next change all
   // finish it first.
-  const seeds: (() => void)[] = [];
+  const seeds: Seed[] = [];
   // The old shapes leave the buckets.
   for (const { id, shape } of changed) {
     if (!shape) continue;
-    seeds.push(() => {
-      fileCells(index, id, shape, false);
-      fileSurface(index, id, shape, false);
+    seeds.push({
+      run: () => {
+        fileCells(index, id, shape, false);
+        fileSurface(index, id, shape, false);
+      },
+      cost: fileCost(shape),
     });
   }
 
@@ -811,7 +865,8 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
           if (o.half !== s.half) continue;
           const from = localOfAnchorCell(o, k, side, depth);
           if (from < 0) continue;
-          status[local] = (o.status as Uint8Array)[from] ?? UNSET;
+          // A cell an earlier change had still to walk has no settled status to give.
+          status[local] = queue.has(keyOf(b.id, from), o) ? UNSET : ((o.status as Uint8Array)[from] ?? UNSET);
           let marks = kept.get(b);
           if (!marks) {
             marks = new Uint8Array((o.status as Uint8Array).length);
@@ -824,9 +879,12 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
         if (!found) fresh++;
       }
     }
-    seeds.push(() => {
-      fileSurface(index, id, s, true);
-      fileCells(index, id, s, true);
+    seeds.push({
+      run: () => {
+        fileSurface(index, id, s, true);
+        fileCells(index, id, s, true);
+      },
+      cost: fileCost(s),
     });
   }
 
@@ -837,7 +895,10 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     for (let local = 0; local < status.length; local++) if (status[local] === UNSET) queue.push(keyOf(id, local));
   }
   // Cells under a surface that went may be free now, and are walked.
-  for (const { shape } of changed) if (shape?.surface) seeds.push(() => seedUnderSurface(shape, UNDER_ROAD));
+  for (const { shape } of changed) {
+    if (!shape?.surface) continue;
+    seeds.push({ run: () => seedUnderSurface(shape, UNDER_ROAD), cost: (shape.surface.length / 8) * ZONING_BALANCE.settleSurfacePieceCost });
+  }
   // Cells under a surface that came are blocked by it, whatever claims
   // first, unless they were already blocked by their own shape: no walk
   // needed. One that held ground lets it go to the cells after it.
@@ -845,7 +906,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   for (const { id } of changed) {
     const surface = index.segs[id]?.surface;
     if (!surface) continue;
-    for (let i = 0; i < surface.length; i += 8) seeds.push(() => {
+    for (let i = 0; i < surface.length; i += 8) seeds.push({ cost: ZONING_BALANCE.settleSurfacePieceCost, run: () => {
       const piece = surface.subarray(i, i + 8);
       quadBoxInto(piece, box);
       const pieceBox = Float64Array.from(box);
@@ -878,24 +939,29 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
         // Its own cells only touch a road's surface, and fresh cells are walked anyway.
         (key, seg) => seg === id || queue.has(key),
       );
-    });
+    } });
   }
   // Cells that lost ground to a cell that went and that no cell took over.
   for (const c of changed) {
     const status = c.shape?.status;
     if (!status) continue;
     const marks = kept.get(c);
-    seeds.push(() => {
-      for (let local = 0; local < status.length; local++) {
-        if (status[local] !== CELL_OPEN || marks?.[local] === 1) continue;
-        cellQuad(c.shape as SegShape, local, q);
-        seedOverlapping(q, LOST_GROUND);
-      }
+    // Counted already, as the removed cells nothing took over.
+    seeds.push({
+      cost: 0,
+      run: () => {
+        for (let local = 0; local < status.length; local++) {
+          if (status[local] !== CELL_OPEN || marks?.[local] === 1) continue;
+          cellQuad(c.shape as SegShape, local, q);
+          seedOverlapping(q, LOST_GROUND);
+        }
+      },
     });
   }
   index.pending = { queue, seeds, nextSeed: 0 };
-  // The seeding tasks count too: how many there are follows from the shapes as well.
-  let work = seeds.length * SEED_COST;
+  // The tasks count too: what each counts for follows from the shapes as well.
+  let work = 0;
+  for (const seed of seeds) work += seed.cost;
   // How big the change is, so every machine that applies it agrees how many
   // ticks it may take to settle: the new cells with nothing to start from,
   // and the removed cells no new cell took over. Both follow from the road
@@ -907,19 +973,17 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     const marks = kept.get(c);
     for (let local = 0; local < gone.length; local++) if (marks?.[local] !== 1) work++;
   }
-  return { cells: relayout(index, cells, changed, byAnchor), work, folded: carried.length > 0 };
+  return { cells: relayout(index, cells, changed, byAnchor), work, folded: earlier !== null };
 }
 
 /**
- * Ends the job of a change still settling: runs its tasks still to run and
- * returns the cells it had still to walk. Nothing if none is settling.
+ * Runs the tasks still to run of a change still settling, so the buckets
+ * match the shapes before the next change replaces any, and returns its
+ * queue for the next change to add to.
  */
-function takeOver(index: CellIndex): number[] {
-  const job = index.pending;
-  if (!job) return [];
-  while (job.nextSeed < job.seeds.length) (job.seeds[job.nextSeed++] as () => void)();
-  index.pending = null;
-  return job.queue.remaining();
+function finishTasks(job: SettleJob): ClaimQueue {
+  while (job.nextSeed < job.seeds.length) (job.seeds[job.nextSeed++] as Seed).run();
+  return job.queue;
 }
 
 /**
@@ -935,8 +999,9 @@ function drain(index: CellIndex, limit: number): boolean {
   // Every seeding task runs before the first cell is walked.
   while (job.nextSeed < job.seeds.length) {
     if (walked >= limit) return false;
-    (job.seeds[job.nextSeed++] as () => void)();
-    walked += SEED_COST;
+    const seed = job.seeds[job.nextSeed++] as Seed;
+    seed.run();
+    walked += seed.cost;
   }
   const q = new Float64Array(8);
   const box = new Float64Array(4);
@@ -1059,7 +1124,7 @@ function layoutBuffer(spare: Uint8Array | undefined, current: Uint8Array, length
     view.fill(0);
     return view;
   }
-  return new Uint8Array(new ArrayBuffer(Math.ceil(length * 1.25) + 1024), 0, length);
+  return new Uint8Array(new ArrayBuffer(ceilOf(length * 1.25) + 1024), 0, length);
 }
 
 // Live indexes by network object, like the spatial index and the blocks. A
@@ -1117,7 +1182,7 @@ export function stepCells(state: SimState): void {
   if (!result) return;
   const { cells, work, folded } = result;
   state.cells = cells;
-  const ticks = Math.ceil(work / ZONING_BALANCE.settleCellsPerTick);
+  const ticks = ceilOf(work / ZONING_BALANCE.settleCellsPerTick);
   if (ticks <= 1) {
     // Settled at once, unless it joined a change still settling, which
     // keeps its own tick; nothing may read the cells before that anyway.

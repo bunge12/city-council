@@ -31,6 +31,7 @@ import {
 import { cloneState } from "../src/state";
 import { isSegment, segmentIdLimit, type RoadNetwork } from "../src/roads/network";
 import { checkCells, fromLocal, unzonedCells } from "../src/zoning/cells";
+import { settleCells } from "../src/zoning/cell-index";
 import { quadsOverlap } from "../src/zoning/shape";
 import { churnNetwork, growNetwork } from "./road-network-helper";
 
@@ -544,6 +545,28 @@ describe("settling a big change over a few ticks", () => {
     expect(cellsSettled(state)).toBe(true);
   });
 
+  it("settles a curved street through a curved street at once", () => {
+    const state = createState(SEED);
+    ok(state, curve([4150, 4500], [4650, 4500], [4400, 4300]));
+    const before = live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).length;
+    // About 550 m of curve from north of it to south, cutting it.
+    ok(state, curve([4200, 4350], [4550, 4750], [4600, 4350]));
+    expect(live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).length).toBe(before + 3);
+    expect(state.cellsReadyAt).toBe(0);
+    expect(cellsSettled(state)).toBe(true);
+  });
+
+  it("gives a long curved street through two curved streets a tick or two at most", () => {
+    const state = createState(SEED);
+    ok(state, curve([4150, 4500], [4650, 4500], [4400, 4300]));
+    ok(state, curve([4150, 4900], [4650, 4900], [4400, 4700]));
+    const before = live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).length;
+    // About 750 m of curve, from north of the first to south of the second, cutting both.
+    ok(state, curve([4200, 4350], [4600, 4980], [4650, 4350]));
+    expect(live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).length).toBe(before + 5);
+    expect(state.cellsReadyAt).toBeLessThanOrEqual(state.tick + 2);
+  });
+
   it("gives a grid too big for one tick the tick it settles by, and walks it a slice a step", () => {
     const state = createState(SEED);
     const tick = state.tick;
@@ -577,6 +600,36 @@ describe("settling a big change over a few ticks", () => {
     while (state.tick < state.cellsReadyAt) step(state);
     expect(rebuilt(state)).toEqual(cellStatuses(state));
     expect(overlappingOpenCells(state)).toBe(0);
+  });
+
+  it("ends on the same city whether its walk ran a slice a step, all at once, or faster (rule 5)", () => {
+    // Built once, so every run logs the same sequence numbers.
+    const built = [bigGrid(), road([4150, 4548], [4650, 4548]), bulldoze([]), undo()];
+    const commands = () => built.map((c) => ({ ...c, payload: JSON.parse(JSON.stringify(c.payload)) as unknown }));
+    const run = (between: (state: SimState) => void) => {
+      const state = createState(SEED);
+      for (const c of commands()) {
+        if (c.type === "BulldozeRoad") (c.payload as { segments: number[] }).segments = [between2(state)];
+        expect(submit(state, c)).toEqual({ ok: true });
+        step(state);
+        between(state);
+        step(state);
+      }
+      while (state.tick < state.cellsReadyAt + 2) step(state);
+      return state;
+    };
+    const between2 = (state: SimState) => live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).at(-1) as number;
+    // A slice a step; every query finishing the walk at once; extra slices, as paused steps or a quick worker give.
+    const sliced = run(() => undefined);
+    const queried = run((state) => void cellStatuses(state));
+    const hurried = run((state) => {
+      for (let i = 0; i < 5; i++) settleCells(state);
+    });
+    expect(hashState(queried)).toBe(hashState(sliced));
+    expect(hashState(hurried)).toBe(hashState(sliced));
+    expect(cellStatuses(queried)).toEqual(cellStatuses(sliced));
+    expect(cellStatuses(hurried)).toEqual(cellStatuses(sliced));
+    expect(rebuilt(sliced)).toEqual(cellStatuses(sliced));
   });
 
   it("settles while paused, and the ready tick waits for the clock", () => {

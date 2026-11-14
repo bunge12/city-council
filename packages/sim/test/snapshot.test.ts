@@ -514,6 +514,16 @@ describe("committed snapshots", () => {
     expect(toHex(serialize(state))).toBe(v10Fixture.hex);
   });
 
+  it("refuses a save whose undo history holds a bad cell anchor", () => {
+    const { state } = deserialize(fromHex(v10Fixture.hex));
+    const op = state.undo.flatMap((r) => r.ops).find((o) => o.op === "removeSeg");
+    if (op?.op !== "removeSeg") throw new Error("the fixture's undo history removes no segment");
+    op.row.anchor = { ...op.row.anchor, tA: 2 };
+    expect(refusal(serialize(state)).message).toMatch(/undo history is malformed/);
+    (op.row as unknown as Record<string, unknown>)["anchor"] = undefined;
+    expect(refusal(serialize(state)).message).toMatch(/undo history is malformed/);
+  });
+
   it("refuses a save whose zoning cells do not fit its roads", () => {
     const { state } = deserialize(fromHex(v10Fixture.hex));
     state.cells = { ...state.cells, zone: state.cells.zone.slice(1) };

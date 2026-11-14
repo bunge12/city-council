@@ -17,7 +17,7 @@ describe("zoning balance", () => {
   });
 
   it("fails when any field is missing", () => {
-    for (const field of ["cellSize", "zoneDepthCells", "maxSlope", "settleCellsPerTick", "zones", "densities"]) {
+    for (const field of ["cellSize", "zoneDepthCells", "maxSlope", "settleCellsPerTick", "settleSurfacePieceCost", "settleFiledCellCost", "zones", "densities"]) {
       const data = Object.fromEntries(Object.entries(copy()).filter(([key]) => key !== field));
       expect(checkZoningBalance(data).join("; "), field).toMatch(field);
     }

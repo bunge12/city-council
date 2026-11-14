@@ -275,6 +275,11 @@ function isRow(value: unknown): boolean {
   if (!["a", "b", "type", "network", "levelA", "levelB", "flags"].every((k) => isId(value[k]))) return false;
   if (!["cx", "cz", "length"].every((k) => isNumber(value[k]))) return false;
   if (!isId(value["order"])) return false;
+  // The cell anchor, as `checkRoadNetwork` checks a live segment's.
+  const anchor = value["anchor"];
+  if (!isRecord(anchor)) return false;
+  if (!["ax", "az", "cx", "cz", "bx", "bz", "tA", "tB"].every((k) => Number.isFinite(anchor[k]))) return false;
+  if (!["tA", "tB"].every((k) => (anchor[k] as number) >= 0 && (anchor[k] as number) <= 1)) return false;
   if ((value["network"] as number) > NETWORK_PATH) return false;
   if ((value["levelA"] as number) >= LEVEL_COUNT || (value["levelB"] as number) >= LEVEL_COUNT) return false;
   if ((value["levelA"] === LEVEL_BRIDGE) !== (value["levelB"] === LEVEL_BRIDGE)) return false;

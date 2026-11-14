@@ -19,8 +19,7 @@
 // polyline `curveLength` measures, so a station's place agrees with the
 // segment's stored length.
 
-/** Pieces in the polyline that measures a curve. The same as `curveLength`. */
-const CURVE_STEPS = 16;
+import { CURVE_STEPS, curvePolyline, isStraight, quadPoint } from "../roads/curve";
 
 /**
  * Two shapes overlap only by more than this many metres. Cells that share an
@@ -38,6 +37,11 @@ const STATION_TOLERANCE = 1e-6;
 
 /** Floats per station in a station array: x, z, then the left normal's x and z. */
 export const STATION_FLOATS = 4;
+
+/** The least whole number at or above `x`, from Math.floor alone, which rule 6 lists. */
+export function ceilOf(x: number): number {
+  return -Math.floor(-x);
+}
 
 /** Whole cells along a segment of `length` metres, for cells of `cellSize`. */
 export function cellsAlong(length: number, cellSize: number): number {
@@ -64,31 +68,15 @@ export interface MeasuredCurve {
 
 /** The curve from (ax, az) through (cx, cz) to (bx, bz), measured. */
 export function measureCurve(ax: number, az: number, cx: number, cz: number, bx: number, bz: number): MeasuredCurve {
-  const straight = cx === (ax + bx) / 2 && cz === (az + bz) / 2;
-  if (straight) {
+  const shape = { ax, az, cx, cz, bx, bz };
+  if (isStraight(shape)) {
     const dx = bx - ax;
     const dz = bz - az;
-    return { ax, az, cx, cz, bx, bz, straight, length: Math.sqrt(dx * dx + dz * dz), cum: null };
+    return { ...shape, straight: true, length: Math.sqrt(dx * dx + dz * dz), cum: null };
   }
-  // The polyline `curveLength` measures, summed in the same order, so the
-  // total is the segment's stored length to the last bit.
-  const cum = new Float64Array(CURVE_STEPS + 1);
-  let px = ax;
-  let pz = az;
-  let run = 0;
-  for (let i = 1; i <= CURVE_STEPS; i++) {
-    const t = i / CURVE_STEPS;
-    const u = 1 - t;
-    const x = u * u * ax + 2 * u * t * cx + t * t * bx;
-    const z = u * u * az + 2 * u * t * cz + t * t * bz;
-    const dx = x - px;
-    const dz = z - pz;
-    run += Math.sqrt(dx * dx + dz * dz);
-    cum[i] = run;
-    px = x;
-    pz = z;
-  }
-  return { ax, az, cx, cz, bx, bz, straight, length: run, cum };
+  // The polyline `curveLength` measures, so the total is the segment's stored length to the last bit.
+  const cum = curvePolyline(ax, az, cx, cz, bx, bz);
+  return { ...shape, straight: false, length: cum[CURVE_STEPS] ?? 0, cum };
 }
 
 /** The curve parameter `s` metres along `c` from its start, held to the curve. */
@@ -135,9 +123,7 @@ function stationInto(c: MeasuredCurve, t: number, out: Float64Array, at: number)
     dx = chordX;
     dz = chordZ;
   } else {
-    const u = 1 - t;
-    x = u * u * c.ax + 2 * u * t * c.cx + t * t * c.bx;
-    z = u * u * c.az + 2 * u * t * c.cz + t * t * c.bz;
+    ({ x, z } = quadPoint(c, t));
     dx = c.cx - c.ax + t * (c.ax - 2 * c.cx + c.bx);
     dz = c.cz - c.az + t * (c.az - 2 * c.cz + c.bz);
   }
@@ -186,7 +172,7 @@ export function anchorSpan(c: MeasuredCurve, tA: number, tB: number, step: numbe
   const lo = sA < sB ? sA : sB;
   const hi = sA < sB ? sB : sA;
   // A stretch cut on a whole cell can land a hair either side of it.
-  const from = Math.ceil(lo / step - 1e-6);
+  const from = ceilOf(lo / step - 1e-6);
   const to = Math.floor(hi / step + 1e-6);
   return { from, to: to > from ? to : from, reversed: tA > tB };
 }

@@ -25,6 +25,7 @@
 // Only exact arithmetic here (rule 6): two machines must agree on lengths.
 
 import { ROAD_TYPES } from "./balance";
+import { CURVE_STEPS, curvePolyline } from "./curve";
 
 /**
  * A segment's vertical level at each end (issue 22, PRD "Levels and grade
@@ -608,13 +609,10 @@ export interface SegmentSpec {
   anchor?: SegmentAnchor;
 }
 
-/** Steps in the polyline that measures a curve. */
-const CURVE_STEPS = 16;
-
 /**
  * Plan length of the quadratic curve from (ax, az) through control point
  * (cx, cz) to (bx, bz). A control point exactly at the midpoint is a
- * straight line. A curve is measured as a polyline of CURVE_STEPS pieces,
+ * straight line. A curve is measured as the polyline `curvePolyline` lays,
  * with only exact operations, so every engine gets the same number.
  */
 export function curveLength(ax: number, az: number, cx: number, cz: number, bx: number, bz: number): number {
@@ -623,21 +621,7 @@ export function curveLength(ax: number, az: number, cx: number, cz: number, bx: 
     const dz = bz - az;
     return Math.sqrt(dx * dx + dz * dz);
   }
-  let length = 0;
-  let px = ax;
-  let pz = az;
-  for (let i = 1; i <= CURVE_STEPS; i++) {
-    const t = i / CURVE_STEPS;
-    const u = 1 - t;
-    const x = u * u * ax + 2 * u * t * cx + t * t * bx;
-    const z = u * u * az + 2 * u * t * cz + t * t * bz;
-    const dx = x - px;
-    const dz = z - pz;
-    length += Math.sqrt(dx * dx + dz * dz);
-    px = x;
-    pz = z;
-  }
-  return length;
+  return curvePolyline(ax, az, cx, cz, bx, bz)[CURVE_STEPS] ?? 0;
 }
 
 /** Adds a segment from node `a` to node `b` and returns its id. */
