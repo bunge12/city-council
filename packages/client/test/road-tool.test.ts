@@ -17,7 +17,7 @@ import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror } from "../src/protocol/mirror";
 import { memoryTransportPair } from "../src/protocol/transport";
 import { buildPreviewGeometry, previewKey } from "../src/render/road-preview-geometry";
-import { INITIAL_ROAD_TOOL, RoadToolController, previewRoad, roadPayload, type RoadToolState } from "../src/tools/road-tool";
+import { INITIAL_ROAD_TOOL, ROAD_GONE, RoadToolController, previewRoad, roadPayload, type RoadToolState } from "../src/tools/road-tool";
 
 // Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000).
 const SEED = 2026;
@@ -509,6 +509,30 @@ describe("another player's road in the same tick (issue 94)", () => {
     expect(sent).toHaveLength(1);
     tick();
     expect(mirror.state?.log.map((e) => e.playerId)).toEqual(["p2"]);
+  });
+});
+
+describe("an undo in the same step as a continuous road's segment", () => {
+  it("stops the road rather than carry on from the segment the undo took away", async () => {
+    const { mirror, tool, tick, settle, sent, state } = setup();
+    tool.pickMode("continuous");
+    tool.click({ x: 4200, z: 4600 });
+    tool.click({ x: 4300, z: 4600 });
+    await settle();
+    tick();
+    await settle();
+    tool.click({ x: 4300, z: 4700 });
+    tool.click({ x: 4400, z: 4700 });
+    // Ctrl+Z before the second segment is built: queued behind it, it takes it straight back.
+    void mirror.sendCommand("Undo");
+    await settle();
+    tick();
+    await settle();
+    expect(sent).toHaveLength(2);
+    expect(state().roadPending).toEqual([]);
+    expect(state().roadNote).toBe(ROAD_GONE);
+    expect(state().roadStart).toBeNull();
+    expect(mirror.state?.log.map((e) => e.type)).toEqual(["BuildRoad", "BuildRoad", "Undo"]);
   });
 });
 

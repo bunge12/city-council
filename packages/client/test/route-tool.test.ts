@@ -12,6 +12,7 @@ import {
   submit,
   type SimState,
   segmentEnds,
+  segmentTypeId,
 } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror } from "../src/protocol/mirror";
@@ -136,7 +137,7 @@ describe("route tool", () => {
     expect(buildPreviewGeometry(terrain, shapes).indices.length).toBeGreaterThan(0);
 
     // Bulldoze the link: the mirror's routing graph follows the delta.
-    const sent = t.mirror.sendCommand("BulldozeRoad", { segments: [link], ends: [segmentEnds(t.net(), link)] });
+    const sent = t.mirror.sendCommand("BulldozeRoad", { segments: [link], ends: [segmentEnds(t.net(), link)], types: [segmentTypeId(t.net(), link)] });
     t.tick();
     expect((await sent).ok).toBe(true);
     t.tick();

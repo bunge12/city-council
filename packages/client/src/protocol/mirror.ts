@@ -196,15 +196,20 @@ export class SimMirror {
     switch (message.type) {
       case "snapshot":
         this.settleFromSnapshot(message.state);
+        this.skipSeqs(message.state);
         this.current = message.state;
         this.logFrom = message.logFrom;
         this.deltaSeq = message.deltaSeq;
         this.awaitingSnapshot = false;
         this.notify({ kind: "snapshot" });
         return;
-      case "delta":
+      case "delta": {
+        const before = this.deltaSeq;
         this.applyDelta(message);
+        // A delta the copy could not take still says which commands were dropped, and why.
+        if (this.deltaSeq === before) this.settleDropped(message);
         return;
+      }
       case "commandResult": {
         if (message.playerId !== this.playerId) return;
         const answer = this.answers.get(message.seq);
@@ -277,10 +282,26 @@ export class SimMirror {
     this.hostStats = { timings: delta.timings };
     // The copy now holds what these commands did, so their senders can look.
     for (const entry of delta.log) if (entry.playerId === this.playerId) this.settle(entry.seq, { ok: true });
+    this.settleDropped(delta);
+    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs, cellChunks, buildingChunks, steps: delta.steps });
+  }
+
+  private settleDropped(delta: Extract<FromSimMessage, { type: "delta" }>): void {
     for (const drop of delta.dropped ?? []) {
       if (drop.playerId === this.playerId) this.settle(drop.seq, { ok: false, reason: drop.reason });
     }
-    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs, cellChunks, buildingChunks, steps: delta.steps });
+  }
+
+  /**
+   * Moves `nextSeq` past every seq of this player's in the snapshot's log
+   * and queue. Seqs start at 1 on every page load and the player id stays
+   * the same, so without this a command queued before a reload, and kept in
+   * the save, could be taken for one sent since.
+   */
+  private skipSeqs(state: SimState): void {
+    for (const command of [...state.log, ...state.pending]) {
+      if (command.playerId === this.playerId && command.seq >= this.nextSeq) this.nextSeq = command.seq + 1;
+    }
   }
 
   private settle(seq: number, result: CommandResult): void {

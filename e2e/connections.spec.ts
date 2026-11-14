@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import fixture from "../packages/sim/test/fixtures/connections.json" with { type: "json" };
 import { decodePng, type Image } from "./png";
+import { ROAD_TYPES } from "../packages/sim/src/index";
 
 // Issue M1-16: outside connections. A new city starts with two or three
 // highway stubs at the map edge, the camera looks at one, each is marked
@@ -22,7 +23,7 @@ declare const window: {
       state: {
         seed: number;
         connections: ArrayLike<number>;
-        roads: { nodeX: ArrayLike<number>; nodeZ: ArrayLike<number>; nodeHeight: ArrayLike<number>; segFlags: ArrayLike<number>; segA: ArrayLike<number>; segB: ArrayLike<number> };
+        roads: { nodeX: ArrayLike<number>; nodeZ: ArrayLike<number>; nodeHeight: ArrayLike<number>; segFlags: ArrayLike<number>; segA: ArrayLike<number>; segB: ArrayLike<number>; segType: ArrayLike<number> };
       } | null;
     };
     sendCommand(type: string, payload: unknown): Promise<{ ok: boolean; reason?: string }>;
@@ -148,13 +149,15 @@ test("the player builds a street from a stub's end, and cannot bulldoze the stub
     { from: { x: first.ix, z: first.iz }, to: { x: first.ix + ux * 400, z: first.iz + uz * 400 }, type: "street" },
   );
   expect(built).toEqual({ ok: true });
-  const bulldoze = await page.evaluate(() => {
+  // The stub as the page sees it: its ends, and its type by index into the balance file's road types.
+  const stub = await page.evaluate(() => {
     const net = window.cityCouncil.mirror.state?.roads;
     const a = net?.segA[0] ?? 0;
     const b = net?.segB[0] ?? 0;
-    const ends = [[net?.nodeX[a] ?? 0, net?.nodeZ[a] ?? 0, net?.nodeX[b] ?? 0, net?.nodeZ[b] ?? 0]];
-    return window.cityCouncil.sendCommand("BulldozeRoad", { segments: [0], ends });
+    return { ends: [net?.nodeX[a] ?? 0, net?.nodeZ[a] ?? 0, net?.nodeX[b] ?? 0, net?.nodeZ[b] ?? 0], type: net?.segType[0] ?? 0 };
   });
+  const payload = { segments: [0], ends: [stub.ends], types: [ROAD_TYPES[stub.type]?.id ?? ""] };
+  const bulldoze = await page.evaluate((p) => window.cityCouncil.sendCommand("BulldozeRoad", p), payload);
   expect(bulldoze.ok).toBe(false);
   expect(bulldoze.reason).toMatch(/fixed and cannot be bulldozed/);
   // Closer in, from the side, so the stub, its mark and the street off its end all show.

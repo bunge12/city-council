@@ -288,10 +288,13 @@
             4296,
             4600
           ]
+        ],
+        "types": [
+          "street"
         ]
       }
     }
   ],
   "balance": "cc5840f19e3d9691",
-  "hash": "afbb129eb4ede29c"
+  "hash": "cb1be22ca53dc336"
 }

@@ -102,7 +102,7 @@ export type { Box, Quad, QuadNearest } from "./roads/curve";
 export type { BuildPoint, BuildRoadPayload, PlanStop, RoadPlan, RoadPlanResult } from "./roads/build";
 export { gridLines, planRoadGrid } from "./roads/grid";
 export type { BuildRoadGridPayload, GridPlan, GridPlanResult, GridProblem, GridStreet } from "./roads/grid";
-export { SEGMENT_CHANGED, planBulldoze, planUpgrade, segmentEnds } from "./roads/edit";
+export { SEGMENT_CHANGED, planBulldoze, planUpgrade, segmentEnds, segmentTypeId } from "./roads/edit";
 export type {
   BulldozePlan,
   BulldozePlanResult,

@@ -2,7 +2,7 @@
 // worker runs, with an in-memory transport and a fake clock. The overlay's
 // state is a plain object standing in for the UI store.
 import { describe, expect, it } from "vitest";
-import { NONE, buildBlockIndex, createState, generateTerrain, listBlocks, step, submit, type RoadNetwork, type SimState, segmentEnds } from "@city-council/sim";
+import { NONE, buildBlockIndex, createState, generateTerrain, listBlocks, step, submit, type RoadNetwork, type SimState, segmentEnds, segmentTypeId } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror } from "../src/protocol/mirror";
 import { memoryTransportPair } from "../src/protocol/transport";
@@ -122,7 +122,7 @@ describe("block overlay", () => {
 
     // Bulldoze the south side: the mirror's blocks follow the delta.
     const south = segmentAt(t.net(), 4300, 4700);
-    const sent = t.mirror.sendCommand("BulldozeRoad", { segments: [south], ends: [segmentEnds(t.net(), south)] });
+    const sent = t.mirror.sendCommand("BulldozeRoad", { segments: [south], ends: [segmentEnds(t.net(), south)], types: [segmentTypeId(t.net(), south)] });
     t.tick();
     expect((await sent).ok).toBe(true);
     await t.settle();

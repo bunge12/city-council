@@ -12,6 +12,7 @@ import {
   planUpgrade,
   SEGMENT_CHANGED,
   segmentEnds,
+  segmentTypeId,
   serialize,
   step,
   type Command,
@@ -557,7 +558,7 @@ describe("a segment that changed after the sender picked it (issue 94)", () => {
     const seen = [segmentEnds(state.roads, seg)];
     // Player 2's crossing road is first in the queue. Both are valid when they arrive.
     expect(submitRaw(state, crossing("p2"))).toEqual({ ok: true });
-    const edit: Command = { seq: 1, playerId: "p1", type, payload: { segments: [seg], ends: seen, ...rest } };
+    const edit: Command = { seq: 1, playerId: "p1", type, payload: { segments: [seg], ends: seen, types: ["street"], ...rest } };
     expect(submitRaw(state, edit)).toEqual({ ok: true });
     const dropped = step(state);
     expect(dropped).toEqual([{ seq: 1, playerId: "p1", type, reason: SEGMENT_CHANGED }]);
@@ -580,7 +581,7 @@ describe("a segment that changed after the sender picked it (issue 94)", () => {
     ok(state, command("Undo", {}));
     ok(state, road([4200, 4700], [4500, 4700]));
     expect(isSegment(state.roads, seg)).toBe(true);
-    const result = submitRaw(state, { seq: 99, playerId: "p1", type: "BulldozeRoad", payload: { segments: [seg], ends: seen } });
+    const result = submitRaw(state, { seq: 99, playerId: "p1", type: "BulldozeRoad", payload: { segments: [seg], ends: seen, types: ["street"] } });
     expect(result).toEqual({ ok: false, reason: SEGMENT_CHANGED });
     step(state);
     expect(isSegment(state.roads, seg)).toBe(true);
@@ -592,11 +593,24 @@ describe("a segment that changed after the sender picked it (issue 94)", () => {
     const seg = liveSegments(state.roads)[0] ?? NaN;
     const seen = [segmentEnds(state.roads, seg)];
     ok(state, upgrade("oneWay", [seg]));
-    const result = submitRaw(state, { seq: 99, playerId: "p1", type: "UpgradeRoad", payload: { segments: [seg], ends: seen, type: "oneWay" } });
+    const result = submitRaw(state, { seq: 99, playerId: "p1", type: "UpgradeRoad", payload: { segments: [seg], ends: seen, types: ["oneWay"], type: "oneWay" } });
     expect(result).toEqual({ ok: false, reason: SEGMENT_CHANGED });
   });
 
-  it("needs one set of ends for each segment", () => {
+  it("does not reverse a one-way that a second make-it-one-way picked while it was a street", () => {
+    const { state, seg } = street();
+    const seen = { segments: [seg], ends: [segmentEnds(state.roads, seg)], types: ["street"], type: "oneWay" };
+    // Both sent before the step, as a double click or two players would.
+    expect(submitRaw(state, { seq: 1, playerId: "p1", type: "UpgradeRoad", payload: seen })).toEqual({ ok: true });
+    expect(submitRaw(state, { seq: 1, playerId: "p2", type: "UpgradeRoad", payload: seen })).toEqual({ ok: true });
+    const a = state.roads.segA[seg];
+    expect(step(state)).toEqual([{ seq: 1, playerId: "p2", type: "UpgradeRoad", reason: SEGMENT_CHANGED }]);
+    // One-way, from node A as the first asked, and not reversed by the second.
+    expect(segmentTypeId(state.roads, seg)).toBe("oneWay");
+    expect(state.roads.segA[seg]).toBe(a);
+  });
+
+  it("needs one set of ends and one type for each segment", () => {
     const { state, seg } = street();
     const ends = segmentEnds(state.roads, seg);
     const need = /needs the ends of each segment/;
@@ -604,6 +618,8 @@ describe("a segment that changed after the sender picked it (issue 94)", () => {
       expect(planBulldoze(state.roads, payload)).toMatchObject({ ok: false, reason: expect.stringMatching(need) });
       expect(planUpgrade(state.roads, terrainOf(SEED), { ...payload, type: "avenue" })).toMatchObject({ ok: false, reason: expect.stringMatching(need) });
     }
-    expect(planBulldoze(state.roads, { segments: [seg], ends: [ends] }).ok).toBe(true);
+    expect(planBulldoze(state.roads, { segments: [seg], ends: [ends] })).toMatchObject({ ok: false, reason: expect.stringMatching(/needs the road type/) });
+    expect(planBulldoze(state.roads, { segments: [seg], ends: [ends], types: ["avenue"] })).toEqual({ ok: false, reason: SEGMENT_CHANGED });
+    expect(planBulldoze(state.roads, { segments: [seg], ends: [ends], types: ["street"] }).ok).toBe(true);
   });
 });

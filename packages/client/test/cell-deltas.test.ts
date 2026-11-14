@@ -24,6 +24,7 @@ import {
   type FromSimMessage,
   type SimState,
   segmentEnds,
+  segmentTypeId,
 } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
@@ -199,7 +200,8 @@ describe("cell deltas", () => {
     /** A bulldoze or upgrade payload naming segment `seg`, with its ends as the copy has them. */
     const picked = (seg: number | undefined) => {
       const roads = state().roads;
-      return { segments: [seg], ends: roads && seg !== undefined ? [segmentEnds(roads, seg)] : [] };
+      const known = roads && seg !== undefined;
+      return { segments: [seg], ends: known ? [segmentEnds(roads, seg)] : [], types: known ? [segmentTypeId(roads, seg)] : [] };
     };
     const zones = [...ZONING_BALANCE.zones.map((z) => z.id), "none"];
     for (let t = 0; t < 400; t++) {

@@ -17,6 +17,7 @@ import {
   seedRng,
   type FromSimMessage,
   segmentEnds,
+  segmentTypeId,
 } from "@city-council/sim";
 import { MAX_CATCH_UP_STEPS, PUMP_INTERVAL_MS, SimHost, typedArrayBuffers } from "../src/protocol/host";
 import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
@@ -365,7 +366,8 @@ describe("road deltas", () => {
     /** A bulldoze or upgrade payload naming segment `seg`, with its ends as the copy has them. */
     const picked = (seg: number | undefined) => {
       const roads = mirror.state?.roads;
-      return { segments: [seg], ends: roads && seg !== undefined ? [segmentEnds(roads, seg)] : [] };
+      const known = roads && seg !== undefined;
+      return { segments: [seg], ends: known ? [segmentEnds(roads, seg)] : [], types: known ? [segmentTypeId(roads, seg)] : [] };
     };
     for (let t = 0; t < 400; t++) {
       const roll = nextInt(rng, 10);
@@ -435,6 +437,18 @@ describe("road deltas", () => {
       ]);
       // Only the first is in the log. The first player hears nothing about the second's.
       expect(other.state?.log.map((e) => [e.playerId, e.seq])).toEqual([["p1", 1]]);
+    });
+
+    it("starts a reloaded page's seqs past those of its player still in the city", async () => {
+      const { mirror, received, tick, join } = roadSetup();
+      void mirror.sendCommand("NoOp");
+      tick();
+      void mirror.sendCommand("NoOp");
+      // A new page for the same player, as after a reload, while seq 2 is still queued.
+      const again = join("p1");
+      await again.sendCommand("NoOp");
+      const seqs = received.filter((m) => m.type === "commandResult").map((m) => m.seq);
+      expect(seqs).toEqual([1, 2, 3]);
     });
 
     it("still answers a plain sendCommand at the queue, before the step", async () => {

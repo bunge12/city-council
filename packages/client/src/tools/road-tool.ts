@@ -54,7 +54,7 @@ import {
   type RoadType,
   type Terrain,
 } from "@city-council/sim";
-import type { RoadNet } from "../render/road-geometry";
+import { liveNode, type RoadNet } from "../render/road-geometry";
 import { DEFAULT_GUIDES, type GuideId, type GuideToggles } from "./config";
 import { roadEnd, snapPoint, startSource, type Snap } from "./snap";
 
@@ -480,13 +480,17 @@ export class RoadToolController {
       const next = mine[0];
       if (!next || next.status !== "queued") continue;
       const { from, to, type, control, level } = next.payload;
-      const preview = previewRoad(world.net, world.terrain, from, to, type, control ?? null, level);
       pending = this.host.get().roadPending;
-      if (!preview.ok) {
+      // The segment before it was built, but something since, such as an
+      // undo in the same step, may have taken it away again.
+      const preview = nodeAt(world.net, from)
+        ? previewRoad(world.net, world.terrain, from, to, type, control ?? null, level)
+        : null;
+      if (!preview?.ok) {
         this.stopChain(
           pending.filter((p) => p.id !== next.id),
           chain,
-          preview.reason ?? "",
+          preview ? (preview.reason ?? "") : ROAD_GONE,
         );
         pending = this.host.get().roadPending;
         continue;
@@ -497,6 +501,17 @@ export class RoadToolController {
       this.sendPending(sending);
     }
   }
+}
+
+/** Why a continuous road stops when the segment it carries on from is gone. */
+export const ROAD_GONE = "The road this one carries on from is gone";
+
+/** Whether a live node stands exactly at `p`. */
+function nodeAt(net: RoadNet, p: BuildPoint): boolean {
+  for (let node = 0; node < net.nodeFlags.length; node++) {
+    if (liveNode(net, node) && net.nodeX[node] === p.x && net.nodeZ[node] === p.z) return true;
+  }
+  return false;
 }
 
 /**

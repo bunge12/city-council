@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { LEVEL_BRIDGE, SEG_FIXED, bridgeDeckLevel, createState, generateTerrain, heightAt, serialize, type SimState } from "../packages/sim/src/index";
+import { LEVEL_BRIDGE, ROAD_TYPES, SEG_FIXED, bridgeDeckLevel, createState, generateTerrain, heightAt, serialize, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 
 // Issue M1-13: the upgrade and bulldoze tools. A player upgrades a street to
@@ -148,17 +148,18 @@ async function segment(page: Page, seg: number): Promise<{ alive: boolean; type:
   }, seg);
 }
 
-/** Where segments' ends are in the page's copy now, as a bulldoze or upgrade carries them. */
-async function endsOf(page: Page, segs: readonly number[]): Promise<number[][]> {
-  return page.evaluate((segs) => {
+/** Where segments' ends are and their types in the page's copy now, as a bulldoze or upgrade carries them. */
+async function endsOf(page: Page, segs: readonly number[]): Promise<{ ends: number[][]; types: string[] }> {
+  const rows = await page.evaluate((segs) => {
     const net = window.cityCouncil.mirror.state?.roads;
     if (!net) throw new Error("no state");
     return segs.map((seg) => {
       const a = net.segA[seg] ?? 0;
       const b = net.segB[seg] ?? 0;
-      return [net.nodeX[a] ?? 0, net.nodeZ[a] ?? 0, net.nodeX[b] ?? 0, net.nodeZ[b] ?? 0];
+      return { ends: [net.nodeX[a] ?? 0, net.nodeZ[a] ?? 0, net.nodeX[b] ?? 0, net.nodeZ[b] ?? 0], type: net.segType[seg] ?? 0 };
     });
   }, segs);
+  return { ends: rows.map((r) => r.ends), types: rows.map((r) => ROAD_TYPES[r.type]?.id ?? "") };
 }
 
 async function attach(page: Page, testInfo: TestInfo, name: string): Promise<void> {
@@ -196,8 +197,10 @@ test("upgrades a street to an avenue and sees it widen, then bulldozes it, with 
   await frames(page);
   await attach(page, testInfo, "3 upgraded to an avenue");
   let log = await logEntries(page);
-  expect(log.slice(start)).toEqual([{ type: "UpgradeRoad", payload: { segments: [seg], ends, type: "avenue" } }]);
+  expect(log.slice(start)).toEqual([{ type: "UpgradeRoad", payload: { segments: [seg], ...ends, type: "avenue" } }]);
 
+  const upgraded = await endsOf(page, [seg]);
+  expect(upgraded.types).toEqual(["avenue"]);
   // N turns on the bulldoze tool.
   await page.keyboard.press("KeyN");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
@@ -212,8 +215,8 @@ test("upgrades a street to an avenue and sees it widen, then bulldozes it, with 
   await attach(page, testInfo, "5 bulldozed");
   log = await logEntries(page);
   expect(log.slice(start)).toEqual([
-    { type: "UpgradeRoad", payload: { segments: [seg], ends, type: "avenue" } },
-    { type: "BulldozeRoad", payload: { segments: [seg], ends } },
+    { type: "UpgradeRoad", payload: { segments: [seg], ...ends, type: "avenue" } },
+    { type: "BulldozeRoad", payload: { segments: [seg], ...upgraded } },
   ]);
 });
 
@@ -238,7 +241,7 @@ test("a drag across four segments bulldozes them in one log entry", async ({ pag
   await page.mouse.up();
   await expect.poll(async () => (await logEntries(page)).length).toBe(start + 1);
   const log = await logEntries(page);
-  expect(log.slice(start)).toEqual([{ type: "BulldozeRoad", payload: { segments: segs, ends } }]);
+  expect(log.slice(start)).toEqual([{ type: "BulldozeRoad", payload: { segments: segs, ...ends } }]);
   for (const seg of segs) expect((await segment(page, seg)).alive).toBe(false);
   await page.mouse.move(640, 20);
   await frames(page);
@@ -305,7 +308,7 @@ test("a fixed road shows as not removable, and a right-click reverses a one-way"
   await click(page, 4575, 4700, "right");
   await expect.poll(async () => (await segment(page, oneWay)).a).toBe(before.b);
   expect((await segment(page, oneWay)).b).toBe(before.a);
-  expect((await logEntries(page)).slice(start)).toEqual([{ type: "UpgradeRoad", payload: { segments: [oneWay], ends, type: "oneWay" } }]);
+  expect((await logEntries(page)).slice(start)).toEqual([{ type: "UpgradeRoad", payload: { segments: [oneWay], ...ends, type: "oneWay" } }]);
   await attach(page, testInfo, "12 a one-way reversed by a right-click");
 });
 
