@@ -1,3 +1,4 @@
+import { BALANCE_STAMP } from "./balance-stamp";
 import type { Command } from "./commands";
 import type { LogEntry } from "./log";
 import { seedRng } from "./rng";
@@ -10,7 +11,7 @@ import type { UndoRecord } from "./undo";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 7;
+export const SNAPSHOT_VERSION = 8;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -54,6 +55,12 @@ export interface SimState {
    * city is created.
    */
   connections: Int32Array;
+  /**
+   * The stamp of the balance files the city was created under
+   * (balance-stamp.ts). Never changes. Empty for a city saved before
+   * version 8, whose balance is not known.
+   */
+  balance: string;
 }
 
 /**
@@ -88,6 +95,7 @@ export function createBareState(seed: number): SimState {
     roads: createRoadNetwork(),
     undo: [],
     connections: new Int32Array(0),
+    balance: BALANCE_STAMP,
   };
 }
 

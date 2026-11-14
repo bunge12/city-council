@@ -34,6 +34,10 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // a removed segment where its end nodes stood, a restyle the ends the
   // segment had (M1 review, issue 80). See `opsWithEnds`.
   6: (old) => ({ ...old, version: 7, undo: opsWithEnds(old) }),
+  // Version 8 adds the stamp of the balance the city was created under
+  // (balance-stamp.ts). An older save does not say, so its stamp is empty
+  // and it is not taken to replay from its log.
+  7: (old) => ({ ...old, version: 8, balance: "" }),
 };
 
 type OldOp = Record<string, unknown> & { op: string; id: number; row?: { a: number; b: number } };

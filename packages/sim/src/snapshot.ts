@@ -611,7 +611,7 @@ function checkPendingCommand(command: unknown, where: string): void {
 
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
-  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections } = state;
+  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");
   if (!isUint32(seed)) throw corrupt("its seed is not a 32-bit integer");
   if (tick !== header.tick || seed !== header.seed) throw corrupt("its header does not match its contents");
@@ -631,6 +631,7 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   if (roadProblem !== null) throw corrupt(`its road network is malformed: ${roadProblem}`);
   const connectionProblem = checkConnections(connections, roads as RoadNetwork);
   if (connectionProblem !== null) throw corrupt(`its outside connections are malformed: ${connectionProblem}`);
+  if (typeof balance !== "string") throw corrupt("its balance stamp is not text");
 }
 
 /**

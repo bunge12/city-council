@@ -22,6 +22,7 @@ export { TIME_BALANCE, gameDate } from "./calendar";
 export type { GameDate, TimeBalance } from "./calendar";
 export { fnv1a64, hashState } from "./hash";
 export { replay } from "./replay";
+export { BALANCE_STAMP, replaysUnderThisBalance } from "./balance-stamp";
 export { migrateState } from "./migrate";
 export {
   SNAPSHOT_FORMAT_VERSION,
