@@ -3,6 +3,7 @@
 // commands, which the sim validates (CLAUDE.md rule 2).
 
 import type { CommandResult } from "@city-council/sim";
+import type { Preset } from "../render/presets";
 import type { SimMirror } from "../protocol/mirror";
 import type { SaveStatus } from "../save/channel";
 import type { SaveClient } from "../save/page";
@@ -49,4 +50,6 @@ export interface AppServices {
   routeTool: RouteToolController;
   /** The debug panel's block overlay. Its state is in the UI store too. */
   blockOverlay: BlockOverlayController;
+  /** The player chose a graphics preset. Kept in this browser; the renderer switches once its shaders are ready. */
+  setPreset(preset: Preset): void;
 }

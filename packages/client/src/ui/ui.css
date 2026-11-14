@@ -123,6 +123,14 @@
   gap: 4px;
 }
 
+.top-bar .graphics-setting {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
 .top-bar .speeds button {
   min-width: 44px;
 }

@@ -236,6 +236,9 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
     if (count === 0) return null;
     const mesh = new InstancedMesh(propGeometries[kind], propMaterial, count);
     mesh.name = kind;
+    // Lights and signs stand up off the road, so they cast shadows as trees do.
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     for (let k = 0; k < count; k++) {
       const o = k * PROP_STRIDE;
       dummy.position.set(data[o] ?? 0, data[o + 1] ?? 0, data[o + 2] ?? 0);
@@ -286,6 +289,8 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
       mesh.matrixAutoUpdate = false;
       // Over the terrain and the water, which draws after the terrain.
       mesh.renderOrder = 2;
+      // Road surfaces take the sun's shadows. They cast none: they lie flat on the ground.
+      mesh.receiveShadow = layer === "surface";
       roots[layer].add(mesh);
       meshes.push(mesh);
     }

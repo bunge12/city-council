@@ -42,9 +42,10 @@ test.use({ viewport: { width: 1280, height: 800 } });
 // Several page loads with the whole map, on a machine that may have no GPU.
 test.setTimeout(240_000);
 
+// Low, so the pictures do not move with the benchmark's choice: flat light and no shadows.
 const BACKENDS = [
-  { name: "default backend", query: "" },
-  { name: "?webgl", query: "?webgl" },
+  { name: "default backend", query: "?preset=low" },
+  { name: "?webgl", query: "?webgl&preset=low" },
 ] as const;
 
 async function ready(page: Page): Promise<void> {
@@ -114,7 +115,7 @@ const BANDS: { band: string; position: Vec3; target: Vec3 }[] = [
 for (const { name, query } of BACKENDS) {
   test(`the fixture city draws the same in every zoom band (${name})`, async ({ page }, testInfo) => {
     const backend = await openCity(page, query, "Roads", fixtureCity().bytes);
-    if (query === "?webgl") expect(backend).toBe("webgl2");
+    if (query.startsWith("?webgl")) expect(backend).toBe("webgl2");
     // CI has a software WebGPU adapter, so the default backend there is WebGPU.
     else if (process.env["CI"]) expect(backend).toBe("webgpu");
     testInfo.annotations.push({ type: "backend", description: backend });
@@ -144,7 +145,7 @@ const curvedGround = groundAt(CURVED_JUNCTION.x, CURVED_JUNCTION.z);
 for (const { name, query } of BACKENDS) {
   test(`the curved fixture city draws curves and curved junctions (${name})`, async ({ page }, testInfo) => {
     const backend = await openCity(page, query, "Curves", curvedCity().bytes);
-    if (query === "?webgl") expect(backend).toBe("webgl2");
+    if (query.startsWith("?webgl")) expect(backend).toBe("webgl2");
     // CI has a software WebGPU adapter, so the default backend there is WebGPU.
     else if (process.env["CI"]) expect(backend).toBe("webgpu");
     testInfo.annotations.push({ type: "backend", description: backend });
@@ -167,7 +168,7 @@ const decorGround = groundAt(SIGNAL_CROSS.x, SIGNAL_CROSS.z);
 for (const { name, query } of BACKENDS) {
   test(`junctions get rounded kerbs, crossings, lights and signs, and tapers join two widths (${name})`, async ({ page }, testInfo) => {
     const backend = await openCity(page, query, "Decorations", decorationCity().bytes);
-    if (query === "?webgl") expect(backend).toBe("webgl2");
+    if (query.startsWith("?webgl")) expect(backend).toBe("webgl2");
     else if (process.env["CI"]) expect(backend).toBe("webgpu");
     testInfo.annotations.push({ type: "backend", description: backend });
     const stats = await roadStats(page);

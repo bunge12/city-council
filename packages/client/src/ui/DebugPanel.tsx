@@ -7,9 +7,24 @@ import { formatSpeed } from "./format";
 import { useServices, useSim } from "./hooks";
 import { TickRateMeter } from "./rate";
 import { CAMERA_KEYS, SHORTCUTS } from "./shortcuts";
-import { useUi, useViewReadout } from "./store";
+import { presetLabel } from "../render/presets";
+import { useGraphics, useUi, useViewReadout, type GraphicsState } from "./store";
 
 const READOUT_MS = 250;
+
+/** The graphics preset in use and what picked it, for the debug panel. */
+export function graphicsReadout(g: GraphicsState): string {
+  const shown = g.shown === null ? "starting" : presetLabel(g.shown);
+  const switching = g.shown !== null && g.shown !== g.wanted ? `, switching to ${presetLabel(g.wanted)}` : "";
+  const b = g.benchmark;
+  const measured = b.ms === null ? "" : `: ${b.ms.toFixed(1)} ms per draw${b.backend ? ` on ${b.backend}` : ""}`;
+  let why: string;
+  if (b.state === "running") why = "benchmark running";
+  else if (g.source === "address") why = "forced by ?preset= in the address, benchmark skipped";
+  else if (g.source === "player") why = `chosen in settings${b.ms === null ? "" : `; the benchmark measured ${b.ms.toFixed(1)} ms per draw on its first run`}`;
+  else why = b.thisVisit ? `picked by the benchmark on this visit${measured}` : `picked by the benchmark on an earlier visit${measured}`;
+  return `${shown}${switching} (${why})`;
+}
 
 /** Ticks per second as the page sees them, refreshed a few times a second. */
 function useTickRate(): number | null {
@@ -185,6 +200,7 @@ export function DebugPanel() {
   const tps = useTickRate();
   const memory = useMemory();
   const view = useViewReadout();
+  const graphics = useGraphics(graphicsReadout);
   const info = simInfo();
 
   return (
@@ -206,6 +222,8 @@ export function DebugPanel() {
         <dd id="sim-log-length">{logLength}</dd>
         <dt>Renderer</dt>
         <dd id="render-backend">{view.backend}</dd>
+        <dt>Graphics</dt>
+        <dd id="render-preset">{graphics}</dd>
         <dt>Frame</dt>
         <dd id="render-frame">{view.frame}</dd>
         <dt>Draw calls</dt>

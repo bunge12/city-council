@@ -1060,6 +1060,14 @@ Two rules keep the presets honest. Every visual feature states which preset turn
 
 Loading follows one rule, which is to show something fast and then refine. Terrain appears first, buildings fill in by chunk from the camera outward, and costlier shaders compile in the background and switch on when ready.
 
+How it works since M2-02:
+
+- The preset is kept in the browser's local storage. It is not in sim state and not in a city file. `?preset=low`, `?preset=balanced` and `?preset=high` force one for tests and skip the benchmark.
+- The list of visual features and the preset that turns each on is `VISUAL_FEATURES` in `packages/client/src/render/config.ts`. A new feature goes there.
+- Lighting is one fixed sun and one ambient light. Low fills with one flat colour. Balanced and High fill from the sky above and the ground below. The sun's shadow map follows the ground point the camera looks at, 640 m across at 2048 texels in Balanced and 2,000 m across at 4096 texels in High. Trees, traffic lights and yield signs cast and take shadows. Terrain, road surfaces and grass take them only.
+- The first frame with terrain is always lit as Low. The shaders a preset with shadows needs are compiled afterwards on a stand-in scene that shares the real geometry and materials, and the switch lands when they are ready, so the frame loop keeps drawing meanwhile.
+- The benchmark runs once per browser, after the first frame. It switches to Balanced, draws the start view eight times into an offscreen target and waits for the GPU. More than 12 ms a draw picks Low, less than 4 ms picks High, and anything between picks Balanced. The thresholds are a first guess until the reference machines below are named.
+
 Where this sits in the build:
 
 | When | What |

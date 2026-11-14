@@ -26,6 +26,7 @@ import type { GroundHit } from "./camera/pick";
 import { createCameraRig, type CameraRig } from "./camera/rig";
 import { startPose } from "./camera/start-pose";
 import { createView, wantsWebGL, type View } from "./render/view";
+import { choosePreset, loadPreset, presetForBenchmark, savePreset, type Preset } from "./render/presets";
 import { createRoadPreviewLayer } from "./render/road-preview";
 import type { PreviewShape } from "./render/road-preview-geometry";
 import { createConnectionMarkLayer } from "./render/connection-marks";
@@ -43,7 +44,7 @@ import type { Snap } from "./tools/snap";
 import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import { setBlockLabels, setEditHover, setRoadHover, setViewReadout, useUi, type BlockLabel } from "./ui/store";
+import { setBlockLabels, setEditHover, setRoadHover, setViewReadout, useGraphics, useUi, type BlockLabel } from "./ui/store";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
 const TAB_CITY_KEY = "city-council:city";
@@ -265,6 +266,42 @@ mirror.subscribe((update) => {
   }
 });
 
+// The graphics preset (issue M2-02). Kept in this browser's local storage,
+// never in sim state or a city file. `?preset=` forces one for tests.
+function localStore(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+const presetChoice = choosePreset(location.search, loadPreset(localStore()));
+useGraphics.setState({
+  wanted: presetChoice.preset,
+  source: presetChoice.source,
+  benchmark: {
+    state: presetChoice.stored?.benchmarkMs != null ? "done" : "none",
+    ms: presetChoice.stored?.benchmarkMs ?? null,
+    backend: presetChoice.stored?.benchmarkBackend ?? null,
+    thisVisit: false,
+  },
+});
+document.body.dataset["presetSource"] = presetChoice.source;
+document.body.dataset["benchmarkRan"] = "false";
+
+/** The player picked a preset in the settings. */
+function choosePresetInSettings(preset: Preset): void {
+  const kept = loadPreset(localStore());
+  savePreset(localStore(), {
+    preset,
+    source: "player",
+    benchmarkMs: kept?.benchmarkMs ?? null,
+    benchmarkBackend: kept?.benchmarkBackend ?? null,
+  });
+  useGraphics.setState({ wanted: preset, source: "player" });
+  document.body.dataset["presetSource"] = "player";
+}
+
 const services: AppServices = {
   mirror,
   saves,
@@ -280,6 +317,7 @@ const services: AppServices = {
   editTool,
   routeTool,
   blockOverlay,
+  setPreset: choosePresetInSettings,
 };
 const uiRoot = document.getElementById("ui");
 if (!uiRoot) throw new Error("#ui is missing from index.html");
@@ -306,6 +344,73 @@ interface RenderStatus {
 
 let status: RenderStatus | null = null;
 
+/** Resolves after `n` animation frames. */
+function frames(n: number): Promise<void> {
+  return new Promise((resolve) => {
+    const step = (left: number) => (left <= 0 ? resolve() : requestAnimationFrame(() => step(left - 1)));
+    step(n);
+  });
+}
+
+/**
+ * Brings the lighting to the preset the page wants, once the first frame
+ * with terrain is drawn: that frame is lit as Low, so it waits for no
+ * shadow shaders. On a first visit the benchmark runs first and picks it.
+ */
+async function startGraphics(view: View): Promise<void> {
+  const settled = () => {
+    const g = useGraphics.getState();
+    document.body.dataset["preset"] = g.shown ?? "";
+    document.body.dataset["presetSettled"] = String(g.shown === g.wanted && g.benchmark.state !== "running");
+  };
+  const apply = async (preset: Preset): Promise<void> => {
+    await view.setPreset(preset);
+    useGraphics.setState({ shown: view.lighting().preset });
+    settled();
+  };
+  useGraphics.setState({ shown: view.lighting().preset });
+  settled();
+  useGraphics.subscribe((now, before) => {
+    if (now.wanted !== before.wanted) void apply(now.wanted);
+    settled();
+  });
+  if (!presetChoice.runBenchmark) {
+    await apply(useGraphics.getState().wanted);
+    return;
+  }
+  useGraphics.setState({ benchmark: { state: "running", ms: null, backend: null, thisVisit: true } });
+  document.body.dataset["benchmarkRan"] = "true";
+  await apply("balanced");
+  // Let the trees near the start view build, so the draw is a real one.
+  let last = "";
+  for (let f = 0, steady = 0; f < 120 && steady < 10; f++) {
+    await frames(1);
+    const now = JSON.stringify(view.decorCounts());
+    steady = now === last ? steady + 1 : 0;
+    last = now;
+  }
+  let ms = Infinity;
+  try {
+    ms = await view.benchmark();
+  } catch {
+    // A benchmark that cannot run picks Low, the safe choice.
+  }
+  const picked = presetForBenchmark(ms);
+  const backend = view.backend === "webgpu" ? "WebGPU" : "WebGL 2";
+  const msOrNull = Number.isFinite(ms) ? Math.round(ms * 100) / 100 : null;
+  const benchmark = { state: "done" as const, ms: msOrNull, backend, thisVisit: true };
+  // The player may have chosen a preset while it ran. Their choice stands.
+  if (useGraphics.getState().source === "player") {
+    const kept = loadPreset(localStore());
+    if (kept) savePreset(localStore(), { ...kept, benchmarkMs: msOrNull, benchmarkBackend: backend });
+    useGraphics.setState({ benchmark });
+    return;
+  }
+  savePreset(localStore(), { preset: picked, source: "benchmark", benchmarkMs: msOrNull, benchmarkBackend: backend });
+  useGraphics.setState({ wanted: picked, benchmark });
+  if (picked === "balanced") settled();
+}
+
 /** The camera and what it needs, once the first map is on screen. */
 interface CameraHooks {
   rig: CameraRig;
@@ -330,6 +435,7 @@ const cameraReady = new Promise<CameraHooks>((resolve) => {
 const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) => {
   setViewReadout({ backend: view.backend === "webgpu" ? "WebGPU" : "WebGL 2" });
   let shownSeed: number | null = null;
+  let graphicsStarted = false;
   let lastReadout = 0;
   view.onFrame((stats) => {
     if (stats.frameMs === 0 || performance.now() - lastReadout < 250) return;
@@ -369,6 +475,10 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
         readyMs: performance.now(),
       };
       document.body.dataset["renderReady"] = "true";
+      if (!graphicsStarted) {
+        graphicsStarted = true;
+        void startGraphics(view);
+      }
     });
   };
   // Roads come from the mirror alone: a snapshot draws them all, a delta

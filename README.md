@@ -61,7 +61,7 @@ pnpm install
 pnpm dev
 ```
 
-Then open the address Vite prints. Add `?webgl` to the address to force the WebGL 2 path. The backquote key opens the debug panel.
+Then open the address Vite prints. Add `?webgl` to the address to force the WebGL 2 path, and `?preset=low`, `?preset=balanced` or `?preset=high` to force a graphics preset. The backquote key opens the debug panel.
 
 ```
 pnpm test    unit, scenario and replay tests
