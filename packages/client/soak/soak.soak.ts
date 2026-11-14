@@ -37,6 +37,7 @@ import {
   hashState,
   replay,
   segmentEnds,
+  segmentTypeId,
   type FromSimMessage,
 } from "@city-council/sim";
 import { expect, test } from "vitest";
@@ -186,8 +187,9 @@ test("soak: one hour of game time at 4x", () => {
         const seg = pickSegment(mirror, (n * 7919) % SCALE_SEGMENTS);
         const roads = mirror.state?.roads;
         if (seg === null || !roads) return null;
-        const ends = [segmentEnds(roads, seg)];
-        return type === "UpgradeRoad" ? [type, { segments: [seg], ends, type: "avenue" }] : [type, { segments: [seg], ends }];
+        // As the mirror shows the segment now: the sim refuses an edit of one that changed since (issue 94).
+        const seen = { ends: [segmentEnds(roads, seg)], types: [segmentTypeId(roads, seg)] };
+        return type === "UpgradeRoad" ? [type, { segments: [seg], ...seen, type: "avenue" }] : [type, { segments: [seg], ...seen }];
       }
       default:
         return [type, {}];
