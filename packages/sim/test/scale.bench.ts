@@ -217,6 +217,17 @@ test("the M1 scale network", async ({ bench, annotate }) => {
     "serialize the city, as an autosave does": () => void serializeDetached(state),
     "serialize the city with its log inside, as a city file": () => void serialize(state),
   };
+  // Fixed run counts for the slow cases. By default a case runs at least
+  // 64 times, which is five minutes of generating cells, and a hooked case
+  // runs until its timed part adds up to a second, with a full settle of
+  // the grid's cells in its hooks each time, which is far longer. CI gives
+  // the whole job ten minutes.
+  const fixedRuns = (runs: number) => ({ iterations: runs, time: 0, warmupIterations: 1, warmupTime: 0 });
+  const runsOf: Record<string, ReturnType<typeof fixedRuns>> = {
+    "generate every zoning cell of the city from scratch, as a load does": fixedRuns(5),
+    "one BuildRoadGrid at the cap over existing streets with every cell settled, and taking it back, for comparison": fixedRuns(10),
+  };
+  for (const name of Object.keys(hooked)) runsOf[name] = fixedRuns(30);
   const meanMs: Record<string, number> = {};
   const p99Ms: Record<string, number> = {};
   const all: [string, { fn: () => void; beforeEach?: () => void; afterEach?: () => void }][] = [
@@ -225,7 +236,7 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   ];
   for (const [name, { fn, ...hooks }] of all) {
     const file = `bench-results/scale-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
-    const result = await bench(name, { writeResult: file, ...hooks }, fn).run();
+    const result = await bench(name, { writeResult: file, ...hooks }, fn).run(runsOf[name]);
     meanMs[name] = result.latency.mean;
     p99Ms[name] = result.latency.p99;
   }
