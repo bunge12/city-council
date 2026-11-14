@@ -155,6 +155,19 @@ interface SegShape {
  */
 type Buckets = Map<number, number[]>;
 
+/**
+ * The work a change of roads leaves: tasks that find the cells it reaches,
+ * run in order, then the cells to walk in claim order.
+ */
+interface SettleJob {
+  queue: ClaimQueue;
+  seeds: (() => void)[];
+  nextSeed: number;
+}
+
+/** What one seeding task counts for against a slice of `settleCellsPerTick`, in cells walked. */
+const SEED_COST = 16;
+
 /** The cells of one network. Derived data: not state. */
 export interface CellIndex {
   readonly net: RoadNetwork;
@@ -171,8 +184,8 @@ export interface CellIndex {
   segs: (SegShape | null)[];
   /** Segment ids the network has added or removed since the index last looked. */
   readonly touched: Set<number>;
-  /** Cells still to walk after a change too big for one tick, in claim order; null when settled. */
-  pending: ClaimQueue | null;
+  /** A change of roads still settling; null when settled. */
+  pending: SettleJob | null;
 }
 
 // Scratch space. The sim runs on one thread, and no two users of one of
@@ -740,11 +753,18 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     else byAnchor.set(c.shape.anchorKey, [c]);
   }
 
-  // The old shapes leave.
+  // Finding the cells a change reaches is left to the job, a task at a
+  // time, in this order, before its walk starts. Nothing reads the buckets
+  // until the job is done: a query, a step's slice and the next change all
+  // finish it first.
+  const seeds: (() => void)[] = [];
+  // The old shapes leave the buckets.
   for (const { id, shape } of changed) {
     if (!shape) continue;
-    fileCells(index, id, shape, false);
-    fileSurface(index, id, shape, false);
+    seeds.push(() => {
+      fileCells(index, id, shape, false);
+      fileSurface(index, id, shape, false);
+    });
   }
 
   // The new shapes arrive, each cell starting from the removed cell on its
@@ -779,8 +799,10 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
         }
       }
     }
-    fileSurface(index, id, s, true);
-    fileCells(index, id, s, true);
+    seeds.push(() => {
+      fileSurface(index, id, s, true);
+      fileCells(index, id, s, true);
+    });
   }
 
   // Cells with nothing to start from are walked.
@@ -790,7 +812,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     for (let local = 0; local < status.length; local++) if (status[local] === UNSET) queue.push(keyOf(id, local));
   }
   // Cells under a surface that went may be free now, and are walked.
-  for (const { shape } of changed) if (shape) seedUnderSurface(shape, UNDER_ROAD);
+  for (const { shape } of changed) if (shape?.surface) seeds.push(() => seedUnderSurface(shape, UNDER_ROAD));
   // Cells under a surface that came are blocked by it, whatever claims
   // first, unless they were already blocked by their own shape: no walk
   // needed. One that held ground lets it go to the cells after it.
@@ -798,7 +820,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   for (const { id } of changed) {
     const surface = index.segs[id]?.surface;
     if (!surface) continue;
-    for (let i = 0; i < surface.length; i += 8) {
+    for (let i = 0; i < surface.length; i += 8) seeds.push(() => {
       const piece = surface.subarray(i, i + 8);
       quadBoxInto(piece, box);
       const pieceBox = Float64Array.from(box);
@@ -831,25 +853,28 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
         // Its own cells only touch a road's surface, and fresh cells are walked anyway.
         (key, seg) => seg === id || queue.has(key),
       );
-    }
+    });
   }
   // Cells that lost ground to a cell that went and that no cell took over.
   for (const c of changed) {
     const status = c.shape?.status;
     if (!status) continue;
     const marks = kept.get(c);
-    for (let local = 0; local < status.length; local++) {
-      if (status[local] !== CELL_OPEN || marks?.[local] === 1) continue;
-      cellQuad(c.shape as SegShape, local, q);
-      seedOverlapping(q, LOST_GROUND);
-    }
+    seeds.push(() => {
+      for (let local = 0; local < status.length; local++) {
+        if (status[local] !== CELL_OPEN || marks?.[local] === 1) continue;
+        cellQuad(c.shape as SegShape, local, q);
+        seedOverlapping(q, LOST_GROUND);
+      }
+    });
   }
-  index.pending = queue;
+  index.pending = { queue, seeds, nextSeed: 0 };
+  // The seeding tasks count too: how many there are follows from the shapes as well.
+  let work = seeds.length * SEED_COST;
   // How big the change is, so every machine that applies it agrees how many
   // ticks it may take to settle: the new cells with nothing to start from,
   // and the removed cells no new cell took over. Both follow from the road
   // shapes alone, not from how far an earlier change has settled.
-  let work = 0;
   for (const c of changed) {
     const fresh = index.segs[c.id]?.status;
     // Nothing has been walked yet, so a cell with nothing to start from is still unset.
@@ -868,11 +893,18 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
  * round again. Returns whether the change has settled.
  */
 function drain(index: CellIndex, limit: number): boolean {
-  const queue = index.pending;
-  if (!queue) return true;
+  const job = index.pending;
+  if (!job) return true;
+  const queue = job.queue;
+  let walked = 0;
+  // Every seeding task runs before the first cell is walked.
+  while (job.nextSeed < job.seeds.length) {
+    if (walked >= limit) return false;
+    (job.seeds[job.nextSeed++] as () => void)();
+    walked += SEED_COST;
+  }
   const q = new Float64Array(8);
   const box = new Float64Array(4);
-  let walked = 0;
   while (walked < limit) {
     const key = queue.pop();
     if (key === undefined) break;
