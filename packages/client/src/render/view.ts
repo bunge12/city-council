@@ -19,8 +19,9 @@ import {
   WebGPURenderer,
 } from "three/webgpu";
 import { heightAt, mapSize, type Terrain } from "@city-council/sim";
-import { FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, TERRAIN_LODS } from "./config";
+import { CELLS, FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, TERRAIN_LODS } from "./config";
 import type { ZoomBand } from "../camera/zoom-band";
+import { createCellLayer, type CellLayer, type CellSource, type CellStats } from "./cell-meshes";
 import { createDecorLayer, type DecorLayer } from "./decor-meshes";
 import { createLighting, skyColour, type LightingReport } from "./lighting";
 import type { Preset } from "./presets";
@@ -68,6 +69,18 @@ export interface View {
   /** Shows the road layers for a zoom band, with the camera `height` metres over the ground. */
   setZoomBand(band: ZoomBand, height: number): void;
   roadStats(): RoadStats | null;
+  /**
+   * The zoning overlay (issue M2-06). `cellSource` is where it reads cells,
+   * the mirror. Set it before `showTerrain`.
+   */
+  setCellSource(source: CellSource): void;
+  /** Shows or hides the zoning overlay. */
+  setCellsVisible(on: boolean): void;
+  /** Redraws the cells of every chunk, as after a snapshot, over the next frames. */
+  showCells(): void;
+  /** Redraws the cells of the chunks a delta changed, over the next frames. */
+  updateCells(chunks: readonly number[]): void;
+  cellStats(): CellStats | null;
   /** Switches the lighting to a graphics preset once its shaders are compiled. */
   setPreset(preset: Preset): Promise<void>;
   /** The lighting on screen: its preset and its shadows. */
@@ -106,9 +119,11 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   // scene is lit as Low, so the first frame needs no shadow shaders.
   const lighting = createLighting(renderer, scene);
 
-  let terrainRoot: { terrain: Terrain; lods: LOD[]; decor: DecorLayer; roads: RoadLayer; dispose: () => void } | null = null;
+  let terrainRoot: { terrain: Terrain; lods: LOD[]; decor: DecorLayer; roads: RoadLayer; cells: CellLayer | null; dispose: () => void } | null = null;
   let band: ZoomBand = "city";
   let height = Infinity;
+  let cellSource: CellSource | null = null;
+  let cellsVisible = false;
 
   function showTerrain(terrain: Terrain): void {
     terrainRoot?.dispose();
@@ -164,13 +179,18 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     const roads = createRoadLayer(terrain, scene);
     roads.setBand(band, height);
     const decor = createDecorLayer(terrain, scene, (chunk) => roads.decorMask(chunk));
+    const cells = cellSource ? createCellLayer(scene, cellSource, (x, z) => heightAt(terrain, x, z)) : null;
+    cells?.setBand(band);
+    cells?.setVisible(cellsVisible);
 
     terrainRoot = {
       terrain,
       lods,
       decor,
       roads,
+      cells,
       dispose() {
+        cells?.dispose();
         decor.dispose();
         roads.dispose();
         for (const lod of lods) scene.remove(lod);
@@ -207,6 +227,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     const seconds = last >= 0 ? (time - last) / 1000 : 0;
     for (const b of before) b(seconds);
     terrainRoot?.decor.update(camera.position);
+    terrainRoot?.cells?.update(camera.position, CELLS.buildBudgetMs);
     const shown = terrainRoot?.terrain;
     lighting.update(camera, shown ? (x, z) => heightAt(shown, x, z) : null);
     renderer.render(scene, camera);
@@ -262,8 +283,19 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       band = next;
       height = nextHeight;
       terrainRoot?.roads.setBand(next, nextHeight);
+      terrainRoot?.cells?.setBand(next);
     },
     roadStats: () => terrainRoot?.roads.stats() ?? null,
+    setCellSource(source) {
+      cellSource = source;
+    },
+    setCellsVisible(on) {
+      cellsVisible = on;
+      terrainRoot?.cells?.setVisible(on);
+    },
+    showCells: () => terrainRoot?.cells?.reset(),
+    updateCells: (chunks) => terrainRoot?.cells?.apply(chunks),
+    cellStats: () => terrainRoot?.cells?.stats() ?? null,
     setPreset: (preset) => lighting.setPreset(preset),
     lighting: () => lighting.report(),
     async benchmark() {

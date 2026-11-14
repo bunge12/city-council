@@ -149,6 +149,11 @@ export function groundAt(x: number, z: number): number {
  * spread matter here.
  */
 export function scaleCity(segments: number, seed = 7): Buffer {
+  return Buffer.from(serialize(scaleCityState(segments, seed)));
+}
+
+/** The state `scaleCity` saves. */
+export function scaleCityState(segments: number, seed = 7): SimState {
   const state = createState(SEED);
   const net: RoadNetwork = state.roads;
   const terrain = generateTerrain(SEED);
@@ -174,5 +179,5 @@ export function scaleCity(segments: number, seed = 7): Buffer {
   }
   // Roads written straight into the graph need their zoning cells laid out before a save.
   syncCells(state);
-  return Buffer.from(serialize(state));
+  return state;
 }

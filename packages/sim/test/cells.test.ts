@@ -12,6 +12,7 @@ import {
   ZONING_BALANCE,
   cellAt,
   cellCorners,
+  cellShapesInChunk,
   cellSlot,
   cellStatuses,
   cellsInBox,
@@ -789,6 +790,26 @@ describe("cell queries", () => {
       }
     }
     expect(seen.size).toBe(all);
+  });
+
+  it("gives a chunk's cells with their corners, the same as asking cell by cell", () => {
+    const state = createState(SEED);
+    ok(state, road([4200, 4600], [4392, 4600]));
+    ok(state, road([4300, 4500], [4300, 4700]));
+    // Across the chunk line x = 4500, so cells fall in two chunks.
+    ok(state, road([4420, 4800], [4580, 4880], { control: { x: 4500, z: 4780 } }));
+    let total = 0;
+    for (let chunk = 0; chunk < CHUNKS_PER_SIDE * CHUNKS_PER_SIDE; chunk++) {
+      const infos = cellsInChunk(state, chunk);
+      const shapes = cellShapesInChunk(state, chunk);
+      expect(Array.from(shapes.slots)).toEqual(infos.map((c) => c.index));
+      expect(Array.from(shapes.statuses)).toEqual(infos.map((c) => c.status));
+      expect(shapes.corners).toHaveLength(infos.length * 8);
+      infos.forEach((c, k) => expect(Array.from(shapes.corners.subarray(k * 8, k * 8 + 8))).toEqual(cellCorners(state, c)));
+      total += infos.length;
+    }
+    expect(total).toBe(state.cells.zone.length);
+    expect(() => cellShapesInChunk(state, -1)).toThrow(RangeError);
   });
 });
 

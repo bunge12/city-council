@@ -70,6 +70,7 @@ export {
   CELL_WATER,
   cellAt,
   cellCorners,
+  cellShapesInChunk,
   cellStatuses,
   cellsInBox,
   cellsInChunk,
@@ -77,7 +78,7 @@ export {
   cellsWalked,
   syncCells,
 } from "./zoning/cell-index";
-export type { CellIndex, CellInfo } from "./zoning/cell-index";
+export type { CellIndex, CellInfo, ChunkCellShapes } from "./zoning/cell-index";
 export { applyCellDelta, drainCellDelta, recordCellChanges } from "./zoning/delta";
 export type { CellDelta } from "./zoning/delta";
 export { ZONE_CLEAR, planZoneCells } from "./zoning/zone";

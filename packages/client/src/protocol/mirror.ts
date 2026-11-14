@@ -8,9 +8,11 @@ import {
   buildingInfo,
   buildingsInChunk,
   cellAt,
+  cellShapesInChunk,
   cellsInChunk,
   type BuildingInfo,
   type CellInfo,
+  type ChunkCellShapes,
   type CommandResult,
   type FromSimMessage,
   type SimState,
@@ -146,6 +148,14 @@ export class SimMirror {
     const state = this.current;
     if (!state) return [];
     return buildingsInChunk(state, chunk).flatMap((id) => buildingInfo(state, id) ?? []);
+  }
+
+  /**
+   * The cells of chunk `chunk` as `cellsInChunk` gives them, laid out flat
+   * with their corners for drawing. Null until the first snapshot.
+   */
+  cellShapesInChunk(chunk: number): ChunkCellShapes | null {
+    return this.current ? cellShapesInChunk(this.current, chunk) : null;
   }
 
   /** The zoning cell whose ground holds the point, in metres, or null. */
