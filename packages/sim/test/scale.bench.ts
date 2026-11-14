@@ -236,7 +236,9 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   ];
   for (const [name, { fn, ...hooks }] of all) {
     const file = `bench-results/scale-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
-    const result = await bench(name, { writeResult: file, ...hooks }, fn).run(runsOf[name]);
+    // `async: false` because tinybench otherwise calls the case once, outside
+    // its hooks, to find out, and a grid applied then is never taken back.
+    const result = await bench(name, { writeResult: file, async: false, ...hooks }, fn).run(runsOf[name]);
     meanMs[name] = result.latency.mean;
     p99Ms[name] = result.latency.p99;
   }
