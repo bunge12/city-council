@@ -74,6 +74,7 @@ export {
   cellsInBox,
   cellsInChunk,
   cellsSettled,
+  cellsWalked,
   syncCells,
 } from "./zoning/cell-index";
 export type { CellIndex, CellInfo } from "./zoning/cell-index";

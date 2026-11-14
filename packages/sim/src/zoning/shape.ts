@@ -162,19 +162,32 @@ export function stationsOf(c: MeasuredCurve, step: number): Float64Array {
 }
 
 /**
- * The stretch of anchor `c` between parameters `tA` and `tB`, in whole
- * cells: cells `from` up to but not including `to`, counted every `step`
- * metres from the anchor's start. `reversed` when `tA` is past `tB`.
+ * The cells of anchor `c` that the stretch between parameters `tA` and
+ * `tB` owns: cells `from` up to but not including `to`, counted every
+ * `step` metres from the anchor's start. A stretch owns the whole cells
+ * whose midpoint lies in it, from its low end and short of its high end,
+ * so the pieces of a cut road own every cell of the road between them,
+ * the one that straddles a cut included. A cell owned this way can reach
+ * past its piece's ends, and a road that made the cut blocks it like any
+ * surface. `reversed` when `tA` is past `tB`.
  */
 export function anchorSpan(c: MeasuredCurve, tA: number, tB: number, step: number): { from: number; to: number; reversed: boolean } {
   const sA = lengthAt(c, tA);
   const sB = lengthAt(c, tB);
   const lo = sA < sB ? sA : sB;
   const hi = sA < sB ? sB : sA;
-  // A stretch cut on a whole cell can land a hair either side of it.
-  const from = ceilOf(lo / step - 1e-6);
-  const to = Math.floor(hi / step + 1e-6);
+  // Every whole cell of the anchor, and no part cell past its last. A
+  // length snapped to whole cells can come back a hair short.
+  const whole = Math.floor(c.length / step + 1e-6);
+  const from = ownerBound(lo, step, whole);
+  const to = ownerBound(hi, step, whole);
   return { from, to: to > from ? to : from, reversed: tA > tB };
+}
+
+/** The first cell, of `whole`, whose midpoint is at or past `s`. Two pieces that meet at `s` get the same answer, so a cell goes to exactly one. */
+function ownerBound(s: number, step: number, whole: number): number {
+  const k = ceilOf(s / step - 0.5);
+  return k > 0 ? (k < whole ? k : whole) : 0;
 }
 
 /**

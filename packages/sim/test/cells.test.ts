@@ -17,6 +17,7 @@ import {
   cellsInBox,
   cellsInChunk,
   cellsSettled,
+  cellsWalked,
   createState,
   deserialize,
   hashState,
@@ -169,7 +170,8 @@ describe("cells along a road", () => {
       const outsideCells = statusesOf(state, seg, 1 - inside);
       const insideCells = statusesOf(state, seg, inside);
       expect(outsideCells.every((s) => s === CELL_OPEN)).toBe(true);
-      expect(count(insideCells, CELL_BEND)).toBeGreaterThan(0);
+      // Lost to an earlier cell of the same strip, or folded over itself.
+      expect(count(insideCells, CELL_TAKEN) + count(insideCells, CELL_BEND)).toBeGreaterThan(0);
       expect(count(insideCells, CELL_OPEN)).toBeGreaterThan(0);
       // The cells nearest the road follow it the whole way.
       const nearest = cellsOf(state, seg).filter((c) => c.side === inside && c.depth === 0);
@@ -414,7 +416,7 @@ describe("keeping cells current", () => {
     expect(Array.from(state.cells.zone)).toEqual(zonesBefore);
   });
 
-  it("leaves every cell exactly where it was when a road is cut off the cell marks", () => {
+  it("leaves every cell exactly where it was, with its zone, when a road is cut off the cell marks", () => {
     const state = createState(SEED);
     ok(state, road([4200, 4600], [4392, 4600]));
     const parent = between(state.roads, [4200, 4600], [4392, 4600]);
@@ -422,23 +424,40 @@ describe("keeping cells current", () => {
     const before = zonedGround(state);
     // 100 m along: twelve and a half cells.
     ok(state, road([4300, 4500], [4300, 4700]));
-    const after = zonedGround(state);
-    // The cell that straddles the cut, 96 m to 104 m along, lies under the
-    // new street and belongs to neither piece. Every other cell is the same
-    // ground to the bit, with the same zone.
-    expect(after.size).toBe(before.size - 2 * DEPTH);
-    for (const [ground, zone] of after) expect(before.get(ground), ground).toBe(zone);
+    // The cell that straddles the cut, 96 m to 104 m along, has its
+    // midpoint on the east piece, so the east piece owns it. The new street
+    // covers it. Every cell is the same ground to the bit, with its zone.
+    expect(zonedGround(state)).toEqual(before);
     const west = between(state.roads, [4200, 4600], [4300, 4600]);
     const east = between(state.roads, [4300, 4600], [4392, 4600]);
     expect(placesAlong(state.roads, west)).toBe(12);
-    expect(placesAlong(state.roads, east)).toBe(11);
-    expect(cellCorners(state, { segment: east, side: CELL_LEFT, place: 0, depth: 0 })).toEqual([4304, 4595, 4312, 4595, 4312, 4587, 4304, 4587]);
+    expect(placesAlong(state.roads, east)).toBe(12);
+    const straddling = { segment: east, side: CELL_LEFT, place: 0, depth: 0 };
+    expect(cellCorners(state, straddling)).toEqual([4296, 4595, 4304, 4595, 4304, 4587, 4296, 4587]);
+    expect(cellsOf(state, east).filter((c) => c.place === 0).every((c) => c.status === CELL_ROAD)).toBe(true);
     expect(rebuilt(state)).toEqual(cellStatuses(state));
-    // Undo puts the road back whole; the straddling cell comes back unzoned.
+    // Undo puts the road back whole, every zone with it.
     ok(state, undo());
-    const back = zonedGround(state);
-    expect(back.size).toBe(before.size - 2 * DEPTH);
-    for (const [ground, zone] of back) expect(before.get(ground)).toBe(zone);
+    expect(zonedGround(state)).toEqual(before);
+  });
+
+  it("keeps the cells on the far side of a T, and gives back the ones under its leg when the leg goes", () => {
+    const state = createState(SEED);
+    ok(state, road([4200, 4600], [4392, 4600]));
+    paint(state, between(state.roads, [4200, 4600], [4392, 4600]));
+    const before = zonedGround(state);
+    ok(state, road([4300, 4700], [4300, 4600]));
+    expect(zonedGround(state)).toEqual(before);
+    const east = between(state.roads, [4300, 4600], [4392, 4600]);
+    // The leg covers the straddling cells on its own side only.
+    for (const c of cellsOf(state, east).filter((c) => c.place === 0)) {
+      expect(c.status, `side ${c.side}`).toBe(c.side === CELL_RIGHT ? CELL_ROAD : CELL_OPEN);
+    }
+    // The pieces stay split once the leg goes, and the cells it covered open again.
+    ok(state, bulldoze([between(state.roads, [4300, 4700], [4300, 4600])]));
+    expect(zonedGround(state)).toEqual(before);
+    expect(cellsOf(state, east).every((c) => c.status === CELL_OPEN)).toBe(true);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
   });
 
   it("keeps a cell's name and zone through an upgrade, and moves it out with the wider road's edge", () => {
@@ -504,6 +523,85 @@ describe("keeping cells current", () => {
       expect(checkCells(state.cells, state.roads)).toBeNull();
     }
   }, 30_000);
+
+  /** A small seeded generator for the fuzz below, apart from the sim's own. */
+  function mulberry(seed: number): () => number {
+    let a = seed;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // Random commands through submit and step, upgrades included, with a twin
+  // reloaded from a save now and then, mid-settle or not. Seeds 33 and 42
+  // once found an upgrade whose kept-current statuses named a different
+  // winner than a fresh walk did.
+  it.each([33, 42, 7])("agrees with a fresh walk and a reloaded twin through random commands, seed %i", (seedN) => {
+    const rnd = mulberry(seedN * 7919);
+    const R = (lo: number, hi: number, snap = 1) => Math.round((lo + rnd() * (hi - lo)) / snap) * snap;
+    let state = createState(SEED);
+    let twin = deserialize(serialize(state)).state;
+    const problems: string[] = [];
+    for (let n = 0; n < 90; n++) {
+      const r = rnd();
+      let c: Command;
+      const segs = live(state.roads).filter((s) => placesAlong(state.roads, s) > 0);
+      const snap = rnd() < 0.5 ? 8 : 1;
+      if (r < 0.35 || segs.length === 0) {
+        c = road(
+          [R(4120, 4680, snap), R(4420, 4980, snap)],
+          [R(4120, 4680, snap), R(4420, 4980, snap)],
+          rnd() < 0.3 ? { type: rnd() < 0.5 ? "avenue" : "oneWay" } : {},
+        );
+      } else if (r < 0.5) {
+        c = road([R(4120, 4680), R(4420, 4980)], [R(4120, 4680), R(4420, 4980)], { control: { x: R(4120, 4680), z: R(4420, 4980) } });
+      } else if (r < 0.6) {
+        const ox = R(4150, 4400, 8);
+        const oz = R(4450, 4700, 8);
+        const k = 1 + Math.floor(rnd() * 3);
+        c = command("BuildRoadGrid", { origin: { x: ox, z: oz }, along: { x: ox + k * 96, z: oz }, across: { x: ox, z: oz + k * 96 }, depth: 86, width: 86, type: "street" });
+      } else if (r < 0.75) c = bulldoze([segs[Math.floor(rnd() * segs.length)] ?? 0]);
+      else if (r < 0.87) c = upgrade(["street", "avenue", "oneWay"][Math.floor(rnd() * 3)] ?? "street", [segs[Math.floor(rnd() * segs.length)] ?? 0]);
+      else c = undo();
+      const copy = { ...c, payload: JSON.parse(JSON.stringify(c.payload)) as unknown };
+      const result = submit(state, c);
+      expect(submit(twin, copy)).toEqual(result);
+      const steps = 1 + Math.floor(rnd() * 3);
+      for (let i = 0; i < steps; i++) {
+        step(state);
+        step(twin);
+      }
+      // Paint a few cells on both, as the zoning command will.
+      if (state.cells.zone.length > 0 && rnd() < 0.5) {
+        for (let i = 0; i < 20; i++) {
+          const at = Math.floor(rnd() * state.cells.zone.length);
+          for (const s of [state, twin]) {
+            s.cells.zone[at] = 2;
+            s.cells.density[at] = 1;
+          }
+        }
+      }
+      if (hashState(twin) !== hashState(state)) {
+        problems.push(`step ${n} after ${c.type}: the twin's hash differs`);
+        twin = deserialize(serialize(state)).state;
+      }
+      if (rnd() < 0.4) {
+        const kept = Array.from(cellStatuses(state));
+        const fresh = Array.from(cellStatuses(cloneState(state)));
+        if (kept.some((v, i) => v !== fresh[i]) || kept.length !== fresh.length) {
+          problems.push(`step ${n} after ${c.type} ${JSON.stringify(c.payload)}: differs from a fresh walk`);
+          state = deserialize(serialize(state)).state;
+          twin = deserialize(serialize(state)).state;
+        }
+        expect(checkCells(state.cells, state.roads)).toBeNull();
+      }
+      if (rnd() < 0.25) twin = deserialize(serialize(state)).state;
+    }
+    expect(problems).toEqual([]);
+  }, 300_000);
 
   it("hashes the same saved and reloaded mid-run as a city that never stopped", () => {
     const state = createState(SEED);
@@ -632,13 +730,15 @@ describe("settling a big change over a few ticks", () => {
     expect(rebuilt(sliced)).toEqual(cellStatuses(sliced));
   });
 
-  it("settles while paused, and the ready tick waits for the clock", () => {
+  it("walks while paused, so a view can show the cells, and the ready tick waits for the clock", () => {
     const state = createState(SEED);
     ok(state, command("SetSpeed", { speed: 0 }));
     ok(state, bigGrid());
     const ready = state.cellsReadyAt;
+    expect(cellsWalked(state)).toBe(false);
     for (let i = 0; i < 20; i++) step(state);
     expect(state.cellsReadyAt).toBe(ready);
+    expect(cellsWalked(state)).toBe(true);
     expect(cellsSettled(state)).toBe(false);
     expect(rebuilt(state)).toEqual(cellStatuses(state));
   });

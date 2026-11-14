@@ -88,9 +88,9 @@ export const CELL_WATER = 2;
 export const CELL_STEEP = 3;
 /** A road, rail or path surface covers it. */
 export const CELL_ROAD = 4;
-/** It folds over itself, or overlaps an earlier cell of its own segment, on the inside of a bend. */
+/** It folds over itself on the inside of a bend too tight for it. */
 export const CELL_BEND = 5;
-/** It overlaps a cell of an older road, which keeps the ground. */
+/** It overlaps an open cell that claims the ground first: an older road's, or an earlier one of its own road on the inside of a bend. */
 export const CELL_TAKEN = 6;
 /** Not yet walked. Never left behind by a walk. */
 const UNSET = 255;
@@ -171,19 +171,6 @@ function surfacePiece(s: SegShape, k: number): Float64Array {
 /** The anchor's road and build order as text: two shapes with the same key measure cells on the same road. */
 function anchorKeyOf(s: SegShape): string {
   return `${s.order},${s.anchorAX},${s.anchorAZ},${s.anchorCX},${s.anchorCZ},${s.anchorBX},${s.anchorBZ}`;
-}
-
-/** Whether two shapes measure their cells on the same road. */
-function sameAnchorRoad(p: SegShape, q: SegShape): boolean {
-  return (
-    p.order === q.order &&
-    p.anchorAX === q.anchorAX &&
-    p.anchorAZ === q.anchorAZ &&
-    p.anchorCX === q.anchorCX &&
-    p.anchorCZ === q.anchorCZ &&
-    p.anchorBX === q.anchorBX &&
-    p.anchorBZ === q.anchorBZ
-  );
 }
 
 /**
@@ -635,8 +622,9 @@ function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): nu
         cellQuad(o, other - otherSeg * KEY_STRIDE, quadB);
         quadBoxInto(quadB, boxB);
         if ((boxB[0] ?? 0) > maxX || (boxB[2] ?? 0) < minX || (boxB[1] ?? 0) > maxZ || (boxB[3] ?? 0) < minZ) continue;
-        // A cell of its own road, or of another piece of the road it was cut from, closes up on a bend.
-        if (quadsOverlap(q, quadB)) return sameAnchorRoad(o, s) ? CELL_BEND : CELL_TAKEN;
+        // One status whoever the winner is: the buckets are in no order, so
+        // a label taken from the first overlap found would depend on it.
+        if (quadsOverlap(q, quadB)) return CELL_TAKEN;
       }
     }
   }
@@ -653,12 +641,12 @@ function setStatus(index: CellIndex, seg: number, s: SegShape, local: number, no
 
 /** Cell statuses as bits, for picking which cells to look at again. */
 const BIT_OPEN = 1 << CELL_OPEN;
-/** Cells a new surface can block: ones it does not already find blocked by ground or a road. UNSET counts as bit 7. */
-const NOT_UNDER_ROAD = BIT_OPEN | (1 << CELL_BEND) | (1 << CELL_TAKEN) | (1 << 7);
+/** Cells a new surface can block: ones it does not already find blocked by ground, a fold or a road. UNSET counts as bit 7. */
+const NOT_UNDER_ROAD = BIT_OPEN | (1 << CELL_TAKEN) | (1 << 7);
 /** Cells a removed surface can free: ones blocked by a road. */
 const UNDER_ROAD = 1 << CELL_ROAD;
-/** Cells that lost ground to another cell, or may have. */
-const LOST_GROUND = (1 << CELL_BEND) | (1 << CELL_TAKEN);
+/** Cells that lost ground to another cell. A fold depends on its own shape only. */
+const LOST_GROUND = 1 << CELL_TAKEN;
 
 /**
  * Calls `visit` with the key of every cell in the buckets whose status is
@@ -1303,6 +1291,17 @@ export function settleCells(state: SimState): void {
 /** Whether the sim may read which cells are blocked: no change of roads is still settling. */
 export function cellsSettled(state: SimState): boolean {
   return state.tick >= state.cellsReadyAt;
+}
+
+/**
+ * Whether the walk of every change so far is done, which can be before
+ * `cellsSettled`: paused steps walk too, while the clock stands still. For
+ * a view deciding when to show cells, never for the sim, whose rules must
+ * not depend on how many paused steps a host ran.
+ */
+export function cellsWalked(state: SimState): boolean {
+  const index = live.get(state.roads);
+  return !index?.pending;
 }
 
 /** `cells` as they are when they fit the roads, or laid out afresh as `syncCells` says. */
