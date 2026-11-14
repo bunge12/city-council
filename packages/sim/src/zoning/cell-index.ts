@@ -61,6 +61,7 @@ import type { SimState } from "../state";
 import { terrainOf } from "../terrain/cache";
 import { isWaterAt, mapSize, slopeAt, type Terrain } from "../terrain/terrain";
 import { ZONING_BALANCE } from "./balance";
+import { CELL_KEY_STRIDE, noteCellsRelaid } from "./cell-changes";
 import { cellsPerPlace, fromLocal, zonableFields, type CellRef, type CellState } from "./cells";
 import {
   STATION_FLOATS,
@@ -101,7 +102,7 @@ const BUCKET = 32;
  * A cell's key is `segment * KEY_STRIDE + its place in the segment's run`,
  * and a surface piece's `segment * KEY_STRIDE + piece`.
  */
-const KEY_STRIDE = 2 ** 21;
+const KEY_STRIDE = CELL_KEY_STRIDE;
 /** Station gaps per surface piece of a straight segment. A curve has one piece per gap, to follow it. */
 const STRAIGHT_PIECE = 4;
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
@@ -279,6 +280,16 @@ export interface CellIndex {
    * stall the sim for tens of milliseconds at a time.
    */
   spare: { zone: Uint8Array; density: Uint8Array } | null;
+  /**
+   * True for a client's copy of a city, whose zone and density arrays are
+   * laid out by cell deltas (delta.ts) and not here.
+   */
+  follows: boolean;
+  /**
+   * The 500 m chunks holding a cell that came, went or changed status since
+   * `followCells` last asked. Null until it first asks: the sim keeps none.
+   */
+  dirty: Set<number> | null;
 }
 
 // Scratch space. The sim runs on one thread, and no two users of one of
@@ -289,6 +300,7 @@ const quadB = new Float64Array(8);
 const boxB = new Float64Array(4);
 const quadW = new Float64Array(8);
 const boxW = new Float64Array(4);
+const quadD = new Float64Array(8);
 
 const keyOf = (seg: number, local: number): number => seg * KEY_STRIDE + local;
 const segOfKey = (key: number): number => Math.floor(key / KEY_STRIDE);
@@ -538,6 +550,10 @@ function bucketDrop(lists: Buckets, bucket: number, value: number): void {
 function fileCell(index: CellIndex, lists: Buckets, seg: number, s: SegShape, local: number, add: boolean): void {
   cellQuad(s, local, quadA);
   quadBoxInto(quadA, boxA);
+  if (index.dirty) {
+    const { x, z } = quadCentre(quadA);
+    index.dirty.add(chunkAt(x, z));
+  }
   const key = keyOf(seg, local);
   forBuckets(index, boxA, (bucket) => (add ? bucketPush : bucketDrop)(lists, bucket, key));
 }
@@ -645,6 +661,11 @@ function setStatus(index: CellIndex, seg: number, s: SegShape, local: number, no
   const status = s.status as Uint8Array;
   const was = status[local];
   status[local] = now;
+  if (index.dirty && was !== now) {
+    cellQuad(s, local, quadD);
+    const { x, z } = quadCentre(quadD);
+    index.dirty.add(chunkAt(x, z));
+  }
   if ((was === CELL_OPEN) !== (now === CELL_OPEN)) fileCell(index, index.openBuckets, seg, s, local, now === CELL_OPEN);
 }
 
@@ -706,6 +727,8 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     touched: new Set<number>(),
     pending: null,
     spare: null,
+    follows: false,
+    dirty: null,
   };
   const limit = segmentIdLimit(net);
   const order: number[] = [];
@@ -879,6 +902,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     if (!sameAsNet(s, net, id)) changed.push({ id, shape: s, start: id < oldLimit ? (cells.offset[id] ?? 0) : 0 });
   }
   if (changed.length === 0 && limit === oldLimit) return null;
+  noteCellsRelaid(net, changed);
   // A change still settling is folded into this one rather than finished
   // here, which could take far longer than a tick. Its tasks run now, so
   // the buckets match the shapes, and its cells still to walk join this
@@ -1068,7 +1092,8 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     const marks = kept.get(c);
     for (let local = 0; local < gone.length; local++) if (marks?.[local] !== 1) work++;
   }
-  return { cells: relayout(index, cells, changed, byAnchor), work, folded: earlier !== null };
+  // A copy's cells came laid out in the delta that brought the roads.
+  return { cells: index.follows ? cells : relayout(index, cells, changed, byAnchor), work, folded: earlier !== null };
 }
 
 /**
@@ -1355,6 +1380,43 @@ function fitCells(index: CellIndex, cells: CellState): CellState {
     density.set(cells.density.subarray(from, from + count), offset[id] ?? 0);
   }
   return { offset, zone, density };
+}
+
+/**
+ * For a client's copy of a city, after a delta's road rows and cells are
+ * copied into `state` (delta.ts): brings the copy's cell index up to date,
+ * if it has one, and returns the 500 m chunks, as `cj * CHUNKS_PER_SIDE + ci`
+ * ascending, holding a cell that came, went, changed status or is one of
+ * `painted`. `segs` are the segment ids whose rows the delta carried, and
+ * `painted` the keys, `segment * CELL_KEY_STRIDE + place in its run`, of
+ * cells whose zone the delta set.
+ *
+ * A copy nobody has asked about cells yet has no index, and building one
+ * costs as much as a whole walk, so none is built here and no chunk is
+ * returned: nothing has been drawn that could need drawing again. The first
+ * query builds the index from the copy as it then is.
+ */
+export function followCells(state: SimState, segs: ArrayLike<number>, painted: ArrayLike<number>): number[] {
+  const index = live.get(state.roads);
+  if (!index) return [];
+  index.follows = true;
+  index.dirty ??= new Set();
+  for (let i = 0; i < segs.length; i++) index.touched.add(segs[i] as number);
+  syncCells(state);
+  const q = new Float64Array(8);
+  for (let i = 0; i < painted.length; i++) {
+    const key = painted[i] as number;
+    const seg = segOfKey(key);
+    const s = index.segs[seg];
+    const local = key - seg * KEY_STRIDE;
+    if (!s?.status || local >= s.status.length) continue;
+    cellQuad(s, local, q);
+    const { x, z } = quadCentre(q);
+    index.dirty.add(chunkAt(x, z));
+  }
+  const chunks = [...index.dirty].sort((a, b) => a - b);
+  index.dirty.clear();
+  return chunks;
 }
 
 // ---- Queries ----

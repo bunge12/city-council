@@ -8,9 +8,10 @@ import type { LogEntry } from "./log";
 import type { RoadDelta } from "./roads/delta";
 import type { SimState, Speed } from "./state";
 import type { UndoRecord } from "./undo";
+import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 // ---- Client to sim ----
 
@@ -32,8 +33,8 @@ export type ToSimMessage = CommandMessage | RequestSnapshotMessage;
 // ---- Sim to client ----
 
 /**
- * The whole state at one tick, the whole road network included. A client
- * replaces its copy with this. `logFrom` is the absolute log index the next
+ * The whole state at one tick, the whole road network and every zoning
+ * cell's zone and density included. A client replaces its copy with this. `logFrom` is the absolute log index the next
  * delta's entries start at, and `deltaSeq` is the next delta's `seq`.
  */
 export interface SnapshotMessage {
@@ -56,7 +57,7 @@ export interface SystemTiming {
 
 /**
  * What changed since the previous delta or snapshot: the tick, the speed,
- * new log entries and changed road rows. `seq` counts deltas from 0 and
+ * new log entries, changed road rows and changed zoning cells. `seq` counts deltas from 0 and
  * `logFrom` is the absolute log index of `log[0]`, so a client that misses
  * one can tell and ask for a snapshot.
  */
@@ -70,6 +71,11 @@ export interface DeltaMessage {
   log: LogEntry[];
   /** Road rows added, changed or removed. Left out when no road changed. */
   roads?: RoadDelta;
+  /**
+   * Zoning cells painted, and the cells of segments a road change laid out
+   * again. Left out when no cell changed. Applied after `roads`.
+   */
+  cells?: CellDelta;
   /** The whole undo history, when it changed. Left out otherwise. */
   undo?: UndoRecord[];
   /** Steps the host ran since the previous delta, paused steps included. */

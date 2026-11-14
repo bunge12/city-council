@@ -2,6 +2,7 @@ import {
   LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
   TICK_MS,
+  drainCellDelta,
   drainRoadChanges,
   encodeRoadDelta,
   logLength,
@@ -9,6 +10,7 @@ import {
   parseToSimMessage,
   prepareDerived,
   readLog,
+  recordCellChanges,
   recordRoadChanges,
   captureState,
   serialize,
@@ -108,9 +110,10 @@ export class SimHost {
     }
     this.state = state;
     prepareDerived(state);
-    // From here on every road change is recorded. Earlier ones reach a
-    // client in the snapshot it asks for first.
+    // From here on every road and cell change is recorded. Earlier ones
+    // reach a client in the snapshot it asks for first.
     recordRoadChanges(state.roads);
+    recordCellChanges(state);
     this.fullLog = [...pagedLog, ...state.log];
     this.transport = transport;
     this.now = now;
@@ -259,9 +262,13 @@ export class SimHost {
   }
 
   private flushDelta(): void {
+    // Cells are read now, like road rows below, so a cell painted and then
+    // moved by a road in between goes out once, as what it is now.
+    const cells = drainCellDelta(this.state);
     const changed =
       this.unsent.length > 0 ||
       this.unsentRoads !== null ||
+      cells !== null ||
       this.state.tick !== this.sentTick ||
       this.state.speed !== this.sentSpeed ||
       this.state.undo !== this.sentUndo;
@@ -280,12 +287,13 @@ export class SimHost {
       logFrom: this.sentLogFrom,
       log,
       ...(roads ? { roads } : {}),
+      ...(cells ? { cells } : {}),
       ...(undo ? { undo } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };
     // The rows are fresh arrays, so a worker can move them.
-    this.transport.send(delta, roads ? typedArrayBuffers(roads) : []);
+    this.transport.send(delta, typedArrayBuffers({ roads, cells }));
     this.deltaSeq++;
     this.unsent = [];
     this.unsentRoads = null;
