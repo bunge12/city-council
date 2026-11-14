@@ -28,6 +28,8 @@ export interface ZoningBalance {
   maxSlope: number;
   /** How many cells a change of roads may walk in one tick before the rest wait for the next. */
   settleCellsPerTick: number;
+  /** What a change's counted size is multiplied by when its ready tick is chosen, for cells the walk sends round again. */
+  settleRewalkAllowance: number;
   /** What finding the cells under one piece of road surface counts for, in cells walked. */
   settleSurfacePieceCost: number;
   /** What filing one cell in or out of the index counts for, in cells walked. */
@@ -65,6 +67,8 @@ export function checkZoningBalance(data: unknown): string[] {
   }
   const settle = data["settleCellsPerTick"];
   if (!Number.isSafeInteger(settle) || (settle as number) < 1) errors.push("settleCellsPerTick must be a whole number of at least 1");
+  const rewalk = data["settleRewalkAllowance"];
+  if (typeof rewalk !== "number" || !Number.isFinite(rewalk) || rewalk < 1) errors.push("settleRewalkAllowance must be a number, 1 or more");
   for (const key of ["settleSurfacePieceCost", "settleFiledCellCost"]) {
     const cost = data[key];
     if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) errors.push(`${key} must be a number of cells walked, zero or more`);

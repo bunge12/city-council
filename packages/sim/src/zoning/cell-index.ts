@@ -1311,7 +1311,9 @@ export function stepCells(state: SimState): void {
   if (!result) return;
   const { cells, work, folded } = result;
   state.cells = cells;
-  const ticks = ceilOf(work / ZONING_BALANCE.settleCellsPerTick);
+  // The walk can send cells round again past its counted size, so the
+  // ready tick allows for that, and the last step is not left a pile.
+  const ticks = ceilOf((work * ZONING_BALANCE.settleRewalkAllowance) / ZONING_BALANCE.settleCellsPerTick);
   if (ticks <= 1) {
     // While an earlier change is still settling, by the state's own clock,
     // this one adds its tick to the wait, so its work has a slice of its
