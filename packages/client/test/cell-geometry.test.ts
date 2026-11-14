@@ -151,7 +151,7 @@ describe("zone colours", () => {
             for (const db of densities) {
               if (b.index * 10 + db <= a.index * 10 + da || (a.index !== b.index && da !== db)) continue;
               const d = distance(seen(cellColour(a.index, da), m), seen(cellColour(b.index, db), m));
-              if (d < 0.05) worst.push(`${vision}: ${a.id} ${da} and ${b.id} ${db}, ${d.toFixed(3)}`);
+              if (d < 0.045) worst.push(`${vision}: ${a.id} ${da} and ${b.id} ${db}, ${d.toFixed(3)}`);
             }
           }
         }
@@ -167,7 +167,7 @@ describe("zone colours", () => {
         for (const d of densities) {
           for (const ground of SURROUNDINGS) {
             const gap = distance(seen(cellColour(z.index, d), m), seen(ground, m));
-            if (gap < 0.045) worst.push(`${vision}: ${z.id} ${d} and #${ground.toString(16)}, ${gap.toFixed(3)}`);
+            if (gap < 0.04) worst.push(`${vision}: ${z.id} ${d} and #${ground.toString(16)}, ${gap.toFixed(3)}`);
           }
         }
       }

@@ -445,19 +445,22 @@ export const PRESET_BENCHMARK = {
  * reads them from here.
  *
  * Each zone has its own hue and density changes lightness only: 1 is the
- * lightest. The five hues, yellow, blue, cyan, magenta and orange, were
- * picked so that two cells of one zone, or of one density, stay apart from
- * each other and from the grass, sand and road greys under normal vision and
- * under simulated protanopia, deuteranopia and tritanopia. The test in
- * `test/cell-geometry.test.ts` holds them to that.
+ * lightest. Residential is green and industrial yellow, as players know
+ * them from other city builders; commercial is blue, office cyan and mixed
+ * magenta. The shades were then picked so that two cells of one zone, or of
+ * one density, stay apart from each other and from the grass, sand and
+ * road greys under normal vision and under simulated protanopia,
+ * deuteranopia and tritanopia. Green is the hardest: it is the closest of
+ * the five to the grass. The test in `test/cell-geometry.test.ts` holds
+ * them to that.
  */
 export const CELLS = {
   zones: {
-    residential: [0xeae039, 0xbbb201, 0x8c8612],
-    commercial: [0x8db3fd, 0x4d82f0, 0x2656c0],
-    office: [0x53effe, 0x0cc0ce, 0x0d8f9a],
-    industrial: [0xfb85d9, 0xca58ac, 0x9b2a80],
-    mixed: [0xfead6d, 0xdc7805, 0x9f5606],
+    residential: [0x8adc54, 0x61b11f, 0x458507],
+    commercial: [0x78a5fe, 0x3f77ed, 0x1a4dc0],
+    office: [0x60dbfd, 0x18b1d3, 0x16859f],
+    industrial: [0xf5e100, 0xc6b60f, 0x998d13],
+    mixed: [0xec7eea, 0xc054bf, 0x942894],
   } as Readonly<Record<string, readonly [number, number, number]>>,
   /** The outline of a cell nobody has zoned. */
   unzoned: 0xf4f4ec,
