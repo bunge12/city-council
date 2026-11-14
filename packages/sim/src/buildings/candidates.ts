@@ -1,0 +1,279 @@
+// The grower's candidates (M2-10): every free zoned cell by the road, the
+// cells a lot can start from. Derived data, like the building index: kept
+// in a WeakMap keyed by the buildings object, never saved or hashed, built
+// from state on first use (`prepareDerived` does that at load) and kept
+// current after, so a grower tick never scans the city.
+//
+// What a candidate is, and the order they are counted in, follow from
+// state alone, so a city loaded from a save draws the same cell for the
+// same number as one that kept running: a candidate is the front cell of a
+// column, at depth 0, that is open, zoned and has no building, and they
+// count in segment id order, then by column within the segment, which is
+// the order of their slots in `state.cells.zone`.
+//
+// Kept by segment, so a change touches only its own segments. Three things
+// change a candidate, and each notes what it touched:
+// - a ZoneCells command, the cells it painted (zoning/zone.ts);
+// - a building added or removed, its lot's columns (buildings.ts);
+// - a change of roads, the segments laid out again and the nodes at their
+//   ends, and the front cells of other segments whose status the walk
+//   changed (`CellIndex.watch`, zoning/cell-index.ts).
+// A building's lot can run on past a segment's end, so a change of roads
+// also looks again at the segments a lot could reach from those nodes: the
+// ones at each node, and on through any segment shorter than the widest
+// lot, up to that many segments away. A lot that no longer fits its roads
+// stands on no cells (where.ts), and those cells come back as candidates.
+
+import { BUILDINGS_BALANCE } from "./balance";
+import type { BuildingState } from "./buildings";
+import { NONE, isNode, nextSegmentAt, type RoadNetwork } from "../roads/network";
+import type { SimState } from "../state";
+import { ZONING_BALANCE } from "../zoning/balance";
+import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
+import { CELL_OPEN, type CellIndex, type Column } from "../zoning/cell-index";
+import { ZONE_NONE, type CellRef } from "../zoning/cells";
+
+const DEPTH = ZONING_BALANCE.zoneDepthCells;
+/** Segments per counted block. */
+const BLOCK = 64;
+/** As where.ts has it. Not imported, to keep this module free of the building index. */
+const NO_BUILDING = -1;
+
+interface Candidates {
+  /** The cell index this was built from. */
+  index: CellIndex;
+  /** By segment id: per column, `place * 2 + side`, 1 for a candidate. Null for a segment with none. */
+  bits: (Uint8Array | null)[];
+  /** By segment id: its candidates. */
+  counts: Int32Array;
+  /** Candidates in each block of BLOCK segment ids. */
+  blocks: Int32Array;
+  count: number;
+  /** Segments to look at again whole. */
+  segs: Set<number>;
+  /** Front cells to look at again, as `segment * CELL_KEY_STRIDE + column`. */
+  fronts: Set<number>;
+}
+
+const live = new WeakMap<BuildingState, Candidates>();
+
+/** The last segment whose run starts at or before `slot`: segments with no cells share a start with the next one. */
+function segmentOfSlot(offset: Int32Array, slot: number): number {
+  let lo = 0;
+  let hi = offset.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if ((offset[mid] ?? 0) <= slot) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** Notes that a command painted the cells at `slots` of `state.cells.zone`. Only front cells matter. */
+export function noteFrontCells(state: SimState, slots: Iterable<number>): void {
+  const c = live.get(state.buildings);
+  if (!c) return;
+  const offset = state.cells.offset;
+  for (const slot of slots) {
+    if (slot % DEPTH !== 0) continue;
+    const seg = segmentOfSlot(offset, slot);
+    c.fronts.add(seg * CELL_KEY_STRIDE + (slot - (offset[seg] ?? 0)) / DEPTH);
+  }
+}
+
+/** Notes that a building came or went on these columns. */
+export function noteColumns(state: SimState, cols: readonly Column[]): void {
+  const c = live.get(state.buildings);
+  if (!c) return;
+  for (const col of cols) c.fronts.add(col.seg * CELL_KEY_STRIDE + col.place * 2 + col.side);
+}
+
+/** Whether column `col` of segment `seg` is a candidate, with the cells as they are now: 1 or 0. */
+function isCandidate(state: SimState, index: CellIndex, onCell: Int32Array, seg: number, col: number): number {
+  const status = index.segs[seg]?.status;
+  if (!status || status[col * DEPTH] !== CELL_OPEN) return 0;
+  const slot = (state.cells.offset[seg] ?? 0) + col * DEPTH;
+  return state.cells.zone[slot] !== ZONE_NONE && onCell[slot] === NO_BUILDING ? 1 : 0;
+}
+
+/** Makes room for segment ids below `limit`. */
+function fit(c: Candidates, limit: number): void {
+  if (c.counts.length < limit) {
+    const counts = new Int32Array(Math.max(limit, c.counts.length * 2));
+    counts.set(c.counts);
+    c.counts = counts;
+    const blocks = new Int32Array(Math.ceil(counts.length / BLOCK));
+    blocks.set(c.blocks);
+    c.blocks = blocks;
+  }
+  while (c.bits.length < limit) c.bits.push(null);
+}
+
+function setCount(c: Candidates, seg: number, n: number): void {
+  const was = c.counts[seg] ?? 0;
+  if (n === was) return;
+  c.counts[seg] = n;
+  const block = Math.floor(seg / BLOCK);
+  c.blocks[block] = (c.blocks[block] ?? 0) + n - was;
+  c.count += n - was;
+}
+
+/** Looks at every column of `seg` again. */
+function refreshSegment(c: Candidates, state: SimState, onCell: Int32Array, seg: number): void {
+  const places = c.index.segs[seg]?.places ?? 0;
+  if (places === 0) {
+    c.bits[seg] = null;
+    setCount(c, seg, 0);
+    return;
+  }
+  const bits = new Uint8Array(places * 2);
+  let n = 0;
+  for (let col = 0; col < bits.length; col++) n += bits[col] = isCandidate(state, c.index, onCell, seg, col);
+  c.bits[seg] = n > 0 ? bits : null;
+  setCount(c, seg, n);
+}
+
+/** Looks at one column again. */
+function refreshColumn(c: Candidates, state: SimState, onCell: Int32Array, seg: number, col: number): void {
+  const columns = (c.index.segs[seg]?.places ?? 0) * 2;
+  if (col >= columns) return;
+  const now = isCandidate(state, c.index, onCell, seg, col);
+  let bits = c.bits[seg] ?? null;
+  if ((bits?.[col] ?? 0) === now) return;
+  if (!bits) c.bits[seg] = bits = new Uint8Array(columns);
+  bits[col] = now;
+  setCount(c, seg, (c.counts[seg] ?? 0) + (now === 1 ? 1 : -1));
+}
+
+/** Adds to `out` every segment a lot could reach from `node`, as the header says. */
+function segmentsNear(c: Candidates, net: RoadNetwork, node: number, out: Set<number>): void {
+  const reach = BUILDINGS_BALANCE.maxLotWidth;
+  let ring = [node];
+  const seen = new Set<number>(ring);
+  for (let hop = 0; hop < reach && ring.length > 0; hop++) {
+    const next: number[] = [];
+    for (const n of ring) {
+      if (!isNode(net, n)) continue;
+      for (let seg = net.nodeFirstSeg[n] ?? NONE; seg !== NONE; seg = nextSegmentAt(net, seg, n)) {
+        out.add(seg);
+        if ((c.index.segs[seg]?.places ?? 0) >= reach) continue;
+        const other = net.segA[seg] === n ? (net.segB[seg] ?? NONE) : (net.segA[seg] ?? NONE);
+        if (!seen.has(other)) {
+          seen.add(other);
+          next.push(other);
+        }
+      }
+    }
+    ring = next;
+  }
+}
+
+function build(state: SimState, index: CellIndex, onCell: Int32Array): Candidates {
+  const limit = index.segs.length;
+  const c: Candidates = {
+    index,
+    bits: new Array<Uint8Array | null>(limit).fill(null),
+    counts: new Int32Array(limit),
+    blocks: new Int32Array(Math.ceil(limit / BLOCK)),
+    count: 0,
+    segs: new Set(),
+    fronts: new Set(),
+  };
+  for (let seg = 0; seg < limit; seg++) refreshSegment(c, state, onCell, seg);
+  return c;
+}
+
+/**
+ * The candidates of `state`, current. `index` and `onCell` are the cell
+ * index and the building on each cell, as `syncCells` and `cellBuildings`
+ * give them now.
+ */
+function candidatesOf(state: SimState, index: CellIndex, onCell: Int32Array): Candidates {
+  let c = live.get(state.buildings);
+  if (!c || c.index !== index) {
+    c = build(state, index, onCell);
+    live.set(state.buildings, c);
+    index.watch = { segs: new Set(), nodes: new Set(), fronts: new Set() };
+    return c;
+  }
+  const watch = index.watch;
+  if (watch) {
+    for (const seg of watch.segs) c.segs.add(seg);
+    for (const node of watch.nodes) segmentsNear(c, state.roads, node, c.segs);
+    for (const key of watch.fronts) c.fronts.add(key);
+    watch.segs.clear();
+    watch.nodes.clear();
+    watch.fronts.clear();
+  }
+  if (c.segs.size === 0 && c.fronts.size === 0) return c;
+  fit(c, index.segs.length);
+  for (const seg of c.segs) refreshSegment(c, state, onCell, seg);
+  for (const key of c.fronts) {
+    const seg = Math.floor(key / CELL_KEY_STRIDE);
+    if (!c.segs.has(seg)) refreshColumn(c, state, onCell, seg, key - seg * CELL_KEY_STRIDE);
+  }
+  c.segs.clear();
+  c.fronts.clear();
+  return c;
+}
+
+/** How many candidates `state` has now. */
+export function candidateCount(state: SimState, index: CellIndex, onCell: Int32Array): number {
+  return candidatesOf(state, index, onCell).count;
+}
+
+/** The `k`-th candidate, from 0, in slot order, as a cell name. `k` must be under `candidateCount`. */
+export function candidateAt(state: SimState, index: CellIndex, onCell: Int32Array, k: number): CellRef {
+  const c = candidatesOf(state, index, onCell);
+  if (!(Number.isInteger(k) && k >= 0 && k < c.count)) throw new RangeError(`no candidate ${k} of ${c.count}`);
+  let left = k;
+  let block = 0;
+  while (left >= (c.blocks[block] ?? 0)) left -= c.blocks[block++] ?? 0;
+  let seg = block * BLOCK;
+  while (left >= (c.counts[seg] ?? 0)) left -= c.counts[seg++] ?? 0;
+  const bits = c.bits[seg] as Uint8Array;
+  let col = 0;
+  for (; ; col++) {
+    if (bits[col] !== 1) continue;
+    if (left === 0) break;
+    left--;
+  }
+  return { segment: seg, side: col % 2, place: (col - (col % 2)) / 2, depth: 0 };
+}
+
+/** Builds the candidates now if they are not, so a host's load pays for it and not a tick. */
+export function prepareCandidates(state: SimState, index: CellIndex, onCell: Int32Array): void {
+  candidatesOf(state, index, onCell);
+}
+
+/**
+ * Every candidate as `segment * CELL_KEY_STRIDE + column`, from the kept
+ * set and from a fresh build, for tests that check the two never part.
+ */
+export function candidateSets(state: SimState, index: CellIndex, onCell: Int32Array): { kept: number[]; fresh: number[] } {
+  const list = (c: Candidates): number[] => {
+    const out: number[] = [];
+    c.bits.forEach((bits, seg) => bits?.forEach((bit, col) => bit === 1 && out.push(seg * CELL_KEY_STRIDE + col)));
+    return out;
+  };
+  const kept = candidatesOf(state, index, onCell);
+  const fresh = build(state, index, onCell);
+  expectSameCounts(kept, fresh);
+  return { kept: list(kept), fresh: list(fresh) };
+}
+
+function expectSameCounts(kept: Candidates, fresh: Candidates): void {
+  let total = 0;
+  for (let block = 0; block < kept.blocks.length; block++) {
+    let sum = 0;
+    for (let seg = block * BLOCK; seg < (block + 1) * BLOCK && seg < kept.counts.length; seg++) sum += kept.counts[seg] ?? 0;
+    if (sum !== kept.blocks[block]) throw new Error(`block ${block} counts ${kept.blocks[block]}, its segments ${sum}`);
+    total += sum;
+  }
+  if (total !== kept.count || kept.count !== fresh.count) throw new Error(`kept ${kept.count} (${total} by block), fresh ${fresh.count}`);
+}
+
+/** Drops the kept candidates, so the next use builds them afresh. For benches and tests. */
+export function forgetCandidates(state: SimState): void {
+  live.delete(state.buildings);
+}

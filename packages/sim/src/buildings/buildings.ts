@@ -10,15 +10,18 @@
 // (zoning/cell-index.ts, `nextColumn`), so the row does not list its
 // cells. Which building stands on each cell is derived (where.ts).
 //
-// Only this module and its callers in the sim add or remove buildings. No
-// command does yet: the grower is issue 10 and `BulldozeBuilding` issue 11.
+// Only this module and its callers in the sim add or remove buildings. The
+// grower (grower.ts, issue 10) adds them. No command removes one yet:
+// `BulldozeBuilding` is issue 11.
 
 import { isSegment, resized, segmentIdLimit, type AnyTypedArray, type RoadNetwork } from "../roads/network";
 import type { SimState } from "../state";
+import { syncCells, type Column } from "../zoning/cell-index";
 import { CELL_LEFT, CELL_RIGHT, placesAlong } from "../zoning/cells";
 import { BUILDING_TYPES } from "./balance";
+import { noteColumns } from "./candidates";
 import { noteBuildingChanged } from "./changes";
-import { fileBuilding, lotProblem, unfileBuilding } from "./where";
+import { fileBuilding, lotColumns, lotProblem, unfileBuilding } from "./where";
 
 /** Set in `flags` for a live building. */
 export const BUILDING_ALIVE = 1;
@@ -171,7 +174,7 @@ export function readBuilding(b: BuildingState, id: number): BuildingRow {
 
 /**
  * Adds a building on the current tick and returns its id, the last free id
- * or a new one. Internal: the grower (issue 10) calls it with a lot the
+ * or a new one. Internal: the grower (grower.ts) calls it with a lot the
  * finder gave. Throws if the row is malformed or any cell of the lot is not
  * open, zoned for the type and free, so two lots never overlap. Not
  * undoable.
@@ -217,7 +220,14 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   b.builtAt[id] = state.tick;
   noteBuildingChanged(b, id);
   fileBuilding(state, id);
+  noteLotFronts(state, first, spec.width);
   return id;
+}
+
+/** Tells the grower's candidates (candidates.ts) that the front cells of a lot gained or lost a building. */
+function noteLotFronts(state: SimState, first: Column, width: number): void {
+  const cols = lotColumns(syncCells(state), first, width);
+  if (cols) noteColumns(state, cols);
 }
 
 /** Removes building `id`: its row becomes zeros and its id goes on the free list. Internal, like `addBuilding`. */
@@ -225,6 +235,7 @@ export function removeBuilding(state: SimState, id: number): void {
   const b = state.buildings;
   if (!isBuilding(b, id)) throw new RangeError(`building ${id} does not exist`);
   unfileBuilding(state, id);
+  noteLotFronts(state, { seg: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0, dir: b.dir[id] ?? 0 }, b.width[id] ?? 0);
   const arrays = b as unknown as Record<BuildingKey, AnyTypedArray>;
   for (const key of BUILDING_ARRAYS) arrays[key][id] = 0;
   const free = resized(b.free, b.free.length + 1);

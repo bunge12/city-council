@@ -86,9 +86,20 @@ function zoneLabel(zone: number, density: number): string {
   return `${ZONING_BALANCE.zones[zone - 1]?.letter ?? "?"}${density}`;
 }
 
-function refuse(problem: LotProblem, reason: string, extra: Partial<Extract<LotResult, { ok: false }>> = {}): LotResult {
+function refuse(problem: LotProblem, reason: string, extra: Partial<Extract<LotResult, { ok: false }>> = {}): Extract<LotResult, { ok: false }> {
   return { ok: false, problem, reason, ...extra };
 }
+
+/** Every type that fits at a cell, each on its largest lot, and how deep the free ground at the cell runs. */
+export type LotOptions =
+  | {
+      ok: true;
+      /** One per type that fits, in `BUILDING_TYPES` order: the type's largest lot holding the cell. Never empty. */
+      lots: Lot[];
+      /** Free cells of the cell's zone and density in its column, from the road back. */
+      free: number;
+    }
+  | Extract<LotResult, { ok: false }>;
 
 /**
  * The largest lot holding the cell `ref` names that fits a building type,
@@ -103,6 +114,25 @@ function refuse(problem: LotProblem, reason: string, extra: Partial<Extract<LotR
  * PRD has the grower wait for that tick.
  */
 export function findLot(state: SimState, ref: CellRef): LotResult {
+  const options = lotOptions(state, ref);
+  if (!options.ok) return options;
+  // The largest; between lots of one area the deeper; then the first type.
+  let best = options.lots[0] as Lot;
+  for (const lot of options.lots) {
+    const area = lot.width * lot.depth;
+    const bestArea = best.width * best.depth;
+    if (area > bestArea || (area === bestArea && lot.depth > best.depth)) best = lot;
+  }
+  return { ok: true, lot: best };
+}
+
+/**
+ * Every building type that fits at the cell `ref` names, each on the
+ * largest lot holding the cell that it takes, or why none does. `findLot`
+ * takes the largest of these; the grower draws among them (grower.ts).
+ * Settles cells as `findLot` does, with the same caution for systems.
+ */
+export function lotOptions(state: SimState, ref: CellRef): LotOptions {
   const index = syncCells(state);
   const cells = state.cells;
   const slot = cellSlot(state.roads, cells, ref);
@@ -163,8 +193,11 @@ export function findLot(state: SimState, ref: CellRef): LotResult {
   const own = strip[at]?.free ?? 0;
   if (own <= ref.depth) return refuse("off-road", "The ground between here and the road is not free");
 
-  let best: { lot: Lot; area: number } | null = null;
+  const lots: Lot[] = [];
   for (const type of types) {
+    // The type's largest lot; between lots of one area the deeper, then
+    // the one whose first column comes first along the strip.
+    let best: { lot: Lot; area: number } | null = null;
     for (let w = type.width[0]; w <= type.width[1]; w++) {
       for (let d = Math.max(type.depth[0], ref.depth + 1); d <= type.depth[1]; d++) {
         const area = w * d;
@@ -180,8 +213,9 @@ export function findLot(state: SimState, ref: CellRef): LotResult {
         }
       }
     }
+    if (best) lots.push(best.lot);
   }
-  if (best) return { ok: true, lot: best.lot };
+  if (lots.length > 0) return { ok: true, lots, free: own };
 
   // A lot holding the cell is at least `ref.depth + 1` deep, so only the
   // types that reach that far back count.

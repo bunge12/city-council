@@ -21,12 +21,18 @@ export interface BuildingTypeBalance {
   residents: [number, number];
   /** True for a starting value from M2-09 with nothing behind it yet. */
   proposal?: boolean;
+  /** True to draw residents per building between low and high; otherwise they scale with lot area (M2-10). */
+  drawResidents?: boolean;
 }
 
 /** The buildings balance file. */
 export interface BuildingsBalance {
   /** The widest lot along a road, in cells. The deepest is `zoneDepthCells`. */
   maxLotWidth: number;
+  /** Buildings the grower adds across the city each game day (M2-10). A whole number. */
+  growthPerDay: number;
+  /** Free cells the grower draws for one building before it gives that building up. */
+  growthTries: number;
   types: BuildingTypeBalance[];
 }
 
@@ -39,7 +45,7 @@ export interface BuildingType extends BuildingTypeBalance {
 }
 
 const FIELDS = ["id", "name", "zone", "density", "width", "depth", "residents"] as const;
-const KNOWN = new Set<string>([...FIELDS, "proposal"]);
+const KNOWN = new Set<string>([...FIELDS, "proposal", "drawResidents"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -68,6 +74,10 @@ export function checkBuildingsBalance(data: unknown): string[] {
   const widthOk = Number.isSafeInteger(maxWidth) && (maxWidth as number) >= 1;
   if (!widthOk) errors.push("maxLotWidth must be a whole number of at least 1");
   const widest = widthOk ? (maxWidth as number) : 0;
+  const perDay = data["growthPerDay"];
+  if (!Number.isSafeInteger(perDay) || (perDay as number) < 0) errors.push("growthPerDay must be a whole number of at least 0");
+  const tries = data["growthTries"];
+  if (!Number.isSafeInteger(tries) || (tries as number) < 1) errors.push("growthTries must be a whole number of at least 1");
   const deepest = ZONING_BALANCE.zoneDepthCells;
   const types = data["types"];
   if (!Array.isArray(types) || types.length === 0) {
@@ -85,7 +95,7 @@ export function checkBuildingsBalance(data: unknown): string[] {
     }
     for (const field of FIELDS) if (!(field in type)) errors.push(`${where}.${field} is missing`);
     for (const key of Object.keys(type)) if (!KNOWN.has(key) && !key.startsWith("_")) errors.push(`${where} has an unknown field "${key}"`);
-    const { id, name, zone, density, width, depth, residents, proposal } = type;
+    const { id, name, zone, density, width, depth, residents, proposal, drawResidents } = type;
     if (!isText(id)) errors.push(`${where}.id must be text`);
     else if (ids.has(id)) errors.push(`${where}.id "${id}" appears twice`);
     else ids.add(id);
@@ -100,6 +110,7 @@ export function checkBuildingsBalance(data: unknown): string[] {
     if ("depth" in type && !depthRange) errors.push(`${where}.depth must be [low, high] cells, from 1 to the zoning depth`);
     if ("residents" in type && !isRange(residents, 0, Number.MAX_SAFE_INTEGER)) errors.push(`${where}.residents must be [low, high], whole numbers`);
     if (proposal !== undefined && typeof proposal !== "boolean") errors.push(`${where}.proposal must be true or false`);
+    if (drawResidents !== undefined && typeof drawResidents !== "boolean") errors.push(`${where}.drawResidents must be true or false`);
     if (!zoneOk || !densityOk || !widthRange || !depthRange) return;
     for (let w = width[0]; w <= width[1]; w++) {
       for (let d = depth[0]; d <= depth[1]; d++) {

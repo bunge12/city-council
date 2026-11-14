@@ -1,0 +1,136 @@
+{
+  "description": "Growth on seed 2026. p1 builds a street and zones R1 along its north side; p2 zones a shallow R2 strip and a C2 strip along its south side. At day 4, while paused, p1 rezones the eastern half of the R1 strip, part of it built, to M1, then unpauses. Fifteen game days, one building a day.",
+  "seed": 2026,
+  "untilTick": 1500,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4600
+        },
+        "to": {
+          "x": 4392,
+          "z": 4600
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 4202,
+              "z": 4571
+            },
+            "to": {
+              "x": 4390,
+              "z": 4571
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 3,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 2,
+        "rects": [
+          {
+            "from": {
+              "x": 4202,
+              "z": 4617
+            },
+            "to": {
+              "x": 4294,
+              "z": 4617
+            },
+            "width": 20
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 4,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "commercial",
+        "density": 2,
+        "rects": [
+          {
+            "from": {
+              "x": 4298,
+              "z": 4629
+            },
+            "to": {
+              "x": 4390,
+              "z": 4629
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 450,
+      "seq": 5,
+      "playerId": "p1",
+      "type": "SetSpeed",
+      "payload": {
+        "speed": 0
+      }
+    },
+    {
+      "tick": 450,
+      "seq": 6,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "mixed",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 4298,
+              "z": 4571
+            },
+            "to": {
+              "x": 4390,
+              "z": 4571
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 450,
+      "seq": 7,
+      "playerId": "p1",
+      "type": "SetSpeed",
+      "payload": {
+        "speed": 1
+      }
+    }
+  ],
+  "balance": "22e8fc7e84b13a0d",
+  "hash": "9585a307e9927521"
+}

@@ -298,6 +298,21 @@ export interface CellIndex {
    * `followCells` last asked. Null until it first asks: the sim keeps none.
    */
   dirty: Set<number> | null;
+  /**
+   * What changed for the grower's candidates (buildings/candidates.ts)
+   * since it last looked: segments laid out again, the nodes at their ends
+   * before and after, and the front cells, at depth 0, of other segments
+   * whose status changed, as `segment * KEY_STRIDE + column`. Null until
+   * the grower first builds its candidates.
+   */
+  watch: CellWatch | null;
+}
+
+/** See `CellIndex.watch`. */
+export interface CellWatch {
+  segs: Set<number>;
+  nodes: Set<number>;
+  fronts: Set<number>;
 }
 
 // Scratch space. The sim runs on one thread, and no two users of one of
@@ -675,6 +690,7 @@ function setStatus(index: CellIndex, seg: number, s: SegShape, local: number, no
     index.dirty.add(chunkAt(x, z));
   }
   if ((was === CELL_OPEN) !== (now === CELL_OPEN)) fileCell(index, index.openBuckets, seg, s, local, now === CELL_OPEN);
+  if (index.watch && was !== now && local % DEPTH === 0) index.watch.fronts.add(seg * KEY_STRIDE + local / DEPTH);
 }
 
 /** Cell statuses as bits, for picking which cells to look at again. */
@@ -737,6 +753,7 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     spare: null,
     follows: false,
     dirty: null,
+    watch: null,
   };
   const limit = segmentIdLimit(net);
   const order: number[] = [];
@@ -911,6 +928,14 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   }
   if (changed.length === 0 && limit === oldLimit) return null;
   noteCellsRelaid(net, changed);
+  if (index.watch) {
+    const { segs, nodes } = index.watch;
+    for (const { id, shape } of changed) {
+      segs.add(id);
+      if (shape) nodes.add(shape.a).add(shape.b);
+      if (isSegment(net, id)) nodes.add(net.segA[id] ?? 0).add(net.segB[id] ?? 0);
+    }
+  }
   // A change still settling is folded into this one rather than finished
   // here, which could take far longer than a tick. Its tasks run now, so
   // the buckets match the shapes, and its cells still to walk join this

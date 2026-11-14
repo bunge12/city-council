@@ -18,6 +18,7 @@
 // reads that, as every query does, so what it paints follows from the roads
 // alone and never from how far a walk had got.
 
+import { noteFrontCells } from "../buildings/candidates";
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "./balance";
 import { noteCellsPainted } from "./cell-changes";
@@ -201,5 +202,6 @@ export function zoneCellsIfValid(state: SimState, payload: unknown): string | nu
     density[slot] = parsed.density;
   }
   noteCellsPainted(state.roads, state.cells, slots);
+  noteFrontCells(state, slots);
   return null;
 }
