@@ -7,6 +7,7 @@ import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 import { applyUndo, planUndo, recordUndo } from "./undo";
 import { stepCells } from "./zoning/cell-index";
+import { planZoneCells, zoneCellsIfValid } from "./zoning/zone";
 
 /**
  * A request to change the city. `payload` is plain JSON data, so a command
@@ -180,6 +181,23 @@ const Undo: CommandDef = {
   },
 };
 
+/**
+ * Paints zone `payload.zone` at density `payload.density` on every open
+ * cell whose centre lies in one of `payload.rects`, or clears them when the
+ * zone is "none". Free and instant, and it leaves whatever stands on the
+ * cells alone (PRD, "Rezoning"). See zoning/zone.ts. No undo record yet:
+ * that is issue #111.
+ */
+const ZoneCells: CommandDef = {
+  validate: (state, command) => {
+    const result = planZoneCells(state, command.payload);
+    return result.ok ? null : result.reason;
+  },
+  apply: (state, command) => void zoneCellsIfValid(state, command.payload),
+  // Finding the cells is the whole cost, so the step does it once.
+  applyIfValid: (state, command) => zoneCellsIfValid(state, command.payload),
+};
+
 /** Every command type the sim accepts, by name. */
 export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   NoOp,
@@ -189,6 +207,7 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   BulldozeRoad,
   UpgradeRoad,
   Undo,
+  ZoneCells,
 });
 
 /** Checks a command against the current state without changing anything. */

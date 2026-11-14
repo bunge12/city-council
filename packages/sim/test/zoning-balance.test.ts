@@ -17,7 +17,7 @@ describe("zoning balance", () => {
   });
 
   it("fails when any field is missing", () => {
-    for (const field of ["cellSize", "zoneDepthCells", "maxSlope", "settleCellsPerTick", "settleSurfacePieceCost", "settleFiledCellCost", "zones", "densities"]) {
+    for (const field of ["cellSize", "zoneDepthCells", "maxSlope", "settleCellsPerTick", "settleSurfacePieceCost", "settleFiledCellCost", "maxRectsPerCommand", "maxRectSide", "zones", "densities"]) {
       const data = Object.fromEntries(Object.entries(copy()).filter(([key]) => key !== field));
       expect(checkZoningBalance(data).join("; "), field).toMatch(field);
     }
@@ -40,6 +40,8 @@ describe("zoning balance", () => {
     expect(checkZoningBalance({ ...copy(), zoneDepthCells: 2.5 })).toEqual([expect.stringMatching(/zoneDepthCells/)]);
     expect(checkZoningBalance({ ...copy(), maxSlope: -1 })).toEqual([expect.stringMatching(/maxSlope/)]);
     expect(checkZoningBalance({ ...copy(), settleCellsPerTick: 0.5 })).toEqual([expect.stringMatching(/settleCellsPerTick/)]);
+    expect(checkZoningBalance({ ...copy(), maxRectsPerCommand: 0 })).toEqual([expect.stringMatching(/maxRectsPerCommand/)]);
+    expect(checkZoningBalance({ ...copy(), maxRectSide: 0 })).toEqual([expect.stringMatching(/maxRectSide/)]);
     const twice = copy();
     (twice["zones"] as Record<string, unknown>[])[1] = { id: "residential", name: "Again", letter: "R" };
     expect(checkZoningBalance(twice)).toHaveLength(2);
