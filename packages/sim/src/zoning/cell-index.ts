@@ -56,7 +56,6 @@ import {
   readAnchor,
   segmentIdLimit,
   type RoadNetwork,
-  type SegmentAnchor,
 } from "../roads/network";
 import type { SimState } from "../state";
 import { terrainOf } from "../terrain/cache";
@@ -129,36 +128,119 @@ interface SegShape {
   straight: boolean;
   /** Places along, when it has cells; 0 otherwise. */
   places: number;
-  /** Its cell anchor, as the network holds it. */
-  anchor: SegmentAnchor;
-  /** The anchor's road and build order as text: two shapes with the same key measure cells on the same road. */
-  anchorKey: string;
+  /** Its cell anchor, as the network holds it, field by field: a big city has tens of thousands of shapes, and every object costs the garbage collector. */
+  anchorAX: number;
+  anchorAZ: number;
+  anchorCX: number;
+  anchorCZ: number;
+  anchorBX: number;
+  anchorBZ: number;
+  anchorTA: number;
+  anchorTB: number;
   /** The first anchor cell this segment has, counted from the anchor's start. */
   from: number;
   /** Whether node A is at the anchor's far end, so places count down the anchor. */
   reversed: boolean;
-  /** Anchor stations `from` to `from + places`, which the cells span. Null when it has no cells. */
-  cellStations: Float64Array | null;
-  /** Its own stations every cell size from node A, and one at node B, for its surface. Null when it has no surface. */
-  stations: Float64Array | null;
   /**
-   * Its surface pieces, eight floats each as `surfaceInto` writes them, when
-   * its surface covers cells: ground or bridge at either end. A straight
-   * segment's pieces are STRAIGHT_PIECE station gaps long, a curve's one,
-   * so each piece's box is small and a long road is not tested whole.
+   * The shape's numbers, in one array over one buffer that `status` shares:
+   * first the anchor stations `from` to `from + places`, which the cells
+   * span; then, from `surfaceAt`, its surface pieces, eight floats each as
+   * `surfaceInto` writes them; then, from `boxesAt`, the box around each
+   * piece, four floats each. Null when it has neither cells nor a surface.
    */
-  surface: Float64Array | null;
-  /** The box around each surface piece, four floats each. */
-  surfaceBoxes: Float64Array | null;
+  data: Float64Array | null;
+  /**
+   * Surface pieces, when its surface covers cells: ground or bridge at
+   * either end. A straight segment's pieces are STRAIGHT_PIECE station gaps
+   * long, a curve's one, so each piece's box is small and a long road is
+   * not tested whole.
+   */
+  pieces: number;
+  surfaceAt: number;
+  boxesAt: number;
   /** Each cell's CELL_ value, in run order. Null when it has no cells. */
   status: Uint8Array | null;
+}
+
+/** Surface piece `k` of `s`, as a view on its data. */
+function surfacePiece(s: SegShape, k: number): Float64Array {
+  const at = s.surfaceAt + k * 8;
+  return (s.data as Float64Array).subarray(at, at + 8);
+}
+
+/** The anchor's road and build order as text: two shapes with the same key measure cells on the same road. */
+function anchorKeyOf(s: SegShape): string {
+  return `${s.order},${s.anchorAX},${s.anchorAZ},${s.anchorCX},${s.anchorCZ},${s.anchorBX},${s.anchorBZ}`;
+}
+
+/** Whether two shapes measure their cells on the same road. */
+function sameAnchorRoad(p: SegShape, q: SegShape): boolean {
+  return (
+    p.order === q.order &&
+    p.anchorAX === q.anchorAX &&
+    p.anchorAZ === q.anchorAZ &&
+    p.anchorCX === q.anchorCX &&
+    p.anchorCZ === q.anchorCZ &&
+    p.anchorBX === q.anchorBX &&
+    p.anchorBZ === q.anchorBZ
+  );
 }
 
 /**
  * Lists by bucket, only for buckets that hold something. A map rather than
  * an array of every bucket, so a city with few roads costs little to index.
  */
-type Buckets = Map<number, number[]>;
+type Buckets = BucketLists;
+
+/**
+ * Lists of numbers by bucket, kept in a few typed arrays as linked lists:
+ * `heads[bucket]` is the first entry, `next[entry]` the one after it, -1 at
+ * the end, and `keys[entry]` the number. A big city files millions of
+ * cells, and kept outside the garbage collector's heap they cost it nothing
+ * to scan or move. Order within a list means nothing.
+ */
+class BucketLists {
+  heads: Int32Array;
+  keys = new Float64Array(1024);
+  next = new Int32Array(1024);
+  private free = -1;
+  private used = 0;
+  constructor(buckets: number) {
+    this.heads = new Int32Array(buckets).fill(-1);
+  }
+
+  add(bucket: number, value: number): void {
+    let e = this.free;
+    if (e >= 0) this.free = this.next[e] ?? -1;
+    else {
+      if (this.used === this.keys.length) {
+        const keys = new Float64Array(this.keys.length * 2);
+        keys.set(this.keys);
+        const next = new Int32Array(this.next.length * 2);
+        next.set(this.next);
+        this.keys = keys;
+        this.next = next;
+      }
+      e = this.used++;
+    }
+    this.keys[e] = value;
+    this.next[e] = this.heads[bucket] ?? -1;
+    this.heads[bucket] = e;
+  }
+
+  remove(bucket: number, value: number): void {
+    let prev = -1;
+    for (let e = this.heads[bucket] ?? -1; e >= 0; prev = e, e = this.next[e] ?? -1) {
+      if (this.keys[e] !== value) continue;
+      if (prev < 0) this.heads[bucket] = this.next[e] ?? -1;
+      else this.next[prev] = this.next[e] ?? -1;
+      this.next[e] = this.free;
+      this.free = e;
+      return;
+    }
+    throw new Error(`${value} is missing from a cell bucket`);
+  }
+}
 
 /**
  * The work a change of roads leaves: tasks that find the cells it reaches,
@@ -182,7 +264,7 @@ interface Seed {
 
 /** What filing or unfiling a shape's cells and surface counts for. */
 function fileCost(s: SegShape): number {
-  return (s.status?.length ?? 0) * ZONING_BALANCE.settleFiledCellCost + (s.surface ? s.surface.length / 8 : 0) * ZONING_BALANCE.settleSurfacePieceCost;
+  return (s.status?.length ?? 0) * ZONING_BALANCE.settleFiledCellCost + s.pieces * ZONING_BALANCE.settleSurfacePieceCost;
 }
 
 /** The cells of one network. Derived data: not state. */
@@ -262,18 +344,25 @@ function shapeOf(net: RoadNetwork, id: number): SegShape | null {
   // Rail and paths have no width table yet, so they read the road type
   // with their index, as their segments do until they get their own.
   const half = (ROAD_TYPES[type]?.width ?? 0) / 2;
-  let surface: Float64Array | null = null;
-  let surfaceBoxes: Float64Array | null = null;
-  if (covers && stations) {
-    const last = stations.length / STATION_FLOATS - 1;
-    const step = straight ? STRAIGHT_PIECE : 1;
-    const pieces = ceilOf(last / step);
-    surface = new Float64Array(pieces * 8);
-    surfaceBoxes = new Float64Array(pieces * 4);
+  // Everything the shape keeps in one buffer, with a view for each part: a
+  // big city has tens of thousands of shapes, and the garbage collector
+  // pays for every buffer it tracks.
+  const last = stations ? stations.length / STATION_FLOATS - 1 : 0;
+  const step = straight ? STRAIGHT_PIECE : 1;
+  const pieces = covers && stations ? ceilOf(last / step) : 0;
+  const cellFloats = cellStations?.length ?? 0;
+  const floats = cellFloats + pieces * 12;
+  const statusBytes = places > 0 ? places * cellsPerPlace() : 0;
+  const buffer = new ArrayBuffer(floats * 8 + statusBytes);
+  const data = floats > 0 ? new Float64Array(buffer, 0, floats) : null;
+  if (data && cellStations) data.set(cellStations);
+  const surfaceAt = cellFloats;
+  const boxesAt = cellFloats + pieces * 8;
+  if (data && stations) {
     for (let i = 0; i < pieces; i++) {
-      const piece = surface.subarray(i * 8, i * 8 + 8);
+      const piece = data.subarray(surfaceAt + i * 8, surfaceAt + i * 8 + 8);
       surfaceInto(stations, i * step, Math.min(last, (i + 1) * step), half, piece);
-      quadBoxInto(piece, surfaceBoxes.subarray(i * 4, i * 4 + 4));
+      quadBoxInto(piece, data.subarray(boxesAt + i * 4, boxesAt + i * 4 + 4));
     }
   }
   return {
@@ -294,15 +383,21 @@ function shapeOf(net: RoadNetwork, id: number): SegShape | null {
     half,
     straight,
     places,
-    anchor,
-    anchorKey: [net.segOrder[id] ?? 0, anchor.ax, anchor.az, anchor.cx, anchor.cz, anchor.bx, anchor.bz].join(","),
+    anchorAX: anchor.ax,
+    anchorAZ: anchor.az,
+    anchorCX: anchor.cx,
+    anchorCZ: anchor.cz,
+    anchorBX: anchor.bx,
+    anchorBZ: anchor.bz,
+    anchorTA: anchor.tA,
+    anchorTB: anchor.tB,
     from,
     reversed,
-    cellStations,
-    stations,
-    surface,
-    surfaceBoxes,
-    status: places > 0 ? new Uint8Array(places * cellsPerPlace()).fill(UNSET) : null,
+    data,
+    pieces,
+    surfaceAt,
+    boxesAt,
+    status: statusBytes > 0 ? new Uint8Array(buffer, floats * 8, statusBytes).fill(UNSET) : null,
   };
 }
 
@@ -328,14 +423,14 @@ function sameAsNet(s: SegShape | null, net: RoadNetwork, id: number): boolean {
     s.levelB === net.segLevelB[id] &&
     s.order === net.segOrder[id] &&
     s.length === net.segLength[id] &&
-    s.anchor.ax === net.segAnchorAX[id] &&
-    s.anchor.az === net.segAnchorAZ[id] &&
-    s.anchor.cx === net.segAnchorCX[id] &&
-    s.anchor.cz === net.segAnchorCZ[id] &&
-    s.anchor.bx === net.segAnchorBX[id] &&
-    s.anchor.bz === net.segAnchorBZ[id] &&
-    s.anchor.tA === net.segAnchorTA[id] &&
-    s.anchor.tB === net.segAnchorTB[id]
+    s.anchorAX === net.segAnchorAX[id] &&
+    s.anchorAZ === net.segAnchorAZ[id] &&
+    s.anchorCX === net.segAnchorCX[id] &&
+    s.anchorCZ === net.segAnchorCZ[id] &&
+    s.anchorBX === net.segAnchorBX[id] &&
+    s.anchorBZ === net.segAnchorBZ[id] &&
+    s.anchorTA === net.segAnchorTA[id] &&
+    s.anchorTB === net.segAnchorTB[id]
   );
 }
 
@@ -351,7 +446,7 @@ function cellQuad(s: SegShape, local: number, out: Float64Array): void {
   const place = rest >> 1;
   const side = rest & 1;
   const j = s.reversed ? s.places - 1 - place : place;
-  cellCornersInto(s.cellStations as Float64Array, j, s.reversed ? 1 - side : side, s.half + depth * CELL, s.half + (depth + 1) * CELL, out);
+  cellCornersInto(s.data as Float64Array, j, s.reversed ? 1 - side : side, s.half + depth * CELL, s.half + (depth + 1) * CELL, out);
 }
 
 /** The anchor cell, side on the anchor and depth of cell `local` of `s`. */
@@ -393,16 +488,12 @@ function anchorOrdinal(s: SegShape, local: number): number {
  */
 function claimsBefore(p: SegShape, pl: number, pk: number, q: SegShape, ql: number, qk: number): boolean {
   if (p.order !== q.order) return p.order < q.order;
-  if (p.anchorKey !== q.anchorKey) {
-    const a = p.anchor;
-    const b = q.anchor;
-    if (a.ax !== b.ax) return a.ax < b.ax;
-    if (a.az !== b.az) return a.az < b.az;
-    if (a.bx !== b.bx) return a.bx < b.bx;
-    if (a.bz !== b.bz) return a.bz < b.bz;
-    if (a.cx !== b.cx) return a.cx < b.cx;
-    if (a.cz !== b.cz) return a.cz < b.cz;
-  }
+  if (p.anchorAX !== q.anchorAX) return p.anchorAX < q.anchorAX;
+  if (p.anchorAZ !== q.anchorAZ) return p.anchorAZ < q.anchorAZ;
+  if (p.anchorBX !== q.anchorBX) return p.anchorBX < q.anchorBX;
+  if (p.anchorBZ !== q.anchorBZ) return p.anchorBZ < q.anchorBZ;
+  if (p.anchorCX !== q.anchorCX) return p.anchorCX < q.anchorCX;
+  if (p.anchorCZ !== q.anchorCZ) return p.anchorCZ < q.anchorCZ;
   const po = anchorOrdinal(p, pl);
   const qo = anchorOrdinal(q, ql);
   if (po !== qo) return po < qo;
@@ -440,17 +531,11 @@ function boxesTouch(p: Float64Array, q: Float64Array): boolean {
 }
 
 function bucketPush(lists: Buckets, bucket: number, value: number): void {
-  const list = lists.get(bucket);
-  if (list) list.push(value);
-  else lists.set(bucket, [value]);
+  lists.add(bucket, value);
 }
 
 function bucketDrop(lists: Buckets, bucket: number, value: number): void {
-  const list = lists.get(bucket);
-  const at = list ? list.indexOf(value) : -1;
-  if (!list || at < 0) throw new Error(`${value} is missing from a cell bucket`);
-  list[at] = list[list.length - 1] as number;
-  list.pop();
+  lists.remove(bucket, value);
 }
 
 /** Files or unfiles cell `local` of `s` in `lists`. */
@@ -472,11 +557,12 @@ function fileCells(index: CellIndex, seg: number, s: SegShape, add: boolean): vo
 }
 
 function fileSurface(index: CellIndex, seg: number, s: SegShape, add: boolean): void {
-  const boxes = s.surfaceBoxes;
-  if (!boxes) return;
-  for (let i = 0; i < boxes.length; i += 4) {
-    const key = keyOf(seg, i / 4);
-    forBuckets(index, boxes.subarray(i, i + 4), (bucket) => (add ? bucketPush : bucketDrop)(index.surfaceBuckets, bucket, key));
+  const data = s.data;
+  if (!data) return;
+  for (let k = 0; k < s.pieces; k++) {
+    const key = keyOf(seg, k);
+    const at = s.boxesAt + k * 4;
+    forBuckets(index, data.subarray(at, at + 4), (bucket) => (add ? bucketPush : bucketDrop)(index.surfaceBuckets, bucket, key));
   }
 }
 
@@ -494,17 +580,18 @@ function covered(index: CellIndex, seg: number, q: Float64Array, box: Float64Arr
   const j1 = bucketOf(index, maxZ);
   for (let j = j0; j <= j1; j++) {
     for (let i = i0; i <= i1; i++) {
-      const list = index.surfaceBuckets.get(j * index.perSide + i);
-      if (!list) continue;
-      for (const piece of list) {
+      const list = index.surfaceBuckets;
+      for (let e = list.heads[j * index.perSide + i] ?? -1; e >= 0; e = list.next[e] ?? -1) {
+        const piece = list.keys[e] ?? 0;
         const other = Math.floor(piece / KEY_STRIDE);
         if (other === seg) continue;
         const s = index.segs[other];
-        const boxes = s?.surfaceBoxes;
-        if (!s || !boxes) continue;
-        const k = (piece - other * KEY_STRIDE) * 4;
-        if ((boxes[k] ?? 0) > maxX || (boxes[k + 2] ?? 0) < minX || (boxes[k + 1] ?? 0) > maxZ || (boxes[k + 3] ?? 0) < minZ) continue;
-        if (quadsOverlap(q, (s.surface as Float64Array).subarray(k * 2, k * 2 + 8))) return true;
+        const data = s?.data;
+        if (!s || !data) continue;
+        const k = piece - other * KEY_STRIDE;
+        const b = s.boxesAt + k * 4;
+        if ((data[b] ?? 0) > maxX || (data[b + 2] ?? 0) < minX || (data[b + 1] ?? 0) > maxZ || (data[b + 3] ?? 0) < minZ) continue;
+        if (quadsOverlap(q, surfacePiece(s, k))) return true;
       }
     }
   }
@@ -538,9 +625,9 @@ function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): nu
   const j1 = bucketOf(index, maxZ);
   for (let j = j0; j <= j1; j++) {
     for (let i = i0; i <= i1; i++) {
-      const list = index.openBuckets.get(j * index.perSide + i);
-      if (!list) continue;
-      for (const other of list) {
+      const list = index.openBuckets;
+      for (let e = list.heads[j * index.perSide + i] ?? -1; e >= 0; e = list.next[e] ?? -1) {
+        const other = list.keys[e] ?? 0;
         if (other === key) continue;
         const otherSeg = Math.floor(other / KEY_STRIDE);
         const o = index.segs[otherSeg];
@@ -549,7 +636,7 @@ function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): nu
         quadBoxInto(quadB, boxB);
         if ((boxB[0] ?? 0) > maxX || (boxB[2] ?? 0) < minX || (boxB[1] ?? 0) > maxZ || (boxB[3] ?? 0) < minZ) continue;
         // A cell of its own road, or of another piece of the road it was cut from, closes up on a bend.
-        if (quadsOverlap(q, quadB)) return o.anchorKey === s.anchorKey ? CELL_BEND : CELL_TAKEN;
+        if (quadsOverlap(q, quadB)) return sameAnchorRoad(o, s) ? CELL_BEND : CELL_TAKEN;
       }
     }
   }
@@ -588,8 +675,10 @@ function forOverlappingCells(
   visit: (key: number) => void,
   skip?: (key: number, seg: number) => boolean,
 ): void {
+  const list = index.cellBuckets;
   forBuckets(index, box, (bucket) => {
-    for (const key of index.cellBuckets.get(bucket) ?? []) {
+    for (let e = list.heads[bucket] ?? -1; e >= 0; e = list.next[e] ?? -1) {
+      const key = list.keys[e] ?? 0;
       const seg = segOfKey(key);
       if (skip?.(key, seg)) continue;
       const s = index.segs[seg];
@@ -613,9 +702,9 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     net,
     terrain,
     perSide,
-    cellBuckets: new Map(),
-    openBuckets: new Map(),
-    surfaceBuckets: new Map(),
+    cellBuckets: new BucketLists(perSide * perSide),
+    openBuckets: new BucketLists(perSide * perSide),
+    surfaceBuckets: new BucketLists(perSide * perSide),
     segs: [],
     touched: new Set<number>(),
     pending: null,
@@ -809,18 +898,17 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   };
   // A surface that comes can only block a cell, and one that goes can only free one.
   const seedUnderSurface = (s: SegShape, statuses: number) => {
-    const surface = s.surface;
-    if (!surface) return;
-    for (let i = 0; i < surface.length; i += 8) seedOverlapping(surface.subarray(i, i + 8), statuses);
+    for (let k = 0; k < s.pieces; k++) seedOverlapping(surfacePiece(s, k), statuses);
   };
 
   // Removed shapes with cells, by the anchor they measure them on.
   const byAnchor = new Map<string, Before[]>();
   for (const c of changed) {
     if (!c.shape?.status) continue;
-    const list = byAnchor.get(c.shape.anchorKey);
+    const key = anchorKeyOf(c.shape);
+    const list = byAnchor.get(key);
     if (list) list.push(c);
-    else byAnchor.set(c.shape.anchorKey, [c]);
+    else byAnchor.set(key, [c]);
   }
 
   // Finding the cells a change reaches is left to the job, a task at a
@@ -854,7 +942,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     index.segs[id] = s;
     if (!s) continue;
     const status = s.status;
-    const sources = status ? byAnchor.get(s.anchorKey) : undefined;
+    const sources = status ? byAnchor.get(anchorKeyOf(s)) : undefined;
     if (status && !sources) fresh += status.length;
     if (status && sources) {
       for (let local = 0; local < status.length; local++) {
@@ -896,18 +984,18 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   }
   // Cells under a surface that went may be free now, and are walked.
   for (const { shape } of changed) {
-    if (!shape?.surface) continue;
-    seeds.push({ run: () => seedUnderSurface(shape, UNDER_ROAD), cost: (shape.surface.length / 8) * ZONING_BALANCE.settleSurfacePieceCost });
+    if (!shape || shape.pieces === 0) continue;
+    seeds.push({ run: () => seedUnderSurface(shape, UNDER_ROAD), cost: shape.pieces * ZONING_BALANCE.settleSurfacePieceCost });
   }
   // Cells under a surface that came are blocked by it, whatever claims
   // first, unless they were already blocked by their own shape: no walk
   // needed. One that held ground lets it go to the cells after it.
   const quadC = new Float64Array(8);
   for (const { id } of changed) {
-    const surface = index.segs[id]?.surface;
-    if (!surface) continue;
-    for (let i = 0; i < surface.length; i += 8) seeds.push({ cost: ZONING_BALANCE.settleSurfacePieceCost, run: () => {
-      const piece = surface.subarray(i, i + 8);
+    const shape = index.segs[id];
+    if (!shape) continue;
+    for (let k = 0; k < shape.pieces; k++) seeds.push({ cost: ZONING_BALANCE.settleSurfacePieceCost, run: () => {
+      const piece = surfacePiece(shape, k);
       quadBoxInto(piece, box);
       const pieceBox = Float64Array.from(box);
       forOverlappingCells(
@@ -1093,7 +1181,7 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
   for (const c of changed) {
     const s = index.segs[c.id];
     const status = s?.status;
-    const sources = s ? byAnchor.get(s.anchorKey) : undefined;
+    const sources = s ? byAnchor.get(anchorKeyOf(s)) : undefined;
     if (!s || !status || !sources) continue;
     const to = offset[c.id] ?? 0;
     for (let local = 0; local < status.length; local++) {
@@ -1184,8 +1272,12 @@ export function stepCells(state: SimState): void {
   state.cells = cells;
   const ticks = ceilOf(work / ZONING_BALANCE.settleCellsPerTick);
   if (ticks <= 1) {
-    // Settled at once, unless it joined a change still settling, which
-    // keeps its own tick; nothing may read the cells before that anyway.
+    // While an earlier change is still settling, by the state's own clock,
+    // this one adds its tick to the wait, so its work has a slice of its
+    // own. From state alone: a city loaded mid-settle, which settled at
+    // load and has nothing pending, extends it just the same.
+    if (state.cellsReadyAt > state.tick) state.cellsReadyAt += ticks;
+    // Settled at once, unless it joined a walk still under way.
     if (!folded) drain(index, Infinity);
     return;
   }
@@ -1280,7 +1372,9 @@ export function cellAt(state: SimState, x: number, z: number): CellInfo | null {
   let best = -1;
   let bestOpen = false;
   const q = new Float64Array(8);
-  for (const key of index.cellBuckets.get(bucket) ?? []) {
+  const list = index.cellBuckets;
+  for (let e = list.heads[bucket] ?? -1; e >= 0; e = list.next[e] ?? -1) {
+    const key = list.keys[e] ?? 0;
     const seg = segOfKey(key);
     const s = index.segs[seg];
     if (!s) continue;
@@ -1301,8 +1395,10 @@ function keysInBox(index: CellIndex, minX: number, minZ: number, maxX: number, m
   const box = Float64Array.of(minX, minZ, maxX, maxZ);
   const found = new Set<number>();
   const q = new Float64Array(8);
+  const list = index.cellBuckets;
   forBuckets(index, box, (bucket) => {
-    for (const key of index.cellBuckets.get(bucket) ?? []) {
+    for (let e = list.heads[bucket] ?? -1; e >= 0; e = list.next[e] ?? -1) {
+      const key = list.keys[e] ?? 0;
       if (found.has(key)) continue;
       const seg = segOfKey(key);
       const s = index.segs[seg];
