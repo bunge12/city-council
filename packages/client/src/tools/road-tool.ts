@@ -354,12 +354,13 @@ export class RoadToolController {
       // A curve's end. The angle and length guides measure a straight road
       // from its start, which a curve's end is not, so only the points that
       // fix an end catch it: nodes, segments, guide lines and the grid. A
-      // parallel offset runs beside a road, which a curve does not.
+      // parallel offset runs beside a road, which a curve does not, and the
+      // cell snap's setback assumes one (issue M2-08).
       return snapPoint(cursor.x, cursor.z, {
         ...base,
         start: s.roadControl,
         source: null,
-        guides: { ...s.guides, angle: false, length: false, offset: false },
+        guides: { ...s.guides, angle: false, length: false, offset: false, cells: false },
       });
     }
     const start = s.roadStart;

@@ -153,7 +153,7 @@ describe("the cell sources", () => {
     send("BuildRoad", { from: { x: 4200, z: Z }, to: { x: 4392, z: Z }, type: "street" });
     const mid = (EDGE + BACK) / 2;
     send("ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4201, z: mid }, to: { x: 4263, z: mid }, width: DEPTH * CELL - 2 }] });
-    const cursor = { x: 4203, z: Z - 2 };
+    const cursor = { x: 4201.5, z: Z - 1 };
     const c = ctx(state, null);
     // Both reach: without the node source, a cell corner catches the cursor.
     expect(snapPoint(cursor.x, cursor.z, c, SNAP_SOURCES.filter((s) => s !== nodeSource)).kind).toBe("corner");
@@ -219,8 +219,9 @@ describe("a road drawn with the cell snap", () => {
     const state = city();
     const line = RUN_X0 + 4 * CELL;
     const from = snapPoint(line + 1, behind(STREET) - 1, ctx(state, null));
+    // From a start on the cell line, the square join onto the street is the cell line's foot.
     const to = snapPoint(line + 1, Z - 1, ctx(state, from, { metresPerPixel: 0.5 }));
-    expect([from.kind, to.kind]).toEqual(["corner", "corner"]);
+    expect([from.kind, to.kind]).toEqual(["corner", "segment"]);
     expect([from.x, to.x, to.z]).toEqual([line, line, Z]);
     expect(submit(state, { seq: 99, playerId: "test", type: "BuildRoad", payload: { from, to, type: "street" } })).toEqual({ ok: true });
     for (let i = 0; i < 5; i++) step(state);
@@ -244,5 +245,159 @@ describe("the grid tool's corners", () => {
     expect(hit?.x).toBeCloseTo(RUN_X0 - STREET / 2 - CELL_SNAP.clearance, 6);
     s = { ...s, guides: { ...DEFAULT_GUIDES, cells: false } };
     expect(tool.snap(ground, { metresPerPixel: 1, free: false })?.kind).toBe("none");
+  });
+});
+
+// Issue M2-08 review: layouts where the cells of two strips, or two
+// segments, do not share their corners. Every line and corner the snap
+// offers must leave a road of the width being drawn clear of every zoned
+// cell and off every road but the one it joins.
+describe("lines offered where cells do not line up", () => {
+  type Seg = [BuildPoint, BuildPoint];
+  type Rect = { from: BuildPoint; to: BuildPoint; width: number };
+
+  function layout(roads: Seg[], rects: Rect[]): SimState {
+    const state = createBareState(SEED);
+    let seq = 0;
+    const send = (type: string, payload: unknown) => {
+      const result = submit(state, { seq: ++seq, playerId: "test", type, payload });
+      if (!result.ok) throw new Error(`${type} refused: ${result.reason}`);
+      step(state);
+    };
+    for (const [from, to] of roads) send("BuildRoad", { from, to, type: "street" });
+    send("ZoneCells", { zone: "residential", density: 1, rects });
+    for (let i = 0; i < 5; i++) step(state);
+    return state;
+  }
+
+  /** Distance from (x, z) to the quad, 0 inside it. */
+  function toQuad(q: ArrayLike<number>, x: number, z: number): number {
+    let inside = true;
+    let sign = 0;
+    let best = Infinity;
+    for (let k = 0; k < 4; k++) {
+      const ax = q[k * 2] ?? 0;
+      const az = q[k * 2 + 1] ?? 0;
+      const bx = q[((k + 1) % 4) * 2] ?? 0;
+      const bz = q[((k + 1) % 4) * 2 + 1] ?? 0;
+      const c = (bx - ax) * (z - az) - (bz - az) * (x - ax);
+      const s = Math.sign(c);
+      if (sign === 0) sign = s;
+      else if (s !== sign) inside = false;
+      const dx = bx - ax;
+      const dz = bz - az;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+      best = Math.min(best, Math.hypot(ax + dx * t - x, az + dz * t - z));
+    }
+    return inside ? 0 : best;
+  }
+
+  /** Corners of every zoned, open cell in the box. */
+  function zonedQuads(state: SimState, minX: number, minZ: number, maxX: number, maxZ: number): number[][] {
+    return zonedCellLookup(state)(minX, minZ, maxX, maxZ).map((c) => Array.from(c.corners));
+  }
+
+  /** Every edge and corner the cell sources offer for cursors over the box, at a few zooms. */
+  function offered(state: SimState, minX: number, minZ: number, maxX: number, maxZ: number) {
+    const hits: ReturnType<typeof snapPoint>[] = [];
+    for (const mpp of [0.2, 0.5, 1]) {
+      for (let x = minX; x <= maxX; x += 1.5) {
+        for (let z = minZ; z <= maxZ; z += 1.5) {
+          const s = snapPoint(x, z, ctx(state, null, { metresPerPixel: mpp }));
+          if (s.kind === "corner" || s.kind === "edge") hits.push(s);
+        }
+      }
+    }
+    return hits;
+  }
+
+  /** Each offered point clear of the zoned cells by half a street, unless it lies on a cell line or on a road's centre line. */
+  function expectClear(state: SimState, minX: number, minZ: number, maxX: number, maxZ: number): number {
+    const quads = zonedQuads(state, minX - 60, minZ - 60, maxX + 60, maxZ + 60);
+    const hits = offered(state, minX, minZ, maxX, maxZ);
+    let outside = 0;
+    for (const h of hits) {
+      if (h.kind === "corner" && h.segment !== undefined) continue;
+      const e = h.cellEdges?.[0];
+      const onCellLine = h.kind === "edge" && e && h.edgeLine && Math.abs(h.edgeLine.ax - e.ax) < 1e-9 && Math.abs(h.edgeLine.az - e.az) < 1e-9;
+      if (onCellLine) continue;
+      outside++;
+      const l = h.kind === "edge" ? h.edgeLine : undefined;
+      const points = l ? [0, 0.25, 0.5, 0.75, 1].map((t) => ({ x: l.ax + (l.bx - l.ax) * t, z: l.az + (l.bz - l.az) * t })) : [h];
+      for (const p of points) {
+        const d = Math.min(...quads.map((q) => toQuad(q, p.x, p.z)));
+        expect(d, `${h.kind} at (${p.x.toFixed(2)}, ${p.z.toFixed(2)})`).toBeGreaterThan(STREET / 2 - 0.02);
+      }
+    }
+    return outside;
+  }
+
+  it("between two strips back to back whose cells are offset along the road", () => {
+    // Twelve cells edge to edge, the second street starting 3 m further east.
+    const north = 4494;
+    const state = layout(
+      [
+        [{ x: 4200, z: Z }, { x: 4392, z: Z }],
+        [{ x: 4203, z: north }, { x: 4395, z: north }],
+      ],
+      [
+        { from: { x: 4210, z: (EDGE + BACK) / 2 }, to: { x: 4380, z: (EDGE + BACK) / 2 }, width: DEPTH * CELL - 2 },
+        { from: { x: 4213, z: north + STREET / 2 + (DEPTH * CELL) / 2 }, to: { x: 4383, z: north + STREET / 2 + (DEPTH * CELL) / 2 }, width: DEPTH * CELL - 2 },
+      ],
+    );
+    expectClear(state, 4240, BACK - 8, 4330, BACK + 8);
+    // Nothing runs along the backs: there is no room for a road between the strips.
+    const along = offered(state, 4240, BACK - 8, 4330, BACK + 8).filter((h) => h.kind === "edge" && h.edgeLine && Math.abs(h.edgeLine.az - h.edgeLine.bz) < 1e-6);
+    expect(along).toEqual([]);
+  });
+
+  it("in front of a strip whose first row is not zoned", () => {
+    const mid = (EDGE - CELL + BACK) / 2;
+    const state = layout([[{ x: 4200, z: Z }, { x: 4392, z: Z }]], [{ from: { x: RUN_X0 + 1, z: mid }, to: { x: RUN_X1 - 1, z: mid }, width: (DEPTH - 1) * CELL - 2 }]);
+    expectClear(state, RUN_X0 - 10, EDGE - 2 * CELL, RUN_X1 + 10, Z);
+    // No line runs along the road's side of the strip, where a road would overlap the street.
+    const front = offered(state, RUN_X0, EDGE - CELL - 6, RUN_X1, Z).filter((h) => h.kind === "edge" && h.edgeLine && Math.abs(h.edgeLine.az - h.edgeLine.bz) < 1e-6);
+    expect(front).toEqual([]);
+  });
+
+  it("at a bend, where the cells of two segments leave a wedge between them", () => {
+    // A 15 degree bend at (4300, 4600), zoned on its outer side along both segments.
+    const bend = { x: 4300, z: Z };
+    const far = { x: 4300 + 96 * Math.cos(Math.PI / 12), z: Z + 96 * Math.sin(Math.PI / 12) };
+    const mid = (EDGE + BACK) / 2;
+    const state = layout(
+      [
+        [{ x: 4204, z: Z }, bend],
+        [bend, { x: Math.round(far.x * 8) / 8, z: Math.round(far.z * 8) / 8 }],
+      ],
+      [{ from: { x: 4210, z: mid }, to: { x: 4298, z: mid }, width: DEPTH * CELL - 2 }],
+    );
+    // Zone the second segment's outer side by its own direction.
+    const ux = Math.cos(Math.PI / 12);
+    const uz = Math.sin(Math.PI / 12);
+    const off = STREET / 2 + (DEPTH * CELL) / 2;
+    const r = submit(state, {
+      seq: 50,
+      playerId: "test",
+      type: "ZoneCells",
+      payload: { zone: "residential", density: 1, rects: [{ from: { x: bend.x + ux * 4 + uz * off, z: bend.z + uz * 4 - ux * off }, to: { x: bend.x + ux * 90 + uz * off, z: bend.z + uz * 90 - ux * off }, width: DEPTH * CELL - 2 }] },
+    });
+    expect(r).toEqual({ ok: true });
+    for (let i = 0; i < 5; i++) step(state);
+    expectClear(state, 4285, BACK - 8, 4320, Z);
+  });
+
+  it("leave the square join onto a zoned street to the segment snap while a road is drawn", () => {
+    const start = { x: 4261.5, z: 4450 };
+    const s = snapPoint(4262, Z - 2, ctx(zoned, start));
+    expect(s.kind).toBe("segment");
+    expect(s.perpendicular).toBe(true);
+    expect(s.x).toBeCloseTo(4261.5, 6);
+    expect(s.square || s.perpendicular).toBe(true);
+  });
+
+  it("put no edge point on the surface of a road, where a new road would end on it", () => {
+    const hits = offered(zoned, RUN_X0, Z - STREET, RUN_X1, Z + STREET).filter((h) => h.kind === "edge");
+    for (const h of hits) expect(Math.abs(h.z - Z), `edge at (${h.x}, ${h.z})`).toBeGreaterThanOrEqual(STREET - 0.02);
   });
 });

@@ -106,10 +106,14 @@ export const PARALLEL = {
  * already lines a road up behind an unzoned strip.
  */
 export const CELL_SNAP = {
-  /** A corner of the zoned area, or where a cell line meets it or the road, catches the cursor this near. */
+  /** A corner of the zoned area, or where a cell line meets it or the road, catches the cursor this near... */
   cornerPx: 12,
-  /** The back or end of a zoned area, or a cell line across it, catches the cursor this near. */
+  /** ...but never further than this many metres, so most of a cell stays free when zoomed out. */
+  cornerMaxMetres: 3,
+  /** The back or end of a zoned area, or a cell line across it, catches the cursor this near... */
   edgePx: 10,
+  /** ...but never further than this many metres: a quarter of a cell. */
+  edgeMaxMetres: 2,
   /**
    * A road drawn along the outside of a zoned area keeps this many metres
    * between its edge and the cells, so rounding to the sim's build grid
@@ -117,7 +121,7 @@ export const CELL_SNAP = {
    */
   clearance: 0.25,
   /** Zoomed out past this, metres a pixel, a cell is a few pixels across and the source is off. */
-  maxMetresPerPixel: 2,
+  maxMetresPerPixel: 1,
 } as const;
 
 /** The edge-to-edge gaps the parallel offset snaps to, in cells, main first. */

@@ -25,10 +25,11 @@
 // direction, for an angle snap or for no snap at all. Every other source
 // fixes the point, or a line it lies on, so length snap leaves it alone.
 //
-// A cell corner comes before a segment so that a road ending on a street
-// beside a zoned strip lands on a cell line rather than anywhere along it;
+// A cell corner comes before a segment so that a road started on a street
+// beside a zoned strip starts on a cell line rather than anywhere along it;
 // those corners lie on the street's centre line, so the sim joins it all the
-// same. An edge comes after angle, which is the clearer sign of what the
+// same. While a road is being drawn with the angle guide on, the corners on
+// roads step aside for the square join and the angle steps. An edge comes after angle, which is the clearer sign of what the
 // player means, and before offset and line, because it is drawn from cells
 // the player has zoned. Behind a straight strip the edge and the six-cell
 // offset are the same line, give or take the clearance; the edge wins.
