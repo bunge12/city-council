@@ -253,14 +253,18 @@ const editTool = new EditToolController({
 });
 mirror.subscribe((update) => editTool.mirrorUpdated(update));
 
+/** Counts every snapshot and delta, so the zone tool knows when what it worked out from the copy is stale. */
+let cityVersion = 0;
+mirror.subscribe(() => cityVersion++);
 const zoneTool = new ZoneToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
   city: () => mirror.state,
+  version: () => cityVersion,
   send: (payload) => sendCommand("ZoneCells", payload),
 });
 mirror.subscribe((update) => zoneTool.mirrorUpdated(update));
-// However the zone tool is left, by its button or by picking another tool, it drops its stroke and puts the overlay back.
+// However the zone tool is left, by its button or by picking another tool, it drops its stroke.
 useUi.subscribe((now, before) => {
   if (now.tool !== before.tool) zoneTool.toolChanged(now.tool, before.tool);
 });
@@ -543,7 +547,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     cellReadout();
   };
   useUi.subscribe((now, before) => {
-    if (now.zoningOverlay !== before.zoningOverlay) setCellsVisible(now.zoningOverlay);
+    if (now.tool !== before.tool && (now.tool === "zone" || before.tool === "zone")) setCellsVisible(now.tool === "zone");
   });
   mirror.subscribe((update) => {
     showMap();
@@ -555,7 +559,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     showRoads({ kind: "snapshot" });
     showCells({ kind: "snapshot" });
   }
-  setCellsVisible(useUi.getState().zoningOverlay);
+  setCellsVisible(useUi.getState().tool === "zone");
   return view;
 });
 viewReady.catch((error: unknown) => {
@@ -737,22 +741,26 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     }
     return edit;
   };
-  // What the zone tool would paint, checked with the sim's planner only when the cells it aims at, the paint or the city change.
+  // What the zone tool would paint, checked with the sim's planner only when the cells it aims at, the paint, the strokes in flight or the city change.
+  // The tool keeps its targets while what they follow from holds, so the same array means the same cells.
+  let zoneTargets: readonly unknown[] | null = null;
   let zoneKey = "";
   let zonePreview: ZonePreview | null = null;
   let zonePreviewId = 0;
   const liveZone = (hover: ZoneHover): ZonePreview | null => {
     const ui = useUi.getState();
     if (!zoneTool.active()) {
+      zoneTargets = null;
       zoneKey = "";
       zonePreview = null;
       return null;
     }
-    const slots = zoneTool.targets(hover).map((c) => c.slot);
-    const key = `${ui.zoneErase ? "erase" : `${ui.zonePick},${ui.zoneDensity}`},${mirrorVersion},${slots.join(";")}`;
-    if (key !== zoneKey) {
+    const targets = zoneTool.targets(hover);
+    const key = `${ui.zoneErase ? "erase" : `${ui.zonePick},${ui.zoneDensity}`},${mirrorVersion},${ui.zonePending.map((p) => p.id).join(";")}`;
+    if (targets !== zoneTargets || key !== zoneKey) {
+      zoneTargets = targets;
       zoneKey = key;
-      zonePreview = slots.length === 0 ? null : zoneTool.preview(hover);
+      zonePreview = zoneTool.previewOf(targets);
       zonePreviewId++;
     }
     return zonePreview;
@@ -839,8 +847,8 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const zonePendingNow = useUi.getState().zonePending;
     const zoneShown = zoneNow?.ok ? zoneNow : null;
     zoneLayer.show(
-      zoneShown ? zoneMarks(zoneShown) : [],
-      zonePendingNow.flatMap((p) => zoneMarks(p.preview)),
+      () => (zoneShown ? zoneMarks(zoneShown) : []),
+      () => zonePendingNow.flatMap((p) => zoneMarks(p.preview)),
       `${zoneShown ? zonePreviewId : "-"}|${zonePendingNow.map((p) => p.id).join(",")}`,
     );
     document.body.dataset["zonePreview"] = zoneNow ? (zoneNow.ok ? String(zoneNow.cells.length) : "0") : "";

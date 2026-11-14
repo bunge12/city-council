@@ -50,8 +50,11 @@ export function buildZoneMarks(marks: readonly ZoneMark[], height: (x: number, z
 }
 
 export interface ZonePreviewLayer {
-  /** Shows the cells a click would change, and those of strokes in flight. `key` changes whenever the cells do. */
-  show(preview: readonly ZoneMark[], pending: readonly ZoneMark[], key: string): void;
+  /**
+   * Shows the cells a click would change, and those of strokes in flight.
+   * `key` changes whenever the cells do; the marks are only asked for then.
+   */
+  show(preview: () => readonly ZoneMark[], pending: () => readonly ZoneMark[], key: string): void;
   dispose(): void;
 }
 
@@ -90,8 +93,8 @@ export function createZonePreviewLayer(scene: Scene, terrain: () => Terrain): Zo
     show(preview, pending, key) {
       if (key === shown) return;
       shown = key;
-      fill(previewMesh, preview);
-      fill(pendingMesh, pending);
+      fill(previewMesh, preview());
+      fill(pendingMesh, pending());
     },
     dispose() {
       for (const mesh of [previewMesh, pendingMesh]) {

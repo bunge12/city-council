@@ -81,6 +81,8 @@ export interface PendingZone {
   preview: ZonePreview;
   /** Commands not yet answered. */
   waiting: number;
+  /** Commands the sim has queued. */
+  accepted: number;
   /** "sending" until every command is answered; "accepted" once all were queued. */
   status: "sending" | "accepted";
 }
@@ -123,6 +125,8 @@ export interface ZoneHover {
 
 type City = ReadonlyDeep<SimState>;
 
+const NO_TARGETS: readonly ZoneTarget[] = [];
+
 /** The sim's queries only read the city, apart from the derived cell index, which is not state a player set. */
 function asState(city: City): SimState {
   return city as unknown as SimState;
@@ -143,9 +147,17 @@ function targetOf(city: City, segment: number, side: number, place: number, dept
   return { slot: slotOf(city, segment, side, place, depth), segment, side, place, depth, x, z, corners };
 }
 
+/** Whether target `t` is open: the cell the sim finds at its centre is this one, and open. */
+function isOpen(city: City, t: ZoneTarget): boolean {
+  const info = cellAt(asState(city), t.x, t.z);
+  return info !== null && info.index === t.slot && info.status === CELL_OPEN;
+}
+
 /**
- * The cells of segment `segment` on side `side`, from the road's edge back
- * `depth` cells, place by place. Blocked ones too: the sim leaves them alone.
+ * The open cells of segment `segment` on side `side`, from the road's edge
+ * back `depth` cells, place by place. A blocked cell is left out: where
+ * another segment's open cell lies on the same ground, a rectangle through
+ * its centre would paint that one, which is not this strip's.
  */
 export function stripCells(city: City, segment: number, side: number, depth: number): ZoneTarget[] {
   const places = placesAlong(city.roads as unknown as RoadNetwork, segment);
@@ -154,10 +166,30 @@ export function stripCells(city: City, segment: number, side: number, depth: num
   for (let place = 0; place < places; place++) {
     for (let d = 0; d < rows; d++) {
       const t = targetOf(city, segment, side, place, d);
-      if (t) out.push(t);
+      if (t && isOpen(city, t)) out.push(t);
     }
   }
   return out;
+}
+
+/** The cell at `slot` in `state.cells`, as a target, or null when there is none. */
+export function targetOfSlot(city: City, slot: number): ZoneTarget | null {
+  const offset = city.cells.offset;
+  // The last segment whose run starts at or before the slot; runs of length zero share a start.
+  let lo = 0;
+  let hi = offset.length - 2;
+  if (hi < 0 || slot < 0 || slot >= (offset[hi + 1] ?? 0)) return null;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if ((offset[mid] ?? 0) <= slot) lo = mid;
+    else hi = mid - 1;
+  }
+  const d = ZONING_BALANCE.zoneDepthCells;
+  const local = slot - (offset[lo] ?? 0);
+  const depth = local % d;
+  const rest = (local - depth) / d;
+  const side = rest % 2;
+  return targetOf(city, lo, side, (rest - side) / 2, depth);
 }
 
 /** The open cell whose ground holds (x, z), or null. */
@@ -270,50 +302,71 @@ export function zonePayloads(zone: string, density: number, cells: readonly Zone
   return out;
 }
 
+/** Why a click sends nothing when every cell it would change is in a stroke already sent. */
+const ALREADY_SENT = "these cells are being zoned already";
+
 /**
  * What painting `cells` would do, checked with `planZoneCells` on the
  * mirror's copy: the cells that would change, or the sim's reason why none
- * would.
+ * would. The cells shown are the plan's own, so they are what the sim
+ * paints. Cells in `sent`, slots of strokes sent and not yet in the copy,
+ * count as painted already.
  */
-export function previewZone(city: City, zone: string, density: number, cells: readonly ZoneTarget[]): ZonePreview {
+export function previewZone(
+  city: City,
+  zone: string,
+  density: number,
+  cells: readonly ZoneTarget[],
+  sent: ReadonlySet<number> = new Set(),
+): ZonePreview {
   const base = { zone, density };
   if (cells.length === 0) return { ...base, ok: false, reason: null, cells: [], payloads: [] };
   const payloads = zonePayloads(zone, density, cells);
   const changing = new Set<number>();
   let reason: string | null = null;
-  const sent: ZoneCellsPayload[] = [];
+  const going: ZoneCellsPayload[] = [];
   for (const payload of payloads) {
     const plan = planZoneCells(asState(city), payload);
     if (!plan.ok) {
       reason = plan.reason;
       continue;
     }
-    // A part that would change nothing would be refused on its own, so it is not sent.
-    sent.push(payload);
-    for (const slot of plan.plan.cells) changing.add(slot);
+    const fresh = Array.from(plan.plan.cells).filter((slot) => !sent.has(slot));
+    // A part that would change nothing, or only cells already on their way, is not sent.
+    if (fresh.length === 0) {
+      reason = ALREADY_SENT;
+      continue;
+    }
+    going.push(payload);
+    for (const slot of fresh) changing.add(slot);
   }
   if (changing.size === 0) return { ...base, ok: false, reason, cells: [], payloads: [] };
-  const seen = new Set<number>();
-  const shown = cells.filter((c) => changing.has(c.slot) && !seen.has(c.slot) && seen.add(c.slot));
-  return { ...base, ok: true, reason: null, cells: shown, payloads: sent };
+  const shown = [...changing].sort((a, b) => a - b).flatMap((slot) => targetOfSlot(city, slot) ?? []);
+  return { ...base, ok: true, reason: null, cells: shown, payloads: going };
 }
 
 /** What the controller needs from the page. */
 export interface ZoneToolHost {
-  get(): RoadToolState & ZoneToolState & { zoningOverlay: boolean };
-  set(patch: Partial<RoadToolState & ZoneToolState & { zoningOverlay: boolean }>): void;
+  get(): RoadToolState & ZoneToolState;
+  set(patch: Partial<RoadToolState & ZoneToolState>): void;
   /** The mirror's copy of the city, or null before the first snapshot. */
   city(): City | null;
+  /** A number that changes whenever the copy does, so the tool can keep what it worked out from it. */
+  version(): number;
   /** Sends a `ZoneCells` and resolves with the sim's answer. */
   send(payload: ZoneCellsPayload): Promise<CommandResult>;
 }
 
-/** The zone tool's input handling. Holds no state of its own beyond a counter for ids and the overlay to put back. */
+/** The zone tool's input handling. Holds no state of its own beyond a counter for ids and caches of what it worked out from the copy. */
 export class ZoneToolController {
   private readonly host: ZoneToolHost;
   private nextId = 1;
-  /** Whether the overlay was on before the tool turned it on, so leaving puts it back. */
-  private overlayBefore: boolean | null = null;
+  /** The last targets worked out, and what they were worked out from. */
+  private memo: { key: string; cells: ZoneTarget[] } = { key: "", cells: [] };
+  /** The road-edge cells of the last segment the fill hovered, for picking a side. */
+  private edge: { key: string; cells: ZoneTarget[] } = { key: "", cells: [] };
+  /** Centres of the cells in the brush stroke, so each joins once. */
+  private brushed = new Set<string>();
 
   constructor(host: ZoneToolHost) {
     this.host = host;
@@ -328,14 +381,13 @@ export class ZoneToolController {
     return this.active() && this.host.get().zoneMode === "brush";
   }
 
-  /** Turns the tool on, with the zoning overlay, or off when it is on. A road being drawn is dropped. */
+  /** Turns the tool on, or off when it is on. The zoning overlay shows while it is on. A road being drawn is dropped. */
   toggle(): void {
     if (this.active()) {
       this.leave();
       return;
     }
-    this.overlayBefore = this.host.get().zoningOverlay;
-    this.host.set({ tool: "zone", zoningOverlay: true, zoneNote: null, zoneBrush: null, roadStart: null, roadControl: null, roadChain: 0, roadNote: null });
+    this.host.set({ tool: "zone", zoneNote: null, zoneBrush: null, roadStart: null, roadControl: null, roadChain: 0, roadNote: null });
   }
 
   leave(): void {
@@ -345,18 +397,14 @@ export class ZoneToolController {
 
   /**
    * Call when the tool in the store changed. Once the zone tool is off,
-   * however it was left, drops its stroke and puts the overlay back the
-   * way it was before the tool opened.
+   * however it was left, drops its stroke.
    */
   toolChanged(now: string | null, before: string | null): void {
     if (before === "zone" && now !== "zone") this.left();
   }
 
   private left(): void {
-    const patch: Partial<ZoneToolState & { zoningOverlay: boolean }> = { zoneBrush: null, zoneNote: null };
-    if (this.overlayBefore === false) patch.zoningOverlay = false;
-    this.overlayBefore = null;
-    this.host.set(patch);
+    this.host.set({ zoneBrush: null, zoneNote: null });
   }
 
   /** Escape: drops a brush stroke, or leaves the tool. Returns whether it did anything. */
@@ -413,45 +461,94 @@ export class ZoneToolController {
    * beside the road for a fill, the cell under the pointer for the brush.
    * During a brush drag, the cells it has passed over.
    */
-  targets(hover: ZoneHover): ZoneTarget[] {
+  targets(hover: ZoneHover): readonly ZoneTarget[] {
     const city = this.host.city();
     const s = this.host.get();
-    if (!this.active() || !city) return [];
-    if (s.zoneBrush) return [...s.zoneBrush];
+    if (!this.active() || !city) return NO_TARGETS;
+    if (s.zoneBrush) return s.zoneBrush;
+    const v = this.host.version();
     const ground = hover.ground;
+    let key: string;
+    let make: () => ZoneTarget[];
     if (s.zoneMode === "brush") {
       const cell = ground ? cellUnder(city, ground.x, ground.z) : null;
-      return cell ? [cell] : [];
+      key = `${v},brush,${cell?.slot ?? "-"}`;
+      make = () => (cell ? [cell] : []);
+    } else if (hover.segment !== NONE && ground) {
+      // Fill: the road under the pointer, on the side the pointer is.
+      const side = this.sideOf(city, v, hover.segment, ground.x, ground.z);
+      key = `${v},fill,${hover.segment},${side ?? "-"},${s.zoneDepth}`;
+      make = () => (side === null ? [] : stripCells(city, hover.segment, side, s.zoneDepth));
+    } else {
+      // Or the road of the cell under it.
+      const cell = ground ? cellUnder(city, ground.x, ground.z) : null;
+      key = cell ? `${v},fill,${cell.segment},${cell.side},${s.zoneDepth}` : `${v},none`;
+      make = () => (cell ? stripCells(city, cell.segment, cell.side, s.zoneDepth) : []);
     }
-    // Fill: the road under the pointer, or the road of the cell under it.
-    if (hover.segment !== NONE && ground) {
-      const side = nearerSide(city, hover.segment, ground.x, ground.z);
-      return side === null ? [] : stripCells(city, hover.segment, side, s.zoneDepth);
+    if (key !== this.memo.key) this.memo = { key, cells: make() };
+    return this.memo.cells;
+  }
+
+  /** The side of `segment` nearer (x, z), from its road-edge cells, worked out once per segment and copy. */
+  private sideOf(city: City, version: number, segment: number, x: number, z: number): number | null {
+    const key = `${version},${segment}`;
+    if (key !== this.edge.key) {
+      const places = placesAlong(city.roads as unknown as RoadNetwork, segment);
+      const cells: ZoneTarget[] = [];
+      for (let place = 0; place < places; place++) {
+        for (const side of [0, 1]) {
+          const t = targetOf(city, segment, side, place, 0);
+          if (t) cells.push(t);
+        }
+      }
+      this.edge = { key, cells };
     }
-    const cell = ground ? cellUnder(city, ground.x, ground.z) : null;
-    return cell ? stripCells(city, cell.segment, cell.side, s.zoneDepth) : [];
+    let best: number | null = null;
+    let bestD = Infinity;
+    for (const t of this.edge.cells) {
+      const d = (t.x - x) ** 2 + (t.z - z) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = t.side;
+      }
+    }
+    return best;
+  }
+
+  /** Slots of the cells in strokes sent and not yet in the copy. */
+  private sentSlots(): Set<number> {
+    const out = new Set<number>();
+    for (const p of this.host.get().zonePending) for (const c of p.preview.cells) out.add(c.slot);
+    return out;
+  }
+
+  /** What painting `cells` would do now, with the paint picked. */
+  previewOf(cells: readonly ZoneTarget[]): ZonePreview | null {
+    const city = this.host.city();
+    if (!this.active() || !city || cells.length === 0) return null;
+    const { zone, density } = this.paint();
+    return previewZone(city, zone, density, cells, this.sentSlots());
   }
 
   /** What the tool shows with the pointer over `hover`, or null when there is nothing to show. */
   preview(hover: ZoneHover): ZonePreview | null {
-    const city = this.host.city();
-    if (!this.active() || !city) return null;
-    const cells = this.targets(hover);
-    if (cells.length === 0) return null;
-    const { zone, density } = this.paint();
-    return previewZone(city, zone, density, cells);
+    return this.previewOf(this.targets(hover));
   }
 
   /** A left click: paints what the preview shows, or sends nothing when nothing would change. */
   click(hover: ZoneHover): void {
     if (!this.active()) return;
+    // A click is a new press: a stroke a lost drag left behind is dropped, not painted.
+    if (this.host.get().zoneBrush) this.host.set({ zoneBrush: null });
     const preview = this.preview(hover);
     if (preview) this.sendIfOk(preview);
   }
 
   /** A brush drag started. */
   dragStart(): void {
-    if (this.brushing()) this.host.set({ zoneBrush: [], zoneNote: null });
+    if (!this.brushing()) return;
+    this.brushed = new Set();
+    this.host.set({ zoneBrush: [], zoneNote: null });
   }
 
   /** The brush passed over ground point (x, z): the open cell there joins the stroke. */
@@ -460,7 +557,10 @@ export class ZoneToolController {
     const city = this.host.city();
     if (!this.brushing() || !s.zoneBrush || !city) return;
     const cell = cellUnder(city, x, z);
-    if (!cell || s.zoneBrush.some((c) => c.slot === cell.slot)) return;
+    // Known by its centre, which names ground and outlasts a change of roads mid-stroke.
+    const key = cell ? `${cell.x},${cell.z}` : "";
+    if (!cell || this.brushed.has(key)) return;
+    this.brushed.add(key);
     this.host.set({ zoneBrush: [...s.zoneBrush, cell] });
   }
 
@@ -471,8 +571,8 @@ export class ZoneToolController {
     const brush = s.zoneBrush;
     this.host.set({ zoneBrush: null });
     if (!this.brushing() || !city || !brush || brush.length === 0) return;
-    const { zone, density } = this.paint();
-    this.sendIfOk(previewZone(city, zone, density, brush));
+    const preview = this.previewOf(brush);
+    if (preview) this.sendIfOk(preview);
   }
 
   /** The drag was cut off: drops it. */
@@ -485,7 +585,7 @@ export class ZoneToolController {
       this.host.set({ zoneNote: preview.reason });
       return;
     }
-    const pending: PendingZone = { id: this.nextId++, preview, waiting: preview.payloads.length, status: "sending" };
+    const pending: PendingZone = { id: this.nextId++, preview, waiting: preview.payloads.length, accepted: 0, status: "sending" };
     this.host.set({ zoneNote: null, zonePending: [...this.host.get().zonePending, pending] });
     for (const payload of preview.payloads) {
       void this.host.send(payload).then((result) => this.answered(pending.id, result));
@@ -496,13 +596,16 @@ export class ZoneToolController {
     const all = this.host.get().zonePending;
     const pending = all.find((p) => p.id === id);
     if (!pending) return;
-    if (!result.ok) {
-      this.host.set({ zonePending: all.filter((p) => p.id !== id), zoneNote: result.reason });
+    const waiting = pending.waiting - 1;
+    const accepted = pending.accepted + (result.ok ? 1 : 0);
+    const note = result.ok ? {} : { zoneNote: result.reason };
+    // A stroke cut into several commands stays drawn while any part of it was taken.
+    if (waiting === 0 && accepted === 0) {
+      this.host.set({ zonePending: all.filter((p) => p.id !== id), ...note });
       return;
     }
-    const waiting = pending.waiting - 1;
-    const next: PendingZone = { ...pending, waiting, status: waiting === 0 ? "accepted" : "sending" };
-    this.host.set({ zonePending: all.map((p) => (p.id === id ? next : p)) });
+    const next: PendingZone = { ...pending, waiting, accepted, status: waiting === 0 ? "accepted" : "sending" };
+    this.host.set({ zonePending: all.map((p) => (p.id === id ? next : p)), ...note });
   }
 
   /**

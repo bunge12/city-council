@@ -254,6 +254,7 @@ test("the zone tool's keys are in the shortcut list", async ({ page }) => {
   await page.goto("/?debug&webgl");
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
   const panel = page.locator("#debug-panel");
-  await expect(panel).toContainText("zone tool on or off");
+  await expect(panel).toContainText("zone tool, with the zoning overlay, on or off");
+  await expect(panel).not.toContainText("show or hide the zoning overlay");
   await expect(panel).toContainText("fill one cell deeper");
 });

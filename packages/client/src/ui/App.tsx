@@ -12,7 +12,7 @@ import { Notes } from "./Notes";
 import { RoadReadout } from "./RoadReadout";
 import type { AppServices } from "./services";
 import { shortcutFor, toggledSpeed } from "./shortcuts";
-import { toggleDebug, toggleLog, toggleZoningOverlay } from "./store";
+import { toggleDebug, toggleLog } from "./store";
 import { TopBar } from "./TopBar";
 import { ZoneLegend } from "./ZoneLegend";
 import { ZoneReadout } from "./ZoneReadout";
@@ -57,9 +57,6 @@ function useShortcuts(): void {
         case "toggleLog":
           toggleLog();
           return;
-        case "toggleZoning":
-          toggleZoningOverlay();
-          return;
         case "roadTool":
           roadTool.toggle();
           return;
@@ -79,7 +76,7 @@ function useShortcuts(): void {
           zoneTool.toggle();
           return;
         case "zoneDepth":
-          zoneTool.stepDepth(action.by);
+          if (zoneTool.active()) zoneTool.stepDepth(action.by);
           return;
         case "roadType":
           roadTool.pickType(action.type);

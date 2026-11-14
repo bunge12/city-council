@@ -9,7 +9,6 @@ export type ShortcutAction =
   | { kind: "togglePause" }
   | { kind: "toggleDebug" }
   | { kind: "toggleLog" }
-  | { kind: "toggleZoning" }
   | { kind: "roadTool" }
   | { kind: "gridTool" }
   | { kind: "confirm" }
@@ -38,13 +37,12 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["Digit3", "Numpad3"], label: "3", description: "speed 4x", action: { kind: "speed", speed: 4 } },
   { codes: ["Backquote"], label: "`", description: "show or hide this panel", action: { kind: "toggleDebug" } },
   { codes: ["KeyL"], label: "L", description: "show or hide the activity log", action: { kind: "toggleLog" } },
-  { codes: ["KeyO"], label: "O", description: "show or hide the zoning overlay", action: { kind: "toggleZoning" } },
   { codes: ["KeyB"], label: "B", description: "road tool on or off", action: { kind: "roadTool" } },
   { codes: ["KeyG"], label: "G", description: "grid tool on or off", action: { kind: "gridTool" } },
   { codes: ["Enter", "NumpadEnter"], label: "Enter", description: "build the grid drawn with the grid tool", action: { kind: "confirm" } },
   { codes: ["KeyV"], label: "V", description: "upgrade tool on or off", action: { kind: "upgradeTool" } },
   { codes: ["KeyN"], label: "N", description: "bulldoze tool on or off", action: { kind: "bulldozeTool" } },
-  { codes: ["KeyK"], label: "K", description: "zone tool on or off", action: { kind: "zoneTool" } },
+  { codes: ["KeyK"], label: "K", description: "zone tool, with the zoning overlay, on or off", action: { kind: "zoneTool" } },
   { codes: ["BracketLeft"], label: "[", description: "zone tool: fill one cell shallower", action: { kind: "zoneDepth", by: -1 } },
   { codes: ["BracketRight"], label: "]", description: "zone tool: fill one cell deeper", action: { kind: "zoneDepth", by: 1 } },
   { codes: ["KeyZ"], label: "Z", description: "draw streets, or upgrade to one", action: { kind: "roadType", type: "street" } },

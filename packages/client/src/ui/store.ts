@@ -31,8 +31,6 @@ export interface UiState extends RoadToolState, GridToolState, EditToolState, Ro
   busy: boolean;
   /** Why the sim refused the last undo, until the next one is sent. */
   undoNote: string | null;
-  /** Whether the zoning overlay is on (issue M2-06). The zone tool turns it on while it is open (issue M2-07). */
-  zoningOverlay: boolean;
 }
 
 export const useUi = create<UiState>(() => ({
@@ -46,7 +44,6 @@ export const useUi = create<UiState>(() => ({
   reminderDismissed: false,
   busy: false,
   undoNote: null,
-  zoningOverlay: false,
   ...INITIAL_ROAD_TOOL,
   ...INITIAL_GRID_TOOL,
   ...INITIAL_EDIT_TOOL,
@@ -61,10 +58,6 @@ export function toggleDebug(): void {
 
 export function toggleLog(): void {
   useUi.setState((s) => ({ logOpen: !s.logOpen }));
-}
-
-export function toggleZoningOverlay(): void {
-  useUi.setState((s) => ({ zoningOverlay: !s.zoningOverlay }));
 }
 
 export function toggleMenu(): void {

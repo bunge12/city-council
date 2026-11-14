@@ -198,7 +198,7 @@ describe("the controller", () => {
   type Store = ReturnType<ZoneToolHost["get"]>;
   function setup() {
     const state = city();
-    let store: Store = { ...INITIAL_ROAD_TOOL, ...INITIAL_ZONE_TOOL, zoningOverlay: false };
+    let store: Store = { ...INITIAL_ROAD_TOOL, ...INITIAL_ZONE_TOOL };
     const sent: ZoneCellsPayload[] = [];
     let answer: (r: CommandResult) => void = () => undefined;
     const tool = new ZoneToolController({
@@ -209,6 +209,7 @@ describe("the controller", () => {
         if (store.tool !== before) tool.toolChanged(store.tool, before);
       },
       city: () => state,
+      version: () => state.tick,
       send: (payload) => {
         sent.push(payload);
         return new Promise((resolve) => {
@@ -219,14 +220,12 @@ describe("the controller", () => {
     return { state, tool, sent, get: () => store, answer: (r: CommandResult) => answer(r) };
   }
 
-  it("turns the overlay on when it opens and back off when it closes", () => {
+  it("opens and closes with its button", () => {
     const { tool, get } = setup();
     tool.toggle();
     expect(get().tool).toBe("zone");
-    expect(get().zoningOverlay).toBe(true);
     tool.toggle();
     expect(get().tool).toBeNull();
-    expect(get().zoningOverlay).toBe(false);
   });
 
   it("sends one ZoneCells for a fill click, keeps it marked until a step, and nothing for a click that changes nothing", async () => {
@@ -275,12 +274,38 @@ describe("the controller", () => {
     expect(plan.ok && plan.plan.cells.length).toBe(11);
   });
 
-  it("puts the overlay back when another tool is picked", () => {
+  it("sends nothing for a second click on a stroke still on its way", () => {
+    const { state, tool, sent, get } = setup();
+    tool.toggle();
+    const hover = { ground: { x: 4300, z: 4592 }, segment: segmentAt(state, 4300, 4600) };
+    tool.click(hover);
+    tool.click(hover);
+    expect(sent).toHaveLength(1);
+    expect(get().zoneNote).toMatch(/being zoned already/);
+  });
+
+  it("drops a stroke a lost drag left behind instead of painting it with the next click", () => {
+    const { state, tool, sent } = setup();
+    tool.toggle();
+    tool.pickMode("brush");
+    tool.dragStart();
+    for (let x = 4250; x <= 4330; x += 4) tool.brushOver(x, 4590);
+    // No dragEnd or dragCancel: the drag was taken over. A click paints only the cell under it.
+    tool.click({ ground: { x: 4204, z: 4580 }, segment: -1 });
+    expect(sent).toHaveLength(1);
+    const plan = planZoneCells(state, sent[0]);
+    expect(plan.ok && plan.plan.cells.length).toBe(1);
+  });
+
+  it("drops its stroke when another tool is picked", () => {
     const { tool, get } = setup();
     tool.toggle();
-    expect(get().zoningOverlay).toBe(true);
+    tool.pickMode("brush");
+    tool.dragStart();
+    tool.brushOver(4300, 4590);
+    expect(get().zoneBrush).toHaveLength(1);
     // As the road tool's toggle does.
     (tool as unknown as { host: ZoneToolHost }).host.set({ tool: "road" });
-    expect(get().zoningOverlay).toBe(false);
+    expect(get().zoneBrush).toBeNull();
   });
 });
