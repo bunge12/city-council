@@ -436,18 +436,27 @@ function cellQuad(s: SegShape, local: number, out: Float64Array): void {
   cellCornersInto(s.data as Float64Array, j, s.reversed ? 1 - side : side, s.half + depth * CELL, s.half + (depth + 1) * CELL, out);
 }
 
-/** The anchor cell, side on the anchor and depth of cell `local` of `s`. */
-function anchorCellOf(s: SegShape, local: number): { k: number; side: number; depth: number } {
-  const { side, place, depth } = fromLocal(local);
-  return s.reversed ? { k: s.from + s.places - 1 - place, side: 1 - side, depth } : { k: s.from + place, side, depth };
-}
-
 /** Where anchor cell `k`, on anchor side `side` at `depth`, sits in `s`'s run, or -1 if `s` does not have it. */
 function localOfAnchorCell(s: SegShape, k: number, side: number, depth: number): number {
   const j = k - s.from;
   if (j < 0 || j >= s.places) return -1;
   const place = s.reversed ? s.places - 1 - j : j;
   return (place * 2 + (s.reversed ? 1 - side : side)) * DEPTH + depth;
+}
+
+/**
+ * Calls `visit` with the first local index in `s` and in `o` of every run
+ * of `DEPTH` cells the two shapes share: one run per anchor cell both own
+ * and per side of the anchor. Within a run, depth d is `+ d` in both.
+ */
+function forSharedRuns(s: SegShape, o: SegShape, visit: (sLocal: number, oLocal: number) => void): void {
+  const lo = s.from > o.from ? s.from : o.from;
+  const sEnd = s.from + s.places;
+  const oEnd = o.from + o.places;
+  const hi = sEnd < oEnd ? sEnd : oEnd;
+  for (let k = lo; k < hi; k++) {
+    for (let side = 0; side < 2; side++) visit(localOfAnchorCell(s, k, side, 0), localOfAnchorCell(o, k, side, 0));
+  }
 }
 
 /**
@@ -933,27 +942,30 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     const sources = status ? byAnchor.get(anchorKeyOf(s)) : undefined;
     if (status && !sources) fresh += status.length;
     if (status && sources) {
-      for (let local = 0; local < status.length; local++) {
-        const { k, side, depth } = anchorCellOf(s, local);
-        let found = false;
-        for (const b of sources) {
-          const o = b.shape as SegShape;
-          if (o.half !== s.half) continue;
-          const from = localOfAnchorCell(o, k, side, depth);
-          if (from < 0) continue;
-          // A cell an earlier change had still to walk has no settled status to give.
-          status[local] = queue.has(keyOf(b.id, from), o) ? UNSET : ((o.status as Uint8Array)[from] ?? UNSET);
-          let marks = kept.get(b);
-          if (!marks) {
-            marks = new Uint8Array((o.status as Uint8Array).length);
-            kept.set(b, marks);
+      // The first removed shape, in order, that has a cell's anchor cell
+      // gives it its status. A run of depths at a time.
+      const got = new Uint8Array(status.length);
+      for (const b of sources) {
+        const o = b.shape as SegShape;
+        if (o.half !== s.half) continue;
+        const from = o.status as Uint8Array;
+        let marks = kept.get(b);
+        forSharedRuns(s, o, (sl, ol) => {
+          for (let d = 0; d < DEPTH; d++) {
+            const local = sl + d;
+            if (got[local] === 1) continue;
+            got[local] = 1;
+            // A cell an earlier change had still to walk has no settled status to give.
+            status[local] = queue.has(keyOf(b.id, ol + d), o) ? UNSET : (from[ol + d] ?? UNSET);
+            if (!marks) {
+              marks = new Uint8Array(from.length);
+              kept.set(b, marks);
+            }
+            marks[ol + d] = 1;
           }
-          marks[from] = 1;
-          found = true;
-          break;
-        }
-        if (!found) fresh++;
+        });
       }
+      for (let local = 0; local < status.length; local++) if (got[local] === 0) fresh++;
     }
     seeds.push({
       run: () => {
@@ -964,11 +976,18 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     });
   }
 
-  // Cells with nothing to start from are walked.
+  // Cells with nothing to start from are walked. Queued by the job, ahead
+  // of the surface tasks that skip queued cells: a big grid has thousands,
+  // and they are counted in `fresh` already, so the task costs nothing more.
   for (const { id } of changed) {
     const status = index.segs[id]?.status;
     if (!status) continue;
-    for (let local = 0; local < status.length; local++) if (status[local] === UNSET) queue.push(keyOf(id, local));
+    seeds.push({
+      run: () => {
+        for (let local = 0; local < status.length; local++) if (status[local] === UNSET) queue.push(keyOf(id, local));
+      },
+      cost: 0,
+    });
   }
   // Cells under a surface that went may be free now, and are walked.
   for (const { shape } of changed) {
@@ -1167,20 +1186,27 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
   }
   copyStretch(Math.min(limit, oldLimit));
   for (const c of changed) {
+    if (c.id >= limit) continue;
     const s = index.segs[c.id];
     const status = s?.status;
-    const sources = s ? byAnchor.get(anchorKeyOf(s)) : undefined;
-    if (!s || !status || !sources) continue;
+    if (!s || !status) continue;
+    // The buffers are not cleared, so a changed run starts unzoned here.
     const to = offset[c.id] ?? 0;
-    for (let local = 0; local < status.length; local++) {
-      const { k, side, depth } = anchorCellOf(s, local);
-      for (const b of sources) {
-        const from = localOfAnchorCell(b.shape as SegShape, k, side, depth);
-        if (from < 0) continue;
-        zone[to + local] = cells.zone[b.start + from] ?? 0;
-        density[to + local] = cells.density[b.start + from] ?? 0;
-        break;
-      }
+    zone.fill(0, to, to + status.length);
+    density.fill(0, to, to + status.length);
+    const sources = byAnchor.get(anchorKeyOf(s));
+    if (!sources) continue;
+    // The first removed shape, in order, that has a cell's anchor cell gives it its zone.
+    const got = new Uint8Array(status.length);
+    for (const b of sources) {
+      forSharedRuns(s, b.shape as SegShape, (sl, ol) => {
+        for (let d = 0; d < DEPTH; d++) {
+          if (got[sl + d] === 1) continue;
+          got[sl + d] = 1;
+          zone[to + sl + d] = cells.zone[b.start + ol + d] ?? 0;
+          density[to + sl + d] = cells.density[b.start + ol + d] ?? 0;
+        }
+      });
     }
   }
   // State lets go of the old arrays, so they become the spare.
@@ -1189,16 +1215,16 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
 }
 
 /**
- * A zeroed array of `length` for a new layout: a view on the spare buffer
- * when it is big enough and not the one state holds now, else a new buffer
- * with room to grow. Like the network's arrays, the view is exactly
- * `length` long, so saves, hashes and copies see only the cells.
+ * An array of `length` for a new layout: a view on the spare buffer when it
+ * is big enough and not the one state holds now, else a new buffer with
+ * room to grow. A spare holds an old layout, and `relayout` writes every
+ * cell over it rather than clearing 2.9 million first. Like the network's
+ * arrays, the view is exactly `length` long, so saves, hashes and copies
+ * see only the cells.
  */
 function layoutBuffer(spare: Uint8Array | undefined, current: Uint8Array, length: number): Uint8Array {
   if (spare && spare.buffer !== current.buffer && spare.buffer.byteLength >= length) {
-    const view = new Uint8Array(spare.buffer, 0, length);
-    view.fill(0);
-    return view;
+    return new Uint8Array(spare.buffer, 0, length);
   }
   return new Uint8Array(new ArrayBuffer(ceilOf(length * 1.25) + 1024), 0, length);
 }
