@@ -56,6 +56,8 @@ export {
   slopeAt,
 } from "./terrain/terrain";
 export type { Terrain, TerrainBalance } from "./terrain/terrain";
+export { ZONING_BALANCE, checkZoningBalance } from "./zoning/balance";
+export type { DensityBalance, ZoneBalance, ZoningBalance } from "./zoning/balance";
 export { ROAD_BALANCE, ROAD_BUILD, ROAD_LEVELS, ROAD_TYPES, roadTypeIndex } from "./roads/balance";
 export type { BalancePrice, BridgeBalance, RoadBalance, RoadBuildBalance, RoadType, RoadTypeBalance } from "./roads/balance";
 export { planRoad, snapToGrid } from "./roads/build";

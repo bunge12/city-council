@@ -84,7 +84,7 @@ function reverse(net: RoadNetwork, ops: readonly NetworkOp[]): void {
     const op = ops[i] as NetworkOp;
     if (op.op === "addNode") unaddNode(net, op.id, op.grown);
     else if (op.op === "removeNode") restoreNode(net, op.id, op.x, op.z, op.height, op.flags);
-    else if (op.op === "addSeg") unaddSegment(net, op.id, op.grown);
+    else if (op.op === "addSeg") unaddSegment(net, op.id, op.grown, op.fresh);
     else if (op.op === "removeSeg") restoreSegment(net, op.id, op.row, op.atA, op.atB);
     else restyleSegment(net, op.id, op.from, op.reverse);
   }

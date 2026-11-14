@@ -274,6 +274,7 @@ function isRow(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (!["a", "b", "type", "network", "levelA", "levelB", "flags"].every((k) => isId(value[k]))) return false;
   if (!["cx", "cz", "length"].every((k) => isNumber(value[k]))) return false;
+  if (!isId(value["order"])) return false;
   if ((value["network"] as number) > NETWORK_PATH) return false;
   if ((value["levelA"] as number) >= LEVEL_COUNT || (value["levelB"] as number) >= LEVEL_COUNT) return false;
   if ((value["levelA"] === LEVEL_BRIDGE) !== (value["levelB"] === LEVEL_BRIDGE)) return false;
@@ -289,7 +290,7 @@ function isOp(value: unknown): boolean {
     case "removeNode":
       return ["x", "z", "height"].every((k) => isNumber(value[k])) && isId(value["flags"]);
     case "addSeg":
-      return typeof value["grown"] === "boolean" && isRow(value["row"]);
+      return typeof value["grown"] === "boolean" && typeof value["fresh"] === "boolean" && isRow(value["row"]);
     case "removeSeg":
       return isRow(value["row"]) && isId(value["atA"]) && isId(value["atB"]) && ["ax", "az", "bx", "bz"].every((k) => isNumber(value[k]));
     case "restyle":

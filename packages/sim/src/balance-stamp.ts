@@ -16,6 +16,7 @@ import roads from "../balance/roads.json" with { type: "json" };
 import routing from "../balance/routing.json" with { type: "json" };
 import terrain from "../balance/terrain.json" with { type: "json" };
 import time from "../balance/time.json" with { type: "json" };
+import zoning from "../balance/zoning.json" with { type: "json" };
 import { hashState } from "./hash";
 
 const WORDS = new Set(["source", "sourceUrl", "note"]);
@@ -37,7 +38,7 @@ export function balanceStampOf(files: Readonly<Record<string, unknown>>): string
 }
 
 /** The stamp of the balance this build of the sim runs. */
-export const BALANCE_STAMP = balanceStampOf({ connections, roads, routing, terrain, time });
+export const BALANCE_STAMP = balanceStampOf({ connections, roads, routing, terrain, time, zoning });
 
 /**
  * Whether `state` was created under the balance this build runs, so its log

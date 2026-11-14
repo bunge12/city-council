@@ -80,6 +80,8 @@ export interface RoadDelta {
   /** The whole free list, when it changed. */
   nodeFree?: Int32Array;
   segFree?: Int32Array;
+  /** `segOrderNext` after the change. It moves only when a segment is added or taken back, so with a row. */
+  segOrderNext: number;
 }
 
 interface Recorder {
@@ -189,6 +191,7 @@ export function encodeRoadDelta(net: RoadNetwork, changes: RoadChanges): RoadDel
     nodes: gather(net, NODE_ARRAYS, nodeIds) as Pick<RoadNetwork, NodeKey>,
     segIds,
     segs: gather(net, SEG_ARRAYS, segIds) as Pick<RoadNetwork, SegKey>,
+    segOrderNext: net.segOrderNext,
   };
   if (changes.nodeFree) delta.nodeFree = net.nodeFree.slice();
   if (changes.segFree) delta.segFree = net.segFree.slice();
@@ -200,6 +203,7 @@ function deltaProblem(net: RoadNetwork, delta: RoadDelta): string | null {
   if (!Number.isSafeInteger(delta.nodeLimit) || delta.nodeLimit < 0 || !Number.isSafeInteger(delta.segLimit) || delta.segLimit < 0) {
     return "id limits are not whole numbers";
   }
+  if (!Number.isSafeInteger(delta.segOrderNext) || delta.segOrderNext < 0) return "the build order counter is not a whole number";
   // A row past both the copy's limit and the new one is for an id handed
   // out and taken back by undo between two deltas. The copy never had it,
   // and copying it changes nothing.
@@ -275,6 +279,7 @@ export function applyRoadDelta(net: RoadNetwork, delta: RoadDelta): number[] | s
   scatter(net, SEG_ARRAYS, delta.segLimit, delta.segIds, delta.segs);
   if (delta.nodeFree) net.nodeFree = delta.nodeFree.slice();
   if (delta.segFree) net.segFree = delta.segFree.slice();
+  net.segOrderNext = delta.segOrderNext;
   if (index) {
     for (const node of delta.nodeIds) if (isNode(net, node)) indexNode(index, node);
     for (const seg of delta.segIds) if (isSegment(net, seg)) indexSegment(index, seg);

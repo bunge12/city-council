@@ -226,10 +226,11 @@ describe("road network array growth", () => {
 });
 
 describe("road network shape", () => {
-  it("holds only typed arrays", () => {
+  it("holds only typed arrays and the build order counter", () => {
     const { net } = lShape();
     for (const [key, value] of Object.entries(net)) {
-      expect(ArrayBuffer.isView(value), key).toBe(true);
+      if (key === "segOrderNext") expect(Number.isSafeInteger(value)).toBe(true);
+      else expect(ArrayBuffer.isView(value), key).toBe(true);
     }
     expect(() => hashState(net)).not.toThrow();
   });

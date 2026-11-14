@@ -34,10 +34,11 @@ import v5Fixture from "./fixtures/snapshots/v5.json";
 import v6Fixture from "./fixtures/snapshots/v6.json";
 import v7Fixture from "./fixtures/snapshots/v7.json";
 import v8Fixture from "./fixtures/snapshots/v8.json";
+import v9Fixture from "./fixtures/snapshots/v9.json";
 import { snapshotChecksum } from "../src/snapshot";
 import { checkConnections } from "../src/roads/connections";
 import { heldIds } from "../src/undo";
-import { addNode, addSegment, removeSegment, segmentsAt } from "../src/roads/network";
+import { addNode, addSegment, checkRoadNetwork, isSegment, removeSegment, segmentsAt } from "../src/roads/network";
 
 function fromHex(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
@@ -375,14 +376,14 @@ describe("committed snapshots", () => {
     expect(Array.from(state.roads.segFree)).toEqual([]);
     expect(Array.from(state.roads.nodeFree)).toEqual([]);
     expect(checkConnections(state.connections, state.roads)).toBeNull();
-    expect(hashState(state)).toBe("6654e47ea86a147d");
+    expect(hashState(state)).toBe("3f150020200bd229");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
     const { state, header } = deserialize(fromHex(v4Fixture.hex));
     expect(header.stateVersion).toBe(4);
-    // Migrated, it is the version 8 fixture.
-    expect(hashState(state)).toBe(v8Fixture.hash);
+    // Migrated, it is the version 9 fixture.
+    expect(hashState(state)).toBe(v9Fixture.hash);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(state.undo.map((r) => [r.playerId, r.type])).toEqual([
       ["p1", "BuildRoad"],
@@ -398,8 +399,8 @@ describe("committed snapshots", () => {
   it("loads the version 5 fixture with each segment's level at both its ends", () => {
     const { state, header } = deserialize(fromHex(v5Fixture.hex));
     expect(header.stateVersion).toBe(5);
-    // Migrated, it is the version 8 fixture.
-    expect(hashState(state)).toBe(v8Fixture.hash);
+    // Migrated, it is the version 9 fixture.
+    expect(hashState(state)).toBe(v9Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v5Fixture.held);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(Array.from(state.roads.segLevelB)).toEqual(Array.from(state.roads.segLevelA));
@@ -419,8 +420,8 @@ describe("committed snapshots", () => {
   it("loads the version 6 fixture with every undo op saying which road it means", () => {
     const { state, header } = deserialize(fromHex(v6Fixture.hex));
     expect(header.stateVersion).toBe(6);
-    // Migrated, it is the version 8 fixture.
-    expect(hashState(state)).toBe(v8Fixture.hash);
+    // Migrated, it is the version 9 fixture.
+    expect(hashState(state)).toBe(v9Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v6Fixture.held);
     expect(Array.from(state.connections)).toEqual(v6Fixture.connections);
     let filled = 0;
@@ -447,29 +448,56 @@ describe("committed snapshots", () => {
     expect(header.stateVersion).toBe(7);
     expect(state.balance).toBe("");
     expect(replaysUnderThisBalance(state)).toBe(false);
-    // Migrated, it is the version 8 fixture.
-    expect(hashState(state)).toBe(v8Fixture.hash);
+    // Migrated, it is the version 9 fixture.
+    expect(hashState(state)).toBe(v9Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v7Fixture.held);
     expect(Array.from(state.connections)).toEqual(v7Fixture.connections);
   });
 
-  it("loads the version 8 fixture to its recorded hash", () => {
+  it("loads the version 8 fixture with a build order on every segment, in id order", () => {
     const { state, header } = deserialize(fromHex(v8Fixture.hex));
     expect(header.stateVersion).toBe(8);
-    expect(hashState(state)).toBe(v8Fixture.hash);
+    expect(state.version).toBe(9);
+    // Migrated, it is the version 9 fixture.
+    expect(hashState(state)).toBe(v9Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v8Fixture.held);
     expect(Array.from(state.connections)).toEqual(v8Fixture.connections);
+    const net = state.roads;
+    const live: number[] = [];
+    for (let id = 0; id < net.segFlags.length; id++) if (isSegment(net, id)) live.push(id);
+    expect(live.map((id) => net.segOrder[id])).toEqual(live.map((_, i) => i));
+    // The segment p2's bulldoze holds comes next, and the counter is past it.
+    const [heldSeg] = v8Fixture.held.segs;
+    const removed = state.undo.flatMap((r) => r.ops).find((op) => op.op === "removeSeg" && op.id === heldSeg);
+    expect(removed?.op === "removeSeg" && removed.row.order).toBe(live.length);
+    expect(net.segOrderNext).toBe(live.length + 1);
+    for (const op of state.undo.flatMap((r) => r.ops)) if (op.op === "addSeg") expect(op.fresh).toBe(false);
+    // p2's bulldoze comes back with that number, then p1's upgrade is taken back.
+    expect(submit(state, { seq: 1, playerId: "p2", type: "Undo", payload: {} })).toEqual({ ok: true });
+    expect(submit(state, { seq: 2, playerId: "p1", type: "Undo", payload: {} })).toEqual({ ok: true });
+    step(state);
+    expect(state.undo.map((r) => r.playerId)).toEqual(["p1", "p2"]);
+    expect(net.segOrder[heldSeg ?? -1]).toBe(live.length);
+    expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
   });
 
-  it("still writes the version 8 fixture byte for byte", () => {
+  it("loads the version 9 fixture to its recorded hash", () => {
+    const { state, header } = deserialize(fromHex(v9Fixture.hex));
+    expect(header.stateVersion).toBe(9);
+    expect(hashState(state)).toBe(v9Fixture.hash);
+    expect(heldIds(state.undo)).toEqual(v9Fixture.held);
+    expect(Array.from(state.connections)).toEqual(v9Fixture.connections);
+  });
+
+  it("still writes the version 9 fixture byte for byte", () => {
     // If this fails the byte layout changed: bump SNAPSHOT_FORMAT_VERSION and
     // keep reading the old layout, or explain in the pull request why not.
-    const { state } = deserialize(fromHex(v8Fixture.hex));
-    expect(toHex(serialize(state))).toBe(v8Fixture.hex);
+    const { state } = deserialize(fromHex(v9Fixture.hex));
+    expect(toHex(serialize(state))).toBe(v9Fixture.hex);
   });
 
   it("refuses a save whose balance stamp is not text", () => {
-    const { state } = deserialize(fromHex(v8Fixture.hex));
+    const { state } = deserialize(fromHex(v9Fixture.hex));
     (state as unknown as Record<string, unknown>)["balance"] = 7;
     const error = refusal(serialize(state));
     expect(error.code).toBe("corrupt");
@@ -486,7 +514,7 @@ describe("committed snapshots", () => {
   });
 
   it("refuses a save whose connection list names a node that is not a connection", () => {
-    const { state } = deserialize(fromHex(v8Fixture.hex));
+    const { state } = deserialize(fromHex(v9Fixture.hex));
     state.connections = Int32Array.of(0);
     const error = refusal(serialize(state));
     expect(error.code).toBe("corrupt");

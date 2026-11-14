@@ -1183,8 +1183,9 @@ function splitPieces(net: RoadNetwork, stops: PlanStop[], seg: number, at: { sto
  * end. Then each split segment, in the order of the first stop that splits
  * it and by ascending id within a stop: the segment is removed and its
  * pieces added from its node A to its node B, so the first takes back the id
- * the removal freed. Then the pieces of the new road from start to end,
- * each at its level, so the ones over water are bridges.
+ * the removal freed. The pieces keep the segment's build order number. Then
+ * the pieces of the new road from start to end, each at its level, so the
+ * ones over water are bridges, each taking the next build order number.
  */
 export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan): number[] {
   const nodes = plan.stops.map((s) => (s.node !== NONE ? s.node : addNode(net, s.x, s.z, heightAt(terrain, s.x, s.z))));
@@ -1199,6 +1200,8 @@ export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan): n
       level: net.segLevelA[seg] ?? 0,
       levelB: net.segLevelB[seg] ?? 0,
       fixed: ((net.segFlags[seg] ?? 0) & SEG_FIXED) !== 0,
+      // The pieces are as old as the road they were cut from.
+      order: net.segOrder[seg] ?? 0,
     };
     removeSegment(net, seg);
     for (let k = 1; k < ends.length; k++) {
