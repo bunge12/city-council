@@ -77,19 +77,19 @@ async function cellsBuilt(page: Page): Promise<void> {
   await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 120_000 });
 }
 
-/** Turns the overlay on with its shortcut and waits until it is drawn. */
+/** Turns the overlay on with the zone tool's shortcut and waits until it is drawn. */
 async function overlayOn(page: Page): Promise<void> {
   await page.locator("#view").focus();
-  await page.keyboard.press("o");
+  await page.keyboard.press("k");
   await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe("true");
   await cellsBuilt(page);
 }
 
-/** Turns the overlay on or off with its shortcut, if it is not that way already. */
+/** Turns the overlay on or off with the zone tool's shortcut, if it is not that way already. */
 async function setOverlay(page: Page, on: boolean): Promise<void> {
   if ((await page.evaluate(() => document.body.dataset["zoningOverlay"])) === String(on)) return;
   await page.locator("#view").focus();
-  await page.keyboard.press("o");
+  await page.keyboard.press("k");
   await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe(String(on));
   if (on) await cellsBuilt(page);
   // The next frame draws it.
@@ -159,7 +159,7 @@ for (const { name, query } of BACKENDS) {
     await expect(page.locator("#zone-legend")).toHaveCount(0);
     await overlayOn(page);
     await expect(page.locator("#zone-legend")).toBeVisible();
-    await expect(page.locator("#zoning-overlay")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#zone-tool")).toHaveAttribute("aria-pressed", "true");
     const stats = await cellStats(page);
     expect(stats.zoned).toBe(fixture.counts.reduce((a, b) => a + b, 0));
     expect(stats.unzoned).toBeGreaterThan(0);
