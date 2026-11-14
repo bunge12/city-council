@@ -49,6 +49,7 @@ pnpm build
 
 ## How work is organised
 
+- Name the Claude Code session after the ticket - a number (M1-01) if exists, or describing a ticket otherwise
 - One issue is one pull request. Keep it small enough to finish and test in one session.
 - Name the branch after the change, for example `m0-terrain-generation`.
 - Right before every push, fetch `main` and rebase onto it, then run `pnpm typecheck`, `pnpm lint` and `pnpm test`. `main` moves while you work, and branch protection needs the branch up to date. Checking once at the start is not enough.
