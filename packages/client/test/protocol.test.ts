@@ -296,9 +296,9 @@ describe("road deltas", () => {
     tick();
     mirror.requestSnapshot();
     expect(updates).toEqual([
-      { kind: "delta", roadChunks: [chunk(4200, 4510)], roadNodes: [0, 1], roadSegs: [0], cellChunks: [], steps: 1 },
-      { kind: "delta", roadChunks: [], roadNodes: [], roadSegs: [], cellChunks: [], steps: 1 },
-      { kind: "delta", roadChunks: [chunk(4300, 4450), chunk(4300, 4550)], roadNodes: [2, 3], roadSegs: [1], cellChunks: [], steps: 1 },
+      { kind: "delta", roadChunks: [chunk(4200, 4510)], roadNodes: [0, 1], roadSegs: [0], cellChunks: [], buildingChunks: [], steps: 1 },
+      { kind: "delta", roadChunks: [], roadNodes: [], roadSegs: [], cellChunks: [], buildingChunks: [], steps: 1 },
+      { kind: "delta", roadChunks: [chunk(4300, 4450), chunk(4300, 4550)], roadNodes: [2, 3], roadSegs: [1], cellChunks: [], buildingChunks: [], steps: 1 },
       { kind: "snapshot" },
     ]);
   });
@@ -473,7 +473,9 @@ describe("snapshot transfer", () => {
     // Every road field but the build order counter, which is a number.
     const roadBuffers = Object.values(state.roads).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
     const cellBuffers = [state.cells.offset.buffer, state.cells.zone.buffer, state.cells.density.buffer];
-    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers]);
+    const buildingBuffers = Object.values(state.buildings).map((value) => value.buffer);
+    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers, ...buildingBuffers]);
+    expect(buildingBuffers).toHaveLength(14);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });
 });

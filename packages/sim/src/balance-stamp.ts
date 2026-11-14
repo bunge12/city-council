@@ -11,6 +11,7 @@
 // the `source`, `sourceUrl` and `note` of a price are words for people, so
 // editing them leaves the stamp alone.
 
+import buildings from "../balance/buildings.json" with { type: "json" };
 import connections from "../balance/connections.json" with { type: "json" };
 import roads from "../balance/roads.json" with { type: "json" };
 import routing from "../balance/routing.json" with { type: "json" };
@@ -38,7 +39,7 @@ export function balanceStampOf(files: Readonly<Record<string, unknown>>): string
 }
 
 /** The stamp of the balance this build of the sim runs. */
-export const BALANCE_STAMP = balanceStampOf({ connections, roads, routing, terrain, time, zoning });
+export const BALANCE_STAMP = balanceStampOf({ buildings, connections, roads, routing, terrain, time, zoning });
 
 /**
  * Whether `state` was created under the balance this build runs, so its log

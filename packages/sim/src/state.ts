@@ -1,4 +1,5 @@
 import { BALANCE_STAMP } from "./balance-stamp";
+import { createBuildings, type BuildingState } from "./buildings/buildings";
 import type { Command } from "./commands";
 import type { LogEntry } from "./log";
 import { seedRng } from "./rng";
@@ -12,7 +13,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 10;
+export const SNAPSHOT_VERSION = 11;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -75,6 +76,11 @@ export interface SimState {
    * one (zoning/cell-index.ts). At or below `tick` when nothing is settling.
    */
   cellsReadyAt: number;
+  /**
+   * Every building, in flat arrays by id (buildings/buildings.ts). Which
+   * building stands on each cell is derived (buildings/where.ts).
+   */
+  buildings: BuildingState;
 }
 
 /**
@@ -114,6 +120,7 @@ export function createBareState(seed: number): SimState {
     balance: BALANCE_STAMP,
     cells: unzonedCells(roads),
     cellsReadyAt: 0,
+    buildings: createBuildings(),
   };
 }
 
