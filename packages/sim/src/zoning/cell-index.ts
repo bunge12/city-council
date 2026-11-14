@@ -186,6 +186,13 @@ export interface CellIndex {
   readonly touched: Set<number>;
   /** A change of roads still settling; null when settled. */
   pending: SettleJob | null;
+  /**
+   * The zone and density buffers state held before the last change, kept to
+   * write the next layout into. A layout is about 6 MB on a big city, and a
+   * new one for every road would keep the garbage collector busy enough to
+   * stall the sim for tens of milliseconds at a time.
+   */
+  spare: { zone: Uint8Array; density: Uint8Array } | null;
 }
 
 // Scratch space. The sim runs on one thread, and no two users of one of
@@ -595,6 +602,7 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     segs: [],
     touched: new Set<number>(),
     pending: null,
+    spare: null,
   };
   const limit = segmentIdLimit(net);
   const order: number[] = [];
@@ -667,6 +675,11 @@ class ClaimQueue {
     heap[i] = key;
   }
 
+  /** The keys still to walk, in no particular order. */
+  remaining(): number[] {
+    return this.heap.slice();
+  }
+
   /** Whether nothing is left to walk. */
   empty(): boolean {
     return this.heap.length === 0;
@@ -702,7 +715,7 @@ interface Before {
 
 /**
  * Brings `index` up to date with its network and returns the new cell state
- * for `cells`, the old one. Returns `cells` itself when no segment changed.
+ * for `cells`, the old one, or null when no segment changed.
  *
  * A new segment's cell that lies on the same anchor cell as a removed
  * segment's, with the same road width, has the same corners to the bit, so
@@ -711,7 +724,7 @@ interface Before {
  * cell, not by segment id (`claimsBefore`), so such a cell claims in the
  * same place in the order as the cell it replaces.
  */
-function update(index: CellIndex, cells: CellState): { cells: CellState; work: number } {
+function update(index: CellIndex, cells: CellState): { cells: CellState; work: number; folded: boolean } | null {
   const net = index.net;
   const limit = segmentIdLimit(net);
   const oldLimit = index.segs.length;
@@ -726,11 +739,17 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     const s = index.segs[id] ?? null;
     if (!sameAsNet(s, net, id)) changed.push({ id, shape: s, start: id < oldLimit ? (cells.offset[id] ?? 0) : 0 });
   }
-  if (changed.length === 0 && limit === oldLimit) return { cells, work: 0 };
-  // A change still settling finishes first: the walk below starts from settled cells.
-  drain(index, Infinity);
+  if (changed.length === 0 && limit === oldLimit) return null;
+  // A change still settling is folded into this one rather than finished
+  // here, which could take far longer than a tick. Its tasks run now, so
+  // the buckets match the shapes, and its cells still to walk join this
+  // walk. The walk is right from any statuses, so long as every cell that
+  // may be wrong is in the queue or is sent there by a neighbour that
+  // changes, and that holds for both changes' cells.
+  const carried = takeOver(index);
 
   const queue = new ClaimQueue(index);
+  for (const key of carried) queue.push(key);
   const box = new Float64Array(4);
   const q = new Float64Array(8);
   const seedOverlapping = (quad: Float64Array, statuses: number) => {
@@ -773,6 +792,8 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   for (let id = oldLimit; id < limit; id++) index.segs[id] = null;
   /** For each removed shape, the cells a new cell took over as they were. */
   const kept = new Map<Before, Uint8Array>();
+  /** New cells on no removed cell's ground: counted from the shapes alone, whatever has been walked. */
+  let fresh = 0;
   for (const { id } of changed) {
     if (id >= limit) continue;
     const s = shapeOf(net, id);
@@ -780,9 +801,11 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     if (!s) continue;
     const status = s.status;
     const sources = status ? byAnchor.get(s.anchorKey) : undefined;
+    if (status && !sources) fresh += status.length;
     if (status && sources) {
       for (let local = 0; local < status.length; local++) {
         const { k, side, depth } = anchorCellOf(s, local);
+        let found = false;
         for (const b of sources) {
           const o = b.shape as SegShape;
           if (o.half !== s.half) continue;
@@ -795,8 +818,10 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
             kept.set(b, marks);
           }
           marks[from] = 1;
+          found = true;
           break;
         }
+        if (!found) fresh++;
       }
     }
     seeds.push(() => {
@@ -875,16 +900,26 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   // ticks it may take to settle: the new cells with nothing to start from,
   // and the removed cells no new cell took over. Both follow from the road
   // shapes alone, not from how far an earlier change has settled.
+  work += fresh;
   for (const c of changed) {
-    const fresh = index.segs[c.id]?.status;
-    // Nothing has been walked yet, so a cell with nothing to start from is still unset.
-    if (fresh) for (let local = 0; local < fresh.length; local++) if (fresh[local] === UNSET) work++;
     const gone = c.shape?.status;
     if (!gone) continue;
     const marks = kept.get(c);
     for (let local = 0; local < gone.length; local++) if (marks?.[local] !== 1) work++;
   }
-  return { cells: relayout(index, cells, changed, byAnchor), work };
+  return { cells: relayout(index, cells, changed, byAnchor), work, folded: carried.length > 0 };
+}
+
+/**
+ * Ends the job of a change still settling: runs its tasks still to run and
+ * returns the cells it had still to walk. Nothing if none is settling.
+ */
+function takeOver(index: CellIndex): number[] {
+  const job = index.pending;
+  if (!job) return [];
+  while (job.nextSeed < job.seeds.length) (job.seeds[job.nextSeed++] as () => void)();
+  index.pending = null;
+  return job.queue.remaining();
 }
 
 /**
@@ -971,8 +1006,8 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
     id = next + 1;
   }
   offset[limit] = total;
-  const zone = new Uint8Array(total);
-  const density = new Uint8Array(total);
+  const zone = layoutBuffer(index.spare?.zone, cells.zone, total);
+  const density = layoutBuffer(index.spare?.density, cells.density, total);
   // Unchanged segments between two changed ones have their runs side by
   // side in both layouts, so each stretch is one copy.
   let stretch = 0;
@@ -1007,7 +1042,24 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
       }
     }
   }
+  // State lets go of the old arrays, so they become the spare.
+  index.spare = { zone: cells.zone, density: cells.density };
   return { offset, zone, density };
+}
+
+/**
+ * A zeroed array of `length` for a new layout: a view on the spare buffer
+ * when it is big enough and not the one state holds now, else a new buffer
+ * with room to grow. Like the network's arrays, the view is exactly
+ * `length` long, so saves, hashes and copies see only the cells.
+ */
+function layoutBuffer(spare: Uint8Array | undefined, current: Uint8Array, length: number): Uint8Array {
+  if (spare && spare.buffer !== current.buffer && spare.buffer.byteLength >= length) {
+    const view = new Uint8Array(spare.buffer, 0, length);
+    view.fill(0);
+    return view;
+  }
+  return new Uint8Array(new ArrayBuffer(Math.ceil(length * 1.25) + 1024), 0, length);
 }
 
 // Live indexes by network object, like the spatial index and the blocks. A
@@ -1041,7 +1093,7 @@ function indexOf(state: SimState): { index: CellIndex; built: boolean } {
  */
 export function syncCells(state: SimState): CellIndex {
   const { index, built } = indexOf(state);
-  if (!built) state.cells = update(index, state.cells).cells;
+  if (!built) state.cells = update(index, state.cells)?.cells ?? state.cells;
   drain(index, Infinity);
   return index;
 }
@@ -1052,23 +1104,31 @@ export function syncCells(state: SimState): CellIndex {
  * for the new roads at once. A change that walks no more than
  * `settleCellsPerTick` cells settles at once too. A bigger one is given
  * `state.cellsReadyAt`, the tick by which it must be settled, from its size
- * alone, so every machine gives it the same tick; until then `settleCells`
- * walks one slice of it a step. Nothing in the sim may read whether a cell
+ * and the tick an earlier change settles by, so every machine gives it the
+ * same tick; until then `settleCells` walks one slice of it a step. A change
+ * that arrives while another settles joins its walk. Nothing in the sim may read whether a cell
  * is blocked before that tick (`cellsSettled`).
  */
 export function stepCells(state: SimState): void {
   const { index, built } = indexOf(state);
   if (built) return;
-  const { cells, work } = update(index, state.cells);
+  const result = update(index, state.cells);
+  // No road changed: any change still settling carries on at its own pace.
+  if (!result) return;
+  const { cells, work, folded } = result;
   state.cells = cells;
-  const per = ZONING_BALANCE.settleCellsPerTick;
-  const ticks = Math.ceil(work / per);
+  const ticks = Math.ceil(work / ZONING_BALANCE.settleCellsPerTick);
   if (ticks <= 1) {
-    drain(index, Infinity);
+    // Settled at once, unless it joined a change still settling, which
+    // keeps its own tick; nothing may read the cells before that anyway.
+    if (!folded) drain(index, Infinity);
     return;
   }
-  const ready = state.tick + ticks;
-  if (ready > state.cellsReadyAt) state.cellsReadyAt = ready;
+  // A big change gets ticks of its own after any earlier change's, so the
+  // two never have to share a tick's slice. From state alone, so a city
+  // loaded mid-settle, which settled everything at load, agrees.
+  const from = state.cellsReadyAt > state.tick ? state.cellsReadyAt : state.tick;
+  state.cellsReadyAt = from + ticks;
 }
 
 /**

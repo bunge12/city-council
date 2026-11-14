@@ -556,6 +556,29 @@ describe("settling a big change over a few ticks", () => {
     expect(overlappingOpenCells(state)).toBe(0);
   });
 
+  it("folds a second big change into one still settling, with ticks of its own after the first's", () => {
+    const state = createState(SEED);
+    ok(state, bigGrid());
+    const first = state.cellsReadyAt;
+    const tick = state.tick;
+    ok(
+      state,
+      command("BuildRoadGrid", {
+        origin: { x: 4248, z: 4548 },
+        along: { x: 4248 + 3 * 96, z: 4548 },
+        across: { x: 4248, z: 4548 + 3 * 96 },
+        depth: 86,
+        width: 86,
+        type: "street",
+      }),
+    );
+    expect(state.tick).toBe(tick + 1);
+    expect(state.cellsReadyAt).toBeGreaterThan(first + 1);
+    while (state.tick < state.cellsReadyAt) step(state);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
+    expect(overlappingOpenCells(state)).toBe(0);
+  });
+
   it("settles while paused, and the ready tick waits for the clock", () => {
     const state = createState(SEED);
     ok(state, command("SetSpeed", { speed: 0 }));
