@@ -72,8 +72,8 @@ These are starting numbers to tune, not measurements.
 
 | Area | Target |
 | --- | --- |
-| Frame rate | 60 fps on a 2022 laptop with integrated graphics at 500,000 residents |
-| Cold load | Under 5 s to an interactive map on broadband |
+| Frame rate | At 500,000 residents, 30 fps minimum on a 2022 laptop with integrated graphics at the Low preset, and 60 fps at Balanced on a recent laptop |
+| Cold load | Under 5 s to an interactive map on broadband, with detail still filling in after that |
 | Map size | 12 km × 12 km buildable area |
 | Sim tick | 10 ticks per second at 1x speed, under 20 ms of worker time per tick |
 | Players per city | 8 editing at once |
@@ -166,7 +166,7 @@ Your list put Map & Zoning first. I split it. With free-form roads, zoning cells
 | --- | --- | --- | --- |
 | M0 ✓ | Foundation and terrain | none | A seeded map renders with camera controls. The sim runs in a worker, accepts a no-op command, and the state saves and reloads from IndexedDB. |
 | M1 ✓ | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Angle guides hold a road at 90 degrees, and the grid tool lays out a block grid in one action. Roads at different levels cross without forming an intersection. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
-| M2 | Zoning and buildings | M1 | Paint R, C, I, O, and M on cells along roads. Buildings appear on zoned cells at a fixed rate and disappear when the road is removed. Each zone can have a level 1-3 which indicates density & impact |
+| M2 | Zoning and buildings | M1 | Paint R, C, I, O, and M on cells along roads. Buildings appear on zoned cells at a fixed rate and disappear when the road is removed. Each zone can have a level 1-3 which indicates density & impact. Three graphics presets exist, and buildings set the default look. |
 | M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. |
 | M4 | Economy | M3 | Taxes, upkeep and construction costs hit one treasury. A monthly budget panel balances. Running out of money blocks building. Allow borrowing. Demolishing an occupied building charges compensation. Property and business taxes and development charges work. The first population milestones unlock density 2 and pay grants. |
 | M5 | Traffic | M3 | Commutes load onto roads. A traffic overlay shows congested segments. Widening a road or adding a bypass visibly changes the overlay. Long commutes lower demand. Decorative cars visualize the traffic levels. Assignment stays inside its time budget on a 500,000 resident test city. Roads can be raised and lowered, with ramps, overpasses and tunnels, so a highway interchange can be built. |
@@ -442,7 +442,7 @@ Per cell, this runs from about 0.3 residents for a house, through about 4 to 6 f
 
 **Note on tower height.** A residential tower's floor plate is around 750 m², which fits a 48 m lot with room for a podium. At that size, 1,000 residents takes roughly 55 storeys. That is the top of the range, and most R3 buildings should sit well below it.
 
-**Note on large commercial and industrial lots, to settle in the M2 spec.** The 6 × 6 cap is fine for housing and offices but too small for a big-box store, a mall or a large factory, and zoning is only six cells deep. The proposed fix is a through-lot. When a block between two parallel roads carries the same zone and density on both sides, the grower may merge the two back-to-back strips into one lot up to 12 cells deep, which is 96 m. Large commercial and industrial buildings may then use lots up to 12 × 12 cells. Zoning depth stays at six cells.
+**Note on large commercial and industrial lots, to settle in the M2 spec.** The 6 × 6 cap is fine for housing and offices but too small for a big-box store, a mall or a large factory, and zoning is only six cells deep. The proposed fix is a through-lot. When a block between two parallel roads carries the same zone and density on both sides, the grower may merge the two back-to-back strips into one lot up to 12 cells deep, which is 96 m. Large commercial and industrial buildings may then use lots up to 12 × 12 cells. Zoning depth stays at six cells. Taken up in the M2 spec: issue M2-14 builds through-lots, for commercial and industrial at density 3 to start with.
 
 Removing a road removes its cells and their buildings. The pops inside are displaced and look for a new home or job.
 
@@ -1040,6 +1040,31 @@ The bands also cap the work. At street level only a few chunks are in view, so f
 
 Overlays work in every band. In the city band the map reads much like an info view by default, which suits planning a 12 km map.
 
+### Graphics presets
+
+The performance targets are a floor and not a ceiling. Three presets let the game look better on stronger machines without slowing weaker ones.
+
+| Preset | Aimed at | Frame rate at 500,000 residents | Adds |
+| --- | --- | --- | --- |
+| Low | Integrated graphics | 30 fps minimum | Flat lighting, no shadows, fewer cars drawn |
+| Balanced, the default | A recent laptop | 60 fps | Sun shadows near the camera, soft ambient shading |
+| High | A discrete GPU | 60 fps | Longer shadow range, water reflections, more street detail |
+
+The game picks a preset on first run from a short benchmark, and the player can change it.
+
+Two rules keep the presets honest. Every visual feature states which preset turns it on, so nothing expensive lands in Low by accident. And no preset changes the sim, so players on different presets in one shared city see the same city.
+
+Loading follows one rule, which is to show something fast and then refine. Terrain appears first, buildings fill in by chunk from the camera outward, and costlier shaders compile in the background and switch on when ready.
+
+Where this sits in the build:
+
+| When | What |
+| --- | --- |
+| M1, in progress | Nothing in code. Roads and terrain have little to shade, and the road tool is the priority. |
+| Start of M2 | The preset setting and its plumbing, the sun and ambient lighting, the building material with tint, and shadows in Balanced. Buildings are the first real visual content, and adding shadow support to instanced materials later is harder than starting with it. |
+| M5 | Car counts and street detail per preset, tied to the zoom bands |
+| M3 onward | Scale checkpoints measure Balanced and Low at each city size |
+| M11 | The tuning pass against real 500,000 resident cities, and the High extras such as water reflections, which are purely additive |
 ### Testing
 
 - **Unit tests on sim systems.** Given this state and this command, expect that state. They run headless in Vitest.
@@ -1099,6 +1124,7 @@ The repo is MIT licensed, the same licence three.js uses. It is the simplest for
 - [x] At launch, who may host an online city while billing does not exist? The doc says invited hosts only.
 - [ ] Jobs per building are not set for commercial, office, industrial and mixed. Residents per building now are, so jobs need the same table before M3.
 - [ ] Are the proposed lot sizes for each housing type right? See the table under M2.
+- [ ] Which machines are the reference for Low and Balanced? The presets need two real computers to measure on, ideally ones you own.
 - [ ] How large may a command's payload be? Nothing limits it today. The sim refuses a payload that is not plain JSON, but one of any size is accepted, logged and kept in every save and city file from then on. That is fine while the only sender is the player's own page. It needs a byte cap in `validateCommand` before a server takes commands from other people, so settle the number by the two-tab spike.
 
 ## Sources
