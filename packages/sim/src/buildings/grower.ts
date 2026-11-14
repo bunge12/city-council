@@ -73,7 +73,7 @@ function chooseLot(rng: Uint32Array, lots: readonly Lot[], free: number): Lot {
 export function growOne(state: SimState): number {
   for (let tries = 0; tries < BUILDINGS_BALANCE.growthTries; tries++) {
     const index = syncCells(state);
-    const onCell = cellBuildings(state);
+    const onCell = () => cellBuildings(state);
     const count = candidateCount(state, index, onCell);
     if (count === 0) return -1;
     const ref = candidateAt(state, index, onCell, nextInt(state.rng, count));

@@ -88,7 +88,7 @@ function buildings(state: SimState): BuildingRow[] {
 
 /** The grower's kept candidates agree with a fresh scan of the city. */
 function expectCandidatesCurrent(state: SimState): void {
-  const { kept, fresh } = candidateSets(state, syncCells(state), cellBuildings(state));
+  const { kept, fresh } = candidateSets(state, syncCells(state), () => cellBuildings(state));
   expect(kept).toEqual(fresh);
 }
 

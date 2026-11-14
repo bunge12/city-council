@@ -28,5 +28,7 @@ export function prepareDerived(state: SimState): void {
   roadIndexOf(state.roads);
   routingGraphOf(state.roads);
   listBlocks(blockIndexOf(state.roads));
-  prepareCandidates(state, syncCells(state), cellBuildings(state));
+  const index = syncCells(state);
+  cellBuildings(state);
+  prepareCandidates(state, index, () => cellBuildings(state));
 }
