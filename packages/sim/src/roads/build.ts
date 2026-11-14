@@ -55,7 +55,9 @@ import {
   nextSegmentAt,
   otherEnd,
   removeSegment,
+  readAnchor,
   type RoadNetwork,
+  type SegmentSpec,
 } from "./network";
 import {
   curveBox,
@@ -1186,8 +1188,13 @@ function splitPieces(net: RoadNetwork, stops: PlanStop[], seg: number, at: { sto
  * the removal freed. The pieces keep the segment's build order number. Then
  * the pieces of the new road from start to end, each at its level, so the
  * ones over water are bridges, each taking the next build order number.
+ *
+ * With `age`, the road's pieces share one build order number instead: the
+ * one in `age.order`, or, when that is not set yet, the number the first
+ * piece takes, which is then written there. The grid tool builds every link
+ * of a grid this way, so the streets of one grid are as old as each other.
  */
-export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan): number[] {
+export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan, age?: { order?: number }): number[] {
   const nodes = plan.stops.map((s) => (s.node !== NONE ? s.node : addNode(net, s.x, s.z, heightAt(terrain, s.x, s.z))));
   for (const { seg, at } of splitChains(plan.stops)) {
     const shape = segmentQuad(net, seg);
@@ -1203,17 +1210,25 @@ export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan): n
       // The pieces are as old as the road they were cut from.
       order: net.segOrder[seg] ?? 0,
     };
+    // And keep its cells where they were: the same anchor, each piece over its own stretch of it.
+    const anchor = readAnchor(net, seg);
+    // The ends of the road land exactly on its own parameters, not on a sum that rounds.
+    const along = (u: number) => (u === 0 ? anchor.tA : u === 1 ? anchor.tB : anchor.tA + u * (anchor.tB - anchor.tA));
     removeSegment(net, seg);
     for (let k = 1; k < ends.length; k++) {
       const c = straight ? null : subControl(shape, params[k - 1] ?? 0, params[k] ?? 1);
-      addSegment(net, ends[k - 1] ?? NONE, ends[k] ?? NONE, c ? { ...base, cx: c.x, cz: c.z } : base);
+      const piece = { ...base, anchor: { ...anchor, tA: along(params[k - 1] ?? 0), tB: along(params[k] ?? 1) } };
+      addSegment(net, ends[k - 1] ?? NONE, ends[k] ?? NONE, c ? { ...piece, cx: c.x, cz: c.z } : piece);
     }
   }
   const road: number[] = [];
   for (let i = 1; i < nodes.length; i++) {
     const c = pieceControl(plan.stops, plan.control, i);
-    const spec = { type: plan.type.index, network: NEW_NETWORK, level: plan.levels[i - 1] ?? plan.level };
-    road.push(addSegment(net, nodes[i - 1] ?? NONE, nodes[i] ?? NONE, c ? { ...spec, cx: c.x, cz: c.z } : spec));
+    const spec: SegmentSpec = { type: plan.type.index, network: NEW_NETWORK, level: plan.levels[i - 1] ?? plan.level };
+    if (age?.order !== undefined) spec.order = age.order;
+    const seg = addSegment(net, nodes[i - 1] ?? NONE, nodes[i] ?? NONE, c ? { ...spec, cx: c.x, cz: c.z } : spec);
+    if (age && age.order === undefined) age.order = net.segOrder[seg] ?? 0;
+    road.push(seg);
   }
   return road;
 }

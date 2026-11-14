@@ -2,6 +2,7 @@ import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
 import { SNAPSHOT_VERSION, type SimState } from "./state";
+import { unzonedCells } from "./zoning/cells";
 
 type Migration = (old: Record<string, unknown>) => Record<string, unknown>;
 
@@ -20,9 +21,9 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // never takes them back.
   //
   // Placing them runs today's road code, so the network takes today's level
-  // fields and build order first (see versions 6 and 9).
+  // fields, build order and cell anchors first (see versions 6, 9 and 10).
   4: (old) => {
-    old = buildOrder(levelsAtBothEnds(old));
+    old = cellAnchors(buildOrder(levelsAtBothEnds(old)));
     const roads = old["roads"] as RoadNetwork;
     const connections = placeConnections(roads, terrainOf(old["seed"] as number), old["seed"] as number);
     return { ...old, version: 5, roads, connections };
@@ -41,7 +42,80 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 9 gives every segment a build order number, so the older of two
   // roads can keep its cells (M2-01). See `buildOrder`.
   8: (old) => ({ ...buildOrder(old), version: 9 }),
+  // Version 10 adds the zoning cells along every zonable road, all unzoned,
+  // and the cell anchor each segment measures them along (M2-03). Nothing
+  // could be painted before them. See `cellAnchors`.
+  9: (old) => {
+    const next = cellAnchors(old);
+    return { ...next, version: 10, cells: unzonedCells(next["roads"] as RoadNetwork), cellsReadyAt: 0 };
+  },
 };
+
+/**
+ * The state with a cell anchor on every segment, live or in the undo
+ * history: the segment itself, from parameter 0 at node A to 1 at node B.
+ * A version 9 save does not say which road a piece was cut from, so each
+ * segment starts as its own road. A row whose segment is gone and whose
+ * ends the history does not say gets an anchor of zeros; its undo is
+ * refused anyway, as it was before.
+ */
+function cellAnchors(old: Record<string, unknown>): Record<string, unknown> {
+  const net = old["roads"] as RoadNetwork;
+  const limit = net.segFlags.length;
+  const arrays = {
+    segAnchorAX: new Float64Array(limit),
+    segAnchorAZ: new Float64Array(limit),
+    segAnchorCX: new Float64Array(limit),
+    segAnchorCZ: new Float64Array(limit),
+    segAnchorBX: new Float64Array(limit),
+    segAnchorBZ: new Float64Array(limit),
+    segAnchorTA: new Float64Array(limit),
+    segAnchorTB: new Float64Array(limit),
+  };
+  const own = (id: number) => {
+    const a = net.segA[id] ?? 0;
+    const b = net.segB[id] ?? 0;
+    return {
+      ax: net.nodeX[a] ?? 0,
+      az: net.nodeZ[a] ?? 0,
+      cx: net.segCX[id] ?? 0,
+      cz: net.segCZ[id] ?? 0,
+      bx: net.nodeX[b] ?? 0,
+      bz: net.nodeZ[b] ?? 0,
+      tA: 0,
+      tB: 1,
+    };
+  };
+  for (let id = 0; id < limit; id++) {
+    if (!isSegment(net, id)) continue;
+    const a = own(id);
+    arrays.segAnchorAX[id] = a.ax;
+    arrays.segAnchorAZ[id] = a.az;
+    arrays.segAnchorCX[id] = a.cx;
+    arrays.segAnchorCZ[id] = a.cz;
+    arrays.segAnchorBX[id] = a.bx;
+    arrays.segAnchorBZ[id] = a.bz;
+    arrays.segAnchorTB[id] = 1;
+  }
+  const none = { ax: 0, az: 0, cx: 0, cz: 0, bx: 0, bz: 0, tA: 0, tB: 1 };
+  const history = (old["undo"] ?? []) as { ops: OldSegOp[] }[];
+  const undo = history.map((record) => ({
+    ...record,
+    ops: record.ops.map((op) => {
+      const row = op.row as (OldRow & { cx: number; cz: number }) | undefined;
+      if (op.op === "removeSeg" && row) {
+        const anchor = { ax: op["ax"], az: op["az"], cx: row.cx, cz: row.cz, bx: op["bx"], bz: op["bz"], tA: 0, tB: 1 };
+        return { ...op, row: { ...row, anchor } };
+      }
+      if (op.op === "addSeg" && row) return { ...op, row: { ...row, anchor: isSegment(net, op.id) ? own(op.id) : none } };
+      return op;
+    }),
+  }));
+  // In the order a new network has its fields, so it saves the same way.
+  const fields: Record<string, unknown> = { ...net, ...arrays };
+  const roads = Object.fromEntries(Object.keys(createRoadNetwork()).map((key) => [key, fields[key]]));
+  return { ...old, roads, undo };
+}
 
 type OldRow = Record<string, unknown>;
 type OldSegOp = Record<string, unknown> & { op: string; id: number; row?: OldRow };

@@ -6,12 +6,13 @@ import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
 import type { UndoRecord } from "./undo";
+import { unzonedCells, type CellState } from "./zoning/cells";
 
 /**
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 9;
+export const SNAPSHOT_VERSION = 10;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -61,6 +62,19 @@ export interface SimState {
    * version 8, whose balance is not known.
    */
   balance: string;
+  /**
+   * The zone and density of every zoning cell, laid out by segment
+   * (zoning/cells.ts). Where each cell is and whether it is blocked are
+   * derived (zoning/cell-index.ts). The step lays these out again after
+   * every command that changes the roads.
+   */
+  cells: CellState;
+  /**
+   * The tick from which the sim may read which cells are blocked. A change
+   * of roads too big to walk in one tick settles over the ticks up to this
+   * one (zoning/cell-index.ts). At or below `tick` when nothing is settling.
+   */
+  cellsReadyAt: number;
 }
 
 /**
@@ -71,6 +85,7 @@ export interface SimState {
 export function createState(seed: number): SimState {
   const state = createBareState(seed);
   state.connections = placeConnections(state.roads, terrainOf(seed), seed);
+  state.cells = unzonedCells(state.roads);
   return state;
 }
 
@@ -83,6 +98,7 @@ export function createBareState(seed: number): SimState {
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) {
     throw new RangeError(`seed must be an integer from 0 to 2^32 - 1, got ${seed}`);
   }
+  const roads = createRoadNetwork();
   return {
     version: SNAPSHOT_VERSION,
     tick: 0,
@@ -92,10 +108,12 @@ export function createBareState(seed: number): SimState {
     pending: [],
     log: [],
     logOffset: 0,
-    roads: createRoadNetwork(),
+    roads,
     undo: [],
     connections: new Int32Array(0),
     balance: BALANCE_STAMP,
+    cells: unzonedCells(roads),
+    cellsReadyAt: 0,
   };
 }
 

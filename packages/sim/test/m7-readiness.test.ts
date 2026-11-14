@@ -6,6 +6,7 @@
 // will make them.
 
 import { describe, expect, it } from "vitest";
+import { syncCells } from "../src/zoning/cell-index";
 import {
   NETWORKS_ALL,
   NETWORKS_PATH,
@@ -82,6 +83,8 @@ describe("M7 readiness", () => {
     expect(byRoad.ok && byRoad.route.segments).not.toContain(segRail);
 
     // All of it survives a save.
+    // The roads were changed by hand, not by a step, so lay their cells out first.
+    syncCells(state);
     const loaded = deserialize(serialize(state)).state;
     expect(hashState(loaded)).toBe(hashState(state));
     expect(loaded.roads.segNetwork[segPath]).toBe(NETWORK_PATH);

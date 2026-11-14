@@ -54,6 +54,7 @@ import { checkConnections } from "./roads/connections";
 import { checkRoadNetwork, type RoadNetwork } from "./roads/network";
 import { SNAPSHOT_VERSION, SPEEDS, type SimState } from "./state";
 import { checkUndoHistory, heldIds, type UndoRecord } from "./undo";
+import { checkCells } from "./zoning/cells";
 
 /** Newest version of the byte layout above this build reads. Bump on any change to it. */
 export const SNAPSHOT_FORMAT_VERSION = 3;
@@ -611,7 +612,7 @@ function checkPendingCommand(command: unknown, where: string): void {
 
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
-  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance } = state;
+  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");
   if (!isUint32(seed)) throw corrupt("its seed is not a 32-bit integer");
   if (tick !== header.tick || seed !== header.seed) throw corrupt("its header does not match its contents");
@@ -632,6 +633,9 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   const connectionProblem = checkConnections(connections, roads as RoadNetwork);
   if (connectionProblem !== null) throw corrupt(`its outside connections are malformed: ${connectionProblem}`);
   if (typeof balance !== "string") throw corrupt("its balance stamp is not text");
+  const cellProblem = checkCells(cells, roads as RoadNetwork);
+  if (cellProblem !== null) throw corrupt(`its zoning cells are malformed: ${cellProblem}`);
+  if (!Number.isSafeInteger(cellsReadyAt) || (cellsReadyAt as number) < 0) throw corrupt("the tick its zoning cells settle by is not a whole number");
 }
 
 /**

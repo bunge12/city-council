@@ -1,5 +1,5 @@
 // Zoning numbers from `balance/zoning.json`, checked when the module loads
-// (PRD, "M2 Zoning and buildings"). The cells themselves arrive in issue 03.
+// (PRD, "M2 Zoning and buildings"). The cells themselves are in cells.ts.
 
 import balance from "../../balance/zoning.json" with { type: "json" };
 
@@ -24,6 +24,14 @@ export interface ZoningBalance {
   cellSize: number;
   /** How far cells reach back from a road's edge, in cells. */
   zoneDepthCells: number;
+  /** The steepest ground a cell can be zoned on, rise over run at its centre. */
+  maxSlope: number;
+  /** How many cells a change of roads may walk in one tick before the rest wait for the next. */
+  settleCellsPerTick: number;
+  /** What finding the cells under one piece of road surface counts for, in cells walked. */
+  settleSurfacePieceCost: number;
+  /** What filing one cell in or out of the index counts for, in cells walked. */
+  settleFiledCellCost: number;
   zones: ZoneBalance[];
   /** In level order, from 1. */
   densities: DensityBalance[];
@@ -47,6 +55,16 @@ export function checkZoningBalance(data: unknown): string[] {
   }
   const depth = data["zoneDepthCells"];
   if (!Number.isSafeInteger(depth) || (depth as number) < 1) errors.push("zoneDepthCells must be a whole number of at least 1");
+  const maxSlope = data["maxSlope"];
+  if (typeof maxSlope !== "number" || !Number.isFinite(maxSlope) || !(maxSlope > 0)) {
+    errors.push("maxSlope must be a positive rise over run");
+  }
+  const settle = data["settleCellsPerTick"];
+  if (!Number.isSafeInteger(settle) || (settle as number) < 1) errors.push("settleCellsPerTick must be a whole number of at least 1");
+  for (const key of ["settleSurfacePieceCost", "settleFiledCellCost"]) {
+    const cost = data[key];
+    if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) errors.push(`${key} must be a number of cells walked, zero or more`);
+  }
 
   const zones = data["zones"];
   if (!Array.isArray(zones) || zones.length === 0) {

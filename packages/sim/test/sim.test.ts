@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CELLS_SYSTEM,
   COMMANDS_SYSTEM,
   LOG_PAGE_SIZE,
   MAX_PENDING_COMMANDS,
@@ -65,7 +66,7 @@ describe("step", () => {
       start: (name) => calls.push(`start ${name}`),
       end: (name) => calls.push(`end ${name}`),
     });
-    expect(calls).toEqual([`start ${COMMANDS_SYSTEM}`, `end ${COMMANDS_SYSTEM}`]);
+    expect(calls).toEqual([`start ${COMMANDS_SYSTEM}`, `end ${COMMANDS_SYSTEM}`, `start ${CELLS_SYSTEM}`, `end ${CELLS_SYSTEM}`]);
   });
 });
 

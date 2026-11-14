@@ -90,7 +90,8 @@ function refusal(state: SimState, c: Command): string {
 
 /** The state hash leaving out the log, the undo history and the tick. */
 function cityHash(state: SimState): string {
-  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [] });
+  // The tick a change of cells settles by is a deadline, like the tick, not part of the city.
+  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0 });
 }
 
 function plan(state: SimState, payload: unknown): GridPlan {
@@ -282,12 +283,12 @@ describe("BuildRoadGrid", () => {
     const state = createBareState(SEED);
     ok(state, road([4150, 4450], [4650, 4950]));
     const before = cityHash(state);
-    const bytes = serialize({ ...state, tick: 0, log: [], logOffset: 0, undo: [] });
+    const bytes = serialize({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0 });
     ok(state, grid(squareGrid([4200, 4500], 4, 4)));
     expect(segmentCount(state.roads)).toBeGreaterThan(40);
     ok(state, undo());
     expect(cityHash(state)).toBe(before);
-    expect(serialize({ ...state, tick: 0, log: [], logOffset: 0, undo: [] })).toEqual(bytes);
+    expect(serialize({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0 })).toEqual(bytes);
     expect(segmentCount(state.roads)).toBe(1);
     expect(state.log.map((e) => e.type)).toEqual(["BuildRoad", "BuildRoadGrid", "Undo"]);
   });

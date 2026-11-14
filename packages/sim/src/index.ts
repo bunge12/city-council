@@ -13,7 +13,7 @@ export { SNAPSHOT_VERSION, SPEEDS, captureState, createBareState, createState } 
 export type { SimState, Speed } from "./state";
 export { COMMANDS, MAX_PENDING_COMMANDS, submit, validateCommand } from "./commands";
 export type { Command, CommandDef, CommandResult } from "./commands";
-export { COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
+export { CELLS_SYSTEM, COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
 export type { System, SystemTimer } from "./step";
 export { RNG_WORDS, nextFloat, nextInt, nextU32, seedRng } from "./rng";
 export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, isLogEntry, logLength, readLog } from "./log";
@@ -58,6 +58,26 @@ export {
 export type { Terrain, TerrainBalance } from "./terrain/terrain";
 export { ZONING_BALANCE, checkZoningBalance } from "./zoning/balance";
 export type { DensityBalance, ZoneBalance, ZoningBalance } from "./zoning/balance";
+export { CELL_LEFT, CELL_RIGHT, DENSITY_NONE, ZONE_NONE, cellCountOf, cellSlot, placesAlong } from "./zoning/cells";
+export type { CellRef, CellState } from "./zoning/cells";
+export {
+  CELL_BEND,
+  CELL_OFF_MAP,
+  CELL_OPEN,
+  CELL_ROAD,
+  CELL_STEEP,
+  CELL_TAKEN,
+  CELL_WATER,
+  cellAt,
+  cellCorners,
+  cellStatuses,
+  cellsInBox,
+  cellsInChunk,
+  cellsSettled,
+  cellsWalked,
+  syncCells,
+} from "./zoning/cell-index";
+export type { CellIndex, CellInfo } from "./zoning/cell-index";
 export { ROAD_BALANCE, ROAD_BUILD, ROAD_LEVELS, ROAD_TYPES, roadTypeIndex } from "./roads/balance";
 export type { BalancePrice, BridgeBalance, RoadBalance, RoadBuildBalance, RoadType, RoadTypeBalance } from "./roads/balance";
 export { planRoad, snapToGrid } from "./roads/build";

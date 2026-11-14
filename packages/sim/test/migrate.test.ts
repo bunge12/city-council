@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { SNAPSHOT_VERSION, connectionEnd, createBareState, createState, hashState, migrateState, type SimState } from "../src/index";
+import { SNAPSHOT_VERSION, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 
-/** `state` as an older version: its fields minus the ones that version did not have. */
+/**
+ * `state` as an older version: its fields minus the ones that version did
+ * not have. Every version before 10 also lacks the zoning cells and the tick they settle by.
+ */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
-  const kept = Object.entries(state).filter(([key]) => !(drop as string[]).includes(key));
+  const gone: string[] = version < 10 ? [...drop, "cells", "cellsReadyAt"] : drop;
+  const kept = Object.entries(state).filter(([key]) => !gone.includes(key));
   return { ...Object.fromEntries(kept), version };
 }
+
+/** Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000) (build-road.test.ts). */
+const SEED_WITH_FLAT_GROUND = 2026;
 
 describe("migrateState", () => {
   it("upgrades a version 1 state by adding an empty activity log and an empty road network", () => {
@@ -21,9 +28,20 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(9);
+    expect(SNAPSHOT_VERSION).toBe(10);
     const fresh = createState(5);
-    expect(state).toEqual({ ...v1, version: 9, log: [], logOffset: 0, roads: fresh.roads, undo: [], connections: fresh.connections, balance: "" });
+    expect(state).toEqual({
+      ...v1,
+      version: 10,
+      log: [],
+      logOffset: 0,
+      roads: fresh.roads,
+      undo: [],
+      connections: fresh.connections,
+      balance: "",
+      cells: fresh.cells,
+      cellsReadyAt: 0,
+    });
     expect(() => hashState(state)).not.toThrow();
   });
 
@@ -31,14 +49,14 @@ describe("migrateState", () => {
     const v2 = older(createBareState(9), 2, "roads", "undo", "connections", "balance");
     const state = migrateState(v2);
     const fresh = createState(9);
-    expect(state).toEqual({ ...v2, version: 9, roads: fresh.roads, undo: [], connections: fresh.connections, balance: "" });
+    expect(state).toEqual({ ...v2, version: 10, roads: fresh.roads, undo: [], connections: fresh.connections, balance: "", cells: fresh.cells, cellsReadyAt: 0 });
     expect(() => hashState(state)).not.toThrow();
   });
 
   it("upgrades a version 3 state by adding an empty undo history", () => {
     const state = migrateState(older(createBareState(9), 3, "undo", "connections", "balance"));
     expect(state.undo).toEqual([]);
-    expect(state.version).toBe(9);
+    expect(state.version).toBe(10);
     expect(() => hashState(state)).not.toThrow();
   });
 
@@ -88,7 +106,7 @@ describe("migrateState", () => {
     const row = { a, b, type: 0, network: 0, level: LEVEL_BRIDGE, flags: 1, cx: 1050, cz: 1000, length: 100 };
     const undo5 = [{ playerId: "p1", entry: 0, type: "BuildRoad", ops: [{ op: "addNode", id: a, grown: true }, { op: "addSeg", id: 9, grown: true, row }] }];
     const migrated = migrateState({ ...older(state, 5, "roads", "undo"), roads: roads5, undo: undo5 });
-    expect(migrated.version).toBe(9);
+    expect(migrated.version).toBe(10);
     expect(Object.keys(migrated.roads)).toEqual(Object.keys(createRoadNetwork()));
     expect(migrated.roads).toEqual(net);
     expect(migrated.undo[0]?.ops[0]).toEqual({ op: "addNode", id: a, grown: true });
@@ -97,6 +115,8 @@ describe("migrateState", () => {
     // Version 9 adds a build order. No segment 9 is live or held, so the
     // add cannot be undone and says 0, and it is not fresh.
     want["order"] = 0;
+    // Version 10 adds a cell anchor. Segment 9 is gone, so its ends are not known.
+    want["anchor"] = { ax: 0, az: 0, cx: 0, cz: 0, bx: 0, bz: 0, tA: 0, tB: 1 };
     expect(migrated.undo[0]?.ops[1]).toEqual({ op: "addSeg", id: 9, grown: true, fresh: false, row: want });
   });
 
@@ -122,7 +142,7 @@ describe("migrateState", () => {
       { playerId: "p3", entry: 4, type: "UpgradeRoad", ops: [{ op: "restyle", id: lost, from: 0, to: 1, reverse: false }] },
     ];
     const migrated = migrateState({ ...older(state, 6, "undo"), undo: undo6 });
-    expect(migrated.version).toBe(9);
+    expect(migrated.version).toBe(10);
     expect(migrated.roads).toEqual(net);
     const ops = migrated.undo.map((r) => r.ops[0]);
     // Walking back from the road as it is: a to b now, so b to a before the
@@ -141,6 +161,16 @@ describe("migrateState", () => {
     const state = createState(9);
     const migrated = migrateState(older(state, 7, "balance"));
     expect(migrated).toEqual({ ...state, balance: "" });
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+  });
+
+  it("upgrades a version 9 state by giving every zonable road its cells, unzoned", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    expect(state.cells.zone.length).toBe(24 * 2 * 6);
+    const migrated = migrateState(older(state, 9));
+    expect(migrated).toEqual(state);
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 

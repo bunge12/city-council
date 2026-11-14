@@ -351,7 +351,8 @@ describe("the crossing point", () => {
       compared++;
     }
     expect(compared).toBeGreaterThan(150);
-  });
+    // 400 cities, each of which builds its zoning cell index on its first step.
+  }, 30_000);
 });
 
 describe("after any accepted road", () => {

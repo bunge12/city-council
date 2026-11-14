@@ -416,9 +416,12 @@ export function planRoadGrid(net: RoadNetwork, terrain: Terrain, payload: unknow
 /**
  * Builds the streets of `plan` in order, one link at a time through the
  * BuildRoad path, and stops at the first link that is refused. Returns that
- * refusal, or null once the whole grid is built.
+ * refusal, or null once the whole grid is built. Every new segment of the
+ * grid shares the build order number its first takes, so where two of its
+ * streets compete for ground the lower id keeps it (M2-03).
  */
 export function buildRoadGrid(net: RoadNetwork, terrain: Terrain, plan: GridPlan): GridProblem | null {
+  const age: { order?: number } = {};
   for (let s = 0; s < plan.streets.length; s++) {
     const points = (plan.streets[s] as GridStreet).points;
     for (let k = 1; k < points.length; k++) {
@@ -429,7 +432,7 @@ export function buildRoadGrid(net: RoadNetwork, terrain: Terrain, plan: GridPlan
       if (result.plan.levels.some((level) => level !== LEVEL_GROUND)) {
         return { street: s, reason: "The street would need a bridge, and a grid never builds one" };
       }
-      buildRoad(net, terrain, result.plan);
+      buildRoad(net, terrain, result.plan, age);
     }
   }
   return null;

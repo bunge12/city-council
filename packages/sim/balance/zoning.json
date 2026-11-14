@@ -1,7 +1,11 @@
 {
-  "_about": "Zoning cells (PRD, \"M2 Zoning and buildings\"). Every zonable segment gets square cells along both sides, reaching back from the road's edge. No prices here, so no source years.",
+  "_about": "Zoning cells (PRD, \"M2 Zoning and buildings\"). Every zonable segment gets square cells along both sides, reaching back from the road's edge. `maxSlope` is the steepest ground, rise over run at a cell's centre, that a cell can be zoned on. It is a starting value to tune, a little steeper than the steepest street (0.16), since a building can step down ground a road cannot climb. `settleCellsPerTick` is how many cells a change of roads may walk in one tick; a bigger change settles over the next few ticks, and the tick it is done by is part of the city's state (cell-index.ts). A starting value that keeps a tick inside its 20 ms budget. Finding the cells a change reaches counts against it too: `settleSurfacePieceCost` for each piece of road surface that comes or goes, and `settleFiledCellCost` for each cell filed in or out of the index, both in cells walked, measured on the 30,000 segment city. No prices here, so no source years.",
   "cellSize": 8,
   "zoneDepthCells": 6,
+  "maxSlope": 0.25,
+  "settleCellsPerTick": 6000,
+  "settleSurfacePieceCost": 8,
+  "settleFiledCellCost": 0.25,
   "zones": [
     { "id": "residential", "name": "Residential", "letter": "R" },
     { "id": "commercial", "name": "Commercial", "letter": "C" },

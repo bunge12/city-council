@@ -6,6 +6,7 @@ import { endJournal, reverseOps, startJournal, type NetworkOp } from "./roads/ne
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 import { applyUndo, planUndo, recordUndo } from "./undo";
+import { stepCells } from "./zoning/cell-index";
 
 /**
  * A request to change the city. `payload` is plain JSON data, so a command
@@ -271,10 +272,16 @@ export function enqueue(state: SimState, command: Command): void {
  * command in the same tick may have made it invalid. Those are dropped and
  * not recorded. A command with `applyIfValid` is checked and applied in one
  * pass.
+ *
+ * The zoning cells are brought up to date with the roads before the first
+ * command and after each one (zoning/cell-index.ts), so the cells of a
+ * removed road are read before it goes. A big change settles over the next
+ * few ticks (`stepCells`).
  */
 export function applyPending(state: SimState): void {
   const queue = state.pending;
   state.pending = [];
+  if (queue.length > 0) stepCells(state);
   for (const command of queue) {
     const def = commandDef(command);
     if (typeof def === "string") continue;
@@ -285,6 +292,7 @@ export function applyPending(state: SimState): void {
       if (applied) def.apply(state, command);
     }
     if (applied) {
+      stepCells(state);
       recordEntry(state, {
         tick: state.tick,
         seq: command.seq,

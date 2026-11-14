@@ -37,6 +37,37 @@ const NEAREST_SAMPLES = 16;
 /** Newton steps that refine a nearest point. */
 const NEAREST_STEPS = 12;
 
+/** Pieces in the polyline that measures a curve's length (`curveLength`, and the zoning cells along it). */
+export const CURVE_STEPS = 16;
+
+/**
+ * The running lengths of the polyline that measures the curve from (ax, az)
+ * through (cx, cz) to (bx, bz): CURVE_STEPS pieces at t = i / CURVE_STEPS,
+ * entry i the length up to piece i, entry CURVE_STEPS the whole. Only exact
+ * operations, so every engine gets the same numbers. A segment's stored
+ * length and the places of its zoning cells both come from here, so the two
+ * can never disagree.
+ */
+export function curvePolyline(ax: number, az: number, cx: number, cz: number, bx: number, bz: number): Float64Array {
+  const cum = new Float64Array(CURVE_STEPS + 1);
+  let px = ax;
+  let pz = az;
+  let run = 0;
+  for (let i = 1; i <= CURVE_STEPS; i++) {
+    const t = i / CURVE_STEPS;
+    const u = 1 - t;
+    const x = u * u * ax + 2 * u * t * cx + t * t * bx;
+    const z = u * u * az + 2 * u * t * cz + t * t * bz;
+    const dx = x - px;
+    const dz = z - pz;
+    run += Math.sqrt(dx * dx + dz * dz);
+    cum[i] = run;
+    px = x;
+    pz = z;
+  }
+  return cum;
+}
+
 /** Whether the control point sits exactly at the midpoint, which makes a straight segment. */
 export function isStraight(q: Quad): boolean {
   return q.cx === (q.ax + q.bx) / 2 && q.cz === (q.az + q.bz) / 2;

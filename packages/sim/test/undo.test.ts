@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { syncCells } from "../src/zoning/cell-index";
 import {
   LEVEL_BRIDGE,
   ROAD_TYPES,
@@ -80,7 +81,8 @@ function refusal(state: SimState, c: Command): string {
 
 /** The state hash leaving out the log and the undo history, and the tick, which every step moves. */
 function cityHash(state: SimState): string {
-  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [] });
+  // The tick a change of cells settles by is a deadline, like the tick, not part of the city.
+  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0 });
 }
 
 function findNode(net: RoadNetwork, x: number, z: number): number {
@@ -237,6 +239,8 @@ describe("A bulldoze of thousands of segments", () => {
     // Ids already free before the command stay free, in their order.
     removeSegment(net, 5);
     removeSegment(net, 3);
+    // The roads were changed by hand, not by a step, so lay their cells out first.
+    syncCells(state);
     const before = cityHash(state);
     ok(state, bulldoze(liveSegments(net)));
     expect(segmentCount(net)).toBe(0);
