@@ -472,7 +472,8 @@ describe("snapshot transfer", () => {
     const state = createBareState(3);
     // Every road field but the build order counter, which is a number.
     const roadBuffers = Object.values(state.roads).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
-    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer]);
+    const cellBuffers = [state.cells.offset.buffer, state.cells.zone.buffer, state.cells.density.buffer];
+    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers]);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });
 });

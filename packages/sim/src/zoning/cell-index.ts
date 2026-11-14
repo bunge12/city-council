@@ -486,18 +486,27 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
 /** A queue of cell keys, the one that claims first at the front. */
 class ClaimQueue {
   private readonly heap: number[] = [];
-  private readonly seen = new Set<number>();
+  /** A mark per cell of each segment that has had one queued. Faster than a set of keys this large. */
+  private readonly seen = new Map<number, Uint8Array>();
   constructor(private readonly index: CellIndex) {}
 
   /** Whether `key` has been queued, and maybe walked already. */
   has(key: number): boolean {
-    return this.seen.has(key);
+    const seg = Math.floor(key / KEY_STRIDE);
+    return this.seen.get(seg)?.[key - seg * KEY_STRIDE] === 1;
   }
 
   /** Queues `key` unless it has been queued before. */
   push(key: number): void {
-    if (this.seen.has(key)) return;
-    this.seen.add(key);
+    const seg = Math.floor(key / KEY_STRIDE);
+    let marks = this.seen.get(seg);
+    if (!marks) {
+      marks = new Uint8Array(this.index.segs[seg]?.status?.length ?? 0);
+      this.seen.set(seg, marks);
+    }
+    const local = key - seg * KEY_STRIDE;
+    if (marks[local] === 1) return;
+    marks[local] = 1;
     const heap = this.heap;
     heap.push(key);
     let i = heap.length - 1;
