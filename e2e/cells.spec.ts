@@ -341,11 +341,13 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   ];
   // The same roads with nothing zoned and the overlay off, for comparison.
   await openCity(page, query, "Thirty thousand", scaleCity(30_000));
+  // Fixed short waits, not `settle`: in software a frame of this city takes
+  // half a second, and waiting for the trees to settle took a minute a pose.
   const plain: Record<string, number> = {};
   for (const { band, position, target } of poses) {
     await setPose(page, position, target);
-    await settle(page);
-    plain[band] = await frameTime(page, 90);
+    await frameTime(page, 5);
+    plain[band] = await frameTime(page, 20);
   }
   const city = zonedScaleCity(30_000);
   const backend = await openCity(page, query, "Thirty thousand zoned", city.bytes);
@@ -357,9 +359,9 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   const overlay: Record<string, number> = {};
   for (const { band, position, target } of poses) {
     await setPose(page, position, target);
-    await settle(page);
+    await frameTime(page, 5);
     expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
-    overlay[band] = await frameTime(page, 90);
+    overlay[band] = await frameTime(page, 20);
     await attach(testInfo, `30,000 segments, every cell zoned, ${band} band`, await canvasShot(page));
   }
   const report = { backend, zonedCells: stats.zoned, unzonedCells: stats.unzoned, chunks: stats.chunks, buildMs: stats.lastBuildMs, firstShowMs, plainFrameMs: plain, overlayFrameMs: overlay };
