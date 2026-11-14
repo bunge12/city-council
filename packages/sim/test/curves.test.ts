@@ -37,6 +37,7 @@ import {
 import { ROAD_TYPES } from "../src/roads/balance";
 import { buildRoadIndex, forSegmentChunks, nearestPointOnSegment, roadIndexOf, segmentsInBox } from "../src/roads/spatial";
 import { terrainOf } from "../src/terrain/cache";
+import { mapSize } from "../src/terrain/terrain";
 import fixtureJson from "./fixtures/replay/curves.json";
 import { expectReplay, type ReplayFixture } from "./replay-helper";
 import { unjoinedCrossings } from "./unjoined";
@@ -239,6 +240,26 @@ describe("BuildRoad with a control point", () => {
     const command = road([4200, 4500], [4400, 4500]);
     (command.payload as Record<string, unknown>)["control"] = { x: 4300 };
     expect(rejection(createBareState(SEED), command)).toBe("A curved road's control point needs a finite x and z");
+  });
+
+  it("refuses a control point too far off the map to reach, however large, and changes nothing", () => {
+    // 1e308 is finite, so it passes as a point, and snapping to the grid
+    // made it Infinity: the radius came out NaN, passed every limit, and the
+    // ground sampler looped until the process ran out of memory (issue 80).
+    const state = createBareState(SEED);
+    const size = mapSize(terrainOf(SEED));
+    for (const control of [
+      [1e308, 1e308],
+      [-1e308, 4500],
+      [4300, 1.7e308],
+      [1e200, 4500],
+      [3 * size, 4500],
+      [4300, -2 * size],
+    ] as [number, number][]) {
+      expect(rejection(state, road([4200, 4500], [4400, 4500], control)), String(control)).toBe("The road runs off the map");
+    }
+    expect(segmentCount(state.roads)).toBe(0);
+    expect(state.pending).toEqual([]);
   });
 });
 

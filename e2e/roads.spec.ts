@@ -113,6 +113,8 @@ for (const { name, query } of BACKENDS) {
   test(`the fixture city draws the same in every zoom band (${name})`, async ({ page }, testInfo) => {
     const backend = await openCity(page, query, "Roads", fixtureCity().bytes);
     if (query === "?webgl") expect(backend).toBe("webgl2");
+    // CI has a software WebGPU adapter, so the default backend there is WebGPU.
+    else if (process.env["CI"]) expect(backend).toBe("webgpu");
     testInfo.annotations.push({ type: "backend", description: backend });
     const stats = await roadStats(page);
     // Three chunks: the grid and avenue cross the lines x = 4500 and z = 4500.
@@ -125,7 +127,9 @@ for (const { name, query } of BACKENDS) {
       const shot = await canvasShot(page);
       await attach(testInfo, `${band} band, ${backend}`, shot);
       // One baseline per band, shared by both backends: they must draw the same picture.
-      expect(shot).toMatchSnapshot(`roads-${band}.png`, { maxDiffPixelRatio: 0.01, threshold: 0.25 });
+      // The threshold is as tight as the two backends allow. At 0.25 these
+      // passed against baselines with no forest canopy at all (issue 80).
+      expect(shot).toMatchSnapshot(`roads-${band}.png`, { maxDiffPixelRatio: 0.01, threshold: 0.1 });
     }
   });
 }
@@ -139,6 +143,8 @@ for (const { name, query } of BACKENDS) {
   test(`the curved fixture city draws curves and curved junctions (${name})`, async ({ page }, testInfo) => {
     const backend = await openCity(page, query, "Curves", curvedCity().bytes);
     if (query === "?webgl") expect(backend).toBe("webgl2");
+    // CI has a software WebGPU adapter, so the default backend there is WebGPU.
+    else if (process.env["CI"]) expect(backend).toBe("webgpu");
     testInfo.annotations.push({ type: "backend", description: backend });
     const { x, z } = CURVED_JUNCTION;
     await setPose(page, [x + 40, curvedGround + 210, z + 200], [x + 40, curvedGround, z + 30]);
@@ -146,7 +152,7 @@ for (const { name, query } of BACKENDS) {
     await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
     const shot = await canvasShot(page);
     await attach(testInfo, `curves, street band, ${backend}`, shot);
-    expect(shot).toMatchSnapshot("roads-curves.png", { maxDiffPixelRatio: 0.01, threshold: 0.25 });
+    expect(shot).toMatchSnapshot("roads-curves.png", { maxDiffPixelRatio: 0.01, threshold: 0.1 });
     await setPose(page, [x, curvedGround + 4200, z + 1700], [x, curvedGround, z]);
     await settle(page);
     await attach(testInfo, `curves, city band, ${backend}`, await canvasShot(page));

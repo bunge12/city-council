@@ -167,6 +167,10 @@ for (const variant of [
     // The WebGPU run expects WebGPU only where this browser offers an adapter.
     await page.goto(url);
     const hasWebGpu = await page.evaluate(async () => Boolean(await navigator.gpu?.requestAdapter()));
+    // CI starts Chromium with a software WebGPU adapter (playwright.config.ts).
+    // Without this the "webgpu" run could pass on WebGL 2 with only an
+    // annotation to say so, and both backends would never have been checked.
+    if (variant.name === "webgpu" && process.env["CI"]) expect(hasWebGpu, "CI must have a WebGPU adapter").toBe(true);
     const wantBackend = variant.name === "webgpu" && hasWebGpu ? "webgpu" : "webgl2";
     if (variant.name === "webgpu" && !hasWebGpu) {
       info.annotations.push({ type: "backend", description: "no WebGPU adapter in this browser; ran on the WebGL 2 fallback" });
