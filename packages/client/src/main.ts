@@ -38,6 +38,7 @@ import { cellColour } from "./render/cell-geometry";
 import { ZONE_PREVIEW } from "./render/config";
 import { createZonePreviewLayer, type ZoneMark } from "./render/zone-preview";
 import { snapMarks } from "./render/snap-marks-geometry";
+import { zonedCellLookup } from "./tools/cell-snap";
 import { BlockOverlayController, blockLabelPoint, blockShapes } from "./tools/block-overlay";
 import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
 import { GridToolController, gridMarks, gridShapes } from "./tools/grid-tool";
@@ -232,7 +233,7 @@ let shownTerrain: Terrain | null = null;
 const roadTool = new RoadToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
-  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain } : null),
+  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state) } : null),
   send: (payload) => sendCommand("BuildRoad", payload),
 });
 mirror.subscribe((update) => roadTool.mirrorUpdated(update));
@@ -240,7 +241,7 @@ mirror.subscribe((update) => roadTool.mirrorUpdated(update));
 const gridTool = new GridToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
-  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain } : null),
+  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state) } : null),
   send: (payload) => sendCommand("BuildRoadGrid", payload),
 });
 mirror.subscribe((update) => gridTool.mirrorUpdated(update));

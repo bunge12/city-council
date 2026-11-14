@@ -11,8 +11,8 @@ import { linearRgb } from "./road-geometry";
 /** One marker shape. Directions are unit vectors in plan. */
 export type SnapMark =
   | { shape: "ring"; x: number; z: number; look: "node" }
-  | { shape: "diamond"; x: number; z: number; look: "segment" }
-  | { shape: "line"; ax: number; az: number; bx: number; bz: number; look: "angle" | "line" | "offset" }
+  | { shape: "diamond"; x: number; z: number; look: "segment" | "cell" }
+  | { shape: "line"; ax: number; az: number; bx: number; bz: number; look: "angle" | "line" | "offset" | "cell" }
   | { shape: "square"; x: number; z: number; ux: number; uz: number; vx: number; vz: number; look: "square" }
   | { shape: "cross"; x: number; z: number; look: "grid" | "line" | "cut" };
 
@@ -42,6 +42,18 @@ function guideMarks(snap: Snap, metresPerPixel: number): SnapMark[] {
   return marks;
 }
 
+/**
+ * The marks of a cell snap (issue M2-08): the cell edges it comes from, the
+ * line the road runs along for an edge, and a diamond at a corner.
+ */
+function cellMarks(snap: Snap): SnapMark[] {
+  if (snap.kind !== "corner" && snap.kind !== "edge") return [];
+  const marks: SnapMark[] = (snap.cellEdges ?? []).map((e) => ({ shape: "line", ...e, look: "cell" }));
+  if (snap.kind === "edge" && snap.edgeLine) marks.push({ shape: "line", ...snap.edgeLine, look: "cell" });
+  if (snap.kind === "corner") marks.push({ shape: "diamond", x: snap.x, z: snap.z, look: "cell" });
+  return marks;
+}
+
 /** The point on a parallel offset's road centre line square across from `p`. */
 function gapFoot(p: { x: number; z: number }, g: NonNullable<Snap["guides"]>[number]): { x: number; z: number } | null {
   if (!g.toRoad) return null;
@@ -59,6 +71,7 @@ export function snapMarks(snap: Snap, start: BuildPoint | null, metresPerPixel: 
   if (snap.kind === "node") marks.push({ shape: "ring", x: snap.x, z: snap.z, look: "node" });
   if (snap.kind === "segment") marks.push({ shape: "diamond", x: snap.x, z: snap.z, look: "segment" });
   if (snap.kind === "grid") marks.push({ shape: "cross", x: snap.x, z: snap.z, look: "grid" });
+  marks.push(...cellMarks(snap));
   marks.push(...guideMarks(snap, metresPerPixel));
   if (!start) return marks;
   const dx = snap.x - start.x;

@@ -6,20 +6,32 @@
 // catches the cursor gives the point:
 //
 //   1. node      an existing node
-//   2. segment   a point on an existing segment, or the point where the road
+//   2. corner    a corner of a zoned area, set back for the road, or where
+//                a cell line meets it or the strip's road (issue M2-08)
+//   3. segment   a point on an existing segment, or the point where the road
 //                would meet it at a right angle
-//   3. crossing  where two guides cross: two guide lines, a guide line and a
+//   4. crossing  where two guides cross: two guide lines, a guide line and a
 //                parallel offset, or either and an angle ray from the start
-//   4. angle     a guide ray from the start at a step from the source road
-//   5. offset    a line beside a straight road, at a gap between the road
+//   5. angle     a guide ray from the start at a step from the source road
+//   6. edge      the back or end of a zoned area, set back for the road, or
+//                a cell line across a strip (issue M2-08)
+//   7. offset    a line beside a straight road, at a gap between the road
 //                edges that zones cleanly (issue M1-19)
-//   6. line      a guide line running in line with, or square to, a road
+//   8. line      a guide line running in line with, or square to, a road
 //                at a nearby node (issue M1-19)
-//   7. grid      the terrain grid, when its toggle is on
+//   9. grid      the terrain grid, when its toggle is on
 //
 // After that, length snap rounds the road's length to whole cells along its
 // direction, for an angle snap or for no snap at all. Every other source
 // fixes the point, or a line it lies on, so length snap leaves it alone.
+//
+// A cell corner comes before a segment so that a road ending on a street
+// beside a zoned strip lands on a cell line rather than anywhere along it;
+// those corners lie on the street's centre line, so the sim joins it all the
+// same. An edge comes after angle, which is the clearer sign of what the
+// player means, and before offset and line, because it is drawn from cells
+// the player has zoned. Behind a straight strip the edge and the six-cell
+// offset are the same line, give or take the clearance; the edge wins.
 //
 // Angle wins over offset and line because it is measured from the road the
 // new one starts on, the strongest sign of what the player means; offset and
@@ -48,6 +60,7 @@ import {
   type RoadNetwork,
 } from "@city-council/sim";
 import { liveNode, liveRoadSegment, roadSegmentsAt, type RoadNet } from "../render/road-geometry";
+import { cellCornerSource, cellEdgeSource, type CellLookup } from "./cell-snap";
 import { GUIDE_LINES, PARALLEL, PARALLEL_GAP_CELLS, SNAP, type GuideToggles } from "./config";
 
 /**
@@ -55,7 +68,7 @@ import { GUIDE_LINES, PARALLEL, PARALLEL_GAP_CELLS, SNAP, type GuideToggles } fr
  * road a curve leaves from (issue M1-10). `line`, `offset` and `crossing` are
  * the guides from issue M1-19.
  */
-export type SnapKind = "node" | "segment" | "crossing" | "angle" | "offset" | "line" | "tangent" | "grid" | "none";
+export type SnapKind = "node" | "corner" | "segment" | "crossing" | "angle" | "edge" | "offset" | "line" | "tangent" | "grid" | "none";
 
 /** A straight guide the cursor can snap onto: a guide line, a parallel offset or an angle ray. */
 export interface GuideLine {
@@ -93,6 +106,10 @@ export interface SnapHit {
   ray?: { dx: number; dz: number };
   /** For a line, offset or crossing snap, the guides that caught it: one, or the two that cross. */
   guides?: GuideLine[];
+  /** For a corner or edge snap (issue M2-08), the cell edges it comes from, for the marker. */
+  cellEdges?: { ax: number; az: number; bx: number; bz: number }[];
+  /** For an edge snap, the piece of line the point slides along. */
+  edgeLine?: { ax: number; az: number; bx: number; bz: number };
 }
 
 /** What the road starts from, as the sim would join it: the directions of the road there. */
@@ -118,8 +135,10 @@ export interface SnapContext {
   free: boolean;
   /** The terrain grid's step in metres. */
   gridStep: number;
-  /** Width in metres of the road being drawn, for the parallel offset. */
+  /** Width in metres of the road being drawn, for the parallel offset and the cell setback. */
   roadWidth: number;
+  /** The mirror's zoned cells near a point, for the cell sources (issue M2-08). Absent, they catch nothing. */
+  cells?: CellLookup | null;
 }
 
 /** A snap source: catches the cursor or returns null. */
@@ -577,7 +596,17 @@ export const gridSource: SnapSource = {
 };
 
 /** Every source, in priority order. */
-export const SNAP_SOURCES: readonly SnapSource[] = [nodeSource, segmentSource, crossingSource, angleSource, offsetSource, lineSource, gridSource];
+export const SNAP_SOURCES: readonly SnapSource[] = [
+  nodeSource,
+  cellCornerSource,
+  segmentSource,
+  crossingSource,
+  angleSource,
+  cellEdgeSource,
+  offsetSource,
+  lineSource,
+  gridSource,
+];
 
 // ---- The snap ----
 
