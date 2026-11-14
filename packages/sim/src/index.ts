@@ -78,6 +78,8 @@ export {
   syncCells,
 } from "./zoning/cell-index";
 export type { CellIndex, CellInfo } from "./zoning/cell-index";
+export { ZONE_CLEAR, planZoneCells } from "./zoning/zone";
+export type { ZoneCellsPayload, ZonePlan, ZonePlanResult, ZonePoint, ZoneRect } from "./zoning/zone";
 export { ROAD_BALANCE, ROAD_BUILD, ROAD_LEVELS, ROAD_TYPES, roadTypeIndex } from "./roads/balance";
 export type { BalancePrice, BridgeBalance, RoadBalance, RoadBuildBalance, RoadType, RoadTypeBalance } from "./roads/balance";
 export { planRoad, snapToGrid } from "./roads/build";

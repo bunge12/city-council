@@ -1449,6 +1449,50 @@ export function cellsInBox(state: SimState, minX: number, minZ: number, maxX: nu
   return keys.map((key) => infoOf(index, state.cells, key));
 }
 
+/**
+ * Calls `visit` with every open cell whose centre lies inside the box, edges
+ * included: where it sits in `cells.zone` and `cells.density`, and its
+ * centre. Each cell once, in no order a caller may rely on. Does not bring
+ * the index up to date: the caller has called `syncCells`.
+ *
+ * A cell is filed in every bucket its box touches, and is taken only from
+ * the bucket its centre is in, so none needs remembering to be told apart.
+ * The centre is the one `cellsInBox` goes by, to the bit.
+ */
+export function forOpenCellsInBox(
+  index: CellIndex,
+  cells: CellState,
+  minX: number,
+  minZ: number,
+  maxX: number,
+  maxZ: number,
+  visit: (slot: number, x: number, z: number) => void,
+): void {
+  const q = quadW;
+  const list = index.openBuckets;
+  const i0 = bucketOf(index, minX);
+  const i1 = bucketOf(index, maxX);
+  const j0 = bucketOf(index, minZ);
+  const j1 = bucketOf(index, maxZ);
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      for (let e = list.heads[j * index.perSide + i] ?? -1; e >= 0; e = list.next[e] ?? -1) {
+        const key = list.keys[e] ?? 0;
+        const seg = segOfKey(key);
+        const s = index.segs[seg];
+        if (!s) continue;
+        const local = key - seg * KEY_STRIDE;
+        cellQuad(s, local, q);
+        const x = ((q[0] ?? 0) + (q[2] ?? 0) + (q[4] ?? 0) + (q[6] ?? 0)) / 4;
+        const z = ((q[1] ?? 0) + (q[3] ?? 0) + (q[5] ?? 0) + (q[7] ?? 0)) / 4;
+        if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
+        if (bucketOf(index, x) !== i || bucketOf(index, z) !== j) continue;
+        visit((cells.offset[seg] ?? 0) + local, x, z);
+      }
+    }
+  }
+}
+
 /** The chunk a point is in, as `cj * CHUNKS_PER_SIDE + ci`, off-map points in the nearest edge chunk. */
 function chunkAt(x: number, z: number): number {
   const clamp = (v: number) => {

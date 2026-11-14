@@ -1,0 +1,289 @@
+{
+  "description": "Roads and zoning on seed 2026. p1 builds a street and both players zone a strip each side of it. p2 lays a street grid, and both zone over it while its cells are still settling. A street cut through the first strip and a stroke over it land in one tick. A stroke of two crossed rectangles while paused, a clear, a rectangle at the size cap, and a bulldoze of a zoned piece of the first street.",
+  "seed": 2026,
+  "untilTick": 20,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4600
+        },
+        "to": {
+          "x": 4392,
+          "z": 4600
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 4200,
+              "z": 4575
+            },
+            "to": {
+              "x": 4392,
+              "z": 4575
+            },
+            "width": 48
+          }
+        ]
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 3,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "commercial",
+        "density": 2,
+        "rects": [
+          {
+            "from": {
+              "x": 4200,
+              "z": 4625
+            },
+            "to": {
+              "x": 4392,
+              "z": 4625
+            },
+            "width": 48
+          }
+        ]
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 4,
+      "playerId": "p2",
+      "type": "BuildRoadGrid",
+      "payload": {
+        "origin": {
+          "x": 4104,
+          "z": 4704
+        },
+        "along": {
+          "x": 4488,
+          "z": 4704
+        },
+        "across": {
+          "x": 4104,
+          "z": 4992
+        },
+        "depth": 86,
+        "width": 86,
+        "type": "street"
+      }
+    },
+    {
+      "tick": 4,
+      "seq": 5,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "office",
+        "density": 3,
+        "rects": [
+          {
+            "from": {
+              "x": 4110,
+              "z": 4760
+            },
+            "to": {
+              "x": 4360,
+              "z": 4760
+            },
+            "width": 100
+          }
+        ]
+      }
+    },
+    {
+      "tick": 4,
+      "seq": 6,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "industrial",
+        "density": 2,
+        "rects": [
+          {
+            "from": {
+              "x": 4150,
+              "z": 4720
+            },
+            "to": {
+              "x": 4320,
+              "z": 4890
+            },
+            "width": 70
+          }
+        ]
+      }
+    },
+    {
+      "tick": 6,
+      "seq": 7,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4296,
+          "z": 4500
+        },
+        "to": {
+          "x": 4296,
+          "z": 4704
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 6,
+      "seq": 8,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "mixed",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 4200,
+              "z": 4591
+            },
+            "to": {
+              "x": 4392,
+              "z": 4591
+            },
+            "width": 4
+          }
+        ]
+      }
+    },
+    {
+      "tick": 9,
+      "seq": 9,
+      "playerId": "p1",
+      "type": "SetSpeed",
+      "payload": {
+        "speed": 0
+      }
+    },
+    {
+      "tick": 9,
+      "seq": 10,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 3,
+        "rects": [
+          {
+            "from": {
+              "x": 4250,
+              "z": 4550
+            },
+            "to": {
+              "x": 4350,
+              "z": 4650
+            },
+            "width": 20
+          },
+          {
+            "from": {
+              "x": 4350,
+              "z": 4550
+            },
+            "to": {
+              "x": 4250,
+              "z": 4650
+            },
+            "width": 20
+          }
+        ]
+      }
+    },
+    {
+      "tick": 9,
+      "seq": 11,
+      "playerId": "p2",
+      "type": "SetSpeed",
+      "payload": {
+        "speed": 2
+      }
+    },
+    {
+      "tick": 12,
+      "seq": 12,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "none",
+        "rects": [
+          {
+            "from": {
+              "x": 4200,
+              "z": 4640
+            },
+            "to": {
+              "x": 4392,
+              "z": 4640
+            },
+            "width": 20
+          }
+        ]
+      }
+    },
+    {
+      "tick": 12,
+      "seq": 13,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "mixed",
+        "density": 2,
+        "rects": [
+          {
+            "from": {
+              "x": 4104,
+              "z": 4850
+            },
+            "to": {
+              "x": 4360,
+              "z": 4850
+            },
+            "width": 256
+          }
+        ]
+      }
+    },
+    {
+      "tick": 14,
+      "seq": 14,
+      "playerId": "p1",
+      "type": "BulldozeRoad",
+      "payload": {
+        "segments": [
+          2
+        ]
+      }
+    }
+  ],
+  "balance": "880e152c2680a13c",
+  "hash": "1460fecbaa359845"
+}

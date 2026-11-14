@@ -32,6 +32,10 @@ export interface ZoningBalance {
   settleSurfacePieceCost: number;
   /** What filing one cell in or out of the index counts for, in cells walked. */
   settleFiledCellCost: number;
+  /** The most rectangles one `ZoneCells` command may carry. */
+  maxRectsPerCommand: number;
+  /** The longest side a `ZoneCells` rectangle may have, metres. */
+  maxRectSide: number;
   zones: ZoneBalance[];
   /** In level order, from 1. */
   densities: DensityBalance[];
@@ -65,6 +69,10 @@ export function checkZoningBalance(data: unknown): string[] {
     const cost = data[key];
     if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) errors.push(`${key} must be a number of cells walked, zero or more`);
   }
+  const maxRects = data["maxRectsPerCommand"];
+  if (!Number.isSafeInteger(maxRects) || (maxRects as number) < 1) errors.push("maxRectsPerCommand must be a whole number of at least 1");
+  const maxSide = data["maxRectSide"];
+  if (typeof maxSide !== "number" || !Number.isFinite(maxSide) || !(maxSide > 0)) errors.push("maxRectSide must be a positive number of metres");
 
   const zones = data["zones"];
   if (!Array.isArray(zones) || zones.length === 0) {

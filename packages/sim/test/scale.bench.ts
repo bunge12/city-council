@@ -8,16 +8,19 @@
 // takes the measurements M1's close-out asks for on one generated city and
 // reports them together, for the pull request and the PRD. Since M2-03 it
 // also times the zoning cells: generating all of them, and keeping them
-// current through one BuildRoad.
+// current through one BuildRoad. Since M2-04, one ZoneCells at the cap.
 
 import { expect, test } from "vitest";
 import {
+  COMMANDS,
   NETWORKS_ROAD,
+  ZONING_BALANCE,
   buildScaleCity,
   deserialize,
   findRouteBetween,
   planRoad,
   planRoadGrid,
+  planZoneCells,
   prepareDerived,
   routingGraphOf,
   serialize,
@@ -25,6 +28,8 @@ import {
   step,
   type BuildRoadPayload,
   type BuildRoadGridPayload,
+  type Command,
+  type ZoneCellsPayload,
 } from "../src/index";
 import { blockById, blockIndexOf, buildBlockIndex, listBlocks } from "../src/roads/blocks";
 import { buildRoad, type RoadPlan } from "../src/roads/build";
@@ -97,7 +102,35 @@ function applyGrid(payload: BuildRoadGridPayload): NetworkOp[] {
   return ops;
 }
 
+/**
+ * A ZoneCells at the cap: as many rectangles as one command takes, each as
+ * big as one may be, laid side by side in a square over the part of the
+ * city where that square covers the most open cells.
+ */
+function zoningAtCap(): { command: Command; cells: number } {
+  const side = ZONING_BALANCE.maxRectSide;
+  const count = ZONING_BALANCE.maxRectsPerCommand;
+  const perRow = Math.ceil(Math.sqrt(count));
+  let best: { command: Command; cells: number } | null = null;
+  for (const g of grids) {
+    const rects: ZoneCellsPayload["rects"] = [];
+    for (let k = 0; k < count; k++) {
+      const x = g.x + (k % perRow) * side;
+      const z = g.z + Math.floor(k / perRow) * side + side / 2;
+      rects.push({ from: { x, z }, to: { x: x + side, z }, width: side });
+    }
+    const payload: ZoneCellsPayload = { zone: "residential", density: 1, rects };
+    const result = planZoneCells(state, payload);
+    if (result.ok && (!best || result.plan.cells.length > best.cells)) {
+      best = { command: { seq: 0, playerId: "bench", type: "ZoneCells", payload }, cells: result.plan.cells.length };
+    }
+  }
+  if (!best) throw new Error("no ground to zone");
+  return best;
+}
+
 const crossing = roadCrossing(10);
+const zoning = zoningAtCap();
 const grid = gridOverStreets();
 // A street through one block, for the block update on its own.
 const blockStreet = roadCrossing(1);
@@ -166,6 +199,17 @@ test("the M1 scale network", async ({ bench, annotate }) => {
         syncCells(state);
       },
     },
+    // M2-04. Every cell under the rectangles changes, which is the most
+    // work the command can do. The hook unzones them again.
+    "the step that applies one ZoneCells at the cap, every open cell under it changing": {
+      fn: () => {
+        if (COMMANDS["ZoneCells"]?.applyIfValid?.(state, zoning.command) !== null) throw new Error("the ZoneCells was refused");
+      },
+      afterEach: () => {
+        state.cells.zone.fill(0);
+        state.cells.density.fill(0);
+      },
+    },
   };
   const cases: Record<string, () => void> = {
     // Plan and build, with the spatial index, the routing graph, the
@@ -197,6 +241,8 @@ test("the M1 scale network", async ({ bench, annotate }) => {
       syncCells(state);
     },
     "generate every zoning cell of the city from scratch, as a load does": () => void buildCellIndex(net, terrain),
+    // M2-04: what the zone tool's preview pays for the same stroke.
+    "planZoneCells for one ZoneCells at the cap": () => void planZoneCells(state, zoning.command.payload),
     "a route across the map, north-west grid to south-east grid": () =>
       void findRouteBetween(graph, first.x, first.z, last.x, last.z, { networks: NETWORKS_ROAD }),
     // The blocks bring themselves up to date when read. The same street
@@ -247,6 +293,7 @@ test("the M1 scale network", async ({ bench, annotate }) => {
 
   const report = {
     city: { ...counts, blocks: blockCount, cells: state.cells.zone.length, snapshotBytes: serialize(state).byteLength },
+    zoning: { rects: ZONING_BALANCE.maxRectsPerCommand, side: ZONING_BALANCE.maxRectSide, cellsChanged: zoning.cells },
     road: { splits: 10, length: Math.round(crossing.payload.to.x - crossing.payload.from.x) },
     route: { metres: Math.round(route.route.distance), segments: route.route.segments.length },
     meanMs: Object.fromEntries(Object.entries(meanMs).map(([k, v]) => [k, round(v)])),
