@@ -485,3 +485,22 @@ export const CELLS = {
    */
   buildBudgetMs: 6,
 } as const;
+
+/**
+ * The zone tool's marks (issue M2-07): the cells a click would change, in
+ * the colour they would take, and the cells of a stroke sent and not yet
+ * painted. Drawn through the terrain over the overlay, like the road
+ * preview. An erase shows the cells it would clear in `erase`.
+ */
+export const ZONE_PREVIEW = {
+  /** Opacity of the cells the click would change. */
+  opacity: 0.9,
+  /** Opacity of the cells of a stroke waiting for the sim. */
+  pendingOpacity: 0.65,
+  /** The colour of cells an erase would clear. */
+  erase: 0xffffff,
+  /** Metres over the ground, so the marks sit on top of the overlay's cells. */
+  lift: 0.3,
+  /** Each cell is drawn this share of its size, around its centre, so neighbouring cells stay apart. */
+  inset: 0.9,
+} as const;

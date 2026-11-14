@@ -15,11 +15,12 @@ import { shortcutFor, toggledSpeed } from "./shortcuts";
 import { toggleDebug, toggleLog, toggleZoningOverlay } from "./store";
 import { TopBar } from "./TopBar";
 import { ZoneLegend } from "./ZoneLegend";
+import { ZoneReadout } from "./ZoneReadout";
 import "./ui.css";
 
 /** Turns key presses into shortcut actions. Speed keys send `SetSpeed`, like the buttons. */
 function useShortcuts(): void {
-  const { sendCommand, roadTool, gridTool, editTool, routeTool, undo } = useServices();
+  const { sendCommand, roadTool, gridTool, editTool, routeTool, zoneTool, undo } = useServices();
   const speed = useSim((s) => s?.speed ?? null);
   const lastRunning = useRef<Speed>(1);
   const current = useRef<Speed | null>(null);
@@ -74,6 +75,12 @@ function useShortcuts(): void {
         case "upgradeTool":
           editTool.toggle("upgrade");
           return;
+        case "zoneTool":
+          zoneTool.toggle();
+          return;
+        case "zoneDepth":
+          zoneTool.stepDepth(action.by);
+          return;
         case "roadType":
           roadTool.pickType(action.type);
           return;
@@ -81,7 +88,7 @@ function useShortcuts(): void {
           roadTool.pickMode(action.mode);
           return;
         case "escape":
-          if (!routeTool.escape() && !editTool.escape() && !gridTool.escape()) roadTool.escape();
+          if (!routeTool.escape() && !editTool.escape() && !gridTool.escape() && !zoneTool.escape()) roadTool.escape();
           return;
         case "undo":
           void undo();
@@ -90,7 +97,7 @@ function useShortcuts(): void {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [sendCommand, roadTool, gridTool, editTool, routeTool, undo]);
+  }, [sendCommand, roadTool, gridTool, editTool, routeTool, zoneTool, undo]);
 }
 
 function Shell() {
@@ -112,6 +119,7 @@ function Shell() {
       <ZoneLegend />
       <RoadReadout />
       <EditReadout />
+      <ZoneReadout />
     </>
   );
 }

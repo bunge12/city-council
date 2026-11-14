@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { ROAD_TYPES } from "@city-council/sim";
+import { ROAD_TYPES, ZONING_BALANCE } from "@city-council/sim";
 import { FREE_HAND_KEY_LABEL, GUIDES } from "../tools/config";
 import { DRAW_MODES, TOOL_ROAD_TYPES, type DrawMode } from "../tools/road-tool";
+import { ZONE_DEPTHS, ZONE_MODES, type ZoneMode } from "../tools/zone-tool";
 import { GridPanel, gridHint } from "./GridPanel";
 import { useServices, useSim } from "./hooks";
 import { toggleZoningOverlay, useUi } from "./store";
@@ -34,6 +35,18 @@ function editHint(tool: "bulldoze" | "upgrade", dragging: boolean, type: string)
   return `Click a road to upgrade it to ${type.toLowerCase()}. Right-click a one-way to reverse it. ${drag}`;
 }
 
+const ZONE_MODE_LABELS: Record<ZoneMode, { label: string; title: string }> = {
+  fill: { label: "Fill", title: "Fill: hover a road and click to zone the strip on that side, as deep as the depth picked" },
+  brush: { label: "Brush", title: "Brush: click or drag over cells to zone the ones under the pointer" },
+};
+
+/** What the hint says while the zone tool is on. */
+function zoneHint(mode: ZoneMode, brushing: boolean, depth: number): string {
+  if (brushing) return "Release to zone every cell marked. Esc or right-click drops the stroke.";
+  if (mode === "brush") return "Click or drag over cells to zone them. Shift-drag orbits.";
+  return `Hover a road and click to zone the strip on that side, ${depth === 1 ? "1 cell" : `${depth} cells`} deep. [ and ] change the depth.`;
+}
+
 function typeName(id: string): string {
   return ROAD_TYPES.find((t) => t.id === id)?.name ?? id;
 }
@@ -55,11 +68,11 @@ function MenuGroup({ label, id, children }: { label: string; id: string; childre
  * the grid is a build mode beside straight, curved and continuous.
  */
 export function BuildBar() {
-  const { roadTool, gridTool, editTool } = useServices();
+  const { roadTool, gridTool, editTool, zoneTool } = useServices();
   const ready = useSim((s) => s !== null);
   const undoNote = useUi((s) => s.undoNote);
   const tool = useUi((s) => s.tool);
-  const zoning = useUi((s) => s.zoningOverlay);
+  const overlay = useUi((s) => s.zoningOverlay);
   const roadType = useUi((s) => s.roadType);
   const roadMode = useUi((s) => s.roadMode);
   const drawing = useUi((s) => s.roadStart !== null);
@@ -75,12 +88,21 @@ export function BuildBar() {
   const gridOnRoad = useUi((s) => s.gridOnRoad);
   const gridPending = useUi((s) => s.gridPending.length);
   const gridNote = useUi((s) => s.gridNote);
+  const zonePick = useUi((s) => s.zonePick);
+  const zoneDensity = useUi((s) => s.zoneDensity);
+  const zoneErase = useUi((s) => s.zoneErase);
+  const zoneMode = useUi((s) => s.zoneMode);
+  const zoneDepth = useUi((s) => s.zoneDepth);
+  const zoneBrushing = useUi((s) => s.zoneBrush !== null);
+  const zonePending = useUi((s) => s.zonePending.length);
+  const zoneNote = useUi((s) => s.zoneNote);
+  const zoning = tool === "zone";
   const active = tool === "road";
   const gridding = tool === "grid";
   const editing = tool === "bulldoze" || tool === "upgrade";
   const roadMenu = active || editing || gridding;
 
-  let hint = "Pick the road tool to draw roads.";
+  let hint = "Pick the road tool to draw roads, or the zone tool to zone along them.";
   if (active) {
     hint = toolHint(roadMode, drawing, curving);
     hint += ` Hold ${FREE_HAND_KEY_LABEL} to draw free-hand.`;
@@ -88,8 +110,10 @@ export function BuildBar() {
     hint = gridHint(gridDrawn, gridDragging, gridOnRoad);
   } else if (editing) {
     hint = editHint(tool, dragging, typeName(roadType));
+  } else if (zoning) {
+    hint = zoneHint(zoneMode, zoneBrushing, zoneDepth);
   }
-  const shownNote = editing ? editNote : gridding ? gridNote : note;
+  const shownNote = editing ? editNote : gridding ? gridNote : zoning ? zoneNote : note;
 
   // An action or the grid that is on goes back to drawing roads rather than closing the menu.
   const action = (id: "upgrade" | "bulldoze") => {
@@ -208,10 +232,91 @@ export function BuildBar() {
           </button>
         </div>
         <div className="dock-slot">
+          {zoning && (
+            <div className="panel tool-menu" id="zone-menu" aria-label="Zone tool options">
+              <MenuGroup label="Zone" id="zone-picks">
+                {ZONING_BALANCE.zones.map((z) => (
+                  <button
+                    key={z.id}
+                    type="button"
+                    id={`zone-${z.id}`}
+                    aria-pressed={!zoneErase && zonePick === z.id}
+                    title={z.name}
+                    onClick={() => zoneTool.pickZone(z.id)}
+                  >
+                    {z.name}
+                  </button>
+                ))}
+                <button type="button" id="zone-erase" aria-pressed={zoneErase} title="Erase: clear the zoning from cells" onClick={() => zoneTool.toggleErase()}>
+                  Erase
+                </button>
+              </MenuGroup>
+              {!zoneErase && (
+                <MenuGroup label="Density" id="zone-densities">
+                  {ZONING_BALANCE.densities.map((d) => (
+                    <button
+                      key={d.level}
+                      type="button"
+                      id={`zone-density-${d.level}`}
+                      aria-pressed={zoneDensity === d.level}
+                      title={`${d.name} density`}
+                      onClick={() => zoneTool.pickDensity(d.level)}
+                    >
+                      {d.level} {d.name}
+                    </button>
+                  ))}
+                </MenuGroup>
+              )}
+              <MenuGroup label="Paint" id="zone-modes">
+                {ZONE_MODES.map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    id={`zone-mode-${mode}`}
+                    aria-pressed={zoneMode === mode}
+                    title={ZONE_MODE_LABELS[mode].title}
+                    onClick={() => zoneTool.pickMode(mode)}
+                  >
+                    {ZONE_MODE_LABELS[mode].label}
+                  </button>
+                ))}
+              </MenuGroup>
+              {zoneMode === "fill" && (
+                <MenuGroup label="Depth" id="zone-depths">
+                  {ZONE_DEPTHS.map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      id={`zone-depth-${d}`}
+                      aria-pressed={zoneDepth === d}
+                      title={`Fill ${d === 1 ? "1 cell" : `${d} cells`} back from the road ([ and ] step it)`}
+                      onClick={() => zoneTool.setDepth(d)}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </MenuGroup>
+              )}
+            </div>
+          )}
+          <button
+            type="button"
+            id="zone-tool"
+            aria-pressed={zoning}
+            aria-expanded={zoning}
+            aria-controls={zoning ? "zone-menu" : undefined}
+            disabled={!ready}
+            title="Zone tool (K): paint zones on the cells along the streets"
+            onClick={() => zoneTool.toggle()}
+          >
+            Zone <kbd>K</kbd>
+          </button>
+        </div>
+        <div className="dock-slot">
           <button
             type="button"
             id="zoning-overlay"
-            aria-pressed={zoning}
+            aria-pressed={overlay}
             disabled={!ready}
             title="Zoning overlay (O): show the cells along every street and what each is zoned for"
             onClick={toggleZoningOverlay}
@@ -225,6 +330,7 @@ export function BuildBar() {
         {pending > 0 && <span id="road-pending"> Building {pending === 1 ? "1 road" : `${pending} roads`}…</span>}
         {gridPending > 0 && <span id="grid-pending"> Building {gridPending === 1 ? "1 grid" : `${gridPending} grids`}…</span>}
         {editPending > 0 && <span id="edit-pending"> Applying {editPending === 1 ? "1 change" : `${editPending} changes`}…</span>}
+        {zonePending > 0 && <span id="zone-pending"> Zoning {zonePending === 1 ? "1 stroke" : `${zonePending} strokes`}…</span>}
       </p>
       {undoNote && (
         <p className="road-note" id="undo-note" role="status">

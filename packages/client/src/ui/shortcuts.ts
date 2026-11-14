@@ -15,6 +15,8 @@ export type ShortcutAction =
   | { kind: "confirm" }
   | { kind: "bulldozeTool" }
   | { kind: "upgradeTool" }
+  | { kind: "zoneTool" }
+  | { kind: "zoneDepth"; by: number }
   | { kind: "roadType"; type: ToolRoadType }
   | { kind: "drawMode"; mode: DrawMode }
   | { kind: "escape" }
@@ -42,6 +44,9 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["Enter", "NumpadEnter"], label: "Enter", description: "build the grid drawn with the grid tool", action: { kind: "confirm" } },
   { codes: ["KeyV"], label: "V", description: "upgrade tool on or off", action: { kind: "upgradeTool" } },
   { codes: ["KeyN"], label: "N", description: "bulldoze tool on or off", action: { kind: "bulldozeTool" } },
+  { codes: ["KeyK"], label: "K", description: "zone tool on or off", action: { kind: "zoneTool" } },
+  { codes: ["BracketLeft"], label: "[", description: "zone tool: fill one cell shallower", action: { kind: "zoneDepth", by: -1 } },
+  { codes: ["BracketRight"], label: "]", description: "zone tool: fill one cell deeper", action: { kind: "zoneDepth", by: 1 } },
   { codes: ["KeyZ"], label: "Z", description: "draw streets, or upgrade to one", action: { kind: "roadType", type: "street" } },
   { codes: ["KeyX"], label: "X", description: "draw avenues, or upgrade to one", action: { kind: "roadType", type: "avenue" } },
   { codes: ["KeyC"], label: "C", description: "draw one-way roads, or upgrade to one", action: { kind: "roadType", type: "oneWay" } },
@@ -51,7 +56,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     codes: ["Escape"],
     label: "Esc",
-    description: "drop the road being drawn, the grid's rectangle or the drag, or leave the tool",
+    description: "drop the road being drawn, the grid's rectangle, the drag or the brush stroke, or leave the tool",
     action: { kind: "escape" },
   },
 ];
@@ -71,6 +76,9 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "Click, drag", description: "with bulldoze or upgrade: one road, or every road the drag passes over" },
   { label: "Right-click", description: "with upgrade: reverse a one-way" },
   { label: "Shift-drag", description: "with bulldoze or upgrade: orbit, since a drag picks roads" },
+  { label: "Click a road", description: "with the zone tool's fill: zone the strip on the side the pointer is" },
+  { label: "Drag over cells", description: "with the zone tool's brush: zone the cells under the pointer" },
+  { label: "Right-click while brushing", description: "with the zone tool: drop the brush stroke" },
   { label: "Ctrl Z, Cmd Z", description: "undo your last road change" },
 ];
 

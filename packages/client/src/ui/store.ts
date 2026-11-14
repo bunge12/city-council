@@ -12,8 +12,9 @@ import { INITIAL_GRID_TOOL, type GridToolState } from "../tools/grid-tool";
 import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tools/road-tool";
 import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
+import { INITIAL_ZONE_TOOL, type ZonePreview, type ZoneToolState } from "../tools/zone-tool";
 
-export interface UiState extends RoadToolState, GridToolState, EditToolState, RouteToolState, BlockOverlayState {
+export interface UiState extends RoadToolState, GridToolState, EditToolState, RouteToolState, BlockOverlayState, ZoneToolState {
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
@@ -30,7 +31,7 @@ export interface UiState extends RoadToolState, GridToolState, EditToolState, Ro
   busy: boolean;
   /** Why the sim refused the last undo, until the next one is sent. */
   undoNote: string | null;
-  /** Whether the zoning overlay is on (issue M2-06). The zone tool turns it on from issue M2-07. */
+  /** Whether the zoning overlay is on (issue M2-06). The zone tool turns it on while it is open (issue M2-07). */
   zoningOverlay: boolean;
 }
 
@@ -51,6 +52,7 @@ export const useUi = create<UiState>(() => ({
   ...INITIAL_EDIT_TOOL,
   ...INITIAL_ROUTE_TOOL,
   ...INITIAL_BLOCK_OVERLAY,
+  ...INITIAL_ZONE_TOOL,
 }));
 
 export function toggleDebug(): void {
@@ -162,6 +164,26 @@ export function setEditHover(hover: EditHover | null): void {
   if (current === hover) return;
   if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview) return;
   useEditHover.setState({ hover });
+}
+
+/**
+ * What the zone tool shows next to the cursor: the pointer in CSS pixels
+ * over the canvas and what a click would paint there, or null when it shows
+ * nothing. Its own store, like the road readout's.
+ */
+export interface ZoneHoverReadout {
+  x: number;
+  y: number;
+  preview: ZonePreview;
+}
+
+export const useZoneHover = create<{ hover: ZoneHoverReadout | null }>(() => ({ hover: null }));
+
+export function setZoneHover(hover: ZoneHoverReadout | null): void {
+  const current = useZoneHover.getState().hover;
+  if (current === hover) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview) return;
+  useZoneHover.setState({ hover });
 }
 
 /** A block's area label on screen: CSS pixels over the canvas. */

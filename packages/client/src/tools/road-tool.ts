@@ -188,8 +188,8 @@ export interface PendingRoad {
   status: "queued" | "sending" | "accepted";
 }
 
-/** The tools: the road tool here, the grid tool in grid-tool.ts, bulldoze and upgrade in edit-tool.ts, and the debug route tool in route-tool.ts. */
-export type ToolId = "road" | "grid" | "bulldoze" | "upgrade" | "route";
+/** The tools: the road tool here, the grid tool in grid-tool.ts, bulldoze and upgrade in edit-tool.ts, the zone tool in zone-tool.ts, and the debug route tool in route-tool.ts. */
+export type ToolId = "road" | "grid" | "bulldoze" | "upgrade" | "route" | "zone";
 
 /** The tool's part of the UI store. */
 export interface RoadToolState {

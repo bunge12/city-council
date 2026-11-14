@@ -10,6 +10,7 @@ import {
   heightAt,
   replay,
   snapToGrid,
+  ZONING_BALANCE,
   type Block,
   type CommandResult,
   type LogEntry,
@@ -33,6 +34,9 @@ import { createConnectionMarkLayer } from "./render/connection-marks";
 import { connectionMarks } from "./render/connection-marks-geometry";
 import type { RoadNet } from "./render/road-geometry";
 import { createSnapMarkLayer } from "./render/snap-marks";
+import { cellColour } from "./render/cell-geometry";
+import { ZONE_PREVIEW } from "./render/config";
+import { createZonePreviewLayer, type ZoneMark } from "./render/zone-preview";
 import { snapMarks } from "./render/snap-marks-geometry";
 import { BlockOverlayController, blockLabelPoint, blockShapes } from "./tools/block-overlay";
 import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
@@ -41,10 +45,11 @@ import { dragSamples, pickSegment } from "./tools/pick-segment";
 import { RoadToolController, type RoadPreview } from "./tools/road-tool";
 import { RouteToolController, routeShapes } from "./tools/route-tool";
 import type { Snap } from "./tools/snap";
+import { ZoneToolController, type ZoneHover, type ZonePreview } from "./tools/zone-tool";
 import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import { setBlockLabels, setEditHover, setRoadHover, setViewReadout, useGraphics, useUi, type BlockLabel } from "./ui/store";
+import { setBlockLabels, setEditHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useUi, type BlockLabel } from "./ui/store";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
 const TAB_CITY_KEY = "city-council:city";
@@ -248,6 +253,18 @@ const editTool = new EditToolController({
 });
 mirror.subscribe((update) => editTool.mirrorUpdated(update));
 
+const zoneTool = new ZoneToolController({
+  get: () => useUi.getState(),
+  set: (patch) => useUi.setState(patch),
+  city: () => mirror.state,
+  send: (payload) => sendCommand("ZoneCells", payload),
+});
+mirror.subscribe((update) => zoneTool.mirrorUpdated(update));
+// However the zone tool is left, by its button or by picking another tool, it drops its stroke and puts the overlay back.
+useUi.subscribe((now, before) => {
+  if (now.tool !== before.tool) zoneTool.toolChanged(now.tool, before.tool);
+});
+
 const routeTool = new RouteToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
@@ -315,6 +332,7 @@ const services: AppServices = {
   roadTool,
   gridTool,
   editTool,
+  zoneTool,
   routeTool,
   blockOverlay,
   setPreset: choosePresetInSettings,
@@ -608,6 +626,11 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       editTool.click(pointer ? segmentAt(pointer) : -1);
       return;
     }
+    if (zoneTool.active()) {
+      const pointer = controls.pointer();
+      zoneTool.click({ ground: hit, segment: pointer ? segmentAt(pointer) : -1 });
+      return;
+    }
     // The grid tool takes drags, not clicks.
     if (gridTool.active()) return;
     const snap = snapAt(hit);
@@ -616,6 +639,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   controls.onRightClick(() => {
     const pointer = controls.pointer();
     if (editTool.active() && pointer && editTool.rightClick(segmentAt(pointer))) return;
+    if (zoneTool.cancel()) return;
     if (gridTool.active()) {
       gridTool.cancel();
       return;
@@ -632,9 +656,10 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   /** A grid drag has started and its first move, which carries the press point, has not come yet. */
   let gridDragStarting = false;
   controls.setToolDrag({
-    active: () => editTool.active() !== null || gridTool.active(),
+    active: () => editTool.active() !== null || gridTool.active() || zoneTool.brushing(),
     start: () => {
       if (gridTool.active()) gridDragStarting = true;
+      else if (zoneTool.brushing()) zoneTool.dragStart();
       else editTool.dragStart();
     },
     move: (from, to) => {
@@ -646,6 +671,14 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
         gridTool.dragMove(gridPointAt(to), controls.altHeld());
         return;
       }
+      if (zoneTool.brushing()) {
+        // Sampled along the path, so a fast drag skips no cell.
+        for (const p of dragSamples(from, to)) {
+          const hit = rig.pickGround(p.x, p.y);
+          if (hit) zoneTool.brushOver(hit.x, hit.z);
+        }
+        return;
+      }
       for (const p of dragSamples(from, to)) {
         // The segment the drag took last wins while the pointer is on it, so a drag along a road skips the roads crossing it.
         const drag = useUi.getState().editDrag;
@@ -655,11 +688,13 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     end: () => {
       gridDragStarting = false;
       if (gridTool.active()) gridTool.dragEnd();
+      else if (zoneTool.active()) zoneTool.dragEnd();
       else editTool.dragEnd();
     },
     cancel: () => {
       gridDragStarting = false;
       if (gridTool.active()) gridTool.dragCancel();
+      else if (zoneTool.active()) zoneTool.dragCancel();
       else editTool.dragCancel();
     },
   });
@@ -667,6 +702,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   const previews = createRoadPreviewLayer(view.scene, () => hooks.terrain);
   const marks = createSnapMarkLayer(view.scene, () => hooks.terrain);
   const connectionLayer = createConnectionMarkLayer(view.scene, () => hooks.terrain);
+  const zoneLayer = createZonePreviewLayer(view.scene, () => hooks.terrain);
   /** Metres one CSS pixel covers on the ground at (x, z). */
   const scaleAt = (x: number, z: number): number => metresPerPixel({ x, y: heightAt(hooks.terrain, x, z), z, distance: 0 });
   // The live preview, worked out again only when what it depends on changes.
@@ -700,6 +736,31 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       edit = key === "" ? null : editTool.preview(seg);
     }
     return edit;
+  };
+  // What the zone tool would paint, checked with the sim's planner only when the cells it aims at, the paint or the city change.
+  let zoneKey = "";
+  let zonePreview: ZonePreview | null = null;
+  let zonePreviewId = 0;
+  const liveZone = (hover: ZoneHover): ZonePreview | null => {
+    const ui = useUi.getState();
+    if (!zoneTool.active()) {
+      zoneKey = "";
+      zonePreview = null;
+      return null;
+    }
+    const slots = zoneTool.targets(hover).map((c) => c.slot);
+    const key = `${ui.zoneErase ? "erase" : `${ui.zonePick},${ui.zoneDensity}`},${mirrorVersion},${slots.join(";")}`;
+    if (key !== zoneKey) {
+      zoneKey = key;
+      zonePreview = slots.length === 0 ? null : zoneTool.preview(hover);
+      zonePreviewId++;
+    }
+    return zonePreview;
+  };
+  const zoneMarks = (p: ZonePreview): ZoneMark[] => {
+    const at = ZONING_BALANCE.zones.findIndex((z) => z.id === p.zone);
+    const colour = at < 0 ? ZONE_PREVIEW.erase : cellColour(at + 1, p.density);
+    return p.cells.map((c) => ({ corners: c.corners, colour }));
   };
   const shapeOf = (p: RoadPreview, look: PreviewShape["look"]): PreviewShape => ({
     ax: p.from.x,
@@ -772,6 +833,18 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       }
     }
     setEditHover(editNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, preview: editNow } : null);
+    // The zone tool: strokes in flight, then what a click would paint.
+    const zoneHover: ZoneHover = { ground: cursor, segment: zoneTool.active() && pointerNow ? segmentAt(pointerNow) : -1 };
+    const zoneNow = liveZone(zoneHover);
+    const zonePendingNow = useUi.getState().zonePending;
+    const zoneShown = zoneNow?.ok ? zoneNow : null;
+    zoneLayer.show(
+      zoneShown ? zoneMarks(zoneShown) : [],
+      zonePendingNow.flatMap((p) => zoneMarks(p.preview)),
+      `${zoneShown ? zonePreviewId : "-"}|${zonePendingNow.map((p) => p.id).join(",")}`,
+    );
+    document.body.dataset["zonePreview"] = zoneNow ? (zoneNow.ok ? String(zoneNow.cells.length) : "0") : "";
+    setZoneHover(zoneNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, preview: zoneNow } : null);
     // The debug route tool's route, under nothing else the tools draw.
     const route = useUi.getState().routeResult;
     if (net && route?.ok) shapes.unshift(...routeShapes(net, route.route));
