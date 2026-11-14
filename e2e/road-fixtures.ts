@@ -6,6 +6,7 @@ import {
   createState,
   heightAt,
   serialize,
+  syncCells,
   step,
   submit,
   generateTerrain,
@@ -68,6 +69,8 @@ export function buildRoads(state: SimState, roads: Road[]): void {
 export function fixtureCity(): { bytes: Buffer; state: SimState } {
   const state = createState(SEED);
   buildRoads(state, fixtureRoads());
+  // Roads written straight into the graph need their zoning cells laid out before a save.
+  syncCells(state);
   return { bytes: Buffer.from(serialize(state)), state };
 }
 
@@ -94,6 +97,8 @@ export function curvedRoads(): Road[] {
 export function curvedCity(): { bytes: Buffer; state: SimState } {
   const state = createState(SEED);
   buildRoads(state, curvedRoads());
+  // Roads written straight into the graph need their zoning cells laid out before a save.
+  syncCells(state);
   return { bytes: Buffer.from(serialize(state)), state };
 }
 
@@ -127,6 +132,8 @@ export function decorationRoads(): Road[] {
 export function decorationCity(): { bytes: Buffer; state: SimState } {
   const state = createState(SEED);
   buildRoads(state, decorationRoads());
+  // Roads written straight into the graph need their zoning cells laid out before a save.
+  syncCells(state);
   return { bytes: Buffer.from(serialize(state)), state };
 }
 
@@ -165,5 +172,7 @@ export function scaleCity(segments: number, seed = 7): Buffer {
     const typeRoll = nextFloat(rng);
     addSegment(net, a, b, { type: typeRoll < 0.6 ? 0 : typeRoll < 0.85 ? 1 : 2 });
   }
+  // Roads written straight into the graph need their zoning cells laid out before a save.
+  syncCells(state);
   return Buffer.from(serialize(state));
 }
