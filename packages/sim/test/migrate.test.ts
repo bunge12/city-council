@@ -114,6 +114,8 @@ describe("migrateState", () => {
     // Version 9 adds a build order. No segment 9 is live or held, so the
     // add cannot be undone and says 0, and it is not fresh.
     want["order"] = 0;
+    // Version 10 adds a cell anchor. Segment 9 is gone, so its ends are not known.
+    want["anchor"] = { ax: 0, az: 0, cx: 0, cz: 0, bx: 0, bz: 0, tA: 0, tB: 1 };
     expect(migrated.undo[0]?.ops[1]).toEqual({ op: "addSeg", id: 9, grown: true, fresh: false, row: want });
   });
 

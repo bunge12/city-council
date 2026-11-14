@@ -47,102 +47,158 @@ export function cellsAlong(length: number, cellSize: number): number {
   return n > 0 ? n : 0;
 }
 
+/** A curve ready to be measured: its shape, and the polyline lengths `curveLength` uses. */
+export interface MeasuredCurve {
+  ax: number;
+  az: number;
+  cx: number;
+  cz: number;
+  bx: number;
+  bz: number;
+  straight: boolean;
+  /** Plan length, the same number `curveLength` gives. */
+  length: number;
+  /** Running lengths of the sixteen-piece polyline at t = i / 16; null when straight. */
+  cum: Float64Array | null;
+}
+
+/** The curve from (ax, az) through (cx, cz) to (bx, bz), measured. */
+export function measureCurve(ax: number, az: number, cx: number, cz: number, bx: number, bz: number): MeasuredCurve {
+  const straight = cx === (ax + bx) / 2 && cz === (az + bz) / 2;
+  if (straight) {
+    const dx = bx - ax;
+    const dz = bz - az;
+    return { ax, az, cx, cz, bx, bz, straight, length: Math.sqrt(dx * dx + dz * dz), cum: null };
+  }
+  // The polyline `curveLength` measures, summed in the same order, so the
+  // total is the segment's stored length to the last bit.
+  const cum = new Float64Array(CURVE_STEPS + 1);
+  let px = ax;
+  let pz = az;
+  let run = 0;
+  for (let i = 1; i <= CURVE_STEPS; i++) {
+    const t = i / CURVE_STEPS;
+    const u = 1 - t;
+    const x = u * u * ax + 2 * u * t * cx + t * t * bx;
+    const z = u * u * az + 2 * u * t * cz + t * t * bz;
+    const dx = x - px;
+    const dz = z - pz;
+    run += Math.sqrt(dx * dx + dz * dz);
+    cum[i] = run;
+    px = x;
+    pz = z;
+  }
+  return { ax, az, cx, cz, bx, bz, straight, length: run, cum };
+}
+
+/** The curve parameter `s` metres along `c` from its start, held to the curve. */
+export function paramAt(c: MeasuredCurve, s: number): number {
+  let t: number;
+  if (c.cum === null) t = c.length > 0 ? s / c.length : 0;
+  else {
+    const cum = c.cum;
+    let piece = 0;
+    while (piece < CURVE_STEPS - 1 && (cum[piece + 1] ?? 0) < s) piece++;
+    const from = cum[piece] ?? 0;
+    const span = (cum[piece + 1] ?? 0) - from;
+    let f = span > 0 ? (s - from) / span : 0;
+    f = f < 0 ? 0 : f > 1 ? 1 : f;
+    t = (piece + f) / CURVE_STEPS;
+  }
+  return t < 0 ? 0 : t > 1 ? 1 : t;
+}
+
+/** How far along `c` from its start parameter `t` is, in metres: the inverse of `paramAt`. */
+export function lengthAt(c: MeasuredCurve, t: number): number {
+  if (t <= 0) return 0;
+  if (t >= 1) return c.length;
+  if (c.cum === null) return t * c.length;
+  const g = t * CURVE_STEPS;
+  const i = Math.floor(g);
+  const from = c.cum[i] ?? 0;
+  return from + (g - i) * ((c.cum[i + 1] ?? 0) - from);
+}
+
+/** Writes the station of `c` at parameter `t`, four floats, into `out` at `at`. */
+function stationInto(c: MeasuredCurve, t: number, out: Float64Array, at: number): void {
+  const chordX = c.bx - c.ax;
+  const chordZ = c.bz - c.az;
+  let x: number;
+  let z: number;
+  // Direction of travel: half the curve's derivative.
+  let dx: number;
+  let dz: number;
+  if (c.straight) {
+    // Along the chord, so a road on a whole-metre line puts its cells on whole metres too.
+    x = c.ax + t * chordX;
+    z = c.az + t * chordZ;
+    dx = chordX;
+    dz = chordZ;
+  } else {
+    const u = 1 - t;
+    x = u * u * c.ax + 2 * u * t * c.cx + t * t * c.bx;
+    z = u * u * c.az + 2 * u * t * c.cz + t * t * c.bz;
+    dx = c.cx - c.ax + t * (c.ax - 2 * c.cx + c.bx);
+    dz = c.cz - c.az + t * (c.az - 2 * c.cz + c.bz);
+  }
+  let len: number = Math.sqrt(dx * dx + dz * dz);
+  if (len === 0) {
+    // The chord, where a curve's own direction is lost.
+    dx = chordX;
+    dz = chordZ;
+    len = Math.sqrt(dx * dx + dz * dz);
+  }
+  if (len === 0) {
+    dx = 1;
+    dz = 0;
+    len = 1;
+  }
+  out[at] = x;
+  out[at + 1] = z;
+  // Left of travel with north up: x east, z south, so (dz, -dx).
+  out[at + 2] = dz / len;
+  out[at + 3] = -dx / len;
+}
+
 /**
- * The stations of the curve from (ax, az) through (cx, cz) to (bx, bz),
- * `length` metres long: one every `step` metres from A for `whole` steps,
- * then one at B if B lies past the last of them. Four floats each, as
- * STATION_FLOATS says.
+ * The stations of `c` every `step` metres from its start, for its whole
+ * steps, then one at its end if the end lies past the last of them. Four
+ * floats each, as STATION_FLOATS says. For a road's surface.
  */
-export function stationsOf(
-  ax: number,
-  az: number,
-  cx: number,
-  cz: number,
-  bx: number,
-  bz: number,
-  length: number,
-  step: number,
-  whole: number,
-): Float64Array {
-  const last = whole * step;
-  const extra = length - last > STATION_TOLERANCE;
+export function stationsOf(c: MeasuredCurve, step: number): Float64Array {
+  const whole = cellsAlong(c.length, step);
+  const extra = c.length - whole * step > STATION_TOLERANCE;
   const count = whole + 1 + (extra ? 1 : 0);
   const out = new Float64Array(count * STATION_FLOATS);
-  const straight = cx === (ax + bx) / 2 && cz === (az + bz) / 2;
-  // The chord: a straight segment's direction, and a curve's where its own is lost.
-  const chordX = bx - ax;
-  const chordZ = bz - az;
-  // The polyline `curveLength` measures, as running lengths at t = i / 16.
-  let cum: Float64Array | null = null;
-  if (!straight) {
-    cum = new Float64Array(CURVE_STEPS + 1);
-    let px = ax;
-    let pz = az;
-    let run = 0;
-    for (let i = 1; i <= CURVE_STEPS; i++) {
-      const t = i / CURVE_STEPS;
-      const u = 1 - t;
-      const x = u * u * ax + 2 * u * t * cx + t * t * bx;
-      const z = u * u * az + 2 * u * t * cz + t * t * bz;
-      const dx = x - px;
-      const dz = z - pz;
-      run += Math.sqrt(dx * dx + dz * dz);
-      cum[i] = run;
-      px = x;
-      pz = z;
-    }
-  }
-  let piece = 0;
-  for (let k = 0; k < count; k++) {
-    const s = k <= whole ? k * step : length;
-    let t: number;
-    if (k === count - 1 && extra) t = 1;
-    else if (cum === null) t = length > 0 ? s / length : 0;
-    else {
-      while (piece < CURVE_STEPS - 1 && (cum[piece + 1] ?? 0) < s) piece++;
-      const from = cum[piece] ?? 0;
-      const span = (cum[piece + 1] ?? 0) - from;
-      let f = span > 0 ? (s - from) / span : 0;
-      f = f < 0 ? 0 : f > 1 ? 1 : f;
-      t = (piece + f) / CURVE_STEPS;
-    }
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    let x: number;
-    let z: number;
-    // Direction of travel: half the curve's derivative.
-    let dx: number;
-    let dz: number;
-    if (straight) {
-      // Along the chord, so a road on a whole-metre line puts its cells on whole metres too.
-      x = ax + t * chordX;
-      z = az + t * chordZ;
-      dx = chordX;
-      dz = chordZ;
-    } else {
-      const u = 1 - t;
-      x = u * u * ax + 2 * u * t * cx + t * t * bx;
-      z = u * u * az + 2 * u * t * cz + t * t * bz;
-      dx = cx - ax + t * (ax - 2 * cx + bx);
-      dz = cz - az + t * (az - 2 * cz + bz);
-    }
-    let len: number = Math.sqrt(dx * dx + dz * dz);
-    if (len === 0) {
-      dx = chordX;
-      dz = chordZ;
-      len = Math.sqrt(dx * dx + dz * dz);
-    }
-    if (len === 0) {
-      dx = 1;
-      dz = 0;
-      len = 1;
-    }
-    const at = k * STATION_FLOATS;
-    out[at] = x;
-    out[at + 1] = z;
-    // Left of travel with north up: x east, z south, so (dz, -dx).
-    out[at + 2] = dz / len;
-    out[at + 3] = -dx / len;
-  }
+  for (let k = 0; k <= whole; k++) stationInto(c, paramAt(c, k * step), out, k * STATION_FLOATS);
+  if (extra) stationInto(c, 1, out, (count - 1) * STATION_FLOATS);
+  return out;
+}
+
+/**
+ * The stretch of anchor `c` between parameters `tA` and `tB`, in whole
+ * cells: cells `from` up to but not including `to`, counted every `step`
+ * metres from the anchor's start. `reversed` when `tA` is past `tB`.
+ */
+export function anchorSpan(c: MeasuredCurve, tA: number, tB: number, step: number): { from: number; to: number; reversed: boolean } {
+  const sA = lengthAt(c, tA);
+  const sB = lengthAt(c, tB);
+  const lo = sA < sB ? sA : sB;
+  const hi = sA < sB ? sB : sA;
+  // A stretch cut on a whole cell can land a hair either side of it.
+  const from = Math.ceil(lo / step - 1e-6);
+  const to = Math.floor(hi / step + 1e-6);
+  return { from, to: to > from ? to : from, reversed: tA > tB };
+}
+
+/**
+ * Stations `from` to `to` of anchor `c`, every `step` metres from its
+ * start. Station k is the same bits whichever segment asks, so the pieces
+ * of a split road have exactly their parent's cells.
+ */
+export function anchorStations(c: MeasuredCurve, from: number, to: number, step: number): Float64Array {
+  const out = new Float64Array((to - from + 1) * STATION_FLOATS);
+  for (let k = from; k <= to; k++) stationInto(c, paramAt(c, k * step), out, (k - from) * STATION_FLOATS);
   return out;
 }
 

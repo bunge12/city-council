@@ -55,6 +55,7 @@ import {
   nextSegmentAt,
   otherEnd,
   removeSegment,
+  readAnchor,
   type RoadNetwork,
   type SegmentSpec,
 } from "./network";
@@ -1209,10 +1210,15 @@ export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan, ag
       // The pieces are as old as the road they were cut from.
       order: net.segOrder[seg] ?? 0,
     };
+    // And keep its cells where they were: the same anchor, each piece over its own stretch of it.
+    const anchor = readAnchor(net, seg);
+    // The ends of the road land exactly on its own parameters, not on a sum that rounds.
+    const along = (u: number) => (u === 0 ? anchor.tA : u === 1 ? anchor.tB : anchor.tA + u * (anchor.tB - anchor.tA));
     removeSegment(net, seg);
     for (let k = 1; k < ends.length; k++) {
       const c = straight ? null : subControl(shape, params[k - 1] ?? 0, params[k] ?? 1);
-      addSegment(net, ends[k - 1] ?? NONE, ends[k] ?? NONE, c ? { ...base, cx: c.x, cz: c.z } : base);
+      const piece = { ...base, anchor: { ...anchor, tA: along(params[k - 1] ?? 0), tB: along(params[k] ?? 1) } };
+      addSegment(net, ends[k - 1] ?? NONE, ends[k] ?? NONE, c ? { ...piece, cx: c.x, cz: c.z } : piece);
     }
   }
   const road: number[] = [];

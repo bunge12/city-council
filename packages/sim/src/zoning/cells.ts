@@ -1,10 +1,12 @@
 // Zoning cells in state (M2-03, PRD "M2 Zoning and buildings").
 //
 // Every ground-level road segment of a zonable type has cells along both
-// sides, `zoneDepthCells` deep, one for each whole cell size along it from
-// node A. A cell is named by its segment, its side, its place along the
-// segment from node A and its depth back from the road's edge. That name is
-// what state, commands and deltas use.
+// sides, `zoneDepthCells` deep. They are measured along the segment's cell
+// anchor, the road it was cut from or itself (network.ts): one for each
+// whole cell size of the anchor that lies between the segment's ends, so a
+// split leaves every cell where it was. A cell is named by its segment, its
+// side, its place along the segment from node A and its depth back from the
+// road's edge. That name is what state, commands and deltas use.
 //
 // State holds what a player sets: a zone and a density per cell, in two flat
 // arrays. The cells of one segment are a run in those arrays, starting at
@@ -12,7 +14,7 @@
 // ids, so the run of segment s ends at `offset[s + 1]`. Within a run, cells
 // go by place, then side, then depth, which is also the order in which
 // cells of one segment claim ground. The runs are in segment id order and
-// the number of cells a segment has follows from its type, level and length,
+// the number of cells a segment has follows from its type, level and anchor,
 // so the layout is a function of the road graph and two cities with the same
 // roads lay their cells out the same way.
 //
@@ -22,7 +24,7 @@
 import { ROAD_TYPES } from "../roads/balance";
 import { LEVEL_GROUND, NETWORK_ROAD, isSegment, segmentIdLimit, type RoadNetwork } from "../roads/network";
 import { ZONING_BALANCE } from "./balance";
-import { cellsAlong } from "./shape";
+import { anchorSpan, measureCurve } from "./shape";
 
 /** A cell on the left of its segment, travelling from node A to node B with north up. */
 export const CELL_LEFT = 0;
@@ -71,11 +73,23 @@ export function zonableFields(network: number, type: number, levelA: number, lev
   return network === NETWORK_ROAD && levelA === LEVEL_GROUND && levelB === LEVEL_GROUND && ROAD_TYPES[type]?.zonable === true;
 }
 
-/** Places along segment `seg`: 0 when it has no cells. */
+/**
+ * Places along segment `seg`: the whole cells of its cell anchor that lie
+ * between its two ends. 0 when it has no cells.
+ */
 export function placesAlong(net: RoadNetwork, seg: number): number {
   if (!isSegment(net, seg)) return 0;
   if (!zonableFields(net.segNetwork[seg] ?? 0, net.segType[seg] ?? 0, net.segLevelA[seg] ?? 0, net.segLevelB[seg] ?? 0)) return 0;
-  return cellsAlong(net.segLength[seg] ?? 0, ZONING_BALANCE.cellSize);
+  const anchor = measureCurve(
+    net.segAnchorAX[seg] ?? 0,
+    net.segAnchorAZ[seg] ?? 0,
+    net.segAnchorCX[seg] ?? 0,
+    net.segAnchorCZ[seg] ?? 0,
+    net.segAnchorBX[seg] ?? 0,
+    net.segAnchorBZ[seg] ?? 0,
+  );
+  const span = anchorSpan(anchor, net.segAnchorTA[seg] ?? 0, net.segAnchorTB[seg] ?? 0, ZONING_BALANCE.cellSize);
+  return span.to - span.from;
 }
 
 /** How many cells segment `seg` has. */

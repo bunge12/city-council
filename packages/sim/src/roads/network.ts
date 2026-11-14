@@ -124,6 +124,22 @@ export interface RoadNetwork {
    * buildings").
    */
   segOrder: Float64Array;
+  /**
+   * The cell anchor (M2-03): the road a segment's zoning cells are measured
+   * along. A new segment is its own anchor; the pieces of a split keep their
+   * parent's, so cutting a road leaves its cells exactly where they were.
+   * The anchor is a quadratic curve from (AX, AZ) through (CX, CZ) to
+   * (BX, BZ), and `segAnchorTA` and `segAnchorTB` are the curve parameters
+   * at this segment's node A and node B. A reverse swaps the two.
+   */
+  segAnchorAX: Float64Array;
+  segAnchorAZ: Float64Array;
+  segAnchorCX: Float64Array;
+  segAnchorCZ: Float64Array;
+  segAnchorBX: Float64Array;
+  segAnchorBZ: Float64Array;
+  segAnchorTA: Float64Array;
+  segAnchorTB: Float64Array;
   /** Removed segment ids, the next one to reuse last. */
   segFree: Int32Array;
   /** The build order number the next new segment takes. Above every live segment's. */
@@ -180,6 +196,14 @@ export function createRoadNetwork(): RoadNetwork {
     segCZ: new Float64Array(0),
     segLength: new Float64Array(0),
     segOrder: new Float64Array(0),
+    segAnchorAX: new Float64Array(0),
+    segAnchorAZ: new Float64Array(0),
+    segAnchorCX: new Float64Array(0),
+    segAnchorCZ: new Float64Array(0),
+    segAnchorBX: new Float64Array(0),
+    segAnchorBZ: new Float64Array(0),
+    segAnchorTA: new Float64Array(0),
+    segAnchorTB: new Float64Array(0),
     segFree: new Int32Array(0),
     segOrderNext: 0,
   };
@@ -257,6 +281,14 @@ export const SEG_ARRAYS = [
   "segCZ",
   "segLength",
   "segOrder",
+  "segAnchorAX",
+  "segAnchorAZ",
+  "segAnchorCX",
+  "segAnchorCZ",
+  "segAnchorBX",
+  "segAnchorBZ",
+  "segAnchorTA",
+  "segAnchorTB",
 ] as const;
 
 /** Every field of one segment, as plain data. */
@@ -273,6 +305,60 @@ export interface SegmentRow {
   length: number;
   /** Build order, `segOrder`. */
   order: number;
+  /** The cell anchor, `segAnchorAX` to `segAnchorTB`. */
+  anchor: SegmentAnchor;
+}
+
+/** The road a segment's cells are measured along, and where on it the segment's ends are. */
+export interface SegmentAnchor {
+  ax: number;
+  az: number;
+  cx: number;
+  cz: number;
+  bx: number;
+  bz: number;
+  /** Curve parameter at the segment's node A. */
+  tA: number;
+  /** Curve parameter at the segment's node B. */
+  tB: number;
+}
+
+/** Segment `id`'s cell anchor. */
+export function readAnchor(net: RoadNetwork, id: number): SegmentAnchor {
+  return {
+    ax: net.segAnchorAX[id] ?? 0,
+    az: net.segAnchorAZ[id] ?? 0,
+    cx: net.segAnchorCX[id] ?? 0,
+    cz: net.segAnchorCZ[id] ?? 0,
+    bx: net.segAnchorBX[id] ?? 0,
+    bz: net.segAnchorBZ[id] ?? 0,
+    tA: net.segAnchorTA[id] ?? 0,
+    tB: net.segAnchorTB[id] ?? 0,
+  };
+}
+
+function writeAnchor(net: RoadNetwork, id: number, a: SegmentAnchor): void {
+  net.segAnchorAX[id] = a.ax;
+  net.segAnchorAZ[id] = a.az;
+  net.segAnchorCX[id] = a.cx;
+  net.segAnchorCZ[id] = a.cz;
+  net.segAnchorBX[id] = a.bx;
+  net.segAnchorBZ[id] = a.bz;
+  net.segAnchorTA[id] = a.tA;
+  net.segAnchorTB[id] = a.tB;
+}
+
+function sameAnchor(p: SegmentAnchor, q: SegmentAnchor): boolean {
+  return (
+    Object.is(p.ax, q.ax) &&
+    Object.is(p.az, q.az) &&
+    Object.is(p.cx, q.cx) &&
+    Object.is(p.cz, q.cz) &&
+    Object.is(p.bx, q.bx) &&
+    Object.is(p.bz, q.bz) &&
+    Object.is(p.tA, q.tA) &&
+    Object.is(p.tB, q.tB)
+  );
 }
 
 /**
@@ -355,6 +441,7 @@ export function readSegment(net: RoadNetwork, id: number): SegmentRow {
     cz: net.segCZ[id] ?? 0,
     length: net.segLength[id] ?? 0,
     order: net.segOrder[id] ?? 0,
+    anchor: readAnchor(net, id),
   };
 }
 
@@ -371,7 +458,8 @@ export function sameRow(p: SegmentRow, q: SegmentRow): boolean {
     Object.is(p.cx, q.cx) &&
     Object.is(p.cz, q.cz) &&
     Object.is(p.length, q.length) &&
-    p.order === q.order
+    p.order === q.order &&
+    sameAnchor(p.anchor, q.anchor)
   );
 }
 
@@ -512,6 +600,12 @@ export interface SegmentSpec {
    * number. Left out, the segment is new and takes `segOrderNext`.
    */
   order?: number;
+  /**
+   * Cell anchor to keep, for a piece of a split segment: its parent's road,
+   * with the parameters of the piece's ends on it. Left out, the segment is
+   * its own anchor, from parameter 0 at node A to 1 at node B.
+   */
+  anchor?: SegmentAnchor;
 }
 
 /** Steps in the polyline that measures a curve. */
@@ -587,6 +681,7 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   net.segCZ[id] = cz;
   net.segLength[id] = curveLength(ax, az, cx, cz, bx, bz);
   net.segOrder[id] = order;
+  writeAnchor(net, id, spec.anchor ?? { ax, az, cx, cz, bx, bz, tA: 0, tB: 1 });
   if (fresh) net.segOrderNext = order + 1;
   // Newest first in each node's list.
   net.segNextA[id] = net.nodeFirstSeg[a] ?? NONE;
@@ -722,6 +817,7 @@ export function restoreSegment(net: RoadNetwork, id: number, row: SegmentRow, at
   net.segCZ[id] = row.cz;
   net.segLength[id] = row.length;
   net.segOrder[id] = row.order;
+  writeAnchor(net, id, row.anchor);
   linkAt(net, id, row.a, atA);
   linkAt(net, id, row.b, atB);
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
@@ -753,6 +849,10 @@ export function restyleSegment(net: RoadNetwork, id: number, type: number, rever
     const levelA = net.segLevelA[id] ?? 0;
     net.segLevelA[id] = net.segLevelB[id] ?? 0;
     net.segLevelB[id] = levelA;
+    // The cells stay on their ground: the anchor's ends swap with the nodes.
+    const tA = net.segAnchorTA[id] ?? 0;
+    net.segAnchorTA[id] = net.segAnchorTB[id] ?? 0;
+    net.segAnchorTB[id] = tA;
   }
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
 }
@@ -818,6 +918,14 @@ const ARRAY_TYPES: Readonly<Record<Exclude<keyof RoadNetwork, "segOrderNext">, n
   segCZ: Float64Array,
   segLength: Float64Array,
   segOrder: Float64Array,
+  segAnchorAX: Float64Array,
+  segAnchorAZ: Float64Array,
+  segAnchorCX: Float64Array,
+  segAnchorCZ: Float64Array,
+  segAnchorBX: Float64Array,
+  segAnchorBZ: Float64Array,
+  segAnchorTA: Float64Array,
+  segAnchorTB: Float64Array,
   segFree: Int32Array,
 };
 
@@ -897,6 +1005,9 @@ export function checkRoadNetwork(value: unknown, held: HeldIds = { nodes: [], se
     }
     const order = n.segOrder[seg] ?? 0;
     if (!Number.isSafeInteger(order) || order < 0 || order >= n.segOrderNext) return `segment ${seg} has a bad build order`;
+    const anchor = readAnchor(n, seg);
+    if (![anchor.ax, anchor.az, anchor.cx, anchor.cz, anchor.bx, anchor.bz].every(Number.isFinite)) return `segment ${seg} has a bad cell anchor`;
+    if (!(anchor.tA >= 0 && anchor.tA <= 1 && anchor.tB >= 0 && anchor.tB <= 1)) return `segment ${seg} has a bad cell anchor`;
   }
   return null;
 }

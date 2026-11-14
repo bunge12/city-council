@@ -326,7 +326,7 @@ describe("roads competing for ground", () => {
     expect(cellStatuses(state)).toEqual(before);
   });
 
-  it("lets the lower id win between streets of one grid, which share an age", () => {
+  it("lets the street laid out further west, then north, win between streets of one grid, which share an age", () => {
     const state = createState(SEED);
     ok(
       state,
@@ -342,7 +342,13 @@ describe("roads competing for ground", () => {
     const net = state.roads;
     const streets = live(net).filter((s) => placesAlong(net, s) > 0);
     expect(new Set(streets.map((s) => net.segOrder[s])).size).toBeLessThan(streets.length);
-    // Where two streets of the grid meet, the cells of the higher id give way.
+    // Where two streets of the grid meet, the cells of the street whose
+    // anchor starts further east, or as far east and further south, give way.
+    const anchorOf = (seg: number) => [net.segAnchorAX[seg] ?? 0, net.segAnchorAZ[seg] ?? 0, net.segAnchorBX[seg] ?? 0, net.segAnchorBZ[seg] ?? 0];
+    const earlier = (p: number[], q: number[]) => {
+      for (let i = 0; i < p.length; i++) if (p[i] !== q[i]) return (p[i] ?? 0) < (q[i] ?? 0);
+      return false;
+    };
     for (const seg of streets) {
       for (const c of cellsOf(state, seg)) {
         if (c.status !== CELL_TAKEN) continue;
@@ -355,7 +361,7 @@ describe("roads competing for ground", () => {
         expect(winners.length, `${seg}/${c.side}/${c.place}/${c.depth}`).toBeGreaterThan(0);
         for (const w of winners) {
           expect(net.segOrder[w.segment]).toBe(net.segOrder[seg]);
-          expect(w.segment).toBeLessThan(seg);
+          expect(earlier(anchorOf(w.segment), anchorOf(seg)), `${w.segment} before ${seg}`).toBe(true);
         }
       }
     }
@@ -404,6 +410,33 @@ describe("keeping cells current", () => {
     ok(state, undo());
     expect(zonedGround(state)).toEqual(before);
     expect(Array.from(state.cells.zone)).toEqual(zonesBefore);
+  });
+
+  it("leaves every cell exactly where it was when a road is cut off the cell marks", () => {
+    const state = createState(SEED);
+    ok(state, road([4200, 4600], [4392, 4600]));
+    const parent = between(state.roads, [4200, 4600], [4392, 4600]);
+    paint(state, parent);
+    const before = zonedGround(state);
+    // 100 m along: twelve and a half cells.
+    ok(state, road([4300, 4500], [4300, 4700]));
+    const after = zonedGround(state);
+    // The cell that straddles the cut, 96 m to 104 m along, lies under the
+    // new street and belongs to neither piece. Every other cell is the same
+    // ground to the bit, with the same zone.
+    expect(after.size).toBe(before.size - 2 * DEPTH);
+    for (const [ground, zone] of after) expect(before.get(ground), ground).toBe(zone);
+    const west = between(state.roads, [4200, 4600], [4300, 4600]);
+    const east = between(state.roads, [4300, 4600], [4392, 4600]);
+    expect(placesAlong(state.roads, west)).toBe(12);
+    expect(placesAlong(state.roads, east)).toBe(11);
+    expect(cellCorners(state, { segment: east, side: CELL_LEFT, place: 0, depth: 0 })).toEqual([4304, 4595, 4312, 4595, 4312, 4587, 4304, 4587]);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
+    // Undo puts the road back whole; the straddling cell comes back unzoned.
+    ok(state, undo());
+    const back = zonedGround(state);
+    expect(back.size).toBe(before.size - 2 * DEPTH);
+    for (const [ground, zone] of back) expect(before.get(ground)).toBe(zone);
   });
 
   it("keeps a cell's name and zone through an upgrade, and moves it out with the wider road's edge", () => {

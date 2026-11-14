@@ -43,7 +43,17 @@
 
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "../chunks";
 import { ROAD_TYPES } from "../roads/balance";
-import { LEVEL_BRIDGE, LEVEL_GROUND, isNode, isSegment, observeNetwork, segmentIdLimit, type RoadNetwork } from "../roads/network";
+import {
+  LEVEL_BRIDGE,
+  LEVEL_GROUND,
+  isNode,
+  isSegment,
+  observeNetwork,
+  readAnchor,
+  segmentIdLimit,
+  type RoadNetwork,
+  type SegmentAnchor,
+} from "../roads/network";
 import type { SimState } from "../state";
 import { terrainOf } from "../terrain/cache";
 import { isWaterAt, mapSize, slopeAt, type Terrain } from "../terrain/terrain";
@@ -51,8 +61,10 @@ import { ZONING_BALANCE } from "./balance";
 import { cellsPerPlace, fromLocal, zonableFields, type CellRef, type CellState } from "./cells";
 import {
   STATION_FLOATS,
+  anchorSpan,
+  anchorStations,
   cellCornersInto,
-  cellsAlong,
+  measureCurve,
   isConvexQuad,
   quadBoxInto,
   quadCentre,
@@ -112,7 +124,17 @@ interface SegShape {
   straight: boolean;
   /** Places along, when it has cells; 0 otherwise. */
   places: number;
-  /** Stations every cell size from node A, and one at node B. Null when it has neither cells nor a surface. */
+  /** Its cell anchor, as the network holds it. */
+  anchor: SegmentAnchor;
+  /** The anchor's road and build order as text: two shapes with the same key measure cells on the same road. */
+  anchorKey: string;
+  /** The first anchor cell this segment has, counted from the anchor's start. */
+  from: number;
+  /** Whether node A is at the anchor's far end, so places count down the anchor. */
+  reversed: boolean;
+  /** Anchor stations `from` to `from + places`, which the cells span. Null when it has no cells. */
+  cellStations: Float64Array | null;
+  /** Its own stations every cell size from node A, and one at node B, for its surface. Null when it has no surface. */
   stations: Float64Array | null;
   /**
    * Its surface pieces, eight floats each as `surfaceInto` writes them, when
@@ -181,10 +203,22 @@ function shapeOf(net: RoadNetwork, id: number): SegShape | null {
   const levelA = net.segLevelA[id] ?? 0;
   const levelB = net.segLevelB[id] ?? 0;
   const length = net.segLength[id] ?? 0;
-  const places = zonableFields(network, type, levelA, levelB) ? cellsAlong(length, CELL) : 0;
+  const anchor = readAnchor(net, id);
+  let places = 0;
+  let from = 0;
+  let reversed = false;
+  let cellStations: Float64Array | null = null;
+  if (zonableFields(network, type, levelA, levelB)) {
+    const road = measureCurve(anchor.ax, anchor.az, anchor.cx, anchor.cz, anchor.bx, anchor.bz);
+    const span = anchorSpan(road, anchor.tA, anchor.tB, CELL);
+    places = span.to - span.from;
+    from = span.from;
+    reversed = span.reversed;
+    if (places > 0) cellStations = anchorStations(road, span.from, span.to, CELL);
+  }
   const onSurface = (level: number) => level === LEVEL_GROUND || level === LEVEL_BRIDGE;
   const covers = onSurface(levelA) || onSurface(levelB);
-  const stations = places > 0 || covers ? stationsOf(ax, az, cx, cz, bx, bz, length, CELL, cellsAlong(length, CELL)) : null;
+  const stations = covers ? stationsOf(measureCurve(ax, az, cx, cz, bx, bz), CELL) : null;
   const straight = cx === (ax + bx) / 2 && cz === (az + bz) / 2;
   // Rail and paths have no width table yet, so they read the road type
   // with their index, as their segments do until they get their own.
@@ -221,6 +255,11 @@ function shapeOf(net: RoadNetwork, id: number): SegShape | null {
     half,
     straight,
     places,
+    anchor,
+    anchorKey: [net.segOrder[id] ?? 0, anchor.ax, anchor.az, anchor.cx, anchor.cz, anchor.bx, anchor.bz].join(","),
+    from,
+    reversed,
+    cellStations,
     stations,
     surface,
     surfaceBoxes,
@@ -249,25 +288,96 @@ function sameAsNet(s: SegShape | null, net: RoadNetwork, id: number): boolean {
     s.levelA === net.segLevelA[id] &&
     s.levelB === net.segLevelB[id] &&
     s.order === net.segOrder[id] &&
-    s.length === net.segLength[id]
+    s.length === net.segLength[id] &&
+    s.anchor.ax === net.segAnchorAX[id] &&
+    s.anchor.az === net.segAnchorAZ[id] &&
+    s.anchor.cx === net.segAnchorCX[id] &&
+    s.anchor.cz === net.segAnchorCZ[id] &&
+    s.anchor.bx === net.segAnchorBX[id] &&
+    s.anchor.bz === net.segAnchorBZ[id] &&
+    s.anchor.tA === net.segAnchorTA[id] &&
+    s.anchor.tB === net.segAnchorTB[id]
   );
 }
 
-/** Writes cell `local` of segment shape `s` into `out`. On the hot path, so the name is unpacked inline. */
+/**
+ * Writes cell `local` of segment shape `s` into `out`. The corners are the
+ * anchor cell's, so they are the same bits as the cell of any other piece
+ * of the anchor on that ground. On the hot path, so the name is unpacked
+ * inline.
+ */
 function cellQuad(s: SegShape, local: number, out: Float64Array): void {
   const depth = local % DEPTH;
   const rest = (local - depth) / DEPTH;
-  cellCornersInto(s.stations as Float64Array, rest >> 1, rest & 1, s.half + depth * CELL, s.half + (depth + 1) * CELL, out);
+  const place = rest >> 1;
+  const side = rest & 1;
+  const j = s.reversed ? s.places - 1 - place : place;
+  cellCornersInto(s.cellStations as Float64Array, j, s.reversed ? 1 - side : side, s.half + depth * CELL, s.half + (depth + 1) * CELL, out);
 }
 
-/** Whether a cell of order `p` and key `pk` claims ground before one of order `q` and key `qk`. */
-function before(p: number, pk: number, q: number, qk: number): boolean {
-  return p < q || (p === q && pk < qk);
+/** The anchor cell, side on the anchor and depth of cell `local` of `s`. */
+function anchorCellOf(s: SegShape, local: number): { k: number; side: number; depth: number } {
+  const { side, place, depth } = fromLocal(local);
+  return s.reversed ? { k: s.from + s.places - 1 - place, side: 1 - side, depth } : { k: s.from + place, side, depth };
+}
+
+/** Where anchor cell `k`, on anchor side `side` at `depth`, sits in `s`'s run, or -1 if `s` does not have it. */
+function localOfAnchorCell(s: SegShape, k: number, side: number, depth: number): number {
+  const j = k - s.from;
+  if (j < 0 || j >= s.places) return -1;
+  const place = s.reversed ? s.places - 1 - j : j;
+  return (place * 2 + (s.reversed ? 1 - side : side)) * DEPTH + depth;
+}
+
+/**
+ * A cell's place in its anchor's claim order: anchor cell, then side on the
+ * anchor, then depth. Unpacked inline, since every claim comparison needs it.
+ */
+function anchorOrdinal(s: SegShape, local: number): number {
+  const depth = local % DEPTH;
+  const rest = (local - depth) / DEPTH;
+  const place = rest >> 1;
+  const side = rest & 1;
+  const k = s.reversed ? s.from + s.places - 1 - place : s.from + place;
+  return (k * 2 + (s.reversed ? 1 - side : side)) * DEPTH + depth;
+}
+
+/**
+ * Whether cell `pl` of `p` (key `pk`) claims ground before cell `ql` of `q`
+ * (key `qk`). The older road first. Between roads of one age, the pieces of
+ * a split and the streets of a grid, the anchor that starts further west,
+ * then further north, then by its other end and control point. On one
+ * anchor, the cell nearer its start, then its left side, then nearer the
+ * road. None of that changes when a road is cut, so the pieces of a split
+ * claim in the order their parent did. Last, the lower key, which only two
+ * roads laid exactly on top of each other could need.
+ */
+function claimsBefore(p: SegShape, pl: number, pk: number, q: SegShape, ql: number, qk: number): boolean {
+  if (p.order !== q.order) return p.order < q.order;
+  if (p.anchorKey !== q.anchorKey) {
+    const a = p.anchor;
+    const b = q.anchor;
+    if (a.ax !== b.ax) return a.ax < b.ax;
+    if (a.az !== b.az) return a.az < b.az;
+    if (a.bx !== b.bx) return a.bx < b.bx;
+    if (a.bz !== b.bz) return a.bz < b.bz;
+    if (a.cx !== b.cx) return a.cx < b.cx;
+    if (a.cz !== b.cz) return a.cz < b.cz;
+  }
+  const po = anchorOrdinal(p, pl);
+  const qo = anchorOrdinal(q, ql);
+  if (po !== qo) return po < qo;
+  return pk < qk;
 }
 
 /** Whether cell `key` claims ground before cell `other`. */
 function claimsFirst(index: CellIndex, key: number, other: number): boolean {
-  return before(index.segs[segOfKey(key)]?.order ?? 0, key, index.segs[segOfKey(other)]?.order ?? 0, other);
+  const ps = segOfKey(key);
+  const qs = segOfKey(other);
+  const p = index.segs[ps];
+  const q = index.segs[qs];
+  if (!p || !q) return key < other;
+  return claimsBefore(p, key - ps * KEY_STRIDE, key, q, other - qs * KEY_STRIDE, other);
 }
 
 // ---- Buckets ----
@@ -383,7 +493,6 @@ function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): nu
   if (covered(index, seg, q, box)) return CELL_ROAD;
   // Lost to an open cell that claims first and overlaps it.
   const key = keyOf(seg, local);
-  const order = s.order;
   const i0 = bucketOf(index, minX);
   const i1 = bucketOf(index, maxX);
   const j0 = bucketOf(index, minZ);
@@ -396,11 +505,12 @@ function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): nu
         if (other === key) continue;
         const otherSeg = Math.floor(other / KEY_STRIDE);
         const o = index.segs[otherSeg];
-        if (!o || !before(o.order, other, order, key)) continue;
+        if (!o || !claimsBefore(o, other - otherSeg * KEY_STRIDE, other, s, local, key)) continue;
         cellQuad(o, other - otherSeg * KEY_STRIDE, quadB);
         quadBoxInto(quadB, boxB);
         if ((boxB[0] ?? 0) > maxX || (boxB[2] ?? 0) < minX || (boxB[1] ?? 0) > maxZ || (boxB[3] ?? 0) < minZ) continue;
-        if (quadsOverlap(q, quadB)) return otherSeg === seg ? CELL_BEND : CELL_TAKEN;
+        // A cell of its own road, or of another piece of the road it was cut from, closes up on a bend.
+        if (quadsOverlap(q, quadB)) return o.anchorKey === s.anchorKey ? CELL_BEND : CELL_TAKEN;
       }
     }
   }
@@ -417,8 +527,10 @@ function setStatus(index: CellIndex, seg: number, s: SegShape, local: number, no
 
 /** Cell statuses as bits, for picking which cells to look at again. */
 const BIT_OPEN = 1 << CELL_OPEN;
-/** Cells whose status depends on what covers them or claims first: not off the map, wet or steep. */
-const DEPENDS_ON_ROADS = BIT_OPEN | (1 << CELL_ROAD) | (1 << CELL_BEND) | (1 << CELL_TAKEN) | (1 << 7);
+/** Cells a new surface can block: ones it does not already find blocked by ground or a road. UNSET counts as bit 7. */
+const NOT_UNDER_ROAD = BIT_OPEN | (1 << CELL_BEND) | (1 << CELL_TAKEN) | (1 << 7);
+/** Cells a removed surface can free: ones blocked by a road. */
+const UNDER_ROAD = 1 << CELL_ROAD;
 /** Cells that lost ground to another cell, or may have. */
 const LOST_GROUND = (1 << CELL_BEND) | (1 << CELL_TAKEN);
 
@@ -444,7 +556,7 @@ function forOverlappingCells(
       const s = index.segs[seg];
       const local = key - seg * KEY_STRIDE;
       const status = s?.status?.[local] ?? UNSET;
-      // UNSET counts as bit 7, which DEPENDS_ON_ROADS includes.
+      // UNSET counts as bit 7.
       if (!s || ((1 << (status === UNSET ? 7 : status)) & statuses) === 0) continue;
       cellQuad(s, local, quadB);
       quadBoxInto(quadB, boxB);
@@ -480,11 +592,25 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
       order.push(id);
     }
   }
-  order.sort((p, q) => (index.segs[p]?.order ?? 0) - (index.segs[q]?.order ?? 0) || p - q);
+  // In claim order: a segment's cells go in their anchor's order, and the
+  // pieces of one anchor never share an anchor cell, so sorting segments by
+  // their first cell sorts every cell.
+  order.sort((p, q) => {
+    const a = index.segs[p] as SegShape;
+    const b = index.segs[q] as SegShape;
+    const first = (s: SegShape) => (s.reversed ? (s.places - 1) * 2 * DEPTH : 0);
+    return claimsBefore(a, first(a), keyOf(p, first(a)), b, first(b), keyOf(q, first(b))) ? -1 : 1;
+  });
   for (const id of order) {
     const s = index.segs[id] as SegShape;
-    const status = s.status as Uint8Array;
-    for (let local = 0; local < status.length; local++) setStatus(index, id, s, local, walkCell(index, id, s, local));
+    for (let j = 0; j < s.places; j++) {
+      for (let side = 0; side < 2; side++) {
+        for (let depth = 0; depth < DEPTH; depth++) {
+          const local = localOfAnchorCell(s, s.from + j, side, depth);
+          setStatus(index, id, s, local, walkCell(index, id, s, local));
+        }
+      }
+    }
   }
   return index;
 }
@@ -556,6 +682,13 @@ interface Before {
 /**
  * Brings `index` up to date with its network and returns the new cell state
  * for `cells`, the old one. Returns `cells` itself when no segment changed.
+ *
+ * A new segment's cell that lies on the same anchor cell as a removed
+ * segment's, with the same road width, has the same corners to the bit, so
+ * it starts from the removed cell's status instead of being walked: that is
+ * what keeps a road cut by a long grid cheap. Claim order goes by anchor
+ * cell, not by segment id (`claimsBefore`), so such a cell claims in the
+ * same place in the order as the cell it replaces.
  */
 function update(index: CellIndex, cells: CellState): CellState {
   const net = index.net;
@@ -575,57 +708,132 @@ function update(index: CellIndex, cells: CellState): CellState {
   if (changed.length === 0 && limit === oldLimit) return cells;
 
   const queue = new ClaimQueue(index);
-  const changedIds = new Set(changed.map((c) => c.id));
   const box = new Float64Array(4);
-  // Seeds every unchanged cell of those statuses that overlaps `q`; the changed ones are all walked anyway.
-  const seedOverlapping = (q: Float64Array, statuses: number) => {
-    quadBoxInto(q, box);
-    forOverlappingCells(index, q, box, statuses, (key) => queue.push(key), (key, seg) => changedIds.has(seg) || queue.has(key));
-  };
   const q = new Float64Array(8);
-  const seedUnderSurface = (s: SegShape) => {
+  const seedOverlapping = (quad: Float64Array, statuses: number) => {
+    quadBoxInto(quad, box);
+    forOverlappingCells(index, quad, box, statuses, (key) => queue.push(key), (key) => queue.has(key));
+  };
+  // A surface that comes can only block a cell, and one that goes can only free one.
+  const seedUnderSurface = (s: SegShape, statuses: number) => {
     const surface = s.surface;
     if (!surface) return;
-    for (let i = 0; i < surface.length; i += 8) seedOverlapping(surface.subarray(i, i + 8), DEPENDS_ON_ROADS);
+    for (let i = 0; i < surface.length; i += 8) seedOverlapping(surface.subarray(i, i + 8), statuses);
   };
 
-  // The old shapes leave. Cells they held, and cells under their surfaces,
-  // may now have ground.
+  // Removed shapes with cells, by the anchor they measure them on.
+  const byAnchor = new Map<string, Before[]>();
+  for (const c of changed) {
+    if (!c.shape?.status) continue;
+    const list = byAnchor.get(c.shape.anchorKey);
+    if (list) list.push(c);
+    else byAnchor.set(c.shape.anchorKey, [c]);
+  }
+
+  // The old shapes leave.
   for (const { id, shape } of changed) {
     if (!shape) continue;
     fileCells(index, id, shape, false);
     fileSurface(index, id, shape, false);
   }
-  for (const { shape } of changed) {
-    if (!shape) continue;
-    seedUnderSurface(shape);
-    const status = shape.status;
-    if (!status) continue;
-    for (let local = 0; local < status.length; local++) {
-      if (status[local] !== CELL_OPEN) continue;
-      cellQuad(shape, local, q);
-      seedOverlapping(q, LOST_GROUND);
-    }
-  }
 
-  // The new shapes arrive, and are walked whole.
+  // The new shapes arrive, each cell starting from the removed cell on its
+  // ground where there is one.
   index.segs.length = limit;
   for (let id = oldLimit; id < limit; id++) index.segs[id] = null;
+  /** For each removed shape, the cells a new cell took over as they were. */
+  const kept = new Map<Before, Uint8Array>();
   for (const { id } of changed) {
     if (id >= limit) continue;
     const s = shapeOf(net, id);
     index.segs[id] = s;
     if (!s) continue;
+    const status = s.status;
+    const sources = status ? byAnchor.get(s.anchorKey) : undefined;
+    if (status && sources) {
+      for (let local = 0; local < status.length; local++) {
+        const { k, side, depth } = anchorCellOf(s, local);
+        for (const b of sources) {
+          const o = b.shape as SegShape;
+          if (o.half !== s.half) continue;
+          const from = localOfAnchorCell(o, k, side, depth);
+          if (from < 0) continue;
+          status[local] = (o.status as Uint8Array)[from] ?? UNSET;
+          let marks = kept.get(b);
+          if (!marks) {
+            marks = new Uint8Array((o.status as Uint8Array).length);
+            kept.set(b, marks);
+          }
+          marks[from] = 1;
+          break;
+        }
+      }
+    }
     fileSurface(index, id, s, true);
     fileCells(index, id, s, true);
   }
-  for (const { id } of changed) {
-    const s = index.segs[id];
-    if (!s) continue;
-    seedUnderSurface(s);
-    for (let local = 0; local < (s.status?.length ?? 0); local++) queue.push(keyOf(id, local));
-  }
 
+  // Cells with nothing to start from are walked.
+  for (const { id } of changed) {
+    const status = index.segs[id]?.status;
+    if (!status) continue;
+    for (let local = 0; local < status.length; local++) if (status[local] === UNSET) queue.push(keyOf(id, local));
+  }
+  // Cells under a surface that went may be free now, and are walked.
+  for (const { shape } of changed) if (shape) seedUnderSurface(shape, UNDER_ROAD);
+  // Cells under a surface that came are blocked by it, whatever claims
+  // first, unless they were already blocked by their own shape: no walk
+  // needed. One that held ground lets it go to the cells after it.
+  const quadC = new Float64Array(8);
+  for (const { id } of changed) {
+    const surface = index.segs[id]?.surface;
+    if (!surface) continue;
+    for (let i = 0; i < surface.length; i += 8) {
+      const piece = surface.subarray(i, i + 8);
+      quadBoxInto(piece, box);
+      const pieceBox = Float64Array.from(box);
+      forOverlappingCells(
+        index,
+        piece,
+        pieceBox,
+        NOT_UNDER_ROAD,
+        (key) => {
+          const seg = segOfKey(key);
+          const c = index.segs[seg] as SegShape;
+          const local = key - seg * KEY_STRIDE;
+          cellQuad(c, local, quadC);
+          if (!isConvexQuad(quadC)) return;
+          const was = c.status?.[local];
+          setStatus(index, seg, c, local, CELL_ROAD);
+          if (was !== CELL_OPEN) return;
+          quadBoxInto(quadC, box);
+          forOverlappingCells(
+            index,
+            quadC,
+            box,
+            LOST_GROUND,
+            (other) => {
+              if (claimsFirst(index, key, other)) queue.push(other);
+            },
+            (other) => queue.has(other),
+          );
+        },
+        // Its own cells only touch a road's surface, and fresh cells are walked anyway.
+        (key, seg) => seg === id || queue.has(key),
+      );
+    }
+  }
+  // Cells that lost ground to a cell that went and that no cell took over.
+  for (const c of changed) {
+    const status = c.shape?.status;
+    if (!status) continue;
+    const marks = kept.get(c);
+    for (let local = 0; local < status.length; local++) {
+      if (status[local] !== CELL_OPEN || marks?.[local] === 1) continue;
+      cellQuad(c.shape as SegShape, local, q);
+      seedOverlapping(q, LOST_GROUND);
+    }
+  }
   // Walk in claim order. A cell that gains or loses its claim sends every
   // later cell it overlaps round again.
   for (let key = queue.pop(); key !== undefined; key = queue.pop()) {
@@ -653,19 +861,17 @@ function update(index: CellIndex, cells: CellState): CellState {
     );
   }
 
-  return relayout(index, cells, changed);
+  return relayout(index, cells, changed, byAnchor);
 }
 
-/** Whether the shapes are one road in one place, the same way round or reversed; null if not. */
-function sameGround(p: SegShape, q: SegShape): "same" | "reversed" | null {
-  if (p.order !== q.order || p.places !== q.places || p.cx !== q.cx || p.cz !== q.cz) return null;
-  if (p.ax === q.ax && p.az === q.az && p.bx === q.bx && p.bz === q.bz) return "same";
-  if (p.ax === q.bx && p.az === q.bz && p.bx === q.ax && p.bz === q.az) return "reversed";
-  return null;
-}
-
-/** The zone and density arrays laid out for the roads `index` now has, carrying zones over as the header says. */
-function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]): CellState {
+/**
+ * The zone and density arrays laid out for the roads `index` now has. An
+ * unchanged segment keeps its run. A changed one takes, cell by cell, the
+ * zone of the removed cell on the same anchor cell, whatever the road's
+ * width: so a split, an upgrade, a reverse and an undo that joins pieces
+ * again all keep each zone on its ground.
+ */
+function relayout(index: CellIndex, cells: CellState, changed: readonly Before[], byAnchor: ReadonlyMap<string, Before[]>): CellState {
   const limit = index.segs.length;
   const offset = new Int32Array(limit + 1);
   // Up to the first changed id the runs start where they did.
@@ -694,8 +900,6 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
   offset[limit] = total;
   const zone = new Uint8Array(total);
   const density = new Uint8Array(total);
-  const perPlace = cellsPerPlace();
-  const byGround: number[] = [];
   // Unchanged segments between two changed ones have their runs side by
   // side in both layouts, so each stretch is one copy.
   let stretch = 0;
@@ -707,88 +911,30 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
       density.set(cells.density.subarray(from, upTo), offset[stretch] ?? 0);
     }
   };
-  for (const { id } of changed) {
-    if (id >= limit) break;
-    copyStretch(id);
-    stretch = id + 1;
+  for (const c of changed) {
+    if (c.id >= limit) break;
+    copyStretch(c.id);
+    stretch = c.id + 1;
   }
-  copyStretch(Math.min(limit, cells.offset.length - 1));
-  for (const old of changed) {
-    const id = old.id;
-    const s = index.segs[id];
-    const count = s?.status?.length ?? 0;
-    if (!s || count === 0) continue;
-    const to = offset[id] ?? 0;
-    const match = old.shape ? sameGround(old.shape, s) : null;
-    if (match === "same") {
-      zone.set(cells.zone.subarray(old.start, old.start + count), to);
-      density.set(cells.density.subarray(old.start, old.start + count), to);
-    } else if (match === "reversed") {
-      for (let local = 0; local < count; local++) {
-        const { side, place, depth } = fromLocal(local);
-        const from = old.start + (s.places - 1 - place) * perPlace + (1 - side) * DEPTH + depth;
-        zone[to + local] = cells.zone[from] ?? 0;
-        density[to + local] = cells.density[from] ?? 0;
+  copyStretch(Math.min(limit, oldLimit));
+  for (const c of changed) {
+    const s = index.segs[c.id];
+    const status = s?.status;
+    const sources = s ? byAnchor.get(s.anchorKey) : undefined;
+    if (!s || !status || !sources) continue;
+    const to = offset[c.id] ?? 0;
+    for (let local = 0; local < status.length; local++) {
+      const { k, side, depth } = anchorCellOf(s, local);
+      for (const b of sources) {
+        const from = localOfAnchorCell(b.shape as SegShape, k, side, depth);
+        if (from < 0) continue;
+        zone[to + local] = cells.zone[b.start + from] ?? 0;
+        density[to + local] = cells.density[b.start + from] ?? 0;
+        break;
       }
-    } else {
-      byGround.push(id);
     }
   }
-  if (byGround.length > 0) carryByGround(index, cells, changed, byGround, offset, zone, density);
   return { offset, zone, density };
-}
-
-/**
- * Gives each cell of the segments in `targets` the zone of the zoned cell of
- * a removed segment of the same build order whose ground holds its centre.
- * Of two such cells, the one that claims first.
- */
-function carryByGround(
-  index: CellIndex,
-  cells: CellState,
-  changed: readonly Before[],
-  targets: readonly number[],
-  offset: Int32Array,
-  zone: Uint8Array,
-  density: Uint8Array,
-): void {
-  // The zoned cells of removed shapes, filed by bucket, in claim order.
-  const sources = changed
-    .filter((c) => c.shape?.status)
-    .sort((p, q) => (p.shape?.order ?? 0) - (q.shape?.order ?? 0) || p.id - q.id);
-  const filed = new Map<number, { order: number; quad: Float64Array; at: number }[]>();
-  for (const { shape, start } of sources) {
-    const s = shape as SegShape;
-    const count = s.status?.length ?? 0;
-    for (let local = 0; local < count; local++) {
-      if ((cells.zone[start + local] ?? 0) === 0) continue;
-      const quad = new Float64Array(8);
-      cellQuad(s, local, quad);
-      quadBoxInto(quad, boxA);
-      const entry = { order: s.order, quad, at: start + local };
-      forBuckets(index, boxA, (bucket) => {
-        const list = filed.get(bucket);
-        if (list) list.push(entry);
-        else filed.set(bucket, [entry]);
-      });
-    }
-  }
-  if (filed.size === 0) return;
-  const q = new Float64Array(8);
-  for (const id of targets) {
-    const s = index.segs[id] as SegShape;
-    const count = s.status?.length ?? 0;
-    const to = offset[id] ?? 0;
-    for (let local = 0; local < count; local++) {
-      cellQuad(s, local, q);
-      const { x, z } = quadCentre(q);
-      const bucket = bucketOf(index, z) * index.perSide + bucketOf(index, x);
-      const found = filed.get(bucket)?.find((e) => e.order === s.order && quadContains(e.quad, x, z));
-      if (!found) continue;
-      zone[to + local] = cells.zone[found.at] ?? 0;
-      density[to + local] = cells.density[found.at] ?? 0;
-    }
-  }
 }
 
 // Live indexes by network object, like the spatial index and the blocks. A
