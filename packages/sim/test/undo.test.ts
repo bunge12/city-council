@@ -18,7 +18,10 @@ import {
 import { cloneState } from "../src/state";
 import { applyRoadDelta, drainRoadChanges, encodeRoadDelta, recordRoadChanges } from "../src/roads/delta";
 import {
+  addNode,
+  addSegment,
   checkRoadNetwork,
+  removeSegment,
   isNode,
   isSegment,
   nodeCount,
@@ -218,6 +221,34 @@ describe("Undo of BulldozeRoad", () => {
   });
 });
 
+describe("A bulldoze of thousands of segments", () => {
+  it("holds every id it removed, keeps the rest of the free list in order, and comes back whole", () => {
+    // A comb: one long spine with a tooth every 16 m.
+    const state = createBareState(SEED);
+    const net = state.roads;
+    const TEETH = 1500;
+    let prev = addNode(net, 0, 0, 0);
+    for (let i = 1; i <= TEETH; i++) {
+      const next = addNode(net, i * 16, 0, 0);
+      addSegment(net, prev, next, { type: 0 });
+      addSegment(net, next, addNode(net, i * 16, 16, 0), { type: 0 });
+      prev = next;
+    }
+    // Ids already free before the command stay free, in their order.
+    removeSegment(net, 5);
+    removeSegment(net, 3);
+    const before = cityHash(state);
+    ok(state, bulldoze(liveSegments(net)));
+    expect(segmentCount(net)).toBe(0);
+    expect(Array.from(net.segFree)).toEqual([5, 3]);
+    expect(Array.from(net.nodeFree)).toEqual([]);
+    expect(heldIds(state.undo).segs).toHaveLength(2 * TEETH - 2);
+    expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
+    ok(state, undo());
+    expect(cityHash(state)).toBe(before);
+  });
+});
+
 describe("Undo of UpgradeRoad", () => {
   it("restores the old type", () => {
     const state = createBareState(SEED);
@@ -326,6 +357,41 @@ describe("An undo that is no longer valid", () => {
     refusedAndUnchanged(state, "p1", /changed or removed/);
     ok(state, bulldoze([0], "p2"));
     refusedAndUnchanged(state, "p1", /changed or removed/);
+  });
+
+  it("is refused when an end of a bulldozed road has gone and its id names another junction", () => {
+    // Node ids are reused. p1's bulldozed road must not come back between
+    // whatever nodes its two ids name now (issue 80).
+    const state = createBareState(SEED);
+    ok(state, road([4200, 4500], [4300, 4500], "street", "p2"));
+    const q = findNode(state.roads, 4300, 4500);
+    ok(state, road([4300, 4500], [4300, 4600], "street", "p1"));
+    ok(state, bulldoze([segmentBetween(state.roads, [4300, 4500], [4300, 4600])], "p1"));
+    // p2 takes their road back, which frees Q's id, and p3's road reuses it.
+    ok(state, undo("p2"));
+    expect(isNode(state.roads, q)).toBe(false);
+    ok(state, road([4500, 4800], [4600, 4800], "street", "p3"));
+    expect(isNode(state.roads, q)).toBe(true);
+    expect([state.roads.nodeX[q], state.roads.nodeZ[q]]).not.toEqual([4300, 4500]);
+    refusedAndUnchanged(state, "p1", /changed or removed/);
+    sound(state);
+  });
+
+  it("is refused for an upgrade or a reverse once someone has split the road", () => {
+    // A split leaves the road's id on one of its two pieces. Undoing on that
+    // piece alone left a one-way pointing two ways (issue 80).
+    for (const change of ["reverse", "upgrade"] as const) {
+      const state = createBareState(SEED);
+      ok(state, road([4200, 4500], [4400, 4500], "street", "p1"));
+      ok(state, change === "reverse" ? upgrade("oneWay", [0], "p1", [state.roads.segB[0] ?? -1]) : upgrade("avenue", [0], "p1"));
+      ok(state, road([4300, 4400], [4300, 4600], "street", "p2"));
+      expect(isSegment(state.roads, 0)).toBe(true);
+      refusedAndUnchanged(state, "p1", /changed or removed/);
+      // With the crossing road gone the road is whole again, and the undo applies.
+      ok(state, undo("p2"));
+      ok(state, undo("p1"));
+      sound(state);
+    }
   });
 
   it("is refused when a road built since is in the way of what it would put back", () => {

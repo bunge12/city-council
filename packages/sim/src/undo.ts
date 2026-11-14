@@ -194,6 +194,9 @@ function rehearse(net: RoadNetwork, ops: readonly NetworkOp[]): string | null {
         const a = nodeAt(op.row.a);
         const b = nodeAt(op.row.b);
         if (a === null || b === null) return CHANGED;
+        // A node id is reused once its node is gone for good. The road goes
+        // back only between the nodes it stood between.
+        if (a.x !== op.ax || a.z !== op.az || b.x !== op.bx || b.z !== op.bz) return CHANGED;
         const shape: Quad = { ax: a.x, az: a.z, cx: op.row.cx, cz: op.row.cz, bx: b.x, bz: b.z };
         const other = blocking(net, shape, op.row, segAt, restored);
         if (other !== null) {
@@ -208,6 +211,8 @@ function rehearse(net: RoadNetwork, ops: readonly NetworkOp[]): string | null {
       case "restyle": {
         const row = segAt(op.id);
         if (row === null || row.type !== op.to) return CHANGED;
+        // A split leaves the id on one piece of the road: not the same road.
+        if (row.a !== (op.reverse ? op.b : op.a) || row.b !== (op.reverse ? op.a : op.b)) return CHANGED;
         const back = { ...row, type: op.from };
         if (op.reverse) {
           back.a = row.b;
@@ -286,9 +291,9 @@ function isOp(value: unknown): boolean {
     case "addSeg":
       return typeof value["grown"] === "boolean" && isRow(value["row"]);
     case "removeSeg":
-      return isRow(value["row"]) && isId(value["atA"]) && isId(value["atB"]);
+      return isRow(value["row"]) && isId(value["atA"]) && isId(value["atB"]) && ["ax", "az", "bx", "bz"].every((k) => isNumber(value[k]));
     case "restyle":
-      return isRoadType(value["from"]) && isRoadType(value["to"]) && typeof value["reverse"] === "boolean";
+      return isRoadType(value["from"]) && isRoadType(value["to"]) && typeof value["reverse"] === "boolean" && isId(value["a"]) && isId(value["b"]);
     default:
       return false;
   }

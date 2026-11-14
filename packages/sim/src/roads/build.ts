@@ -1042,6 +1042,16 @@ export function planRoad(net: RoadNetwork, terrain: Terrain, payload: unknown): 
   // The curve between the ends as they joined. A control point on the line
   // between them, the midpoint included, makes a straight road.
   let control: BuildPoint | null = input.control ? { x: snapToGrid(input.control.x), z: snapToGrid(input.control.z) } : null;
+  // A curve stays inside the triangle of its ends and its control point, so
+  // a control point within one map width of the map is as far as any curve
+  // on the map needs. This also refuses one so large that the arithmetic
+  // below overflows.
+  if (control) {
+    const size = mapSize(terrain);
+    if (!(control.x >= -size && control.x <= 2 * size && control.z >= -size && control.z <= 2 * size)) {
+      return { ok: false, reason: "The road runs off the map" };
+    }
+  }
   let road = roadQuad([start, end], control);
   if (control) {
     const radius = minRadius(road);

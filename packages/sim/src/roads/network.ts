@@ -262,13 +262,18 @@ export interface SegmentRow {
  * One change a journal wrote down. `grown` is true when the id came from
  * growing the arrays rather than off the free list. `atA` and `atB` are
  * where a removed segment stood in its nodes' lists, counted from the head.
+ *
+ * Ids are reused, so an id written here may later name something else. A
+ * removed segment therefore carries where its end nodes stood (`ax` to
+ * `bz`), and a restyle the ends the segment had before it (`a`, `b`). Undo
+ * refuses when they no longer match (M1 review, issue 80).
  */
 export type NetworkOp =
   | { op: "addNode"; id: number; grown: boolean }
   | { op: "removeNode"; id: number; x: number; z: number; height: number; flags: number }
   | { op: "addSeg"; id: number; grown: boolean; row: SegmentRow }
-  | { op: "removeSeg"; id: number; row: SegmentRow; atA: number; atB: number }
-  | { op: "restyle"; id: number; from: number; to: number; reverse: boolean };
+  | { op: "removeSeg"; id: number; row: SegmentRow; atA: number; atB: number; ax: number; az: number; bx: number; bz: number }
+  | { op: "restyle"; id: number; from: number; to: number; reverse: boolean; a: number; b: number };
 
 // Open journals by network object. Only open while one command applies, so
 // never part of state.
@@ -288,8 +293,8 @@ export function endJournal(net: RoadNetwork): NetworkOp[] {
   const ops = journals.get(net) ?? [];
   journals.delete(net);
   const held = heldByOps(ops);
-  for (const id of held.nodes) claim(net, "nodeFree", id);
-  for (const id of held.segs) claim(net, "segFree", id);
+  claimAll(net, "nodeFree", held.nodes);
+  claimAll(net, "segFree", held.segs);
   return ops;
 }
 
@@ -400,6 +405,25 @@ function claim(net: RoadNetwork, freeKey: "nodeFree" | "segFree", id: number): v
   next.set(free.subarray(0, at));
   next.set(free.subarray(at + 1), at);
   net[freeKey] = next;
+}
+
+/**
+ * Takes every id in `ids` off the free list in one pass, keeping the order
+ * of the rest. An id is on the list at most once. One pass, because a
+ * command can remove thousands of segments and `claim` copies the list for
+ * each.
+ */
+function claimAll(net: RoadNetwork, freeKey: "nodeFree" | "segFree", ids: readonly number[]): void {
+  if (ids.length === 0) return;
+  const gone = new Set(ids);
+  const free = net[freeKey];
+  const next = new Int32Array(free.length);
+  let n = 0;
+  for (let i = 0; i < free.length; i++) {
+    const id = free[i] as number;
+    if (!gone.has(id)) next[n++] = id;
+  }
+  net[freeKey] = next.slice(0, n);
 }
 
 /** Puts held ids on the free list, nodes then segments, each in the order given. */
@@ -588,7 +612,17 @@ export function removeSegment(net: RoadNetwork, id: number): void {
   const row = readSegment(net, id);
   const atA = unlink(net, id, row.a);
   const atB = unlink(net, id, row.b);
-  journal(net, { op: "removeSeg", id, row, atA, atB });
+  journal(net, {
+    op: "removeSeg",
+    id,
+    row,
+    atA,
+    atB,
+    ax: net.nodeX[row.a] ?? 0,
+    az: net.nodeZ[row.a] ?? 0,
+    bx: net.nodeX[row.b] ?? 0,
+    bz: net.nodeZ[row.b] ?? 0,
+  });
   for (const observer of observers.get(net) ?? []) observer.segmentRemoving(id);
   release(net, "segFree", SEG_ARRAYS, id);
 }
@@ -665,7 +699,7 @@ export function restyleSegment(net: RoadNetwork, id: number, type: number, rever
   if (!isSegment(net, id)) throw new RangeError(`segment ${id} does not exist`);
   if (!Number.isInteger(type) || type < 0 || type > 255) throw new RangeError(`bad segment type ${type}`);
   if (net.segNetwork[id] === NETWORK_ROAD && type >= ROAD_TYPES.length) throw new RangeError(`no road type ${type}`);
-  journal(net, { op: "restyle", id, from: net.segType[id] ?? 0, to: type, reverse });
+  journal(net, { op: "restyle", id, from: net.segType[id] ?? 0, to: type, reverse, a: net.segA[id] ?? NONE, b: net.segB[id] ?? NONE });
   for (const observer of observers.get(net) ?? []) observer.segmentRemoving(id);
   net.segType[id] = type;
   if (reverse) {

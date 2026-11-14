@@ -43,7 +43,7 @@ pnpm test       unit, scenario and replay tests for the sim
 pnpm lint       includes the package boundary rule
 pnpm e2e        Playwright walkthroughs
 pnpm soak       sim host at 4x for one game hour, reports tick time and memory
-pnpm bench      times the road spatial index on 30,000 segments
+pnpm bench      times the spatial index, routing, blocks, levels, grids and commands on 30,000 segments
 pnpm build
 ```
 

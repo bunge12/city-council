@@ -1,5 +1,5 @@
 import { placeConnections } from "./roads/connections";
-import { createRoadNetwork, type RoadNetwork } from "./roads/network";
+import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
 import { SNAPSHOT_VERSION, type SimState } from "./state";
 
@@ -30,7 +30,72 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 6 stores a level at each end of a segment, so a ramp can change
   // level along its length (issue 22). See `levelsAtBothEnds`.
   5: (old) => ({ ...levelsAtBothEnds(old), version: 6 }),
+  // Version 7 has each undo op say which road it means, not only its id:
+  // a removed segment where its end nodes stood, a restyle the ends the
+  // segment had (M1 review, issue 80). See `opsWithEnds`.
+  6: (old) => ({ ...old, version: 7, undo: opsWithEnds(old) }),
 };
+
+type OldOp = Record<string, unknown> & { op: string; id: number; row?: { a: number; b: number } };
+
+/**
+ * The undo history with the fields version 7 adds, filled in from what the
+ * save holds.
+ *
+ * A removed segment's end nodes are where the network has them now or, for
+ * a node that is gone, where the newest record that removed it says it
+ * stood. A restyle's ends are found by walking the history backwards from
+ * the segment as it is now. Where the save cannot say, as when the id has
+ * since gone to another road, the ends are left as ones no road has, and
+ * the undo is refused as it should have been.
+ */
+function opsWithEnds(old: Record<string, unknown>): unknown[] {
+  const net = old["roads"] as RoadNetwork;
+  const history = (old["undo"] ?? []) as { ops: OldOp[] }[];
+  // Where each node that is gone last stood.
+  const gone = new Map<number, { x: number; z: number }>();
+  for (const record of history) {
+    for (const op of record.ops) {
+      if (op.op === "removeNode") gone.set(op.id, { x: op["x"] as number, z: op["z"] as number });
+    }
+  }
+  const nodeAt = (id: number): { x: number; z: number } => {
+    if (isNode(net, id)) return { x: net.nodeX[id] ?? 0, z: net.nodeZ[id] ?? 0 };
+    return gone.get(id) ?? { x: 0, z: 0 };
+  };
+  // The ends each segment id has at the point the walk has reached, newest
+  // change first. Null once the walk passes the change that made the id's
+  // current road, since what the id named before that is not in the save.
+  const ends = new Map<number, { a: number; b: number } | null>();
+  const endsOf = (id: number): { a: number; b: number } | null => {
+    if (!ends.has(id)) ends.set(id, isSegment(net, id) ? { a: net.segA[id] ?? 0, b: net.segB[id] ?? 0 } : null);
+    return ends.get(id) ?? null;
+  };
+  const out: unknown[] = new Array<unknown>(history.length);
+  for (let r = history.length - 1; r >= 0; r--) {
+    const record = history[r] as { ops: OldOp[] };
+    const ops: unknown[] = new Array<unknown>(record.ops.length);
+    for (let i = record.ops.length - 1; i >= 0; i--) {
+      const op = record.ops[i] as OldOp;
+      ops[i] = op;
+      if (op.op === "removeSeg" && op.row) {
+        const a = nodeAt(op.row.a);
+        const b = nodeAt(op.row.b);
+        ops[i] = { ...op, ax: a.x, az: a.z, bx: b.x, bz: b.z };
+        ends.set(op.id, { a: op.row.a, b: op.row.b });
+      } else if (op.op === "addSeg") {
+        ends.set(op.id, null);
+      } else if (op.op === "restyle") {
+        const after = endsOf(op.id);
+        const before = after === null ? { a: 0, b: 0 } : op["reverse"] ? { a: after.b, b: after.a } : after;
+        ops[i] = { ...op, a: before.a, b: before.b };
+        if (after !== null) ends.set(op.id, before);
+      }
+    }
+    out[r] = { ...record, ops };
+  }
+  return out;
+}
 
 /**
  * The state with each segment's one level made the level at both its ends:
