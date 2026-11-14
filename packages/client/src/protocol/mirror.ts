@@ -2,7 +2,11 @@ import {
   LOG_LIVE_LIMIT,
   LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
+  applyCellDelta,
   applyRoadDelta,
+  cellAt,
+  cellsInChunk,
+  type CellInfo,
   type CommandResult,
   type FromSimMessage,
   type SimState,
@@ -30,9 +34,12 @@ export interface HostStats {
  * everything may have changed. A delta names the 500 m chunks, as
  * `cj * CHUNKS_PER_SIDE + ci` ascending, whose roads changed, and the node
  * and segment ids whose rows it carried, ascending; all empty when no road
- * changed. `steps` is how many sim steps the delta covers: after one or
- * more, every command the host had queued before it has been applied or
- * dropped.
+ * changed. `cellChunks` names the chunks, numbered the same way, holding a
+ * zoning cell that came, went, was painted or changed whether it is blocked.
+ * It stays empty until something has asked the mirror about cells
+ * (`cellsInChunk`, `cellAt`): before that nothing drawn can be out of date.
+ * `steps` is how many sim steps the delta covers: after one or more, every
+ * command the host had queued before it has been applied or dropped.
  */
 export type MirrorUpdate =
   | { kind: "snapshot" }
@@ -41,6 +48,7 @@ export type MirrorUpdate =
       roadChunks: readonly number[];
       roadNodes: readonly number[];
       roadSegs: readonly number[];
+      cellChunks: readonly number[];
       steps: number;
     };
 
@@ -107,6 +115,21 @@ export class SimMirror {
     });
   }
 
+  /**
+   * Every zoning cell whose centre is in 500 m chunk `chunk`, open or
+   * blocked, with where its zone and density sit in `state.cells`. Whether
+   * a cell is blocked is worked out here, by the sim's own code, from the
+   * copy's roads. Empty until the first snapshot.
+   */
+  cellsInChunk(chunk: number): CellInfo[] {
+    return this.current ? cellsInChunk(this.current, chunk) : [];
+  }
+
+  /** The zoning cell whose ground holds the point, in metres, or null. */
+  cellAt(x: number, z: number): CellInfo | null {
+    return this.current ? cellAt(this.current, x, z) : null;
+  }
+
   requestSnapshot(): void {
     this.awaitingSnapshot = true;
     this.transport.send({ v: PROTOCOL_VERSION, type: "requestSnapshot" });
@@ -156,6 +179,16 @@ export class SimMirror {
       roadNodes = [...delta.roads.nodeIds];
       roadSegs = [...delta.roads.segIds];
     }
+    // Then the cells, laid out for the roads as they now are.
+    let cellChunks: readonly number[] = [];
+    if (delta.roads || delta.cells) {
+      const applied = applyCellDelta(state, delta.cells ?? null, roadSegs);
+      if (typeof applied === "string") {
+        this.outOfStep();
+        return;
+      }
+      cellChunks = applied;
+    }
     this.deltaSeq++;
     state.tick = delta.tick;
     state.speed = delta.speed;
@@ -171,7 +204,7 @@ export class SimMirror {
       state.logOffset += LOG_PAGE_SIZE;
     }
     this.hostStats = { timings: delta.timings };
-    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs, steps: delta.steps });
+    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs, cellChunks, steps: delta.steps });
   }
 
   /** Out of step with the host. Drop deltas until a snapshot resets us. */

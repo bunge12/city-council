@@ -78,6 +78,8 @@ export {
   syncCells,
 } from "./zoning/cell-index";
 export type { CellIndex, CellInfo } from "./zoning/cell-index";
+export { applyCellDelta, drainCellDelta, recordCellChanges } from "./zoning/delta";
+export type { CellDelta } from "./zoning/delta";
 export { ZONE_CLEAR, planZoneCells } from "./zoning/zone";
 export type { ZoneCellsPayload, ZonePlan, ZonePlanResult, ZonePoint, ZoneRect } from "./zoning/zone";
 export { ROAD_BALANCE, ROAD_BUILD, ROAD_LEVELS, ROAD_TYPES, roadTypeIndex } from "./roads/balance";

@@ -20,6 +20,7 @@
 
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "./balance";
+import { noteCellsPainted } from "./cell-changes";
 import { forOpenCellsInBox, syncCells } from "./cell-index";
 import { DENSITY_NONE, ZONE_NONE } from "./cells";
 
@@ -199,5 +200,6 @@ export function zoneCellsIfValid(state: SimState, payload: unknown): string | nu
     zone[slot] = parsed.zone;
     density[slot] = parsed.density;
   }
+  noteCellsPainted(state.roads, state.cells, slots);
   return null;
 }
