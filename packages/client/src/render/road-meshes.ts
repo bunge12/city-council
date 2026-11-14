@@ -286,6 +286,8 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
       mesh.matrixAutoUpdate = false;
       // Over the terrain and the water, which draws after the terrain.
       mesh.renderOrder = 2;
+      // Road surfaces take the sun's shadows. They cast none: they lie flat on the ground.
+      mesh.receiveShadow = layer === "surface";
       roots[layer].add(mesh);
       meshes.push(mesh);
     }

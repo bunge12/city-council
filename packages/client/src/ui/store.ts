@@ -4,6 +4,8 @@
 // `useSim` (hooks.ts) and change it only by sending commands.
 
 import { create } from "zustand";
+import { DEFAULT_PRESET } from "../render/config";
+import type { Preset, PresetSource } from "../render/presets";
 import { INITIAL_BLOCK_OVERLAY, type BlockOverlayState } from "../tools/block-overlay";
 import { INITIAL_EDIT_TOOL, type EditPreview, type EditToolState } from "../tools/edit-tool";
 import { INITIAL_GRID_TOOL, type GridToolState } from "../tools/grid-tool";
@@ -174,3 +176,27 @@ export function setBlockLabels(labels: readonly BlockLabel[]): void {
 function sameLabel(a: BlockLabel, b: BlockLabel | undefined): boolean {
   return !!b && a.id === b.id && a.area === b.area && Math.round(a.x) === Math.round(b.x) && Math.round(a.y) === Math.round(b.y);
 }
+
+/**
+ * The graphics preset. Kept per browser by main.ts, never in sim state. The
+ * player's choice and the benchmark's set `wanted`; the renderer moves
+ * `shown` to it once the shaders it needs are compiled.
+ */
+export interface GraphicsState {
+  wanted: Preset;
+  /** The preset on screen, or null before the first frame with terrain. */
+  shown: Preset | null;
+  source: PresetSource;
+  /**
+   * The first-run benchmark: `ms` per draw and the preset it picked, from
+   * this visit or the one it ran on. `running` while it runs.
+   */
+  benchmark: { state: "none" | "running" | "done"; ms: number | null; backend: string | null; thisVisit: boolean };
+}
+
+export const useGraphics = create<GraphicsState>(() => ({
+  wanted: DEFAULT_PRESET,
+  shown: null,
+  source: "benchmark",
+  benchmark: { state: "none", ms: null, backend: null, thisVisit: false },
+}));

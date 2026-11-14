@@ -32,7 +32,9 @@ pnpm soak    one hour of game time at 4x, headless; writes packages/client/soak-
 BASE_URL=https://bunge12.github.io/city-council/ pnpm e2e --project walkthrough
 ```
 
-`e2e/roads.spec.ts` checks road rendering in its own `roads` project, also headed, against the dev server. It draws a fixture city on WebGPU and with `?webgl` and compares both with the same baseline screenshots in `e2e/roads.spec.ts-snapshots/`. If you change how roads look on purpose, refresh them with `xvfb-run -a pnpm e2e --project roads --update-snapshots` and say why in the pull request.
+`e2e/roads.spec.ts` checks road rendering in its own `roads` project, also headed, against the dev server. It draws a fixture city on WebGPU and with `?webgl` and compares both with the same baseline screenshots in `e2e/roads.spec.ts-snapshots/`. If you change how roads look on purpose, refresh them with `xvfb-run -a pnpm e2e --project roads --update-snapshots` and say why in the pull request. It draws at the Low graphics preset, so shadows do not move the pictures.
+
+Every e2e test starts with the Low preset kept in the browser (see `playwright.config.ts`), so the first-run benchmark does not run in each fresh browser. `e2e/presets.spec.ts` clears it to test the benchmark. For frame times per preset on the M1 scale city, run `e2e/scale.spec.ts` with `SCALE_PRESET` set to `low`, `balanced` or `high`. Add `SCALE_WEBGPU=1` and `--project roads` to measure on WebGPU instead of `?webgl`.
 
 The replay tests feed a recorded command log and a seed to the sim and compare a hash of the final state. If one fails after your change, the sim has become nondeterministic or its behaviour changed. Both need an explanation in the pull request.
 

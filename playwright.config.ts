@@ -22,6 +22,21 @@ const webGpuArgs =
     ? ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-webgpu-adapter=swiftshader"]
     : ["--enable-unsafe-webgpu"];
 
+/**
+ * Every test starts in a browser that already keeps the Low graphics preset
+ * (issue M2-02), as if the player had chosen it. Otherwise each test's fresh
+ * browser would run the first-run benchmark, which on a runner without a GPU
+ * takes seconds of drawing. Tests of the presets and the benchmark clear it.
+ */
+const lowPreset = JSON.stringify({ preset: "low", source: "player", benchmarkMs: null, benchmarkBackend: null });
+const keptPreset = {
+  cookies: [],
+  origins: ["http://localhost:5173", "http://localhost:4173"].map((origin) => ({
+    origin,
+    localStorage: [{ name: "city-council:graphics", value: lowPreset }],
+  })),
+};
+
 export default defineConfig({
   testDir: "e2e",
   forbidOnly: isCI,
@@ -34,11 +49,12 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:5173",
     trace: "off",
+    storageState: keptPreset,
   },
   projects: [
     {
       name: "chromium",
-      testIgnore: [/walkthrough\.spec\.ts$/, "roads.spec.ts"],
+      testIgnore: [/walkthrough\.spec\.ts$/, "roads.spec.ts", ...(process.env["SCALE_WEBGPU"] ? ["scale.spec.ts"] : [])],
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -51,7 +67,8 @@ export default defineConfig({
       // split over three of them with `--shard`, which only splits a file
       // when the project is fully parallel, and each runs one worker.
       name: "roads",
-      testMatch: "roads.spec.ts",
+      // With SCALE_WEBGPU set, the scale check runs here too, for its WebGPU numbers (see scale.spec.ts).
+      testMatch: process.env["SCALE_WEBGPU"] ? ["roads.spec.ts", "scale.spec.ts"] : "roads.spec.ts",
       fullyParallel: isCI,
       dependencies: remoteBase ? [] : ["chromium"],
       use: {

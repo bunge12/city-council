@@ -49,18 +49,30 @@ const BANDS: { band: string; position: Vec3; target: Vec3 }[] = [
   { band: "city", position: [6000, 8400, 15_800], target: [6000, 0, 5600] },
 ];
 
+/**
+ * The address the city opens at. CI measures `?webgl` at the Low preset the
+ * test browser keeps. For the per-preset numbers in a pull request set
+ * SCALE_PRESET to low, balanced or high, and SCALE_WEBGPU=1 to leave out
+ * `?webgl` (issue M2-02), in the `roads` project for headed WebGPU.
+ */
+const scalePreset = process.env["SCALE_PRESET"];
+const scaleQuery = [process.env["SCALE_WEBGPU"] ? "" : "webgl", scalePreset ? `preset=${scalePreset}` : ""].filter(Boolean).join("&");
+const reportName = `scale-report${scalePreset ? `-${scalePreset}` : ""}${process.env["SCALE_WEBGPU"] ? "-webgpu" : ""}.json`;
+
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 120_000 });
 }
 
 /** Opens the page, imports `bytes` as a city and waits for it to be drawn. */
 async function openCity(page: Page, name: string, bytes: Buffer): Promise<void> {
-  await page.goto("/?webgl");
+  await page.goto(`/?${scaleQuery}`);
   await ready(page);
+  await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
   await loaded;
   await ready(page);
+  await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
   await page.addStyleTag({ content: ".notes { display: none !important; }" });
 }
 
@@ -195,6 +207,7 @@ test("the M1 scale city: frame time in each zoom band, and the tab's memory", as
 
   const report = {
     backend,
+    preset: await page.evaluate(() => document.body.dataset["preset"]),
     city: { ...scale.counts, fileBytes: bytes.byteLength },
     frameMs: Object.fromEntries(BANDS.map(({ band }) => [band, { empty: empty[band], roads: roads[band] }])),
     roadMesh: stats,
@@ -202,7 +215,7 @@ test("the M1 scale city: frame time in each zoom band, and the tab's memory", as
   };
   console.log(`M1 scale city in the browser: ${JSON.stringify(report, null, 2)}`);
   mkdirSync("test-results", { recursive: true });
-  writeFileSync("test-results/scale-report.json", `${JSON.stringify(report, null, 2)}\n`);
+  writeFileSync(`test-results/${reportName}`, `${JSON.stringify(report, null, 2)}\n`);
   await testInfo.attach("scale report", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
 
   expect(stats?.segmentPieces ?? 0).toBeGreaterThan(30_000);

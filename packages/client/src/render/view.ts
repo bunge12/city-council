@@ -8,21 +8,22 @@
 import {
   BufferAttribute,
   BufferGeometry,
-  Color,
-  DirectionalLight,
-  HemisphereLight,
   LOD,
   Mesh,
   MeshLambertNodeMaterial,
   PerspectiveCamera,
   PlaneGeometry,
+  RenderTarget,
   Scene,
+  Vector2,
   WebGPURenderer,
 } from "three/webgpu";
-import { mapSize, type Terrain } from "@city-council/sim";
-import { FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, TERRAIN_LODS } from "./config";
+import { heightAt, mapSize, type Terrain } from "@city-council/sim";
+import { FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, TERRAIN_LODS } from "./config";
 import type { ZoomBand } from "../camera/zoom-band";
 import { createDecorLayer, type DecorLayer } from "./decor-meshes";
+import { createLighting, skyColour, type LightingReport } from "./lighting";
+import type { Preset } from "./presets";
 import { neighbourhood, type RoadNet } from "./road-geometry";
 import { createRoadLayer, type RoadLayer, type RoadStats } from "./road-meshes";
 import { buildChunk, chunkCentre, chunksPerSide } from "./terrain-chunks";
@@ -67,6 +68,16 @@ export interface View {
   /** Shows the road layers for a zoom band, with the camera `height` metres over the ground. */
   setZoomBand(band: ZoomBand, height: number): void;
   roadStats(): RoadStats | null;
+  /** Switches the lighting to a graphics preset once its shaders are compiled. */
+  setPreset(preset: Preset): Promise<void>;
+  /** The lighting on screen: its preset and its shadows. */
+  lighting(): LightingReport;
+  /**
+   * The first-run benchmark: draws the current view into an offscreen
+   * target, waits for the GPU, and returns the mean milliseconds per draw.
+   * See PRESET_BENCHMARK.
+   */
+  benchmark(): Promise<number>;
 }
 
 /** True when the page asks for the WebGL 2 backend with `?webgl`. */
@@ -74,10 +85,7 @@ export function wantsWebGL(search: string): boolean {
   return new URLSearchParams(search).has("webgl");
 }
 
-const SKY = 0xb7cfe0;
 const WATER = 0x3a6f8f;
-/** The sun's fixed direction, from the scene towards the light. */
-const SUN: readonly [number, number, number] = [0.55, 0.55, 0.3];
 
 export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean): Promise<View> {
   const useWebGL = forceWebGL || !("gpu" in navigator);
@@ -89,17 +97,16 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   const backend: Backend = backendObj.isWebGPUBackend === true ? "webgpu" : "webgl2";
 
   const scene = new Scene();
-  scene.background = new Color(SKY);
+  scene.background = skyColour();
 
   const camera = new PerspectiveCamera(45, window.innerWidth / window.innerHeight, 10, 60_000);
 
-  // Fixed daylight: one sun and a sky fill. No day and night cycle in v1.
-  const sun = new DirectionalLight(0xfff4e0, 2.2);
-  sun.position.set(...SUN);
-  scene.add(sun);
-  scene.add(new HemisphereLight(0xdfeaf5, 0x5a5040, 1.1));
+  // Fixed daylight: one sun and one ambient light, lit as the graphics
+  // preset says. No day and night cycle in v1. Until a preset is set the
+  // scene is lit as Low, so the first frame needs no shadow shaders.
+  const lighting = createLighting(renderer, scene);
 
-  let terrainRoot: { lods: LOD[]; decor: DecorLayer; roads: RoadLayer; dispose: () => void } | null = null;
+  let terrainRoot: { terrain: Terrain; lods: LOD[]; decor: DecorLayer; roads: RoadLayer; dispose: () => void } | null = null;
   let band: ZoomBand = "city";
   let height = Infinity;
 
@@ -125,6 +132,8 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
           geometry.computeBoundingSphere();
           geometries.push(geometry);
           const mesh = new Mesh(geometry, material);
+          // Terrain takes shadows but casts none: it would shade itself in stripes.
+          mesh.receiveShadow = true;
           // The LOD sits at the chunk centre so its distance test works; the
           // mesh undoes that offset. c + (-c) is exactly 0, so every chunk's
           // world matrix is exactly the identity (see terrain-chunks.ts).
@@ -157,6 +166,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     const decor = createDecorLayer(terrain, scene, (chunk) => roads.decorMask(chunk));
 
     terrainRoot = {
+      terrain,
       lods,
       decor,
       roads,
@@ -197,6 +207,8 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     const seconds = last >= 0 ? (time - last) / 1000 : 0;
     for (const b of before) b(seconds);
     terrainRoot?.decor.update(camera.position);
+    const shown = terrainRoot?.terrain;
+    lighting.update(camera, shown ? (x, z) => heightAt(shown, x, z) : null);
     renderer.render(scene, camera);
     if (last >= 0) {
       const slot = gapCount % FRAME_TIME_WINDOW;
@@ -252,5 +264,28 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       terrainRoot?.roads.setBand(next, nextHeight);
     },
     roadStats: () => terrainRoot?.roads.stats() ?? null,
+    setPreset: (preset) => lighting.setPreset(preset),
+    lighting: () => lighting.report(),
+    async benchmark() {
+      const size = renderer.getDrawingBufferSize(new Vector2());
+      const target = new RenderTarget(Math.max(1, size.x), Math.max(1, size.y));
+      const draw = () => {
+        renderer.setRenderTarget(target);
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
+      };
+      // Waits for the GPU: reading a pixel back finishes once every draw before it has.
+      const finish = () => renderer.readRenderTargetPixelsAsync(target, 0, 0, 1, 1);
+      try {
+        for (let k = 0; k < PRESET_BENCHMARK.warmup; k++) draw();
+        await finish();
+        const start = performance.now();
+        for (let k = 0; k < PRESET_BENCHMARK.renders; k++) draw();
+        await finish();
+        return (performance.now() - start) / PRESET_BENCHMARK.renders;
+      } finally {
+        target.dispose();
+      }
+    },
   };
 }

@@ -202,6 +202,10 @@ export function createDecorLayer(
     if (placed.count === 0) return null;
     const mesh = new InstancedMesh(geometries[kind], kind === "grass" ? grassMaterial : treeMaterial, placed.count);
     mesh.name = kind;
+    // Trees cast and take shadows, the first instanced meshes to do both.
+    // Grass only takes them: a tuft's shadow is under a pixel.
+    mesh.castShadow = kind !== "grass";
+    mesh.receiveShadow = true;
     const [a, b] = LEAVES[kind];
     tintA.set(a);
     tintB.set(b);

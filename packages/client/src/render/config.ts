@@ -347,3 +347,89 @@ export const CONNECTION_MARKS = {
   arrowWidthPx: 14,
   arrowStrokePx: 3.5,
 } as const;
+
+/** The graphics presets, cheapest first. Presentation only: no preset changes the sim. */
+export const PRESETS = ["low", "balanced", "high"] as const;
+export type Preset = (typeof PRESETS)[number];
+
+/** The preset a player gets when nothing else decides. */
+export const DEFAULT_PRESET: Preset = "balanced";
+
+/**
+ * Every visual feature and the cheapest preset that turns it on. A preset
+ * draws a feature when it is this one or a later one in `PRESETS`. A new
+ * feature goes in this list, so nothing costly lands in Low by accident.
+ */
+export const VISUAL_FEATURES = {
+  /** Terrain chunks with their levels of detail, and the water plane. */
+  terrain: "low",
+  /** Road surfaces, bridges, and the city band's lines. */
+  roads: "low",
+  /** Lane markings and one-way arrows, in the street and low district bands. */
+  roadMarkings: "low",
+  /** Decorative trees near the camera, and the canopy colour further out. */
+  trees: "low",
+  /** Grass tufts near the camera. */
+  grass: "low",
+  /** One fixed sun, lighting terrain, roads and trees from one side. */
+  sunLight: "low",
+  /** Sky light from above and earth light from below, in place of one flat fill. */
+  softAmbient: "balanced",
+  /** The sun casts shadows within `SHADOWS.near` of the point the camera looks at. */
+  sunShadows: "balanced",
+  /** The same shadows out to `SHADOWS.far`, with a larger shadow map to keep them sharp. */
+  longShadows: "high",
+} as const satisfies Record<string, Preset>;
+export type VisualFeature = keyof typeof VISUAL_FEATURES;
+
+/** True when `preset` draws `feature`. */
+export function featureOn(feature: VisualFeature, preset: Preset): boolean {
+  return PRESETS.indexOf(preset) >= PRESETS.indexOf(VISUAL_FEATURES[feature]);
+}
+
+/**
+ * The fixed daylight: one sun and one ambient light. No day and night cycle.
+ * Colours are sRGB hex. `sun.direction` points from the scene towards the sun.
+ * Without soft ambient the fill is one flat colour, `flat`, as bright overall
+ * as the sky and ground pair.
+ */
+export const LIGHTING = {
+  sky: 0xb7cfe0,
+  sun: { colour: 0xfff4e0, intensity: 2.2, direction: [0.55, 0.55, 0.3] as const },
+  ambient: { sky: 0xdfeaf5, ground: 0x5a5040, flat: 0xbec3c8, intensity: 1.1 },
+} as const;
+
+/**
+ * Sun shadows. One shadow map follows the point the camera looks at. `range`
+ * is the half-width of the square it covers, in metres, and `mapSize` its
+ * side in texels, so a texel is 2 * range / mapSize metres. `depth` is how
+ * far the shadow camera stands back along the sun's direction, metres: past
+ * the highest ground over the focus. The biases keep trees from shadowing
+ * themselves in stripes.
+ */
+export const SHADOWS = {
+  near: { range: 320, mapSize: 2048 },
+  far: { range: 1000, mapSize: 4096 },
+  depth: 1500,
+  bias: -0.0004,
+  normalBias: 0.35,
+} as const;
+
+/**
+ * The first-run benchmark. After the first frame with terrain, the game
+ * switches to Balanced, draws the start view `renders` times into an
+ * offscreen target and waits for the GPU to finish, after `warmup` untimed
+ * draws. The mean milliseconds per draw picks the preset: over `lowAbove`
+ * gives Low, under `highBelow` gives High, and anything between gives
+ * Balanced. It runs once per browser; the choice is kept with the setting.
+ *
+ * The thresholds are a first guess until the PRD names the reference
+ * machines for Low and Balanced. A software adapter, as on a CI runner, takes
+ * hundreds of milliseconds per draw. A recent laptop GPU takes a few.
+ */
+export const PRESET_BENCHMARK = {
+  warmup: 2,
+  renders: 8,
+  lowAbove: 12,
+  highBelow: 4,
+} as const;
