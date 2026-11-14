@@ -248,8 +248,10 @@ for (const { name, query } of BACKENDS) {
   test(`roads stay on top of the terrain at every zoom (${name})`, async ({ page }, testInfo) => {
     await openCity(page, query, "Roads", fixtureCity().bytes);
     // Points on the avenue's centre line, between junctions, away from paint.
+    // They stop 50 m short of the four-way at z = 4850, clear of its crossing
+    // and the traffic light whose mast hangs over the road (issue 87).
     const avenue: Vec3[] = [];
-    for (let z = 4470; z <= 4830; z += 15) avenue.push([4450 + 3, groundAt(4453, z), z]);
+    for (let z = 4470; z <= 4800; z += 15) avenue.push([4450 + 3, groundAt(4453, z), z]);
     // Camera distance from far above down to the closest zoom, looking down the avenue at a slant.
     const results: string[] = [];
     for (const height of [12_000, 6000, 3500, 2500, 1500, 800, 400, 200, 100, 60]) {
