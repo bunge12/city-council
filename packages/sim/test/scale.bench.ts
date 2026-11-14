@@ -6,7 +6,9 @@
 //
 // The other benches time one thing each on a flat synthetic grid. This one
 // takes the measurements M1's close-out asks for on one generated city and
-// reports them together, for the pull request and the PRD.
+// reports them together, for the pull request and the PRD. Since M2-03 it
+// also times the zoning cells: generating all of them, and keeping them
+// current through one BuildRoad.
 
 import { expect, test } from "vitest";
 import {
@@ -31,6 +33,7 @@ import { endJournal, reverseOps, segmentCount, startJournal, type NetworkOp, typ
 import { roadIndexOf } from "../src/roads/spatial";
 import { ROAD_BUILD } from "../src/roads/balance";
 import { terrainOf } from "../src/terrain/cache";
+import { buildCellIndex, syncCells } from "../src/zoning/cell-index";
 
 /** What one tick may spend, in milliseconds. */
 const TICK_BUDGET_MS = 20;
@@ -119,22 +122,35 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   // starts from the same city. Taking back costs about what building does,
   // so the build times are up to twice what the step itself spends.
   const cases: Record<string, () => void> = {
-    // Plan and build, with the spatial index, the routing graph and the
-    // blocks kept current, then the take-back.
+    // Plan and build, with the spatial index, the routing graph, the
+    // blocks and the zoning cells kept current, then the take-back.
     "the step that applies one BuildRoad crossing ten segments, and taking it back": () => {
       const result = planRoad(net, terrain, crossing.payload);
       if (!result.ok) throw new Error(result.reason);
       const ops = build(result.plan);
       blockById(blocks, 0);
+      syncCells(state);
       reverseOps(net, ops);
       blockById(blocks, 0);
+      syncCells(state);
     },
     "the step that applies one BuildRoadGrid at the cap over existing streets, and taking it back": () => {
       const ops = applyGrid(grid);
       blockById(blocks, 0);
+      syncCells(state);
       reverseOps(net, ops);
       blockById(blocks, 0);
+      syncCells(state);
     },
+    // M2-03: the zoning cells on their own, the same road built and taken
+    // back with only the cells brought up to date.
+    "one BuildRoad crossing ten segments with the zoning cells kept current, and taking it back": () => {
+      const ops = build(crossing.plan);
+      syncCells(state);
+      reverseOps(net, ops);
+      syncCells(state);
+    },
+    "generate every zoning cell of the city from scratch, as a load does": () => void buildCellIndex(net, terrain),
     "a route across the map, north-west grid to south-east grid": () =>
       void findRouteBetween(graph, first.x, first.z, last.x, last.z, { networks: NETWORKS_ROAD }),
     // The blocks bring themselves up to date when read. The same street
@@ -167,7 +183,7 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   expect(listBlocks(blockIndexOf(net))).toHaveLength(blockCount);
 
   const report = {
-    city: { ...counts, blocks: blockCount, snapshotBytes: serialize(state).byteLength },
+    city: { ...counts, blocks: blockCount, cells: state.cells.zone.length, snapshotBytes: serialize(state).byteLength },
     road: { splits: 10, length: Math.round(crossing.payload.to.x - crossing.payload.from.x) },
     route: { metres: Math.round(route.route.distance), segments: route.route.segments.length },
     meanMs: Object.fromEntries(Object.entries(meanMs).map(([k, v]) => [k, round(v)])),
@@ -192,6 +208,7 @@ test("the M1 scale network", async ({ bench, annotate }) => {
     "the step that applies one BuildRoad crossing ten segments, and taking it back",
     "the step that applies one BuildRoadGrid at the cap over existing streets, and taking it back",
     "one BuildRoad through a block, blocks brought up to date, and taking it back",
+    "one BuildRoad crossing ten segments with the zoning cells kept current, and taking it back",
   ]) {
     expect(meanMs[name], name).toBeLessThan(2 * TICK_BUDGET_MS);
   }

@@ -2,6 +2,7 @@ import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
 import { SNAPSHOT_VERSION, type SimState } from "./state";
+import { unzonedCells } from "./zoning/cells";
 
 type Migration = (old: Record<string, unknown>) => Record<string, unknown>;
 
@@ -41,6 +42,9 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 9 gives every segment a build order number, so the older of two
   // roads can keep its cells (M2-01). See `buildOrder`.
   8: (old) => ({ ...buildOrder(old), version: 9 }),
+  // Version 10 adds the zoning cells along every zonable road, all unzoned
+  // (M2-03). Nothing could be painted before them.
+  9: (old) => ({ ...old, version: 10, cells: unzonedCells(old["roads"] as RoadNetwork) }),
 };
 
 type OldRow = Record<string, unknown>;

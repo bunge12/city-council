@@ -1,5 +1,5 @@
 // Zoning numbers from `balance/zoning.json`, checked when the module loads
-// (PRD, "M2 Zoning and buildings"). The cells themselves arrive in issue 03.
+// (PRD, "M2 Zoning and buildings"). The cells themselves are in cells.ts.
 
 import balance from "../../balance/zoning.json" with { type: "json" };
 
@@ -24,6 +24,8 @@ export interface ZoningBalance {
   cellSize: number;
   /** How far cells reach back from a road's edge, in cells. */
   zoneDepthCells: number;
+  /** The steepest ground a cell can be zoned on, rise over run at its centre. */
+  maxSlope: number;
   zones: ZoneBalance[];
   /** In level order, from 1. */
   densities: DensityBalance[];
@@ -47,6 +49,10 @@ export function checkZoningBalance(data: unknown): string[] {
   }
   const depth = data["zoneDepthCells"];
   if (!Number.isSafeInteger(depth) || (depth as number) < 1) errors.push("zoneDepthCells must be a whole number of at least 1");
+  const maxSlope = data["maxSlope"];
+  if (typeof maxSlope !== "number" || !Number.isFinite(maxSlope) || !(maxSlope > 0)) {
+    errors.push("maxSlope must be a positive rise over run");
+  }
 
   const zones = data["zones"];
   if (!Array.isArray(zones) || zones.length === 0) {

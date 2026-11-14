@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { syncCells } from "../src/zoning/cell-index";
 import { nextFloat, seedRng } from "../src/rng";
 import {
   NETWORK_RAIL,
@@ -259,9 +260,12 @@ describe("spatial index kept current", () => {
   it("gives a city saved and loaded mid-run the same answers as one that never stopped", () => {
     const state = createBareState(9);
     growNetwork(state.roads, 21, 1500);
+    // prepareDerived also walks the 1.5 million zoning cells this random network has.
     entry.prepareDerived(state);
     churnNetwork(state.roads, 22, 300);
 
+    // The roads were changed by hand, not by a step, so lay their cells out first.
+    syncCells(state);
     const loaded = deserialize(serialize(state)).state;
     // Both go on with the same changes.
     churnNetwork(state.roads, 23, 500);
@@ -271,7 +275,7 @@ describe("spatial index kept current", () => {
     expect(contents(roadIndexOf(loaded.roads))).toEqual(contents(roadIndexOf(state.roads)));
     const qs = queries(24, 500);
     expect(answers(roadIndexOf(loaded.roads), qs)).toEqual(answers(roadIndexOf(state.roads), qs));
-  });
+  }, 30_000);
 });
 
 describe("spatial query order", () => {

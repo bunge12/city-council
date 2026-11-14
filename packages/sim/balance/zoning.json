@@ -1,7 +1,8 @@
 {
-  "_about": "Zoning cells (PRD, \"M2 Zoning and buildings\"). Every zonable segment gets square cells along both sides, reaching back from the road's edge. No prices here, so no source years.",
+  "_about": "Zoning cells (PRD, \"M2 Zoning and buildings\"). Every zonable segment gets square cells along both sides, reaching back from the road's edge. `maxSlope` is the steepest ground, rise over run at a cell's centre, that a cell can be zoned on. It is a starting value to tune, a little steeper than the steepest street (0.16), since a building can step down ground a road cannot climb. No prices here, so no source years.",
   "cellSize": 8,
   "zoneDepthCells": 6,
+  "maxSlope": 0.25,
   "zones": [
     { "id": "residential", "name": "Residential", "letter": "R" },
     { "id": "commercial", "name": "Commercial", "letter": "C" },

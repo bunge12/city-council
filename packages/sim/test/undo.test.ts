@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { syncCells } from "../src/zoning/cell-index";
 import {
   LEVEL_BRIDGE,
   ROAD_TYPES,
@@ -237,6 +238,8 @@ describe("A bulldoze of thousands of segments", () => {
     // Ids already free before the command stay free, in their order.
     removeSegment(net, 5);
     removeSegment(net, 3);
+    // The roads were changed by hand, not by a step, so lay their cells out first.
+    syncCells(state);
     const before = cityHash(state);
     ok(state, bulldoze(liveSegments(net)));
     expect(segmentCount(net)).toBe(0);

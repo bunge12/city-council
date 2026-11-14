@@ -11,12 +11,13 @@ describe("zoning balance", () => {
     expect(checkZoningBalance(zoning)).toEqual([]);
     expect(ZONING_BALANCE.cellSize).toBe(8);
     expect(ZONING_BALANCE.zoneDepthCells).toBe(6);
+    expect(ZONING_BALANCE.maxSlope).toBe(0.25);
     expect(ZONING_BALANCE.zones.map((z) => z.letter)).toEqual(["R", "C", "O", "I", "M"]);
     expect(ZONING_BALANCE.densities.map((d) => d.level)).toEqual([1, 2, 3]);
   });
 
   it("fails when any field is missing", () => {
-    for (const field of ["cellSize", "zoneDepthCells", "zones", "densities"]) {
+    for (const field of ["cellSize", "zoneDepthCells", "maxSlope", "zones", "densities"]) {
       const data = Object.fromEntries(Object.entries(copy()).filter(([key]) => key !== field));
       expect(checkZoningBalance(data).join("; "), field).toMatch(field);
     }
@@ -37,6 +38,7 @@ describe("zoning balance", () => {
   it("fails on numbers that cannot be a cell grid", () => {
     expect(checkZoningBalance({ ...copy(), cellSize: 0 })).toEqual([expect.stringMatching(/cellSize/)]);
     expect(checkZoningBalance({ ...copy(), zoneDepthCells: 2.5 })).toEqual([expect.stringMatching(/zoneDepthCells/)]);
+    expect(checkZoningBalance({ ...copy(), maxSlope: -1 })).toEqual([expect.stringMatching(/maxSlope/)]);
     const twice = copy();
     (twice["zones"] as Record<string, unknown>[])[1] = { id: "residential", name: "Again", letter: "R" };
     expect(checkZoningBalance(twice)).toHaveLength(2);

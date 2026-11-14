@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { syncCells } from "../src/zoning/cell-index";
 import * as entry from "../src/index";
 import { applyRoadDelta, drainRoadChanges, encodeRoadDelta, recordRoadChanges } from "../src/roads/delta";
 import { roadTypeIndex } from "../src/roads/balance";
@@ -446,9 +447,12 @@ describe("routing graph kept current", () => {
   it("gives a city saved and loaded mid-run the same routes as one that never stopped", () => {
     const state = createBareState(9);
     growNetwork(state.roads, 21, 1500);
+    // prepareDerived also walks the 1.5 million zoning cells this random network has.
     entry.prepareDerived(state);
     expect(existingRoutingGraph(state.roads)).not.toBeNull();
     churnNetwork(state.roads, 22, 300);
+    // The roads were changed by hand, not by a step, so lay their cells out first.
+    syncCells(state);
     const loaded = deserialize(serialize(state)).state;
     churnNetwork(state.roads, 23, 500);
     churnNetwork(loaded.roads, 23, 500);
@@ -457,7 +461,7 @@ describe("routing graph kept current", () => {
     const q = routingGraphOf(loaded.roads);
     expect(sameRoutingGraph(p, q)).toBe(true);
     for (const [from, to] of pairs(state.roads, 24, 100)) expect(findRoute(q, from, to)).toEqual(findRoute(p, from, to));
-  });
+  }, 30_000);
 
   it("follows road deltas on a client's copy", () => {
     const net = createRoadNetwork();
