@@ -32,7 +32,11 @@ declare const performance: { now(): number };
 declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
-test.setTimeout(300_000);
+// Two cities, three bands each, drawn in software on a CI runner at about
+// 2 fps. On main it took 294.7 s of the old 300 s (run 43548591694), so the
+// wait for the graphics preset (issue M2-02) tipped it over. Seven minutes
+// leaves room without hiding a real slowdown: the frame-time asserts do that.
+test.setTimeout(420_000);
 
 const scale = buildScaleCity();
 const terrain = generateTerrain(scale.state.seed);
