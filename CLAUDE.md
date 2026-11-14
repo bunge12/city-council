@@ -58,6 +58,7 @@ pnpm build
 - If a decision in the PRD changes, update `docs/PRD.md` in the same pull request.
 - Do not start work that belongs to a later milestone, even when it looks easy.
 - If you think something is a bad idea (or not worth doing), say no, challenge it, present it to me.
+- For any change over 300 LOC, you must launch a fresh Opus review subagent (instructions: "Review the code from this session. No need to run specs. Do not focus on nits") before opening the PR
 
 ## Things this project does not do
 
