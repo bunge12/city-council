@@ -57,6 +57,7 @@ pnpm build
 - Every pull request that changes what users see in the browser gets browser evidence for the feature it changes. Publish the evidence as a Claude Artifact and post its link as a comment on the pull request. Back-end and simulation-only changes need no evidence.
 - If a decision in the PRD changes, update `docs/PRD.md` in the same pull request.
 - Do not start work that belongs to a later milestone, even when it looks easy.
+- If you think something is a bad idea (or not worth doing), say no, challenge it, present it to me.
 
 ## Things this project does not do
 
