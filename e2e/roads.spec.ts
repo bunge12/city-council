@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { decodePng, type Image } from "./png";
-import { CURVED_JUNCTION, FIVE_WAY, curvedCity, fixtureCity, groundAt, scaleCity } from "./road-fixtures";
+import { CURVED_JUNCTION, FIVE_WAY, SIGNAL_CROSS, YIELD_TEE, curvedCity, decorationCity, fixtureCity, groundAt, scaleCity } from "./road-fixtures";
 
 // Issue M1-06: roads in the mirror appear on the map. It runs in the `roads`
 // project, headed with WebGPU on where the browser has an adapter (see
@@ -18,6 +18,8 @@ interface RoadStats {
   lastRebuilt: number;
   totalRebuilt: number;
   lastBuildMs: number;
+  signals: number;
+  yields: number;
 }
 declare const window: {
   cityCouncil: {
@@ -156,6 +158,35 @@ for (const { name, query } of BACKENDS) {
     await setPose(page, [x, curvedGround + 4200, z + 1700], [x, curvedGround, z]);
     await settle(page);
     await attach(testInfo, `curves, city band, ${backend}`, await canvasShot(page));
+  });
+}
+
+// Issue 87: rounded kerbs, tapers, zebra crossings, traffic lights and
+// yield signs. The lights and signs show in the street band only.
+const decorGround = groundAt(SIGNAL_CROSS.x, SIGNAL_CROSS.z);
+for (const { name, query } of BACKENDS) {
+  test(`junctions get rounded kerbs, crossings, lights and signs, and tapers join two widths (${name})`, async ({ page }, testInfo) => {
+    const backend = await openCity(page, query, "Decorations", decorationCity().bytes);
+    if (query === "?webgl") expect(backend).toBe("webgl2");
+    else if (process.env["CI"]) expect(backend).toBe("webgpu");
+    testInfo.annotations.push({ type: "backend", description: backend });
+    const stats = await roadStats(page);
+    // A light on each of the four roads at the avenue's crossing, a yield sign on each of the T's three.
+    expect(stats.signals).toBe(4);
+    expect(stats.yields).toBe(3);
+    const { x, z } = SIGNAL_CROSS;
+    await setPose(page, [x - 30, decorGround + 40, z + 50], [x, decorGround, z]);
+    await settle(page);
+    await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
+    const shot = await canvasShot(page);
+    await attach(testInfo, `avenue crossing a street, ${backend}`, shot);
+    expect(shot).toMatchSnapshot("roads-decorations.png", { maxDiffPixelRatio: 0.01, threshold: 0.1 });
+    await setPose(page, [YIELD_TEE.x - 20, decorGround + 45, YIELD_TEE.z + 60], [YIELD_TEE.x, decorGround, YIELD_TEE.z]);
+    await settle(page);
+    await attach(testInfo, `street T with yield signs, ${backend}`, await canvasShot(page));
+    await setPose(page, [4290, decorGround + 90, 4620], [4290, decorGround, 4510]);
+    await settle(page);
+    await attach(testInfo, `streets tapering into avenues, ${backend}`, await canvasShot(page));
   });
 }
 

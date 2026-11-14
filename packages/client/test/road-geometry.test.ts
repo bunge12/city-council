@@ -30,9 +30,11 @@ import { withoutDropped } from "../src/render/decor";
 import {
   MASK_GRASS,
   MASK_TREES,
+  PROP_STRIDE,
   RoadChunks,
   buildRoadChunk,
   chunkAt,
+  crossingsOf,
   isRaised,
   junctionAt,
   nodeLift,
@@ -40,8 +42,10 @@ import {
   masked,
   paintFor,
   pierStations,
+  ringDistance,
   roadMask,
   roadSegmentsAt,
+  trimAt,
   segPath,
   stations,
   type MeshArrays,
@@ -312,8 +316,10 @@ describe("junctions", () => {
     const tee = [0, 1, 2, 3].find((n) => roadSegmentsAt(net, n).length === 3) ?? -1;
     const j = junctionAt(net, tee);
     expect(j?.segs.length).toBe(3);
-    // A street is 10 m wide, so every road is cut back half that.
-    for (const t of j?.trims ?? []) expect(t).toBeCloseTo(5, 9);
+    // A street is 10 m wide, so the kerbs meet 5 m out, and each road gives
+    // up a street's corner radius more for the rounded kerb. At 90 degrees
+    // the arc's tangent length is its radius.
+    for (const t of j?.trims ?? []) expect(t).toBeCloseTo(5 + (ROADS.corners.radius["street"] ?? 0), 9);
     const end = [0, 1, 2, 3].find((n) => net.nodeX[n] === 4250 && net.nodeZ[n] === 4550) ?? -1;
     expect(junctionAt(net, end)).toBeNull();
   });
@@ -436,7 +442,11 @@ describe("chunks", () => {
     index.reset(copy);
     const drawn = new Map<number, string>();
     const key = (g: ReturnType<typeof buildRoadChunk>) =>
-      JSON.stringify(["surface", "markings", "lines"].map((k) => Array.from((g as unknown as Record<string, MeshArrays>)[k]?.positions ?? [])));
+      JSON.stringify([
+        ...["surface", "markings", "lines"].map((k) => Array.from((g as unknown as Record<string, MeshArrays>)[k]?.positions ?? [])),
+        Array.from(g.signals),
+        Array.from(g.yields),
+      ]);
     const plan: [from: [number, number], to: [number, number], type: string, control?: [number, number]][] = [
       [[4150, 4450], [4650, 4450], "street"],
       [[4300, 4420], [4300, 4700], "avenue"],
@@ -477,6 +487,217 @@ describe("chunks", () => {
     if (!changes) throw new Error("no changes");
     const dirty = index.apply(state.roads, changes.nodes, changes.segs);
     expect([...dirty]).toEqual([chunkAt(4250, 4400)]);
+  });
+});
+
+describe("corners and tapers (issue 87)", () => {
+  /** How many surface triangles cover (x, z). */
+  const covers = (net: RoadNet, x: number, z: number) => triangles(net).filter((t) => inside(t, x, z)).length;
+
+  it("round a right-angle corner with an arc between the kerbs", () => {
+    const x = 4250;
+    const z = 4450;
+    const net = city([
+      [[x - 100, z], [x + 100, z]],
+      [[x, z - 100], [x, z + 100]],
+    ]);
+    const r = ROADS.corners.radius["street"] ?? 0;
+    // The sharp corner, 5 m out each way, is road now, and so is a point inside the arc.
+    // (Points off the diagonal: the fan's triangles share an edge along it.)
+    expect(covers(net, x + 5.3, z + 5.2)).toBe(1);
+    expect(covers(net, x + 5 + r * 0.2, z + 5 + r * 0.15)).toBe(1);
+    // The arc bends no further out than a circle of the corner radius would.
+    const round = 5 + r - r / Math.SQRT2;
+    expect(covers(net, x + round + 0.25, z + round + 0.2)).toBe(0);
+    // Along each kerb the arc starts the radius past the sharp corner.
+    expect(covers(net, x + 5 + r + 0.5, z + 5.2)).toBe(0);
+    expectTiled(net, x - 30, z - 30, x + 30, z + 30, 0.5);
+  });
+
+  it("taper a narrow road into a wide one it runs on into", () => {
+    const x = 4250;
+    const z = 4450;
+    const net = city([
+      [[x - 100, z], [x, z], "street"],
+      [[x, z], [x + 150, z], "avenue"],
+    ]);
+    const node = [0, 1, 2].find((n) => net.nodeX[n] === x && net.nodeZ[n] === z) ?? -1;
+    const j = junctionAt(net, node);
+    const street = j?.segs.find((s) => net.segType[s] === 0) ?? -1;
+    // A street is 5 m from centre to kerb and an avenue 9, so the taper is 4 m times the ratio long.
+    const length = 4 * ROADS.taper.ratio;
+    expect(trimAt(j, street)).toBeCloseTo(length, 9);
+    // Half way along it the road is 7 m from centre to kerb.
+    expect(covers(net, x - length / 2, z + 6.8)).toBe(1);
+    expect(covers(net, x - length / 2, z + 7.2)).toBe(0);
+    expect(covers(net, x - length / 2, z - 6.8)).toBe(1);
+    expectTiled(net, x - 40, z - 15, x + 20, z + 15, 0.4);
+  });
+
+  it("taper a bent road too, and leave a sharp bend of two widths to the corner rules", () => {
+    const net = city([
+      [[4150, 4450], [4250, 4450], "street"],
+      [[4250, 4450], [4391, 4501], "avenue"],
+      [[4150, 4650], [4250, 4650], "street"],
+      [[4250, 4650], [4280, 4720], "avenue"],
+    ]);
+    const nodeAt = (x: number, z: number) => [0, 1, 2, 3, 4, 5].find((n) => net.nodeX[n] === x && net.nodeZ[n] === z) ?? -1;
+    const bent = junctionAt(net, nodeAt(4250, 4450));
+    const street = bent?.segs.find((s) => net.segType[s] === 0) ?? -1;
+    expect(trimAt(bent, street)).toBeGreaterThanOrEqual(4 * ROADS.taper.ratio - 1e-9);
+    const sharp = junctionAt(net, nodeAt(4250, 4650));
+    const sharpStreet = sharp?.segs.find((s) => net.segType[s] === 0) ?? -1;
+    expect(trimAt(sharp, sharpStreet)).toBeLessThan(4 * ROADS.taper.ratio);
+    expectTiled(net, 4220, 4420, 4290, 4480, 0.4);
+    expectTiled(net, 4220, 4620, 4290, 4690, 0.4);
+  });
+
+  it("keep trees and grass off the rounded corner, not just the strips", () => {
+    const x = 4250;
+    const z = 4450;
+    const net = city([
+      [[x - 100, z], [x + 100, z]],
+      [[x, z - 100], [x, z + 100]],
+    ]);
+    const chunk = chunkAt(x, z);
+    const segs = [0, 1, 2, 3].filter((s) => s < net.segFlags.length);
+    const node = [0, 1, 2, 3, 4].find((n) => net.nodeX[n] === x && net.nodeZ[n] === z) ?? -1;
+    const ring = junctionAt(net, node)?.ring ?? [];
+    // On the arc, inside the junction but more than half a metre plus a mask cell from both strips.
+    const r = ROADS.corners.radius["street"] ?? 0;
+    const px = x + 5 + r * 0.25;
+    const pz = z + 5 + r * 0.25;
+    expect(ringDistance(ring, px, pz)).toBe(0);
+    expect(masked(roadMask(net, chunk, segs, [ring]), chunk, px, pz, MASK_GRASS)).toBe(true);
+    expect(ringDistance(ring, x + 40, z + 40)).toBeGreaterThan(40);
+  });
+});
+
+describe("crossings and props (issue 87)", () => {
+  /** Every prop of `kind` in every chunk, as x, z and turn. */
+  function propsOf(net: RoadNet, kind: "signals" | "yields"): { x: number; z: number; turn: number }[] {
+    const out: { x: number; z: number; turn: number }[] = [];
+    for (const g of allChunks(net).values()) {
+      const d = g[kind];
+      for (let k = 0; k < d.length; k += PROP_STRIDE) out.push({ x: d[k] ?? 0, z: d[k + 2] ?? 0, turn: d[k + 3] ?? 0 });
+    }
+    return out;
+  }
+
+  it("paint a zebra crossing on each road at a junction of three, and stop the lane lines short of it", () => {
+    const x = 4250;
+    const z = 4450;
+    const net = city([
+      [[x - 100, z], [x + 100, z]],
+      [[x, z], [x, z + 100]],
+    ]);
+    const c = ROADS.crossings;
+    const node = [0, 1, 2, 3].find((n) => net.nodeX[n] === x && net.nodeZ[n] === z) ?? -1;
+    const j = junctionAt(net, node);
+    const east = j?.segs.find((s) => (net.nodeX[net.segA[s] ?? 0] ?? 0) > x || (net.nodeX[net.segB[s] ?? 0] ?? 0) > x) ?? -1;
+    const trim = trimAt(j, east);
+    const g = allChunks(net).get(chunkAt(x, z));
+    const p = g?.markings.positions ?? new Float32Array();
+    const from = x + trim + c.gap;
+    const to = from + c.length;
+    let bars = 0;
+    let gapPaint = 0;
+    for (let v = 0; v < p.length / 3; v++) {
+      const px = p[v * 3] ?? 0;
+      const pz = p[v * 3 + 2] ?? 0;
+      if (Math.abs(pz - z) > 5) continue;
+      if (Math.abs(px - from) < 1e-3) bars++;
+      // Nothing is painted in the gap before the crossing or after it, where the lane lines stop.
+      if ((px > x + trim + 1e-3 && px < from - 1e-3) || (px > to + 1e-3 && px < to + c.gap + ROADS.markings.width - 1e-3)) gapPaint++;
+    }
+    // Each bar's two corners at the crossing's near edge.
+    const count = Math.floor((10 - 2 * c.margin + c.space) / (c.bar + c.space));
+    expect(bars).toBe(count * 2);
+    expect(gapPaint).toBe(0);
+  });
+
+  it("paint no crossing at a dead end, a bend, or where a road is too short for one", () => {
+    const net = city([
+      [[4150, 4450], [4250, 4450]],
+      [[4250, 4450], [4250, 4550]],
+    ]);
+    for (let seg = 0; seg < net.segFlags.length; seg++) {
+      const f = segPath(net, seg);
+      expect(crossingsOf(net, seg, f, 0, f.length, (n) => junctionAt(net, n))).toEqual({ a: null, b: null });
+    }
+    // A T whose stem is too short to have room between its cut and its middle.
+    const tee = city([
+      [[4150, 4450], [4350, 4450]],
+      [[4250, 4450], [4250, 4476]],
+    ]);
+    const stem = [0, 1, 2].find((s) => tee.segFlags[s] !== undefined && segPath(tee, s).length < 30) ?? -1;
+    expect(stem).toBeGreaterThanOrEqual(0);
+    const f = segPath(tee, stem);
+    const js = (n: number) => junctionAt(tee, n);
+    const t0 = trimAt(js(tee.segA[stem] ?? 0), stem);
+    const t1 = f.length - trimAt(js(tee.segB[stem] ?? 0), stem);
+    expect(crossingsOf(tee, stem, f, t0, t1, js)).toEqual({ a: null, b: null });
+  });
+
+  it("stand a yield sign on each road at a junction of streets, and a light on each at an avenue's", () => {
+    const tee = city([
+      [[4150, 4450], [4350, 4450]],
+      [[4250, 4450], [4250, 4550]],
+    ]);
+    expect(propsOf(tee, "yields")).toHaveLength(3);
+    expect(propsOf(tee, "signals")).toHaveLength(0);
+    const cross = city([
+      [[4300, 4420], [4300, 4700], "avenue"],
+      [[4150, 4550], [4450, 4550], "street"],
+    ]);
+    expect(propsOf(cross, "signals")).toHaveLength(4);
+    expect(propsOf(cross, "yields")).toHaveLength(0);
+    // A dead end and a bend get none.
+    const bend = city([
+      [[4150, 4450], [4250, 4450]],
+      [[4250, 4450], [4250, 4550]],
+    ]);
+    expect(propsOf(bend, "yields")).toHaveLength(0);
+  });
+
+  it("stand each one off the road, on the right of the traffic coming in, facing it", () => {
+    const x = 4300;
+    const z = 4550;
+    const net = city([
+      [[x, 4420], [x, 4700], "avenue"],
+      [[4150, z], [4450, z], "street"],
+    ]);
+    const props = propsOf(net, "signals");
+    expect(props).toHaveLength(4);
+    for (const p of props) {
+      // The way out from the junction past this prop, along which incoming traffic comes the other way.
+      const ox = p.x - x;
+      const oz = p.z - z;
+      const out = Math.abs(ox) > Math.abs(oz) ? { dx: Math.sign(ox), dz: 0 } : { dx: 0, dz: Math.sign(oz) };
+      const half = out.dx !== 0 ? 5 : 9;
+      // Incoming traffic runs along -out; its right is (out.dz, -out.dx).
+      const right = ox * out.dz - oz * out.dx;
+      expect(right, `prop at ${p.x}, ${p.z}`).toBeCloseTo(half + ROADS.props.kerbGap, 6);
+      // Turned so its face, +z in its own frame, points out along the road at the traffic.
+      expect(Math.sin(p.turn)).toBeCloseTo(out.dx, 6);
+      expect(Math.cos(p.turn)).toBeCloseTo(out.dz, 6);
+      // Not on either road.
+      expect(Math.abs(p.x - x) > 9 && Math.abs(p.z - z) > 5).toBe(true);
+    }
+  });
+
+  it("stand none for a one-way's traffic leaving the junction", () => {
+    // A one-way runs from its node A to its node B: one leaving the T brings no traffic in.
+    const out = city([
+      [[4150, 4450], [4350, 4450]],
+      [[4250, 4450], [4250, 4550], "oneWay"],
+    ]);
+    expect(propsOf(out, "yields")).toHaveLength(2);
+    const into = city([
+      [[4150, 4450], [4350, 4450]],
+      [[4250, 4550], [4250, 4450], "oneWay"],
+    ]);
+    expect(propsOf(into, "yields")).toHaveLength(3);
   });
 });
 
