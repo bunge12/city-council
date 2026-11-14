@@ -12,7 +12,7 @@ import type { UndoRecord } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 // ---- Client to sim ----
 
@@ -82,6 +82,12 @@ export interface DeltaMessage {
   buildings?: BuildingDelta;
   /** The whole undo history, when it changed. Left out otherwise. */
   undo?: UndoRecord[];
+  /**
+   * The generator's four words after the last step, a copy. Always sent:
+   * the grower (M2-10) draws from it on growing ticks, and a copy whose
+   * generator fell behind would hash differently from the sim.
+   */
+  rng: Uint32Array;
   /** Steps the host ran since the previous delta, paused steps included. */
   steps: number;
   /** Per-system time of the most recent step, in `step` order. */

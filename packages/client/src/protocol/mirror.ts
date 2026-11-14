@@ -239,6 +239,7 @@ export class SimMirror {
     // snapshot have now been applied or dropped.
     if (delta.steps > 0) state.pending = [];
     if (delta.undo) state.undo = delta.undo;
+    state.rng.set(delta.rng);
     for (const entry of delta.log) state.log.push(entry);
     this.logFrom += delta.log.length;
     // Same paging as live state, so the copy stays the same shape.

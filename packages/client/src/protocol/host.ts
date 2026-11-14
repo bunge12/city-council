@@ -296,6 +296,7 @@ export class SimHost {
       ...(cells ? { cells } : {}),
       ...(buildings ? { buildings } : {}),
       ...(undo ? { undo } : {}),
+      rng: this.state.rng.slice(),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };

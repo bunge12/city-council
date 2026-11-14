@@ -553,7 +553,7 @@ The list of free cells by the road is derived data, never saved. A city loaded m
 
 Until issue 106 lands, a road that splits a segment with buildings on it can leave a building's first cell past the end of the shorter piece, and a save of that city is refused as damaged. Issue 106 keeps a building on the same ground through a split.
 
-Protocol version 6. A snapshot carries every building. A delta carries a `buildings` part when one came or went: the id limit, the changed ids, each one's whole row read when the delta is built, and the free list when it changed. The mirror applies it after the roads and cells, and `SimMirror.buildingsInChunk` lists the buildings in a chunk with their lot's corners. Each delta update lists `buildingChunks`, the chunks a changed building was or is in, empty until something has asked the mirror about buildings.
+Protocol version 6. A snapshot carries every building. A delta carries a `buildings` part when one came or went: the id limit, the changed ids, each one's whole row read when the delta is built, and the free list when it changed. The mirror applies it after the roads and cells, and `SimMirror.buildingsInChunk` lists the buildings in a chunk with their lot's corners. Each delta update lists `buildingChunks`, the chunks a changed building was or is in, empty until something has asked the mirror about buildings. Protocol version 7 (M2-10): every delta carries the generator's four words, since the grower draws from it and a copy whose generator fell behind would hash differently from the sim.
 
 Removing a road removes its cells and their buildings. The pops inside are displaced and look for a new home or job.
 
