@@ -12,7 +12,12 @@
 //   change laid out and those a lot could reach from them;
 // - every draw landing on a cell with no lot, so the grower tries
 //   `growthTries` cells and adds nothing: the most lot finder calls a tick
-//   can make.
+//   can make;
+// - the first growing tick after the same street once tens of thousands of
+//   buildings stand. That tick rebuilds the building index (where.ts,
+//   M2-09) for the new cell layout, which costs about 3 µs a building. It
+//   is reported and not held to the budget: see the PRD under "The
+//   grower".
 
 import { expect, test } from "vitest";
 import {
@@ -27,7 +32,7 @@ import {
 } from "../src/index";
 import { buildingCount, removeBuilding } from "../src/buildings/buildings";
 import { forgetCandidates } from "../src/buildings/candidates";
-import { grow } from "../src/buildings/grower";
+import { grow, growOne } from "../src/buildings/grower";
 import { ROAD_BUILD } from "../src/roads/balance";
 import { buildRoad, type RoadPlan } from "../src/roads/build";
 import { buildRoadGrid } from "../src/roads/grid";
@@ -170,6 +175,18 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   await time(`a grower tick whose ${BUILDINGS_BALANCE.growthTries} draws all find no lot`, {});
   expect(buildingCount(state.buildings)).toBe(0);
 
+  // Grown out: the zoning of the first cases again, with buildings on it.
+  zoneEverything((z, d) => [z, d]);
+  for (let i = 0; i < 40_000; i++) growOne(state);
+  const standing = buildingCount(state.buildings);
+  await time(`the first grower tick after a street across a grid, with ${standing} buildings standing`, {
+    beforeEach: () => buildStreet(street),
+    afterEach: () => {
+      takeBack();
+      takeBackRoads();
+    },
+  });
+
   const round = (v: number) => Math.round(v * 100) / 100;
   const report = {
     city: { segments: counts.segments, cells: state.cells.zone.length, frontCells: state.cells.zone.length / DEPTH },
@@ -178,7 +195,7 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   };
   await annotate(JSON.stringify(report, null, 2), "grower");
   for (const [name, r] of Object.entries(results)) {
-    if (name.includes("from scratch")) continue;
+    if (name.includes("from scratch") || name.includes("standing")) continue;
     expect(r.max, name).toBeLessThan(TICK_BUDGET_MS);
   }
 }, 600_000);
