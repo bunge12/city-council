@@ -8,7 +8,7 @@ Play the current build at <https://bunge12.github.io/city-council/>. It is redep
 
 ## Where it stands
 
-It is early. You can fly around a generated map, but you cannot build anything yet.
+It is early. You can lay out a road network on a generated map, but nothing grows on it yet.
 
 M0, the foundation, is done:
 
@@ -18,7 +18,18 @@ M0, the foundation, is done:
 - Saves in the browser, plus download and import of a city as a `.city` file
 - An activity log of every command, and replay tests that rebuild a city from its seed and that log
 
-M1, road networks, is in progress. It adds drawing straight and curved roads, intersections, bridges, upgrade, bulldoze, undo and a pathfinder. The spec is [docs/milestones/M1.md](docs/milestones/M1.md) and the work is in the [issues labelled M1](https://github.com/bunge12/city-council/issues?q=is%3Aissue+label%3AM1).
+M1, road networks, is done:
+
+- Streets, avenues and one-way roads, straight or curved, that split and join into intersections where they meet
+- Snapping to nodes, segments and angles, with guide lines, a parallel offset and a length snap
+- A grid tool that lays out a block grid in one drag and one click
+- Bridges where a road crosses water, and roads at different levels that cross without an intersection
+- Upgrade, bulldoze and undo
+- A pathfinder that routes between any two connected points, and outside connections at the map edge
+- Blocks enclosed by roads, found and outlined in the debug panel
+- A scale check on a generated network of 30,000 segments
+
+M2, zoning and buildings, is next. The player paints five zones at three densities on cells along the roads, and buildings appear on them. It also brings lighting, shadows, three graphics presets and the first building models. The spec is [docs/milestones/M2.md](docs/milestones/M2.md) and the work is in the [issues labelled M2](https://github.com/bunge12/city-council/issues?q=is%3Aissue+label%3AM2).
 
 ## Roadmap
 
@@ -27,8 +38,8 @@ Twelve milestones, built in order. There are no dates. The full table, with the 
 | # | Milestone | Status |
 | --- | --- | --- |
 | M0 | Foundation and terrain | Done |
-| M1 | Road networks | In progress |
-| M2 | Zoning and buildings | |
+| M1 | Road networks | Done |
+| M2 | Zoning and buildings | Next |
 | M3 | Demand | |
 | M4 | Economy | |
 | M5 | Traffic | |
@@ -57,6 +68,7 @@ pnpm test    unit, scenario and replay tests
 pnpm lint
 pnpm e2e     Playwright walkthroughs
 pnpm soak    one hour of game time at 4x, reporting tick time and memory
+pnpm bench   times the hot sim queries on a 30,000 segment network
 pnpm build
 ```
 
@@ -75,8 +87,8 @@ The whole plan rests on one rule. `sim` takes commands and produces state, and i
 ## Read more
 
 - The plan and every design decision: [docs/PRD.md](docs/PRD.md)
-- The milestone in progress: [docs/milestones/M1.md](docs/milestones/M1.md)
-- The milestone before it: [docs/milestones/M0.md](docs/milestones/M0.md)
+- The next milestone: [docs/milestones/M2.md](docs/milestones/M2.md)
+- The ones before it: [M1](docs/milestones/M1.md) and [M0](docs/milestones/M0.md)
 - How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 MIT licensed.
