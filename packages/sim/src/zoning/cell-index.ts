@@ -419,13 +419,22 @@ const LOST_GROUND = (1 << CELL_BEND) | (1 << CELL_TAKEN);
 /**
  * Calls `visit` with the key of every cell in the buckets whose status is
  * one of the bits in `statuses` and that overlaps quad `q` by more than the
- * tolerance, whose box is `box`. A cell in several buckets is visited once
- * per bucket. The status is read first, so most cells cost no geometry.
+ * tolerance, whose box is `box`, leaving out the cells `skip` picks. A
+ * cell in several buckets is visited once per bucket. The status is read
+ * first, so most cells cost no geometry.
  */
-function forOverlappingCells(index: CellIndex, q: Float64Array, box: Float64Array, statuses: number, visit: (key: number) => void): void {
+function forOverlappingCells(
+  index: CellIndex,
+  q: Float64Array,
+  box: Float64Array,
+  statuses: number,
+  visit: (key: number) => void,
+  skip?: (key: number, seg: number) => boolean,
+): void {
   forBuckets(index, box, (bucket) => {
     for (const key of index.cellBuckets[bucket] ?? []) {
       const seg = segOfKey(key);
+      if (skip?.(key, seg)) continue;
       const s = index.segs[seg];
       const local = key - seg * KEY_STRIDE;
       const status = s?.status?.[local] ?? UNSET;
@@ -479,6 +488,11 @@ class ClaimQueue {
   private readonly heap: number[] = [];
   private readonly seen = new Set<number>();
   constructor(private readonly index: CellIndex) {}
+
+  /** Whether `key` has been queued, and maybe walked already. */
+  has(key: number): boolean {
+    return this.seen.has(key);
+  }
 
   /** Queues `key` unless it has been queued before. */
   push(key: number): void {
@@ -551,9 +565,7 @@ function update(index: CellIndex, cells: CellState): CellState {
   // Seeds every unchanged cell of those statuses that overlaps `q`; the changed ones are all walked anyway.
   const seedOverlapping = (q: Float64Array, statuses: number) => {
     quadBoxInto(q, box);
-    forOverlappingCells(index, q, box, statuses, (key) => {
-      if (!changedIds.has(segOfKey(key))) queue.push(key);
-    });
+    forOverlappingCells(index, q, box, statuses, (key) => queue.push(key), (key, seg) => changedIds.has(seg) || queue.has(key));
   };
   const q = new Float64Array(8);
   const seedUnderSurface = (s: SegShape) => {
@@ -614,9 +626,16 @@ function update(index: CellIndex, cells: CellState): CellState {
     quadBoxInto(q, box);
     // A cell that now holds ground can only take it from open cells; one
     // that let it go can only give it to cells that lost ground.
-    forOverlappingCells(index, q, box, now === CELL_OPEN ? BIT_OPEN : LOST_GROUND, (other) => {
-      if (claimsFirst(index, key, other)) queue.push(other);
-    });
+    forOverlappingCells(
+      index,
+      q,
+      box,
+      now === CELL_OPEN ? BIT_OPEN : LOST_GROUND,
+      (other) => {
+        if (claimsFirst(index, key, other)) queue.push(other);
+      },
+      (other) => queue.has(other),
+    );
   }
 
   return relayout(index, cells, changed);
@@ -634,10 +653,28 @@ function sameGround(p: SegShape, q: SegShape): "same" | "reversed" | null {
 function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]): CellState {
   const limit = index.segs.length;
   const offset = new Int32Array(limit + 1);
-  let total = 0;
-  for (let id = 0; id < limit; id++) {
-    offset[id] = total;
-    total += index.segs[id]?.status?.length ?? 0;
+  // Up to the first changed id the runs start where they did.
+  const first = Math.min(changed[0]?.id ?? limit, limit, cells.offset.length - 1);
+  offset.set(cells.offset.subarray(0, first + 1));
+  // After it, a stretch of unchanged runs moves by however much the
+  // changed runs before it grew or shrank.
+  let total = offset[first] ?? 0;
+  let id = first;
+  const oldLimit = cells.offset.length - 1;
+  for (let c = 0; c <= changed.length; c++) {
+    const next = Math.min(changed[c]?.id ?? limit, limit);
+    // Ids past the old limit that are still unchanged were never live, and have no cells.
+    const known = Math.min(next, oldLimit);
+    if (id < known) {
+      const shift = total - (cells.offset[id] ?? 0);
+      for (; id < known; id++) offset[id] = (cells.offset[id] ?? 0) + shift;
+      total = (cells.offset[known] ?? 0) + shift;
+    }
+    for (; id < next; id++) offset[id] = total;
+    if (next >= limit) break;
+    offset[next] = total;
+    total += index.segs[next]?.status?.length ?? 0;
+    id = next + 1;
   }
   offset[limit] = total;
   const zone = new Uint8Array(total);

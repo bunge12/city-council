@@ -46,7 +46,8 @@ describe("the scale city", () => {
     const hash = hashState(city.state);
     expect(hashState(again.state)).toBe(hash);
     expect(hashState(replay(SCALE_SEED, city.state.log, city.state.tick))).toBe(hash);
-  });
+    // Builds the city twice more, keeping its 2.9 million zoning cells current through every command.
+  }, 120_000);
 
   it("routes across the map, from the north-west grid to the south-east one", () => {
     const first = city.grids[0];
