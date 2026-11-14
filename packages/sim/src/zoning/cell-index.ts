@@ -127,6 +127,12 @@ interface SegShape {
   status: Uint8Array | null;
 }
 
+/**
+ * Lists by bucket, only for buckets that hold something. A map rather than
+ * an array of every bucket, so a city with few roads costs little to index.
+ */
+type Buckets = Map<number, number[]>;
+
 /** The cells of one network. Derived data: not state. */
 export interface CellIndex {
   readonly net: RoadNetwork;
@@ -134,11 +140,11 @@ export interface CellIndex {
   /** Buckets along each side. Bucket (i, j) is at `j * perSide + i`. */
   readonly perSide: number;
   /** Keys of the cells whose box touches each bucket, in no particular order. */
-  readonly cellBuckets: (number[] | undefined)[];
+  readonly cellBuckets: Buckets;
   /** The same for open cells only, the ones that hold ground. */
-  readonly openBuckets: (number[] | undefined)[];
+  readonly openBuckets: Buckets;
   /** Keys of the surface pieces whose box touches each bucket, in no particular order. */
-  readonly surfaceBuckets: (number[] | undefined)[];
+  readonly surfaceBuckets: Buckets;
   /** Each segment id as last seen, null where none was live. */
   segs: (SegShape | null)[];
   /** Segment ids the network has added or removed since the index last looked. */
@@ -284,14 +290,14 @@ function boxesTouch(p: Float64Array, q: Float64Array): boolean {
   return (p[0] ?? 0) <= (q[2] ?? 0) && (q[0] ?? 0) <= (p[2] ?? 0) && (p[1] ?? 0) <= (q[3] ?? 0) && (q[1] ?? 0) <= (p[3] ?? 0);
 }
 
-function bucketPush(lists: (number[] | undefined)[], bucket: number, value: number): void {
-  const list = lists[bucket];
+function bucketPush(lists: Buckets, bucket: number, value: number): void {
+  const list = lists.get(bucket);
   if (list) list.push(value);
-  else lists[bucket] = [value];
+  else lists.set(bucket, [value]);
 }
 
-function bucketDrop(lists: (number[] | undefined)[], bucket: number, value: number): void {
-  const list = lists[bucket];
+function bucketDrop(lists: Buckets, bucket: number, value: number): void {
+  const list = lists.get(bucket);
   const at = list ? list.indexOf(value) : -1;
   if (!list || at < 0) throw new Error(`${value} is missing from a cell bucket`);
   list[at] = list[list.length - 1] as number;
@@ -299,7 +305,7 @@ function bucketDrop(lists: (number[] | undefined)[], bucket: number, value: numb
 }
 
 /** Files or unfiles cell `local` of `s` in `lists`. */
-function fileCell(index: CellIndex, lists: (number[] | undefined)[], seg: number, s: SegShape, local: number, add: boolean): void {
+function fileCell(index: CellIndex, lists: Buckets, seg: number, s: SegShape, local: number, add: boolean): void {
   cellQuad(s, local, quadA);
   quadBoxInto(quadA, boxA);
   const key = keyOf(seg, local);
@@ -339,7 +345,7 @@ function covered(index: CellIndex, seg: number, q: Float64Array, box: Float64Arr
   const j1 = bucketOf(index, maxZ);
   for (let j = j0; j <= j1; j++) {
     for (let i = i0; i <= i1; i++) {
-      const list = index.surfaceBuckets[j * index.perSide + i];
+      const list = index.surfaceBuckets.get(j * index.perSide + i);
       if (!list) continue;
       for (const piece of list) {
         const other = Math.floor(piece / KEY_STRIDE);
@@ -384,7 +390,7 @@ function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): nu
   const j1 = bucketOf(index, maxZ);
   for (let j = j0; j <= j1; j++) {
     for (let i = i0; i <= i1; i++) {
-      const list = index.openBuckets[j * index.perSide + i];
+      const list = index.openBuckets.get(j * index.perSide + i);
       if (!list) continue;
       for (const other of list) {
         if (other === key) continue;
@@ -432,7 +438,7 @@ function forOverlappingCells(
   skip?: (key: number, seg: number) => boolean,
 ): void {
   forBuckets(index, box, (bucket) => {
-    for (const key of index.cellBuckets[bucket] ?? []) {
+    for (const key of index.cellBuckets.get(bucket) ?? []) {
       const seg = segOfKey(key);
       if (skip?.(key, seg)) continue;
       const s = index.segs[seg];
@@ -456,9 +462,9 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     net,
     terrain,
     perSide,
-    cellBuckets: new Array<number[] | undefined>(perSide * perSide),
-    openBuckets: new Array<number[] | undefined>(perSide * perSide),
-    surfaceBuckets: new Array<number[] | undefined>(perSide * perSide),
+    cellBuckets: new Map(),
+    openBuckets: new Map(),
+    surfaceBuckets: new Map(),
     segs: [],
     touched: new Set<number>(),
   };
@@ -883,7 +889,7 @@ export function cellAt(state: SimState, x: number, z: number): CellInfo | null {
   let best = -1;
   let bestOpen = false;
   const q = new Float64Array(8);
-  for (const key of index.cellBuckets[bucket] ?? []) {
+  for (const key of index.cellBuckets.get(bucket) ?? []) {
     const seg = segOfKey(key);
     const s = index.segs[seg];
     if (!s) continue;
@@ -905,7 +911,7 @@ function keysInBox(index: CellIndex, minX: number, minZ: number, maxX: number, m
   const found = new Set<number>();
   const q = new Float64Array(8);
   forBuckets(index, box, (bucket) => {
-    for (const key of index.cellBuckets[bucket] ?? []) {
+    for (const key of index.cellBuckets.get(bucket) ?? []) {
       if (found.has(key)) continue;
       const seg = segOfKey(key);
       const s = index.segs[seg];
