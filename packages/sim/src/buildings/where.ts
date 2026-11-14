@@ -11,7 +11,7 @@
 
 import { BUILDING_ALIVE, BUILDING_ARRAYS, type BuildingState } from "./buildings";
 import type { SimState } from "../state";
-import { chunkAt, columnExists, lotCorners, nextColumn, syncCells, type CellIndex, type Column } from "../zoning/cell-index";
+import { CELL_OPEN, chunkAt, columnExists, columnStatus, lotCorners, nextColumn, syncCells, type CellIndex, type Column } from "../zoning/cell-index";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { localIndex, type CellState } from "../zoning/cells";
 
@@ -121,6 +121,28 @@ function indexOf(state: SimState): { bi: BuildingIndex; cellIndex: CellIndex } {
   }
   live.set(b, bi);
   return { bi, cellIndex };
+}
+
+/**
+ * Why a building of this zone and density cannot stand on the lot, or null
+ * if every one of its cells is there, open, zoned that way and free of
+ * buildings. `addBuilding` checks this, so two lots never overlap and the
+ * index gives the same answer kept current or built afresh.
+ */
+export function lotProblem(state: SimState, first: Column, width: number, depth: number, zone: number, density: number): string | null {
+  const { bi, cellIndex } = indexOf(state);
+  const cols = lotColumns(cellIndex, first, width);
+  if (!cols) return "the strip ends before the lot does";
+  const cells = state.cells;
+  for (const col of cols) {
+    const start = (cells.offset[col.seg] ?? 0) + localIndex(col.side, col.place, 0);
+    for (let d = 0; d < depth; d++) {
+      if (columnStatus(cellIndex, col, d) !== CELL_OPEN) return `a cell of the lot on segment ${col.seg} is blocked`;
+      if (cells.zone[start + d] !== zone || cells.density[start + d] !== density) return `a cell of the lot on segment ${col.seg} is not zoned for it`;
+      if (bi.cellBuilding[start + d] !== NO_BUILDING) return `a cell of the lot on segment ${col.seg} has a building`;
+    }
+  }
+  return null;
 }
 
 /** Files a building just added, if the index exists and is current. Otherwise the next question builds it. */

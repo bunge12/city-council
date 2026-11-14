@@ -224,13 +224,16 @@ describe("the lot finder", () => {
   it("finds nothing on an R3 lot of 3 x 6, and says why", () => {
     const state = street();
     zoneNorth(state, "residential", 3, 4, 3, 6);
-    for (const at of [north(4, 0), north(6, 5)]) {
-      const result = findLot(state, refAt(state, at));
-      expect(result).toEqual({
+    // From the road, and from the back, where only a lot 6 deep holds the cell.
+    for (const [at, depth] of [
+      [north(4, 0), 4],
+      [north(6, 5), 6],
+    ] as const) {
+      expect(findLot(state, refAt(state, at))).toEqual({
         ok: false,
         problem: "too-narrow",
-        reason: "R3 needs a lot at least 4 wide and 4 deep; the zoned ground here is 3 wide",
-        need: { width: 4, depth: 4 },
+        reason: `R3 needs a lot at least 4 wide and ${depth} deep; the zoned ground here is 3 wide`,
+        need: { width: 4, depth },
         room: { width: 3, depth: 6 },
       });
     }
@@ -242,6 +245,48 @@ describe("the lot finder", () => {
     const result = findLot(state, refAt(state, north(6, 0)));
     expect(result.ok === false && result.problem).toBe("too-shallow");
     expect(result.ok === false && result.reason).toBe("R3 needs a lot at least 4 wide and 4 deep; the zoned ground here is 3 deep");
+  });
+
+  it("says when a cell is further back than any type of its zone reaches", () => {
+    const state = street();
+    zoneNorth(state, "commercial", 1, 0, 24, 6);
+    // No C1 type is deeper than 4, so the 5th and 6th rows never build.
+    for (const k of [4, 5]) {
+      expect(findLot(state, refAt(state, north(8, k)))).toEqual({
+        ok: false,
+        problem: "too-deep",
+        reason: `No C1 building reaches ${k + 1} cells back from the road; the deepest lot is 4`,
+      });
+    }
+    expect(findLot(state, refAt(state, north(8, 3))).ok).toBe(true);
+  });
+
+  it("counts only the types that reach a deep cell in what it says is needed", () => {
+    const state = street();
+    // R2 two wide and six deep: apartments reach the 5th row but need 3 wide.
+    zoneNorth(state, "residential", 2, 4, 2, 6);
+    expect(findLot(state, refAt(state, north(4, 4)))).toEqual({
+      ok: false,
+      problem: "too-narrow",
+      reason: "R2 needs a lot at least 3 wide and 5 deep; the zoned ground here is 2 wide",
+      need: { width: 3, depth: 5 },
+      room: { width: 2, depth: 6 },
+    });
+    // From the road the same ground takes townhomes.
+    expect(typeId(lotAt(state, north(4, 0)).type)).toBe("townhomes");
+  });
+
+  it("refuses to add a building over another, or on ground not zoned for it", () => {
+    const state = street();
+    zoneNorth(state, "residential", 2, 0, 8, 6);
+    const lot = lotAt(state, north(0, 0));
+    build(state, lot);
+    expect(() => build(state, lot)).toThrow(/has a building/);
+    expect(() => build(state, { ...lot, firstPlace: 2 })).toThrow(/has a building/);
+    const house = BUILDING_TYPES.findIndex((t) => t.id === "single-family-home");
+    expect(() => build(state, { ...lot, type: house, firstPlace: 5, width: 1, depth: 2 })).toThrow(/not zoned for it/);
+    expect(() => build(state, { ...lot, firstPlace: 22, width: 4 })).toThrow(/strip ends|not zoned/);
+    expect(state.buildings.flags).toHaveLength(1);
   });
 
   it("refuses a cell that does not exist, is unzoned, blocked, built on or cut off from the road", () => {

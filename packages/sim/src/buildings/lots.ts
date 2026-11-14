@@ -20,7 +20,10 @@
 // The lot's shape picks the type: in each zone and density no two types
 // take the same shape (balance.ts). Between lots of one area it takes the
 // deeper one, then the one whose first column comes first along the strip.
-// When no type fits it says why, for the zoning overlay.
+// When no type fits it says why, for the zoning overlay. A cell further
+// back than any type of its zone and density reaches says so ("too-deep"):
+// with zoning six cells deep, the back rows of R1, C1, O1 and M1 never
+// take a building.
 
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "../zoning/balance";
@@ -58,6 +61,8 @@ export type LotProblem =
   | "too-shallow"
   /** No type fits: the free ground is deep enough but not wide enough. */
   | "too-narrow"
+  /** No type of its zone and density reaches this far back from the road. */
+  | "too-deep"
   /** The balance has no type for its zone and density. */
   | "no-types";
 
@@ -88,7 +93,14 @@ function refuse(problem: LotProblem, reason: string, extra: Partial<Extract<LotR
 /**
  * The largest lot holding the cell `ref` names that fits a building type,
  * and the type; or why none does. Settles any change of roads first, as
- * every cell query does. Read only.
+ * every cell query does, so the answer follows from the roads alone and is
+ * the same on every machine. Read only.
+ *
+ * A system in the step that acts on the answer, such as the grower, must
+ * not call this before `cellsSettled` (cell-index.ts). Until that tick a
+ * big change of roads is settling a slice a tick, and a call would walk the
+ * rest in one step, past the tick budget the slicing exists to protect. The
+ * PRD has the grower wait for that tick.
  */
 export function findLot(state: SimState, ref: CellRef): LotResult {
   const index = syncCells(state);
@@ -171,12 +183,19 @@ export function findLot(state: SimState, ref: CellRef): LotResult {
   }
   if (best) return { ok: true, lot: best.lot };
 
+  // A lot holding the cell is at least `ref.depth + 1` deep, so only the
+  // types that reach that far back count.
+  const reaching = types.filter((t) => t.depth[1] > ref.depth);
+  if (reaching.length === 0) {
+    const deepest = Math.max(...types.map((t) => t.depth[1]));
+    return refuse("too-deep", `No ${label} building reaches ${ref.depth + 1} cells back from the road; the deepest lot is ${deepest}`);
+  }
   const need = {
-    width: Math.min(...types.map((t) => t.width[0])),
-    depth: Math.min(...types.map((t) => t.depth[0])),
+    width: Math.min(...reaching.map((t) => t.width[0])),
+    depth: Math.min(...reaching.map((t) => Math.max(t.depth[0], ref.depth + 1))),
   };
   // How wide the free ground runs through the cell at the depth needed.
-  const deep = Math.max(need.depth, ref.depth + 1);
+  const deep = need.depth;
   let lo = at;
   let hi = at;
   while (lo > 0 && (strip[lo - 1]?.free ?? 0) >= deep) lo--;

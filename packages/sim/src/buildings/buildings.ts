@@ -18,7 +18,7 @@ import type { SimState } from "../state";
 import { CELL_LEFT, CELL_RIGHT, placesAlong } from "../zoning/cells";
 import { BUILDING_TYPES } from "./balance";
 import { noteBuildingChanged } from "./changes";
-import { fileBuilding, unfileBuilding } from "./where";
+import { fileBuilding, lotProblem, unfileBuilding } from "./where";
 
 /** Set in `flags` for a live building. */
 export const BUILDING_ALIVE = 1;
@@ -172,8 +172,9 @@ export function readBuilding(b: BuildingState, id: number): BuildingRow {
 /**
  * Adds a building on the current tick and returns its id, the last free id
  * or a new one. Internal: the grower (issue 10) calls it with a lot the
- * finder gave, on cells it has checked are free. It checks only that the
- * row is well formed. Not undoable.
+ * finder gave. Throws if the row is malformed or any cell of the lot is not
+ * open, zoned for the type and free, so two lots never overlap. Not
+ * undoable.
  */
 export function addBuilding(state: SimState, spec: NewBuilding): number {
   const type = BUILDING_TYPES[spec.type];
@@ -188,6 +189,9 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   if (!Number.isSafeInteger(spec.residents) || spec.residents < 0 || !Number.isInteger(spec.variant) || spec.variant < 0 || spec.variant > 255) {
     throw new RangeError("bad residents or variant");
   }
+  const first = { seg: spec.firstSeg, side: spec.firstSide, place: spec.firstPlace, dir: spec.dir };
+  const problem = lotProblem(state, first, spec.width, spec.depth, type.zoneNumber, type.density);
+  if (problem) throw new RangeError(`no ${type.id} can stand there: ${problem}`);
   const b = state.buildings;
   let id: number;
   if (b.free.length > 0) {

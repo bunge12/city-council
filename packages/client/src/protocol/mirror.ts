@@ -44,7 +44,11 @@ export interface HostStats {
  * (`cellsInChunk`, `cellAt`): before that nothing drawn can be out of date.
  * `buildingChunks` names the chunks a building that came or went was or is
  * in, and likewise stays empty until something has asked about buildings
- * (`buildingsInChunk`).
+ * (`buildingsInChunk`). It is also empty when the same delta moved roads:
+ * new road rows lay the cells out again, which drops the copy's building
+ * index, and it is rebuilt on the next question. A view that draws
+ * buildings must redraw them in every chunk of `roadChunks` and
+ * `cellChunks` too.
  * `steps` is how many sim steps the delta covers: after one or more, every
  * command the host had queued before it has been applied or dropped.
  */
