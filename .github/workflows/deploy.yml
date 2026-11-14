@@ -70,7 +70,10 @@ jobs:
       - name: Walkthrough against the public address
         env:
           PAGE_URL: ${{ needs.deploy.outputs.page_url }}
-        run: BASE_URL="${PAGE_URL%/}/" xvfb-run -a pnpm e2e --project walkthrough
+        # One worker. With two, the M0 and M1 walkthroughs run side by side,
+        # software WebGPU in one takes the CPU from the other, and the M1
+        # walkthrough fails on steps that pass when it runs alone.
+        run: BASE_URL="${PAGE_URL%/}/" xvfb-run -a pnpm e2e --project walkthrough --workers=1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
