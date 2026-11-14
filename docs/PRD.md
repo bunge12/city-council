@@ -146,7 +146,7 @@ The client only sends commands and receives state. Whether the sim sits in a wor
 4. **Flat data.** Roads, cells, buildings and pops live in typed arrays indexed by id, not in object graphs. Snapshots are then a handful of buffers that copy to a worker, a file or a socket with no serialisation step.
 5. **State is serialisable at every tick.** No closures, class instances or DOM references in sim state. Save, load and join-in-progress all use the same snapshot format.
 6. **The client is a view.** It keeps a read-only copy of state, applies deltas, and interpolates for smooth motion. Cars on screen are drawn by the client along routes the sim has already assigned. The sim does not move them.
-7. **Derived data is rebuilt, never saved.** Some structures are only a faster way to read state: the terrain, the road spatial index, from issue 15 the routing graph, from issue 18 the blocks, and from M2-03 where the zoning cells are and whether each is blocked. They live outside `SimState` and are never saved, hashed or sent. The terrain is cached by seed, because it depends on nothing else; commands that check the ground, such as `BuildRoad`, read it through that cache, so a worker, a server and a replay check against the same map. The others are cached by the state object they come from. Each is built from the graph arrays the first time it is asked for, then kept current by the functions that change the graph. A city loaded from a save, cloned or replayed is a new object, so it builds its own. A host calls `prepareDerived` after it creates or loads a city, so the rebuild lands at load and not inside a tick. A derived structure must give the same answers whether it was kept current through a city's whole history or built a moment ago, and every structure has a test that proves it. Every list inside one stays sorted by id and every query breaks ties by the lower id, so nothing depends on the order changes arrived in.
+7. **Derived data is rebuilt, never saved.** Some structures are only a faster way to read state: the terrain, the road spatial index, from issue 15 the routing graph, from issue 18 the blocks, from M2-03 where the zoning cells are and whether each is blocked, and from M2-09 which building stands on each cell and which chunk each building is in. They live outside `SimState` and are never saved, hashed or sent. The terrain is cached by seed, because it depends on nothing else; commands that check the ground, such as `BuildRoad`, read it through that cache, so a worker, a server and a replay check against the same map. The others are cached by the state object they come from. Each is built from the graph arrays the first time it is asked for, then kept current by the functions that change the graph. A city loaded from a save, cloned or replayed is a new object, so it builds its own. A host calls `prepareDerived` after it creates or loads a city, so the rebuild lands at load and not inside a tick. A derived structure must give the same answers whether it was kept current through a city's whole history or built a moment ago, and every structure has a test that proves it. Every list inside one stays sorted by id and every query breaks ties by the lower id, so nothing depends on the order changes arrived in.
 
 ### Why this keeps multiplayer cheap
 
@@ -475,6 +475,63 @@ Per cell, this runs from about 0.3 residents for a house, through about 4 to 6 f
 **Note on tower height.** A residential tower's floor plate is around 750 m², which fits a 48 m lot with room for a podium. At that size, 1,000 residents takes roughly 55 storeys. That is the top of the range, and most R3 buildings should sit well below it.
 
 **Note on large commercial and industrial lots, to settle in the M2 spec.** The 6 × 6 cap is fine for housing and offices but too small for a big-box store, a mall or a large factory, and zoning is only six cells deep. The proposed fix is a through-lot. When a block between two parallel roads carries the same zone and density on both sides, the grower may merge the two back-to-back strips into one lot up to 12 cells deep, which is 96 m. Large commercial and industrial buildings may then use lots up to 12 × 12 cells. Zoning depth stays at six cells. Taken up in the M2 spec: issue M2-14 builds through-lots, for commercial and industrial at density 3 to start with.
+
+#### Commercial, office, industrial and mixed building types
+
+Proposed in M2-09 as starting values, and marked `proposal` in `packages/sim/balance/buildings.json`. Lots are width × depth in cells, as for housing. Within one zone and density no two types take the same lot shape, so the shape picks the type. Jobs per building are still open (see "Open questions"). Mixed buildings house people above their shops, so they carry residents.
+
+| Zone | Building | Lot, width × depth in cells | Residents |
+| --- | --- | --- | --- |
+| C1 | Corner store | 1 to 2 wide, 1 to 2 deep | none |
+| C1 | Bar or restaurant | 1 to 2 wide, 3 to 4 deep | none |
+| C1 | Row of small shops | 3 to 4 wide, 1 to 3 deep | none |
+| C2 | Retail block | 2 to 3 wide, 2 to 3 deep | none |
+| C2 | Small office park | 2 to 3 wide, 4 to 6 deep | none |
+| C2 | Strip mall | 4 to 6 wide, 2 to 3 deep | none |
+| C2 | Small shopping mall | 4 to 6 wide, 4 to 6 deep | none |
+| C3 | Retail podium | 3 to 4 wide, 3 to 4 deep | none |
+| C3 | Department store | 3 to 4 wide, 5 to 6 deep | none |
+| C3 | Big-box store | 5 to 6 wide, 3 to 4 deep | none |
+| C3 | Shopping centre | 5 to 6 wide, 5 to 6 deep | none |
+| O1 | Converted house office | 1 to 2 wide, 2 to 4 deep | none |
+| O1 | Low office block | 3 to 4 wide, 2 to 4 deep | none |
+| O1 | Office pavilion | 5 to 6 wide, 3 to 4 deep | none |
+| O2 | Mid-rise office | 2 to 3 wide, 3 to 4 deep | none |
+| O2 | Office slab | 4 to 6 wide, 3 to 4 deep | none |
+| O2 | Mid-rise office tower | 3 to 4 wide, 5 to 6 deep | none |
+| O3 | Slim office tower | 3 wide, 4 to 6 deep | none |
+| O3 | Office tower | 4 to 5 wide, 4 to 6 deep | none |
+| O3 | Tall office tower | 6 wide, 5 to 6 deep | none |
+| I1 | Workshop | 1 to 2 wide, 2 to 3 deep | none |
+| I1 | Yard depot | 1 to 2 wide, 4 to 6 deep | none |
+| I1 | Small factory | 3 to 4 wide, 2 to 4 deep | none |
+| I2 | Light industrial unit | 2 wide, 3 to 4 deep | none |
+| I2 | Warehouse | 3 to 4 wide, 3 to 5 deep | none |
+| I2 | Medium factory | 5 to 6 wide, 4 to 6 deep | none |
+| I3 | Tank farm | 3 wide, 3 to 6 deep | none |
+| I3 | Processing plant | 4 wide, 4 to 6 deep | none |
+| I3 | Large factory | 5 to 6 wide, 4 to 6 deep | none |
+| M1 | Corner walk-up | 1 to 2 wide, 2 to 3 deep | 3 to 8 |
+| M1 | Row of flats over shops | 3 to 4 wide, 2 to 3 deep | 8 to 16 |
+| M1 | Main street block | 3 to 4 wide, 4 to 5 deep | 16 to 30 |
+| M2 | Walk-up over shops | 2 to 3 wide, 3 to 4 deep | 20 to 40 |
+| M2 | Mid-rise over retail | 4 to 5 wide, 3 to 6 deep | 50 to 120 |
+| M2 | Perimeter block | 6 wide, 4 to 6 deep | 120 to 200 |
+| M3 | Slab over retail | 5 to 6 wide, 3 to 4 deep | 150 to 300 |
+| M3 | Podium tower | 4 wide, 4 to 6 deep | 200 to 400 |
+| M3 | Tall podium tower | 5 to 6 wide, 5 to 6 deep | 400 to 800 |
+
+**Buildings and lots** (M2-09, issue 104). The types above and the six housing types are in `buildings.json`, checked when the sim loads: every field present, zones and densities from `zoning.json`, lots from 1 to `maxLotWidth` (6) wide and from 1 to the zoning depth deep, and no lot shape claimed by two types of one zone and density. The file is part of the balance stamp.
+
+Since snapshot version 11, `SimState.buildings` holds every building in flat typed arrays by id, with a free list, like the road network: the lot's first cell (segment, side and place), which way along the road the lot runs from it, its width and depth, the zone and density it was built under, its type, its residents, a variant number and the tick it was built. A removed id's row is zeros. The row does not list the lot's cells, because a lot can run into the next segment. Which building stands on each cell, and which 500 m chunk each building is in, are derived, rebuilt from the buildings and the cells and never saved, so a save grows by about 30 bytes a building and not 4 bytes a cell. The version 11 migration gives an old city no buildings. Internal functions add and remove a building; no command does yet. Adding one refuses a lot with any cell that is blocked, zoned for something else or already built on, so two lots never overlap. The grower is M2-10 and `BulldozeBuilding` M2-11, which also keeps a building's first cell right when the road under it is split.
+
+A lot's columns follow the strip along one side of the road, and run on into another segment where the two meet edge to edge: the far edge of the last column, at the road and at the back, lies on the near edge of the other segment's end column, to 1 cm. That covers the two pieces a T-junction across the street cuts a road into, and two streets drawn end to end in a straight line on the cell grid. Where roads meet at an angle or change width the edges part and the strip ends.
+
+Lots along a curve. A curved strip's cells fan out on the outside and close up on the inside, but neighbours still share their corners exactly, so a lot is fitted there the same way as on a straight road, at any width, and its ground is the cells it covers. A cell on the inside of a bend too tight for it is already blocked. The issue offered limiting curved lots to one cell wide; that would leave curved streets with houses and corner stores only and no R3 at all, so it was not taken. The renderer (M2-12) fits a building to the lot's four corners, which on a curve are not a rectangle.
+
+The lot finder takes a free zoned cell, one that is open, zoned and has no building, and returns the largest lot holding that cell that fits a type of the cell's zone and density, and the type. A lot is free cells of that zone and density from the road back. Between lots of one area it takes the deeper, then the one whose first column comes first along the strip. When nothing fits it returns a reason for the overlay: the cell does not exist, is blocked, unzoned or built on, a cell between it and the road is not free, the cell is further back than any type of its zone and density reaches, or the free ground is too shallow or too narrow for the smallest type that reaches the cell, with the size needed and the size there ("R3 needs a lot at least 4 wide and 4 deep; the zoned ground here is 3 wide").
+
+Protocol version 6. A snapshot carries every building. A delta carries a `buildings` part when one came or went: the id limit, the changed ids, each one's whole row read when the delta is built, and the free list when it changed. The mirror applies it after the roads and cells, and `SimMirror.buildingsInChunk` lists the buildings in a chunk with their lot's corners. Each delta update lists `buildingChunks`, the chunks a changed building was or is in, empty until something has asked the mirror about buildings.
 
 Removing a road removes its cells and their buildings. The pops inside are displaced and look for a new home or job.
 
@@ -1163,7 +1220,7 @@ The repo is MIT licensed, the same licence three.js uses. It is the simplest for
 - [x] Where does the repo live and what is it called, and where is the free game hosted? The local game is static files, so GitHub Pages or Cloudflare Pages would do.
 - [x] At launch, who may host an online city while billing does not exist? The doc says invited hosts only.
 - [ ] Jobs per building are not set for commercial, office, industrial and mixed. Residents per building now are, so jobs need the same table before M3.
-- [ ] Are the proposed lot sizes for each housing type right? See the table under M2.
+- [ ] Are the proposed lot sizes for each housing type right? See the table under M2. The same goes for the commercial, office, industrial and mixed types M2-09 proposed in the table after it. With zoning six cells deep, no R1 or M1 type reaches the 6th row back from the road and no C1 or O1 type the 5th or 6th, so those rows stay empty and the overlay says so.
 - [ ] Which machines are the reference for Low and Balanced? The presets need two real computers to measure on, ideally ones you own.
 - [ ] How large may a command's payload be? Nothing limits it today. The sim refuses a payload that is not plain JSON, but one of any size is accepted, logged and kept in every save and city file from then on. That is fine while the only sender is the player's own page. It needs a byte cap in `validateCommand` before a server takes commands from other people, so settle the number by the two-tab spike.
 

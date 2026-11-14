@@ -1,3 +1,4 @@
+import { createBuildings } from "./buildings/buildings";
 import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -49,6 +50,9 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
     const next = cellAnchors(old);
     return { ...next, version: 10, cells: unzonedCells(next["roads"] as RoadNetwork), cellsReadyAt: 0 };
   },
+  // Version 11 adds the buildings, none of them (M2-09). Nothing could grow
+  // before them.
+  10: (old) => ({ ...old, version: 11, buildings: createBuildings() }),
 };
 
 /**

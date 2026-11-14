@@ -46,6 +46,7 @@
 // Typed array data is written in the platform's byte order. Every engine the
 // game targets is little endian, as `hashState` already assumes.
 
+import { checkBuildings } from "./buildings/buildings";
 import { Fnv64 } from "./hash";
 import { isLogEntry, type LogEntry } from "./log";
 import { migrateState } from "./migrate";
@@ -612,7 +613,7 @@ function checkPendingCommand(command: unknown, where: string): void {
 
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
-  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt } = state;
+  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, buildings } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");
   if (!isUint32(seed)) throw corrupt("its seed is not a 32-bit integer");
   if (tick !== header.tick || seed !== header.seed) throw corrupt("its header does not match its contents");
@@ -636,6 +637,8 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   const cellProblem = checkCells(cells, roads as RoadNetwork);
   if (cellProblem !== null) throw corrupt(`its zoning cells are malformed: ${cellProblem}`);
   if (!Number.isSafeInteger(cellsReadyAt) || (cellsReadyAt as number) < 0) throw corrupt("the tick its zoning cells settle by is not a whole number");
+  const buildingProblem = checkBuildings(buildings, roads as RoadNetwork, tick as number);
+  if (buildingProblem !== null) throw corrupt(`its buildings are malformed: ${buildingProblem}`);
 }
 
 /**

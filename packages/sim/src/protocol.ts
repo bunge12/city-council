@@ -3,6 +3,7 @@
 // a WebSocket. Keep them plain JSON data plus typed arrays, and bump
 // PROTOCOL_VERSION on any change to a shape.
 
+import type { BuildingDelta } from "./buildings/delta";
 import type { Command, CommandResult } from "./commands";
 import type { LogEntry } from "./log";
 import type { RoadDelta } from "./roads/delta";
@@ -11,7 +12,7 @@ import type { UndoRecord } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 // ---- Client to sim ----
 
@@ -33,8 +34,8 @@ export type ToSimMessage = CommandMessage | RequestSnapshotMessage;
 // ---- Sim to client ----
 
 /**
- * The whole state at one tick, the whole road network and every zoning
- * cell's zone and density included. A client replaces its copy with this. `logFrom` is the absolute log index the next
+ * The whole state at one tick, the whole road network, every zoning
+ * cell's zone and density and every building included. A client replaces its copy with this. `logFrom` is the absolute log index the next
  * delta's entries start at, and `deltaSeq` is the next delta's `seq`.
  */
 export interface SnapshotMessage {
@@ -57,7 +58,8 @@ export interface SystemTiming {
 
 /**
  * What changed since the previous delta or snapshot: the tick, the speed,
- * new log entries, changed road rows and changed zoning cells. `seq` counts deltas from 0 and
+ * new log entries, changed road rows, changed zoning cells and the
+ * buildings that came or went. `seq` counts deltas from 0 and
  * `logFrom` is the absolute log index of `log[0]`, so a client that misses
  * one can tell and ask for a snapshot.
  */
@@ -76,6 +78,8 @@ export interface DeltaMessage {
    * again. Left out when no cell changed. Applied after `roads`.
    */
   cells?: CellDelta;
+  /** Buildings added or removed, as whole rows. Left out when none was. Applied after `cells`. */
+  buildings?: BuildingDelta;
   /** The whole undo history, when it changed. Left out otherwise. */
   undo?: UndoRecord[];
   /** Steps the host ran since the previous delta, paused steps included. */

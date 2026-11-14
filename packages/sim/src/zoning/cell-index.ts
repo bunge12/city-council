@@ -50,8 +50,10 @@ import { ROAD_TYPES } from "../roads/balance";
 import {
   LEVEL_BRIDGE,
   LEVEL_GROUND,
+  NONE,
   isNode,
   isSegment,
+  nextSegmentAt,
   observeNetwork,
   readAnchor,
   segmentIdLimit,
@@ -1556,7 +1558,7 @@ export function forOpenCellsInBox(
 }
 
 /** The chunk a point is in, as `cj * CHUNKS_PER_SIDE + ci`, off-map points in the nearest edge chunk. */
-function chunkAt(x: number, z: number): number {
+export function chunkAt(x: number, z: number): number {
   const clamp = (v: number) => {
     const c = Math.floor(v / CHUNK_SIZE);
     return c < 0 ? 0 : c >= CHUNKS_PER_SIDE ? CHUNKS_PER_SIDE - 1 : c;
@@ -1608,4 +1610,130 @@ export function cellStatuses(state: SimState): Uint8Array {
     if (status) out.set(status, state.cells.offset[id] ?? 0);
   }
   return out;
+}
+
+// ---- Columns, for lots (M2-09) ----
+
+/**
+ * A column of cells: one place on one side of a segment, every depth from
+ * the road's edge back. `dir` is the way a walk along the road is going
+ * from it: 0 toward node B, where places count up, 1 toward node A.
+ */
+export interface Column {
+  seg: number;
+  side: number;
+  place: number;
+  dir: number;
+}
+
+/** Two points closer than this, in metres, are one point: the 1 cm shapes go by. */
+const SAME_POINT_SQ = 0.0001;
+
+/**
+ * Writes the edge of a column that faces `toward` (0 toward node B, 1
+ * toward node A), `depth` cells deep, as inner x, z then outer x, z: the
+ * corner at the road's edge and the corner at the back of cell `depth - 1`.
+ */
+function columnEdge(s: SegShape, side: number, place: number, toward: number, depth: number, out: Float64Array): void {
+  // A cell's corners go by its anchor: 0 and 3 at the station nearer the
+  // anchor's start, 1 and 2 at the next, inner then outer. Places count
+  // down the anchor on a reversed segment.
+  const ahead = toward === 0 ? !s.reversed : s.reversed;
+  const local = (place * 2 + side) * DEPTH;
+  cellQuad(s, local, quadD);
+  out[0] = quadD[ahead ? 2 : 0] ?? 0;
+  out[1] = quadD[ahead ? 3 : 1] ?? 0;
+  cellQuad(s, local + depth - 1, quadD);
+  out[2] = quadD[ahead ? 4 : 6] ?? 0;
+  out[3] = quadD[ahead ? 5 : 7] ?? 0;
+}
+
+const edgeA = new Float64Array(4);
+const edgeB = new Float64Array(4);
+
+/** Whether two edges as `columnEdge` writes them are one edge, inner to inner and outer to outer. */
+function sameEdge(p: Float64Array, q: Float64Array): boolean {
+  const d0 = ((p[0] ?? 0) - (q[0] ?? 0)) ** 2 + ((p[1] ?? 0) - (q[1] ?? 0)) ** 2;
+  const d1 = ((p[2] ?? 0) - (q[2] ?? 0)) ** 2 + ((p[3] ?? 0) - (q[3] ?? 0)) ** 2;
+  return d0 <= SAME_POINT_SQ && d1 <= SAME_POINT_SQ;
+}
+
+/**
+ * The column after `col` going its way along the road, or null where the
+ * strip ends. Within a segment that is the next place. At a segment's end
+ * it is the end column of another segment at that node whose facing edge
+ * is this column's far edge, inner corner on inner corner and outer on
+ * outer, to 1 cm: a road that runs straight on with the same width, such as
+ * the two pieces a T-junction across the street cut a road into. Where
+ * roads meet at an angle or change width, the edges part and the strip
+ * ends. Where two candidates match, which only overlapping roads could
+ * give, the lower segment id.
+ */
+export function nextColumn(index: CellIndex, col: Column): Column | null {
+  const s = index.segs[col.seg];
+  if (!s?.status) return null;
+  const step = col.dir === 0 ? 1 : -1;
+  const place = col.place + step;
+  if (place >= 0 && place < s.places) return { seg: col.seg, side: col.side, place, dir: col.dir };
+  const node = col.dir === 0 ? s.b : s.a;
+  columnEdge(s, col.side, col.place, col.dir, DEPTH, edgeA);
+  const net = index.net;
+  let best: Column | null = null;
+  for (let other = net.nodeFirstSeg[node] ?? NONE; other !== NONE; other = nextSegmentAt(net, other, node)) {
+    if (other === col.seg || (best !== null && other > best.seg)) continue;
+    const o = index.segs[other];
+    if (!o?.status || o.places === 0) continue;
+    // Leaving through node A means walking toward node B, and the other way.
+    const fromA = o.a === node;
+    const oPlace = fromA ? 0 : o.places - 1;
+    const oDir = fromA ? 0 : 1;
+    for (let side = 0; side < 2; side++) {
+      columnEdge(o, side, oPlace, 1 - oDir, DEPTH, edgeB);
+      if (sameEdge(edgeA, edgeB)) best = { seg: other, side, place: oPlace, dir: oDir };
+    }
+  }
+  return best;
+}
+
+/**
+ * Whether `col` names a column a segment has. A building row that has not
+ * caught up with a change of roads may not.
+ */
+export function columnExists(index: CellIndex, col: Column): boolean {
+  const s = index.segs[col.seg];
+  return !!s?.status && (col.side === 0 || col.side === 1) && Number.isInteger(col.place) && col.place >= 0 && col.place < s.places;
+}
+
+/** The CELL_ value of the cell at `depth` in `col`, or -1 if there is none. */
+export function columnStatus(index: CellIndex, col: Column, depth: number): number {
+  const s = index.segs[col.seg];
+  if (!s?.status) return -1;
+  return s.status[(col.place * 2 + col.side) * DEPTH + depth] ?? -1;
+}
+
+/**
+ * The corners of the ground `width` columns from `first` on cover, `depth`
+ * cells back, as x0, z0, ..., x3, z3: the near edge of the first column at
+ * the road and at the back, then the far edge of the last at the back and
+ * at the road. Null if the strip ends before `width` columns. On a curve
+ * the four corners are those of the cells, so the shape fans out with
+ * them.
+ */
+export function lotCorners(index: CellIndex, first: Column, width: number, depth: number): number[] | null {
+  if (!columnExists(index, first) || depth < 1 || depth > DEPTH) return null;
+  const cols: Column[] = [first];
+  for (let i = 1; i < width; i++) {
+    const next = nextColumn(index, cols[i - 1] as Column);
+    if (!next) return null;
+    cols.push(next);
+  }
+  const last = cols[width - 1] as Column;
+  const s0 = index.segs[first.seg];
+  const s1 = index.segs[last.seg];
+  if (!s0?.status || !s1?.status) return null;
+  const near = new Float64Array(4);
+  const far = new Float64Array(4);
+  columnEdge(s0, first.side, first.place, 1 - first.dir, depth, near);
+  columnEdge(s1, last.side, last.place, last.dir, depth, far);
+  return [near[0] ?? 0, near[1] ?? 0, near[2] ?? 0, near[3] ?? 0, far[2] ?? 0, far[3] ?? 0, far[0] ?? 0, far[1] ?? 0];
 }

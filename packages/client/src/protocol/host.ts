@@ -2,6 +2,7 @@ import {
   LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
   TICK_MS,
+  drainBuildingDelta,
   drainCellDelta,
   drainRoadChanges,
   encodeRoadDelta,
@@ -10,6 +11,7 @@ import {
   parseToSimMessage,
   prepareDerived,
   readLog,
+  recordBuildingChanges,
   recordCellChanges,
   recordRoadChanges,
   captureState,
@@ -114,6 +116,7 @@ export class SimHost {
     // reach a client in the snapshot it asks for first.
     recordRoadChanges(state.roads);
     recordCellChanges(state);
+    recordBuildingChanges(state);
     this.fullLog = [...pagedLog, ...state.log];
     this.transport = transport;
     this.now = now;
@@ -265,10 +268,13 @@ export class SimHost {
     // Cells are read now, like road rows below, so a cell painted and then
     // moved by a road in between goes out once, as what it is now.
     const cells = drainCellDelta(this.state);
+    // Building rows too: one added and removed in between goes out once.
+    const buildings = drainBuildingDelta(this.state);
     const changed =
       this.unsent.length > 0 ||
       this.unsentRoads !== null ||
       cells !== null ||
+      buildings !== null ||
       this.state.tick !== this.sentTick ||
       this.state.speed !== this.sentSpeed ||
       this.state.undo !== this.sentUndo;
@@ -288,12 +294,13 @@ export class SimHost {
       log,
       ...(roads ? { roads } : {}),
       ...(cells ? { cells } : {}),
+      ...(buildings ? { buildings } : {}),
       ...(undo ? { undo } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };
     // The rows are fresh arrays, so a worker can move them.
-    this.transport.send(delta, typedArrayBuffers({ roads, cells }));
+    this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings }));
     this.deltaSeq++;
     this.unsent = [];
     this.unsentRoads = null;
