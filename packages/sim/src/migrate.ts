@@ -20,9 +20,9 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // never takes them back.
   //
   // Placing them runs today's road code, so the network takes today's level
-  // fields first (see version 6).
+  // fields and build order first (see versions 6 and 9).
   4: (old) => {
-    old = levelsAtBothEnds(old);
+    old = buildOrder(levelsAtBothEnds(old));
     const roads = old["roads"] as RoadNetwork;
     const connections = placeConnections(roads, terrainOf(old["seed"] as number), old["seed"] as number);
     return { ...old, version: 5, roads, connections };
@@ -38,7 +38,56 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // (balance-stamp.ts). An older save does not say, so its stamp is empty
   // and it is not taken to replay from its log.
   7: (old) => ({ ...old, version: 8, balance: "" }),
+  // Version 9 gives every segment a build order number, so the older of two
+  // roads can keep its cells (M2-01). See `buildOrder`.
+  8: (old) => ({ ...buildOrder(old), version: 9 }),
 };
+
+type OldRow = Record<string, unknown>;
+type OldSegOp = Record<string, unknown> & { op: string; id: number; row?: OldRow };
+
+/**
+ * The state with a build order number on every segment, live or in the
+ * undo history, and the counter past them all.
+ *
+ * A version 8 save does not say which road came first, so the numbers are
+ * made up in the one order every machine agrees on: live segments in id
+ * order from 0. A row in the undo history whose id is live takes that
+ * segment's number, which is right for the piece a split left under its
+ * parent's id and for a road a command added. A segment the history holds,
+ * bulldozed and waiting for its undo, gets the next number, in the order the
+ * history removed it, and the record that built it says the same number,
+ * so the two undos still apply one after the other. An add whose segment is
+ * gone and held by no record cannot be undone anyway, and says 0. Adds are
+ * marked as not fresh, so taking one back never moves the counter. No cell
+ * exists before version 9, so these numbers change nothing a player built.
+ */
+function buildOrder(old: Record<string, unknown>): Record<string, unknown> {
+  const net = old["roads"] as Omit<RoadNetwork, "segOrder" | "segOrderNext">;
+  const live = (id: number) => isSegment(net as RoadNetwork, id);
+  const limit = net.segFlags.length;
+  const segOrder = new Float64Array(limit);
+  let next = 0;
+  for (let id = 0; id < limit; id++) if (live(id)) segOrder[id] = next++;
+  const history = (old["undo"] ?? []) as { ops: OldSegOp[] }[];
+  const held = new Map<number, number>();
+  for (const record of history) {
+    for (const op of record.ops) if (op.op === "removeSeg" && !live(op.id) && !held.has(op.id)) held.set(op.id, next++);
+  }
+  const orderOf = (id: number): number => (live(id) ? (segOrder[id] ?? 0) : (held.get(id) ?? 0));
+  const undo = history.map((record) => ({
+    ...record,
+    ops: record.ops.map((op) => {
+      if (op.op === "addSeg") return { op: op.op, id: op.id, grown: op["grown"], fresh: false, row: { ...op.row, order: orderOf(op.id) } };
+      if (op.op === "removeSeg") return { ...op, row: { ...op.row, order: orderOf(op.id) } };
+      return op;
+    }),
+  }));
+  // In the order a new network has its fields, so it saves the same way.
+  const fields: Record<string, unknown> = { ...net, segOrder, segOrderNext: next };
+  const roads = Object.fromEntries(Object.keys(createRoadNetwork()).map((key) => [key, fields[key]]));
+  return { ...old, roads, undo };
+}
 
 type OldOp = Record<string, unknown> & { op: string; id: number; row?: { a: number; b: number } };
 

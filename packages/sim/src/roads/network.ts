@@ -114,8 +114,20 @@ export interface RoadNetwork {
   segCZ: Float64Array;
   /** Length in plan, metres. */
   segLength: Float64Array;
+  /**
+   * Build order: a lower number is an older segment (M2-01). Each new
+   * segment takes `segOrderNext`. The pieces of a split keep their
+   * parent's number, and an upgrade or a reverse leaves it alone, so the
+   * number says when the road was first built there. Two segments share a
+   * number only as pieces of one split road. Where two roads compete for
+   * the same ground, the older keeps its cells (PRD, "M2 Zoning and
+   * buildings").
+   */
+  segOrder: Float64Array;
   /** Removed segment ids, the next one to reuse last. */
   segFree: Int32Array;
+  /** The build order number the next new segment takes. Above every live segment's. */
+  segOrderNext: number;
 }
 
 export type AnyTypedArray = Float64Array | Int32Array | Uint8Array;
@@ -167,7 +179,9 @@ export function createRoadNetwork(): RoadNetwork {
     segCX: new Float64Array(0),
     segCZ: new Float64Array(0),
     segLength: new Float64Array(0),
+    segOrder: new Float64Array(0),
     segFree: new Int32Array(0),
+    segOrderNext: 0,
   };
 }
 
@@ -242,6 +256,7 @@ export const SEG_ARRAYS = [
   "segCX",
   "segCZ",
   "segLength",
+  "segOrder",
 ] as const;
 
 /** Every field of one segment, as plain data. */
@@ -256,11 +271,15 @@ export interface SegmentRow {
   cx: number;
   cz: number;
   length: number;
+  /** Build order, `segOrder`. */
+  order: number;
 }
 
 /**
  * One change a journal wrote down. `grown` is true when the id came from
- * growing the arrays rather than off the free list. `atA` and `atB` are
+ * growing the arrays rather than off the free list. `fresh` is true when a
+ * new segment took its build order from `segOrderNext` rather than from the
+ * segment it was split from. `atA` and `atB` are
  * where a removed segment stood in its nodes' lists, counted from the head.
  *
  * Ids are reused, so an id written here may later name something else. A
@@ -271,7 +290,7 @@ export interface SegmentRow {
 export type NetworkOp =
   | { op: "addNode"; id: number; grown: boolean }
   | { op: "removeNode"; id: number; x: number; z: number; height: number; flags: number }
-  | { op: "addSeg"; id: number; grown: boolean; row: SegmentRow }
+  | { op: "addSeg"; id: number; grown: boolean; fresh: boolean; row: SegmentRow }
   | { op: "removeSeg"; id: number; row: SegmentRow; atA: number; atB: number; ax: number; az: number; bx: number; bz: number }
   | { op: "restyle"; id: number; from: number; to: number; reverse: boolean; a: number; b: number };
 
@@ -335,6 +354,7 @@ export function readSegment(net: RoadNetwork, id: number): SegmentRow {
     cx: net.segCX[id] ?? 0,
     cz: net.segCZ[id] ?? 0,
     length: net.segLength[id] ?? 0,
+    order: net.segOrder[id] ?? 0,
   };
 }
 
@@ -350,7 +370,8 @@ export function sameRow(p: SegmentRow, q: SegmentRow): boolean {
     p.flags === q.flags &&
     Object.is(p.cx, q.cx) &&
     Object.is(p.cz, q.cz) &&
-    Object.is(p.length, q.length)
+    Object.is(p.length, q.length) &&
+    p.order === q.order
   );
 }
 
@@ -486,6 +507,11 @@ export interface SegmentSpec {
   cz?: number;
   /** Sets SEG_FIXED. */
   fixed?: boolean;
+  /**
+   * Build order to keep, for a piece of a split segment: its parent's
+   * number. Left out, the segment is new and takes `segOrderNext`.
+   */
+  order?: number;
 }
 
 /** Steps in the polyline that measures a curve. */
@@ -543,6 +569,11 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   const cz = spec.cz ?? (az + bz) / 2;
   checkFinite("cx", cx);
   checkFinite("cz", cz);
+  const fresh = spec.order === undefined;
+  const order = spec.order ?? net.segOrderNext;
+  if (!fresh && !(Number.isSafeInteger(order) && order >= 0 && order < net.segOrderNext)) {
+    throw new RangeError(`segment order ${order} was never handed out`);
+  }
 
   const { id, grown } = allocate(net, "segFree", SEG_ARRAYS);
   net.segA[id] = a;
@@ -555,12 +586,14 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   net.segCX[id] = cx;
   net.segCZ[id] = cz;
   net.segLength[id] = curveLength(ax, az, cx, cz, bx, bz);
+  net.segOrder[id] = order;
+  if (fresh) net.segOrderNext = order + 1;
   // Newest first in each node's list.
   net.segNextA[id] = net.nodeFirstSeg[a] ?? NONE;
   net.nodeFirstSeg[a] = id;
   net.segNextB[id] = net.nodeFirstSeg[b] ?? NONE;
   net.nodeFirstSeg[b] = id;
-  if (journals.has(net)) journal(net, { op: "addSeg", id, grown, row: readSegment(net, id) });
+  if (journals.has(net)) journal(net, { op: "addSeg", id, grown, fresh, row: readSegment(net, id) });
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
   return id;
 }
@@ -655,9 +688,14 @@ export function restoreNode(net: RoadNetwork, id: number, x: number, z: number, 
   for (const observer of observers.get(net) ?? []) observer.nodeAdded(id);
 }
 
-/** Reverses `addSegment`. */
-export function unaddSegment(net: RoadNetwork, id: number, grown: boolean): void {
+/**
+ * Reverses `addSegment`. A `fresh` segment that took the newest build order
+ * number gives it back, so the next new segment takes it again. One with an
+ * older number leaves the counter alone: a newer segment holds a higher one.
+ */
+export function unaddSegment(net: RoadNetwork, id: number, grown: boolean, fresh: boolean): void {
   if (!isSegment(net, id)) throw new RangeError(`segment ${id} does not exist`);
+  if (fresh && net.segOrder[id] === net.segOrderNext - 1) net.segOrderNext--;
   unlink(net, id, net.segA[id] ?? NONE);
   unlink(net, id, net.segB[id] ?? NONE);
   for (const observer of observers.get(net) ?? []) observer.segmentRemoving(id);
@@ -683,6 +721,7 @@ export function restoreSegment(net: RoadNetwork, id: number, row: SegmentRow, at
   net.segCX[id] = row.cx;
   net.segCZ[id] = row.cz;
   net.segLength[id] = row.length;
+  net.segOrder[id] = row.order;
   linkAt(net, id, row.a, atA);
   linkAt(net, id, row.b, atB);
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
@@ -734,7 +773,7 @@ export function reverseOps(net: RoadNetwork, ops: readonly NetworkOp[]): void {
         restoreNode(net, op.id, op.x, op.z, op.height, op.flags);
         break;
       case "addSeg":
-        unaddSegment(net, op.id, op.grown);
+        unaddSegment(net, op.id, op.grown, op.fresh);
         break;
       case "removeSeg":
         restoreSegment(net, op.id, op.row, op.atA, op.atB);
@@ -759,7 +798,7 @@ export function otherEnd(net: RoadNetwork, seg: number, node: number): number {
   return (net.segA[seg] === node ? net.segB[seg] : net.segA[seg]) ?? NONE;
 }
 
-const ARRAY_TYPES: Readonly<Record<keyof RoadNetwork, new (n: number) => AnyTypedArray>> = {
+const ARRAY_TYPES: Readonly<Record<Exclude<keyof RoadNetwork, "segOrderNext">, new (n: number) => AnyTypedArray>> = {
   nodeX: Float64Array,
   nodeZ: Float64Array,
   nodeHeight: Float64Array,
@@ -778,6 +817,7 @@ const ARRAY_TYPES: Readonly<Record<keyof RoadNetwork, new (n: number) => AnyType
   segCX: Float64Array,
   segCZ: Float64Array,
   segLength: Float64Array,
+  segOrder: Float64Array,
   segFree: Int32Array,
 };
 
@@ -798,8 +838,10 @@ export function checkRoadNetwork(value: unknown, held: HeldIds = { nodes: [], se
   for (const [key, Type] of Object.entries(ARRAY_TYPES)) {
     if (!(net[key] instanceof Type)) return `${key} is not a ${Type.name}`;
   }
-  const extra = Object.keys(net).find((key) => !(key in ARRAY_TYPES));
+  const extra = Object.keys(net).find((key) => !(key in ARRAY_TYPES) && key !== "segOrderNext");
   if (extra !== undefined) return `it has an unknown field "${extra}"`;
+  const orderNext = net["segOrderNext"];
+  if (!Number.isSafeInteger(orderNext) || (orderNext as number) < 0) return "segOrderNext is not a whole number";
   const n = net as unknown as RoadNetwork;
   const nodes = n.nodeFlags.length;
   const segs = n.segFlags.length;
@@ -853,6 +895,8 @@ export function checkRoadNetwork(value: unknown, held: HeldIds = { nodes: [], se
     if (n.segNetwork[seg] === NETWORK_ROAD && (n.segType[seg] ?? 0) >= ROAD_TYPES.length) {
       return `segment ${seg} has an unknown road type`;
     }
+    const order = n.segOrder[seg] ?? 0;
+    if (!Number.isSafeInteger(order) || order < 0 || order >= n.segOrderNext) return `segment ${seg} has a bad build order`;
   }
   return null;
 }

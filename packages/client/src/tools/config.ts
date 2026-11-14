@@ -1,9 +1,13 @@
 // Settings for the drawing tools: how near the cursor must be for each snap
 // to catch, and the steps the guides snap to. Feel, not game balance, so it
-// lives in the client rather than under packages/sim/balance.
+// lives in the client rather than under packages/sim/balance. The zoning
+// cell size and depth are the exception: they are sim balance
+// (`balance/zoning.json`), and the steps here are read from them.
 //
 // Distances in pixels are CSS pixels on screen, turned into metres at the
 // cursor each frame, so a snap feels the same in every zoom band.
+
+import { ZONING_BALANCE } from "@city-council/sim";
 
 /** The route tool in the debug panel (issue M1-15). */
 export const ROUTE_TOOL = {
@@ -27,7 +31,7 @@ export const GRID_TOOL = {
    * Block depth to start with, cells between road edges: two zoning strips
    * of `SNAP.zoneDepthCells` back to back, so every lot faces a street.
    */
-  defaultDepthCells: 12,
+  defaultDepthCells: 2 * ZONING_BALANCE.zoneDepthCells,
   /** Block width to start with, cells between road edges along the first side. */
   defaultWidthCells: 24,
   /** The block size fields take whole cells in this range. The sim refuses blocks under 10 m. */
@@ -51,16 +55,15 @@ export const SNAP = {
   lightAngleStep: 15,
   lightAnglePx: 6,
   /**
-   * Length snap step, metres. One M2 zoning cell, so a road's frontage holds
-   * a whole number of cells. If M2 changes the cell size, change it here.
+   * Length snap step, metres. One zoning cell, so a road's frontage holds
+   * a whole number of cells. From `zoning.json`.
    */
-  cellSize: 8,
+  cellSize: ZONING_BALANCE.cellSize,
   /**
-   * How deep zoning reaches from a road's edge, in cells: the M2 rule that a
-   * zonable segment gets cells six deep. The parallel offsets are strips of
-   * this depth, so if M2 changes it, they follow.
+   * How deep zoning reaches from a road's edge, in cells. The parallel
+   * offsets are strips of this depth, so they follow it. From `zoning.json`.
    */
-  zoneDepthCells: 6,
+  zoneDepthCells: ZONING_BALANCE.zoneDepthCells,
 } as const;
 
 /** Guide lines from nearby nodes (issue M1-19). */

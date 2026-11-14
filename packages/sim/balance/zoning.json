@@ -1,0 +1,17 @@
+{
+  "_about": "Zoning cells (PRD, \"M2 Zoning and buildings\"). Every zonable segment gets square cells along both sides, reaching back from the road's edge. No prices here, so no source years.",
+  "cellSize": 8,
+  "zoneDepthCells": 6,
+  "zones": [
+    { "id": "residential", "name": "Residential", "letter": "R" },
+    { "id": "commercial", "name": "Commercial", "letter": "C" },
+    { "id": "office", "name": "Office", "letter": "O" },
+    { "id": "industrial", "name": "Industrial", "letter": "I" },
+    { "id": "mixed", "name": "Mixed", "letter": "M" }
+  ],
+  "densities": [
+    { "level": 1, "name": "Low" },
+    { "level": 2, "name": "Medium" },
+    { "level": 3, "name": "High" }
+  ]
+}

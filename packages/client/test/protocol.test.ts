@@ -470,7 +470,8 @@ describe("a host resumed from its own save", () => {
 describe("snapshot transfer", () => {
   it("lists the state's typed array buffers so a worker can move them", () => {
     const state = createBareState(3);
-    const roadBuffers = Object.values(state.roads).map((array) => array.buffer);
+    // Every road field but the build order counter, which is a number.
+    const roadBuffers = Object.values(state.roads).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
     expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer]);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });
