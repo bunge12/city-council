@@ -26,7 +26,7 @@ export interface AppServices {
   /** Read-only copy of sim state. */
   mirror: SimMirror;
   saves: SaveClient;
-  /** Sends a command and records the sim's answer for the activity log. */
+  /** Sends a command, resolves once the sim has applied it or with why not, and records that for the activity log. */
   sendCommand(type: string, payload?: unknown): Promise<CommandResult>;
   saveNow(): Promise<SaveStatus>;
   downloadCity(): Promise<DownloadedCity>;

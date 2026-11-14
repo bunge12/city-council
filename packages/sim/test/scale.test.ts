@@ -14,10 +14,10 @@ import {
   replay,
   serialize,
   step,
-  submit,
   type ScaleCity,
   type SimState,
 } from "../src/index";
+import { submit } from "./seen-ends";
 import { LEVEL_ELEVATED_1, SEG_FIXED, isSegment, segmentCount, segmentIdLimit } from "../src/roads/network";
 import { findRouteBetween, routingGraphOf } from "../src/roads/routing";
 import { terrainOf } from "../src/terrain/cache";

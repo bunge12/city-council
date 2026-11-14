@@ -12,7 +12,7 @@ export function simInfo(): { name: string; tickMs: number } {
 export { SNAPSHOT_VERSION, SPEEDS, captureState, createBareState, createState } from "./state";
 export type { SimState, Speed } from "./state";
 export { COMMANDS, MAX_PENDING_COMMANDS, submit, validateCommand } from "./commands";
-export type { Command, CommandDef, CommandResult } from "./commands";
+export type { Command, CommandDef, CommandResult, DroppedCommand } from "./commands";
 export { CELLS_SYSTEM, COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
 export type { System, SystemTimer } from "./step";
 export { RNG_WORDS, nextFloat, nextInt, nextU32, seedRng } from "./rng";
@@ -102,11 +102,13 @@ export type { Box, Quad, QuadNearest } from "./roads/curve";
 export type { BuildPoint, BuildRoadPayload, PlanStop, RoadPlan, RoadPlanResult } from "./roads/build";
 export { gridLines, planRoadGrid } from "./roads/grid";
 export type { BuildRoadGridPayload, GridPlan, GridPlanResult, GridProblem, GridStreet } from "./roads/grid";
-export { planBulldoze, planUpgrade } from "./roads/edit";
+export { SEGMENT_CHANGED, planBulldoze, planUpgrade, segmentEnds } from "./roads/edit";
 export type {
   BulldozePlan,
   BulldozePlanResult,
   BulldozeRoadPayload,
+  SegmentEnds,
+  SegmentEndsNetwork,
   UpgradePlan,
   UpgradePlanResult,
   UpgradeRoadPayload,

@@ -25,6 +25,18 @@ export interface Command {
 /** Outcome of validating or submitting a command. */
 export type CommandResult = { ok: true } | { ok: false; reason: string };
 
+/**
+ * A command `submit` accepted that the step then refused, because an
+ * earlier command in the same tick made it invalid. Not recorded in the
+ * log, so this is the only word the sender gets (issue 94).
+ */
+export interface DroppedCommand {
+  seq: number;
+  playerId: string;
+  type: string;
+  reason: string;
+}
+
 export interface CommandDef {
   /** Returns null when the command is valid, or the reason it is not. */
   validate(state: SimState, command: Command): string | null;
@@ -288,8 +300,9 @@ export function enqueue(state: SimState, command: Command): void {
 /**
  * Applies queued commands in the order they were submitted and records each
  * one in the activity log. Each is checked again first, because an earlier
- * command in the same tick may have made it invalid. Those are dropped and
- * not recorded. A command with `applyIfValid` is checked and applied in one
+ * command in the same tick may have made it invalid. Those are dropped, not
+ * recorded, and returned with the reason, so the host can tell their
+ * senders. A command with `applyIfValid` is checked and applied in one
  * pass.
  *
  * The zoning cells are brought up to date with the roads before the first
@@ -297,20 +310,23 @@ export function enqueue(state: SimState, command: Command): void {
  * removed road are read before it goes. A big change settles over the next
  * few ticks (`stepCells`).
  */
-export function applyPending(state: SimState): void {
+export function applyPending(state: SimState): DroppedCommand[] {
   const queue = state.pending;
   state.pending = [];
+  const dropped: DroppedCommand[] = [];
   if (queue.length > 0) stepCells(state);
   for (const command of queue) {
     const def = commandDef(command);
-    if (typeof def === "string") continue;
-    let applied: boolean;
-    if (def.applyIfValid) applied = def.applyIfValid(state, command) === null;
+    let reason: string | null;
+    if (typeof def === "string") reason = def;
+    else if (def.applyIfValid) reason = def.applyIfValid(state, command);
     else {
-      applied = def.validate(state, command) === null;
-      if (applied) def.apply(state, command);
+      reason = def.validate(state, command);
+      if (reason === null) def.apply(state, command);
     }
-    if (applied) {
+    if (reason !== null) {
+      dropped.push({ seq: command.seq, playerId: command.playerId, type: command.type, reason });
+    } else {
       stepCells(state);
       recordEntry(state, {
         tick: state.tick,
@@ -321,4 +337,5 @@ export function applyPending(state: SimState): void {
       });
     }
   }
+  return dropped;
 }

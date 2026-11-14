@@ -16,12 +16,12 @@ import {
   planZoneCells,
   serialize,
   step,
-  submit,
   validateCommand,
   type Command,
   type SimState,
   type ZoneRect,
 } from "../src/index";
+import { submit } from "./seen-ends";
 import { cloneState } from "../src/state";
 import { fromLocal } from "../src/zoning/cells";
 import fixtureJson from "./fixtures/replay/zoning.json";

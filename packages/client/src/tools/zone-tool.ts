@@ -79,12 +79,8 @@ export interface PendingZone {
   /** Local to this page, for keys. Not a sim id. */
   id: number;
   preview: ZonePreview;
-  /** Commands not yet answered. */
+  /** Commands the sim has not yet applied or refused. */
   waiting: number;
-  /** Commands the sim has queued. */
-  accepted: number;
-  /** "sending" until every command is answered; "accepted" once all were queued. */
-  status: "sending" | "accepted";
 }
 
 /** The zone tool's part of the UI store. */
@@ -353,7 +349,7 @@ export interface ZoneToolHost {
   city(): City | null;
   /** A number that changes whenever the copy does, so the tool can keep what it worked out from it. */
   version(): number;
-  /** Sends a `ZoneCells` and resolves with the sim's answer. */
+  /** Sends a `ZoneCells` and resolves once the sim has applied it, or with why it did not. */
   send(payload: ZoneCellsPayload): Promise<CommandResult>;
 }
 
@@ -585,40 +581,25 @@ export class ZoneToolController {
       this.host.set({ zoneNote: preview.reason });
       return;
     }
-    const pending: PendingZone = { id: this.nextId++, preview, waiting: preview.payloads.length, accepted: 0, status: "sending" };
+    const pending: PendingZone = { id: this.nextId++, preview, waiting: preview.payloads.length };
     this.host.set({ zoneNote: null, zonePending: [...this.host.get().zonePending, pending] });
     for (const payload of preview.payloads) {
       void this.host.send(payload).then((result) => this.answered(pending.id, result));
     }
   }
 
+  /**
+   * One of a stroke's commands was applied or refused. The stroke stays
+   * drawn until every one of them has been, by which time the cells the
+   * applied ones painted are in the copy. A refusal's reason is shown.
+   */
   private answered(id: number, result: CommandResult): void {
     const all = this.host.get().zonePending;
     const pending = all.find((p) => p.id === id);
     if (!pending) return;
     const waiting = pending.waiting - 1;
-    const accepted = pending.accepted + (result.ok ? 1 : 0);
     const note = result.ok ? {} : { zoneNote: result.reason };
-    // A stroke cut into several commands stays drawn while any part of it was taken.
-    if (waiting === 0 && accepted === 0) {
-      this.host.set({ zonePending: all.filter((p) => p.id !== id), ...note });
-      return;
-    }
-    const next: PendingZone = { ...pending, waiting, accepted, status: waiting === 0 ? "accepted" : "sending" };
-    this.host.set({ zonePending: all.map((p) => (p.id === id ? next : p)), ...note });
-  }
-
-  /**
-   * Call on every mirror update. After a step, every command the sim had
-   * accepted before it has been applied, so the cells it painted are in the
-   * copy; a stroke whose commands were all accepted stops being drawn. A
-   * snapshot replaces the copy, so it clears them too.
-   */
-  mirrorUpdated(update: { kind: "snapshot" } | { kind: "delta"; steps: number }): void {
-    if (update.kind === "delta" && update.steps === 0) return;
-    const pending = this.host.get().zonePending;
-    if (pending.some((p) => p.status === "accepted")) {
-      this.host.set({ zonePending: pending.filter((p) => p.status !== "accepted") });
-    }
+    const zonePending = waiting === 0 ? all.filter((p) => p.id !== id) : all.map((p) => (p.id === id ? { ...p, waiting } : p));
+    this.host.set({ zonePending, ...note });
   }
 }

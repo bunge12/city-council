@@ -22,7 +22,7 @@ declare const window: {
       state: {
         seed: number;
         connections: ArrayLike<number>;
-        roads: { nodeX: ArrayLike<number>; nodeZ: ArrayLike<number>; nodeHeight: ArrayLike<number>; segFlags: ArrayLike<number> };
+        roads: { nodeX: ArrayLike<number>; nodeZ: ArrayLike<number>; nodeHeight: ArrayLike<number>; segFlags: ArrayLike<number>; segA: ArrayLike<number>; segB: ArrayLike<number> };
       } | null;
     };
     sendCommand(type: string, payload: unknown): Promise<{ ok: boolean; reason?: string }>;
@@ -148,7 +148,13 @@ test("the player builds a street from a stub's end, and cannot bulldoze the stub
     { from: { x: first.ix, z: first.iz }, to: { x: first.ix + ux * 400, z: first.iz + uz * 400 }, type: "street" },
   );
   expect(built).toEqual({ ok: true });
-  const bulldoze = await page.evaluate(() => window.cityCouncil.sendCommand("BulldozeRoad", { segments: [0] }));
+  const bulldoze = await page.evaluate(() => {
+    const net = window.cityCouncil.mirror.state?.roads;
+    const a = net?.segA[0] ?? 0;
+    const b = net?.segB[0] ?? 0;
+    const ends = [[net?.nodeX[a] ?? 0, net?.nodeZ[a] ?? 0, net?.nodeX[b] ?? 0, net?.nodeZ[b] ?? 0]];
+    return window.cityCouncil.sendCommand("BulldozeRoad", { segments: [0], ends });
+  });
   expect(bulldoze.ok).toBe(false);
   expect(bulldoze.reason).toMatch(/fixed and cannot be bulldozed/);
   // Closer in, from the side, so the stub, its mark and the street off its end all show.

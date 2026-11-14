@@ -23,6 +23,7 @@ import {
   type CellDelta,
   type FromSimMessage,
   type SimState,
+  segmentEnds,
 } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
@@ -195,6 +196,11 @@ describe("cell deltas", () => {
       for (let id = 0; id < roads.segFlags.length; id++) if ((roads.segFlags[id] ?? 0) & 1) out.push(id);
       return out;
     };
+    /** A bulldoze or upgrade payload naming segment `seg`, with its ends as the copy has them. */
+    const picked = (seg: number | undefined) => {
+      const roads = state().roads;
+      return { segments: [seg], ends: roads && seg !== undefined ? [segmentEnds(roads, seg)] : [] };
+    };
     const zones = [...ZONING_BALANCE.zones.map((z) => z.id), "none"];
     for (let t = 0; t < 400; t++) {
       // The index is built part of the way in, from the copy as it then is.
@@ -211,8 +217,8 @@ describe("cell deltas", () => {
             density: 1 + nextInt(rng, 3),
             rects: [rect(from, [from[0] + nextFloat(rng) * 200 - 100, from[1] + nextFloat(rng) * 200 - 100], 16 + nextFloat(rng) * 150)],
           });
-        } else if (roll < 9) void mirror.sendCommand("BulldozeRoad", { segments: [segs[nextInt(rng, segs.length)]] });
-        else if (roll < 10) void mirror.sendCommand("UpgradeRoad", { segments: [segs[nextInt(rng, segs.length)]], type: "avenue" });
+        } else if (roll < 9) void mirror.sendCommand("BulldozeRoad", picked(segs[nextInt(rng, segs.length)]));
+        else if (roll < 10) void mirror.sendCommand("UpgradeRoad", { ...picked(segs[nextInt(rng, segs.length)]), type: "avenue" });
         else void mirror.sendCommand("Undo");
       }
       tick();

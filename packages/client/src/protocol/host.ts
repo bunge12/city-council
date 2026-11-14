@@ -21,6 +21,7 @@ import {
   serializeSteps,
   step,
   submit,
+  type DroppedCommand,
   type FromSimMessage,
   type LogEntry,
   type SnapshotSteps,
@@ -74,6 +75,8 @@ export class SimHost {
   readonly fullLog: LogEntry[];
   /** Entries read since the last delta. */
   private unsent: LogEntry[] = [];
+  /** Commands the steps since the last delta dropped. */
+  private unsentDropped: DroppedCommand[] = [];
   /** Road ids changed since the last delta. */
   private unsentRoads: RoadChanges | null = null;
   /** `seq` of the next delta. */
@@ -251,7 +254,7 @@ export class SimHost {
       start: (system) => void starts.set(system, this.now()),
       end: (system) => timings.push({ system, ms: this.now() - (starts.get(system) ?? 0) }),
     };
-    step(this.state, timer);
+    for (const dropped of step(this.state, timer)) this.unsentDropped.push(dropped);
     this.lastTimings = timings;
     this.stepsSinceDelta++;
     // Read after every step so no entry pages out of live state unread.
@@ -272,6 +275,7 @@ export class SimHost {
     const buildings = drainBuildingDelta(this.state);
     const changed =
       this.unsent.length > 0 ||
+      this.unsentDropped.length > 0 ||
       this.unsentRoads !== null ||
       cells !== null ||
       buildings !== null ||
@@ -281,6 +285,7 @@ export class SimHost {
     if (!changed) return;
     const undo = this.state.undo !== this.sentUndo ? structuredClone(this.state.undo) : undefined;
     const log = this.unsent;
+    const dropped = this.unsentDropped;
     // Rows are read now, after every step since the last delta, so an id
     // removed and reused in between goes out once, as what it is now.
     const roads = this.unsentRoads ? encodeRoadDelta(this.state.roads, this.unsentRoads) : undefined;
@@ -296,6 +301,7 @@ export class SimHost {
       ...(cells ? { cells } : {}),
       ...(buildings ? { buildings } : {}),
       ...(undo ? { undo } : {}),
+      ...(dropped.length > 0 ? { dropped } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };
@@ -303,6 +309,7 @@ export class SimHost {
     this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings }));
     this.deltaSeq++;
     this.unsent = [];
+    this.unsentDropped = [];
     this.unsentRoads = null;
     this.sentTick = this.state.tick;
     this.sentSpeed = this.state.speed;

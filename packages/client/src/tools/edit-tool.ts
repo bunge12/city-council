@@ -19,9 +19,15 @@
 // still has the final say. Tool state lives in the UI store (ui/store.ts);
 // nothing here writes sim state.
 //
-// A sent edit stays marked on screen until the sim answers. A refusal
-// removes the mark and shows the reason. An acceptance keeps it until the
-// next delta from a step, which carries the change, as with the road tool.
+// A sent edit stays marked on screen until the sim has applied or refused
+// it. A refusal removes the mark and shows the reason, whether the sim
+// refused the command when it arrived or dropped it at the step.
+//
+// A command names segments by id and carries where each one's ends were
+// when the preview was worked out (`segmentEnds`). If the segment has split
+// or the id names another road by the time the command applies, as when
+// another player's crossing road lands first, the sim refuses it and
+// nothing is removed or changed (issue 94).
 
 import {
   LEVEL_BRIDGE,
@@ -31,7 +37,9 @@ import {
   levelOffset,
   planBulldoze,
   planUpgrade,
+  segmentEnds,
   type CommandResult,
+  type SegmentEnds,
   type RoadNetwork,
   type RoadType,
   type Terrain,
@@ -59,18 +67,21 @@ export interface EditPreview {
   cost: number;
   /** A segment in it is fixed, such as an outside connection's: it cannot be removed or changed. */
   fixed: boolean;
+  /** The command that does it, with the segments' ends as the preview saw them. */
+  command: EditCommand;
 }
 
 /** The command an edit sends. */
 export interface EditCommand {
   type: "BulldozeRoad" | "UpgradeRoad";
-  payload: { segments: number[]; type?: string };
+  payload: { segments: number[]; ends: SegmentEnds[]; type?: string };
 }
 
-/** The command for an edit of `segments`. */
-export function editCommand(kind: EditKind, segments: readonly number[], typeId: string): EditCommand {
-  if (kind === "bulldoze") return { type: "BulldozeRoad", payload: { segments: [...segments] } };
-  return { type: "UpgradeRoad", payload: { segments: [...segments], type: typeId } };
+/** The command for an edit of `segments`, carrying where their ends are in `net` now. */
+export function editCommand(net: RoadNet, kind: EditKind, segments: readonly number[], typeId: string): EditCommand {
+  const ends = segments.map((seg) => segmentEnds(net, seg));
+  if (kind === "bulldoze") return { type: "BulldozeRoad", payload: { segments: [...segments], ends } };
+  return { type: "UpgradeRoad", payload: { segments: [...segments], ends, type: typeId } };
 }
 
 function isFixed(net: RoadNet, seg: number): boolean {
@@ -95,10 +106,10 @@ export function previewEdit(
   segments: readonly number[],
   typeId: string,
 ): EditPreview {
-  const command = editCommand(kind, segments, typeId);
+  const command = editCommand(net, kind, segments, typeId);
   const type = kind === "bulldoze" ? null : (ROAD_TYPES.find((t) => t.id === typeId) ?? null);
   const fixed = segments.some((seg) => isFixed(net, seg));
-  const base = { kind, segments: [...segments], type, fixed };
+  const base = { kind, segments: [...segments], type, fixed, command };
   if (fixed) {
     // The sim refuses this too, naming the segment by id. A player does not know ids.
     const reason = kind === "bulldoze" ? "This road is fixed and cannot be removed" : "This road is fixed and cannot be changed";
@@ -115,8 +126,6 @@ export interface PendingEdit {
   /** Local to this page, for keys. Not a sim id. */
   id: number;
   preview: EditPreview;
-  /** "sending" until the sim answers; "accepted" once it has queued the command. */
-  status: "sending" | "accepted";
 }
 
 /** The edit tools' part of the UI store. */
@@ -143,7 +152,7 @@ export interface EditToolHost {
   set(patch: Partial<RoadToolState & EditToolState>): void;
   /** The mirror's roads and the map, or null before the first snapshot. */
   world(): { net: RoadNet; terrain: Terrain } | null;
-  /** Sends a command and resolves with the sim's answer. */
+  /** Sends a command and resolves once the sim has applied it, or with why it did not. */
   send(type: EditCommand["type"], payload: EditCommand["payload"]): Promise<CommandResult>;
 }
 
@@ -285,34 +294,16 @@ export class EditToolController {
       this.host.set({ editNote: preview.reason });
       return;
     }
-    const pending: PendingEdit = { id: this.nextId++, preview, status: "sending" };
+    const pending: PendingEdit = { id: this.nextId++, preview };
     this.host.set({ editNote: null, editPending: [...this.host.get().editPending, pending] });
-    const typeId = preview.type?.id ?? "";
-    const command = editCommand(preview.kind, preview.segments, typeId);
-    void this.host.send(command.type, command.payload).then((result) => this.answered(pending.id, result));
+    const { type, payload } = preview.command;
+    void this.host.send(type, payload).then((result) => this.answered(pending.id, result));
   }
 
+  /** The sim applied the edit, and the copy shows it, or refused it: either way its mark goes. */
   private answered(id: number, result: CommandResult): void {
-    const pending = this.host.get().editPending;
-    if (result.ok) {
-      this.host.set({ editPending: pending.map((p) => (p.id === id ? { ...p, status: "accepted" } : p)) });
-      return;
-    }
-    this.host.set({ editPending: pending.filter((p) => p.id !== id), editNote: result.reason });
-  }
-
-  /**
-   * Call on every mirror update. After a step, every command the sim had
-   * accepted before it has been applied, or dropped because an earlier
-   * command in the same tick made it invalid; either way its mark goes. A
-   * snapshot replaces the whole copy, so it clears them too.
-   */
-  mirrorUpdated(update: { kind: "snapshot" } | { kind: "delta"; steps: number }): void {
-    if (update.kind === "delta" && update.steps === 0) return;
-    const pending = this.host.get().editPending;
-    if (pending.some((p) => p.status === "accepted")) {
-      this.host.set({ editPending: pending.filter((p) => p.status !== "accepted") });
-    }
+    const pending = this.host.get().editPending.filter((p) => p.id !== id);
+    this.host.set(result.ok ? { editPending: pending } : { editPending: pending, editNote: result.reason });
   }
 }
 

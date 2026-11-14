@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as entry from "../src/index";
-import { submit, type Command } from "../src/commands";
+import type { Command } from "../src/commands";
+import { submit } from "./seen-ends";
 import { step } from "../src/step";
 import { roadTypeIndex } from "../src/roads/balance";
 import {

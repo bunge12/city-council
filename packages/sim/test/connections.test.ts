@@ -15,10 +15,10 @@ import {
   routingGraphOf,
   slopeAt,
   step,
-  submit,
   type Command,
   type SimState,
 } from "../src/index";
+import { submit } from "./seen-ends";
 import { checkConnectionBalance } from "../src/roads/connections";
 import { NODE_FIXED, SEG_FIXED, nodeCount, segmentCount, segmentsAt } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";

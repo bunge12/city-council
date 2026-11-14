@@ -280,10 +280,18 @@
       "payload": {
         "segments": [
           2
+        ],
+        "ends": [
+          [
+            4200,
+            4600,
+            4296,
+            4600
+          ]
         ]
       }
     }
   ],
   "balance": "cc5840f19e3d9691",
-  "hash": "d31091c00e075d36"
+  "hash": "afbb129eb4ede29c"
 }

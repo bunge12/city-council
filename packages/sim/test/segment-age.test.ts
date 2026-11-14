@@ -5,10 +5,10 @@ import {
   hashState,
   serialize,
   step,
-  submit,
   type Command,
   type SimState,
 } from "../src/index";
+import { submit } from "./seen-ends";
 import { cloneState } from "../src/state";
 import { applyRoadDelta, drainRoadChanges, encodeRoadDelta, recordRoadChanges } from "../src/roads/delta";
 import { checkRoadNetwork, isSegment, segmentIdLimit, type RoadNetwork } from "../src/roads/network";

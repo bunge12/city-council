@@ -4,7 +4,7 @@
 // PROTOCOL_VERSION on any change to a shape.
 
 import type { BuildingDelta } from "./buildings/delta";
-import type { Command, CommandResult } from "./commands";
+import type { Command, CommandResult, DroppedCommand } from "./commands";
 import type { LogEntry } from "./log";
 import type { RoadDelta } from "./roads/delta";
 import type { SimState, Speed } from "./state";
@@ -12,7 +12,7 @@ import type { UndoRecord } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 // ---- Client to sim ----
 
@@ -82,6 +82,13 @@ export interface DeltaMessage {
   buildings?: BuildingDelta;
   /** The whole undo history, when it changed. Left out otherwise. */
   undo?: UndoRecord[];
+  /**
+   * Commands accepted into the queue that a step then dropped, with why,
+   * for every player. Left out when none was. Together with `log` it
+   * settles every command the steps covered: each was applied, and is in
+   * `log`, or dropped, and is here.
+   */
+  dropped?: DroppedCommand[];
   /** Steps the host ran since the previous delta, paused steps included. */
   steps: number;
   /** Per-system time of the most recent step, in `step` order. */
@@ -89,8 +96,10 @@ export interface DeltaMessage {
 }
 
 /**
- * Whether a command was accepted into the queue. Accepted commands apply at
- * the next step and then appear in a delta's log.
+ * Whether a command was accepted into the queue. Accepted is not applied:
+ * an accepted command applies at the next step and then appears in a
+ * delta's `log`, or an earlier command in that step makes it invalid and it
+ * appears in the delta's `dropped`.
  */
 export interface CommandResultMessage {
   v: typeof PROTOCOL_VERSION;

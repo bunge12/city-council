@@ -36,6 +36,7 @@ import {
   deserialize,
   hashState,
   replay,
+  segmentEnds,
   type FromSimMessage,
 } from "@city-council/sim";
 import { expect, test } from "vitest";
@@ -183,8 +184,10 @@ test("soak: one hour of game time at 4x", () => {
       case "UpgradeRoad":
       case "BulldozeRoad": {
         const seg = pickSegment(mirror, (n * 7919) % SCALE_SEGMENTS);
-        if (seg === null) return null;
-        return type === "UpgradeRoad" ? [type, { segments: [seg], type: "avenue" }] : [type, { segments: [seg] }];
+        const roads = mirror.state?.roads;
+        if (seg === null || !roads) return null;
+        const ends = [segmentEnds(roads, seg)];
+        return type === "UpgradeRoad" ? [type, { segments: [seg], ends, type: "avenue" }] : [type, { segments: [seg], ends }];
       }
       default:
         return [type, {}];

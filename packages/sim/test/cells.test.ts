@@ -25,11 +25,11 @@ import {
   placesAlong,
   serialize,
   step,
-  submit,
   syncCells,
   type Command,
   type SimState,
 } from "../src/index";
+import { submit } from "./seen-ends";
 import { cloneState } from "../src/state";
 import { isSegment, segmentIdLimit, type RoadNetwork } from "../src/roads/network";
 import { checkCells, fromLocal, unzonedCells } from "../src/zoning/cells";
