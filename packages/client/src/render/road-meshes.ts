@@ -236,6 +236,9 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
     if (count === 0) return null;
     const mesh = new InstancedMesh(propGeometries[kind], propMaterial, count);
     mesh.name = kind;
+    // Lights and signs stand up off the road, so they cast shadows as trees do.
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     for (let k = 0; k < count; k++) {
       const o = k * PROP_STRIDE;
       dummy.position.set(data[o] ?? 0, data[o + 1] ?? 0, data[o + 2] ?? 0);

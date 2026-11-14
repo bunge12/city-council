@@ -168,7 +168,7 @@ const decorGround = groundAt(SIGNAL_CROSS.x, SIGNAL_CROSS.z);
 for (const { name, query } of BACKENDS) {
   test(`junctions get rounded kerbs, crossings, lights and signs, and tapers join two widths (${name})`, async ({ page }, testInfo) => {
     const backend = await openCity(page, query, "Decorations", decorationCity().bytes);
-    if (query === "?webgl") expect(backend).toBe("webgl2");
+    if (query.startsWith("?webgl")) expect(backend).toBe("webgl2");
     else if (process.env["CI"]) expect(backend).toBe("webgpu");
     testInfo.annotations.push({ type: "backend", description: backend });
     const stats = await roadStats(page);

@@ -365,8 +365,12 @@ export const VISUAL_FEATURES = {
   terrain: "low",
   /** Road surfaces, bridges, and the city band's lines. */
   roads: "low",
-  /** Lane markings and one-way arrows, in the street and low district bands. */
+  /** Lane markings, one-way arrows and zebra crossings, in the street and low district bands. */
   roadMarkings: "low",
+  /** Rounded kerbs and tapers where roads meet. */
+  roadKerbs: "low",
+  /** Traffic lights and yield signs at junctions, in the street band. */
+  roadProps: "low",
   /** Decorative trees near the camera, and the canopy colour further out. */
   trees: "low",
   /** Grass tufts near the camera. */
