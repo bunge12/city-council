@@ -100,6 +100,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** The segment list in a payload, or the reason it is not one. */
 function readSegments(command: string, value: unknown): number[] | string {
   if (!Array.isArray(value) || value.length === 0) return `${command} needs a list of one or more segment ids`;
+  if (value.length > ROAD_BUILD.editMaxSegments) {
+    return `${command} takes at most ${ROAD_BUILD.editMaxSegments} segments at once, and this names ${value.length}`;
+  }
   const seen = new Set<number>();
   for (const id of value) {
     if (!Number.isSafeInteger(id)) return `${command} needs whole-number segment ids`;

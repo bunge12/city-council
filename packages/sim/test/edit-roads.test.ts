@@ -148,6 +148,33 @@ function synthetic(h: (x: number, z: number) => number): Terrain {
   return { seed: 0, samples, spacing, heights, waterLevel: 10, fertile: empty, forest: empty, ore: empty, buildableShare: 1, attempts: 1 };
 }
 
+
+describe("the cap on how many segments one command names", () => {
+  // `editMaxSegments` in roads.json (M1 review, issue 80).
+  const tooMany = Array.from({ length: ROAD_BUILD.editMaxSegments + 1 }, (_, i) => i);
+
+  it("refuses a bulldoze or an upgrade over the cap, before looking at any id", () => {
+    const state = createBareState(SEED);
+    for (const command of [
+      { type: "BulldozeRoad", payload: { segments: tooMany } },
+      { type: "UpgradeRoad", payload: { segments: tooMany, type: "avenue" } },
+    ]) {
+      const result = submit(state, { seq: 1, playerId: "p1", ...command });
+      expect(result).toEqual({
+        ok: false,
+        reason: `${command.type} takes at most ${ROAD_BUILD.editMaxSegments} segments at once, and this names ${tooMany.length}`,
+      });
+    }
+    expect(state.pending).toEqual([]);
+  });
+
+  it("takes exactly the cap as far as the ids", () => {
+    const state = createBareState(SEED);
+    const result = submit(state, { seq: 1, playerId: "p1", type: "BulldozeRoad", payload: { segments: tooMany.slice(1) } });
+    expect(result).toEqual({ ok: false, reason: "Segment 1 does not exist" });
+  });
+});
+
 describe("BulldozeRoad", () => {
   it("removes a middle segment and leaves the junction nodes where they are", () => {
     const { state, centre } = crossroads();

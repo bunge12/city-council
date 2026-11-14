@@ -82,6 +82,11 @@ export interface RoadBuildBalance {
    */
   gridMaxStreets: number;
   /**
+   * Most segments one BulldozeRoad or UpgradeRoad may name. Keeps the step
+   * that applies it inside the tick budget.
+   */
+  editMaxSegments: number;
+  /**
    * The last block along a side of a grid takes what is left. Smaller than
    * this share of the asked-for block, it joins its neighbour instead.
    */
@@ -241,6 +246,8 @@ export function checkRoadBalance(data: unknown): string[] {
     if (!Number.isSafeInteger(undoSteps) || (undoSteps as number) < 1) errors.push("build.undoSteps must be a whole number of at least 1");
     const gridMax = build["gridMaxStreets"];
     if (!Number.isSafeInteger(gridMax) || (gridMax as number) < 4) errors.push("build.gridMaxStreets must be a whole number of at least 4");
+    const editMax = build["editMaxSegments"];
+    if (!Number.isSafeInteger(editMax) || (editMax as number) < 1) errors.push("build.editMaxSegments must be a whole number of at least 1");
     const share = build["gridMinBlockShare"];
     if (typeof share !== "number" || !(share > 0 && share <= 1)) errors.push("build.gridMinBlockShare must be a number over 0 and at most 1");
     // Positions are whole multiples of the step, so it must divide a metre

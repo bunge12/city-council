@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  BALANCE_STAMP,
+  replaysUnderThisBalance,
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
   SNAPSHOT_FORMAT_VERSION,
@@ -31,6 +33,7 @@ import v4Fixture from "./fixtures/snapshots/v4.json";
 import v5Fixture from "./fixtures/snapshots/v5.json";
 import v6Fixture from "./fixtures/snapshots/v6.json";
 import v7Fixture from "./fixtures/snapshots/v7.json";
+import v8Fixture from "./fixtures/snapshots/v8.json";
 import { snapshotChecksum } from "../src/snapshot";
 import { checkConnections } from "../src/roads/connections";
 import { heldIds } from "../src/undo";
@@ -344,6 +347,7 @@ describe("committed snapshots", () => {
       roads: fresh.roads,
       undo: [],
       connections: fresh.connections,
+      balance: "",
     });
   });
 
@@ -351,11 +355,12 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v2Fixture.hex));
     expect(header.stateVersion).toBe(2);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    const { roads, undo, connections, ...rest } = state;
+    const { roads, undo, connections, balance, ...rest } = state;
     const fresh = createState(state.seed);
     expect(roads).toEqual(fresh.roads);
     expect(connections).toEqual(fresh.connections);
     expect(undo).toEqual([]);
+    expect(balance).toBe("");
     // Everything the version 2 save held comes back unchanged.
     expect(hashState({ ...rest, version: 2 })).toBe(v2Fixture.hash);
   });
@@ -370,14 +375,14 @@ describe("committed snapshots", () => {
     expect(Array.from(state.roads.segFree)).toEqual([]);
     expect(Array.from(state.roads.nodeFree)).toEqual([]);
     expect(checkConnections(state.connections, state.roads)).toBeNull();
-    expect(hashState(state)).toBe("0c8ce64d94f25291");
+    expect(hashState(state)).toBe("6654e47ea86a147d");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
     const { state, header } = deserialize(fromHex(v4Fixture.hex));
     expect(header.stateVersion).toBe(4);
-    // Migrated, it is the version 7 fixture.
-    expect(hashState(state)).toBe(v7Fixture.hash);
+    // Migrated, it is the version 8 fixture.
+    expect(hashState(state)).toBe(v8Fixture.hash);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(state.undo.map((r) => [r.playerId, r.type])).toEqual([
       ["p1", "BuildRoad"],
@@ -393,8 +398,8 @@ describe("committed snapshots", () => {
   it("loads the version 5 fixture with each segment's level at both its ends", () => {
     const { state, header } = deserialize(fromHex(v5Fixture.hex));
     expect(header.stateVersion).toBe(5);
-    // Migrated, it is the version 7 fixture.
-    expect(hashState(state)).toBe(v7Fixture.hash);
+    // Migrated, it is the version 8 fixture.
+    expect(hashState(state)).toBe(v8Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v5Fixture.held);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(Array.from(state.roads.segLevelB)).toEqual(Array.from(state.roads.segLevelA));
@@ -414,8 +419,8 @@ describe("committed snapshots", () => {
   it("loads the version 6 fixture with every undo op saying which road it means", () => {
     const { state, header } = deserialize(fromHex(v6Fixture.hex));
     expect(header.stateVersion).toBe(6);
-    // Migrated, it is the version 7 fixture.
-    expect(hashState(state)).toBe(v7Fixture.hash);
+    // Migrated, it is the version 8 fixture.
+    expect(hashState(state)).toBe(v8Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v6Fixture.held);
     expect(Array.from(state.connections)).toEqual(v6Fixture.connections);
     let filled = 0;
@@ -437,23 +442,51 @@ describe("committed snapshots", () => {
     expect(submit(state, { seq: 2, playerId: "p1", type: "Undo", payload: {} })).toEqual({ ok: true });
   });
 
-  it("loads the version 7 fixture to its recorded hash", () => {
+  it("loads the version 7 fixture with an empty balance stamp, so it is not taken to replay", () => {
     const { state, header } = deserialize(fromHex(v7Fixture.hex));
     expect(header.stateVersion).toBe(7);
-    expect(hashState(state)).toBe(v7Fixture.hash);
+    expect(state.balance).toBe("");
+    expect(replaysUnderThisBalance(state)).toBe(false);
+    // Migrated, it is the version 8 fixture.
+    expect(hashState(state)).toBe(v8Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v7Fixture.held);
     expect(Array.from(state.connections)).toEqual(v7Fixture.connections);
   });
 
-  it("still writes the version 7 fixture byte for byte", () => {
+  it("loads the version 8 fixture to its recorded hash", () => {
+    const { state, header } = deserialize(fromHex(v8Fixture.hex));
+    expect(header.stateVersion).toBe(8);
+    expect(hashState(state)).toBe(v8Fixture.hash);
+    expect(heldIds(state.undo)).toEqual(v8Fixture.held);
+    expect(Array.from(state.connections)).toEqual(v8Fixture.connections);
+  });
+
+  it("still writes the version 8 fixture byte for byte", () => {
     // If this fails the byte layout changed: bump SNAPSHOT_FORMAT_VERSION and
     // keep reading the old layout, or explain in the pull request why not.
-    const { state } = deserialize(fromHex(v7Fixture.hex));
-    expect(toHex(serialize(state))).toBe(v7Fixture.hex);
+    const { state } = deserialize(fromHex(v8Fixture.hex));
+    expect(toHex(serialize(state))).toBe(v8Fixture.hex);
+  });
+
+  it("refuses a save whose balance stamp is not text", () => {
+    const { state } = deserialize(fromHex(v8Fixture.hex));
+    (state as unknown as Record<string, unknown>)["balance"] = 7;
+    const error = refusal(serialize(state));
+    expect(error.code).toBe("corrupt");
+    expect(error.message).toMatch(/balance stamp/);
+  });
+
+  it("keeps a new city's stamp through a save, and a city from another balance keeps its own", () => {
+    const fresh = createState(7);
+    expect(fresh.balance).toBe(BALANCE_STAMP);
+    expect(replaysUnderThisBalance(deserialize(serialize(fresh)).state)).toBe(true);
+    const other = deserialize(serialize({ ...fresh, balance: "0123456789abcdef" })).state;
+    expect(other.balance).toBe("0123456789abcdef");
+    expect(replaysUnderThisBalance(other)).toBe(false);
   });
 
   it("refuses a save whose connection list names a node that is not a connection", () => {
-    const { state } = deserialize(fromHex(v7Fixture.hex));
+    const { state } = deserialize(fromHex(v8Fixture.hex));
     state.connections = Int32Array.of(0);
     const error = refusal(serialize(state));
     expect(error.code).toBe("corrupt");

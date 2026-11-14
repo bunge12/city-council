@@ -21,30 +21,31 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(7);
+    expect(SNAPSHOT_VERSION).toBe(8);
     const fresh = createState(5);
-    expect(state).toEqual({ ...v1, version: 7, log: [], logOffset: 0, roads: fresh.roads, undo: [], connections: fresh.connections });
+    expect(state).toEqual({ ...v1, version: 8, log: [], logOffset: 0, roads: fresh.roads, undo: [], connections: fresh.connections, balance: "" });
     expect(() => hashState(state)).not.toThrow();
   });
 
   it("upgrades a version 2 state by adding a road network with only the outside connections", () => {
-    const v2 = older(createBareState(9), 2, "roads", "undo", "connections");
+    const v2 = older(createBareState(9), 2, "roads", "undo", "connections", "balance");
     const state = migrateState(v2);
     const fresh = createState(9);
-    expect(state).toEqual({ ...v2, version: 7, roads: fresh.roads, undo: [], connections: fresh.connections });
+    expect(state).toEqual({ ...v2, version: 8, roads: fresh.roads, undo: [], connections: fresh.connections, balance: "" });
     expect(() => hashState(state)).not.toThrow();
   });
 
   it("upgrades a version 3 state by adding an empty undo history", () => {
-    const state = migrateState(older(createBareState(9), 3, "undo", "connections"));
+    const state = migrateState(older(createBareState(9), 3, "undo", "connections", "balance"));
     expect(state.undo).toEqual([]);
-    expect(state.version).toBe(7);
+    expect(state.version).toBe(8);
     expect(() => hashState(state)).not.toThrow();
   });
 
   it("upgrades a version 4 state by adding the connections a new city of its seed gets", () => {
-    const state = migrateState(older(createBareState(9), 4, "connections"));
-    expect(hashState(state)).toBe(hashState(createState(9)));
+    const state = migrateState(older(createBareState(9), 4, "connections", "balance"));
+    // All but the balance stamp, which an old save does not have.
+    expect(hashState(state)).toBe(hashState({ ...createState(9), balance: "" }));
   });
 
   it("keeps a version 4 city's own roads and ids, and places its connections clear of them", () => {
@@ -61,7 +62,7 @@ describe("migrateState", () => {
     const a = addNode(v4.roads, mx + 50 * px, mz + 50 * pz, 10);
     const b = addNode(v4.roads, mx - 50 * px, mz - 50 * pz, 10);
     const street = addSegment(v4.roads, a, b, { type: 0 });
-    const state = migrateState(older(v4, 4, "connections"));
+    const state = migrateState(older(v4, 4, "connections", "balance"));
     expect(checkConnections(state.connections, state.roads)).toBeNull();
     expect(state.connections.length).toBeGreaterThanOrEqual(2);
     expect(isNode(state.roads, a) && isNode(state.roads, b)).toBe(true);
@@ -87,7 +88,7 @@ describe("migrateState", () => {
     const row = { a, b, type: 0, network: 0, level: LEVEL_BRIDGE, flags: 1, cx: 1050, cz: 1000, length: 100 };
     const undo5 = [{ playerId: "p1", entry: 0, type: "BuildRoad", ops: [{ op: "addNode", id: a, grown: true }, { op: "addSeg", id: 9, grown: true, row }] }];
     const migrated = migrateState({ ...older(state, 5, "roads", "undo"), roads: roads5, undo: undo5 });
-    expect(migrated.version).toBe(7);
+    expect(migrated.version).toBe(8);
     expect(Object.keys(migrated.roads)).toEqual(Object.keys(createRoadNetwork()));
     expect(migrated.roads).toEqual(net);
     expect(migrated.undo[0]?.ops[0]).toEqual({ op: "addNode", id: a, grown: true });
@@ -118,7 +119,7 @@ describe("migrateState", () => {
       { playerId: "p3", entry: 4, type: "UpgradeRoad", ops: [{ op: "restyle", id: lost, from: 0, to: 1, reverse: false }] },
     ];
     const migrated = migrateState({ ...older(state, 6, "undo"), undo: undo6 });
-    expect(migrated.version).toBe(7);
+    expect(migrated.version).toBe(8);
     expect(migrated.roads).toEqual(net);
     const ops = migrated.undo.map((r) => r.ops[0]);
     // Walking back from the road as it is: a to b now, so b to a before the
@@ -131,6 +132,13 @@ describe("migrateState", () => {
     expect(migrated.undo[1]?.ops[1]).toEqual(undo6[1]?.ops[1]);
     // Ends no road has, so that undo is refused.
     expect(ops[4]).toMatchObject({ op: "restyle", a: 0, b: 0 });
+  });
+
+  it("upgrades a version 7 state by adding an empty balance stamp", () => {
+    const state = createState(9);
+    const migrated = migrateState(older(state, 7, "balance"));
+    expect(migrated).toEqual({ ...state, balance: "" });
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 
   it("leaves a current state as it is", () => {
