@@ -240,6 +240,12 @@ interface SettleJob {
   queue: ClaimQueue;
   seeds: Seed[];
   nextSeed: number;
+  /**
+   * Set by the step whose command made this job too big for one tick, which
+   * has spent its time laying the change out. Its walk starts on the next
+   * step. Walked in fewer or more steps, a change settles to the same cells.
+   */
+  fresh?: boolean;
 }
 
 /**
@@ -1329,18 +1335,26 @@ export function stepCells(state: SimState): void {
   // loaded mid-settle, which settled everything at load, agrees.
   const from = state.cellsReadyAt > state.tick ? state.cellsReadyAt : state.tick;
   state.cellsReadyAt = from + ticks;
+  if (index.pending) index.pending.fresh = true;
 }
 
 /**
  * Walks one slice of a change still settling, once a step, paused or not.
- * The step whose tick is the last before `state.cellsReadyAt` walks
- * whatever is left, however much that is, so the cells are settled on that
- * tick on every machine, whatever its speed (CLAUDE.md rule 5).
+ * The step that applied a change too big for one tick walks none of it:
+ * laying the change out was that step's work. The step whose tick is the
+ * last before `state.cellsReadyAt` walks whatever is left, however much
+ * that is, so the cells are settled on that tick on every machine,
+ * whatever its speed (CLAUDE.md rule 5).
  */
 export function settleCells(state: SimState): void {
   const index = live.get(state.roads);
   if (!index?.pending) return;
-  drain(index, state.tick + 1 >= state.cellsReadyAt ? Infinity : ZONING_BALANCE.settleCellsPerTick);
+  const last = state.tick + 1 >= state.cellsReadyAt;
+  if (index.pending.fresh && !last) {
+    index.pending.fresh = false;
+    return;
+  }
+  drain(index, last ? Infinity : ZONING_BALANCE.settleCellsPerTick);
 }
 
 /** Whether the sim may read which cells are blocked: no change of roads is still settling. */

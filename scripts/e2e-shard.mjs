@@ -14,10 +14,24 @@
 // With --list it prints every runner's files and minutes instead.
 
 import { readFileSync, readdirSync } from "node:fs";
+import { relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = new URL("../", import.meta.url);
 const projects = JSON.parse(readFileSync(new URL("e2e/projects.json", root), "utf8"));
 const walkthrough = new RegExp(projects.walkthrough);
+
+// Playwright finds tests in any `*.spec.*` or `*.test.*` file under e2e/,
+// in subfolders too. This deals out only `e2e/*.spec.ts`, so any other
+// would run on no CI runner: refuse instead.
+const e2eDir = fileURLToPath(new URL("e2e/", root));
+const stray = readdirSync(e2eDir, { recursive: true })
+  .map(String)
+  .filter((f) => /\.(spec|test)\.[cm]?[jt]sx?$/.test(f) && !/^[^/\\]+\.spec\.ts$/.test(f));
+if (stray.length > 0) {
+  console.error(`put spec files directly in e2e/ and name them *.spec.ts, or no CI runner gets them: ${stray.map((f) => relative(".", `${e2eDir}${f}`)).join(", ")}`);
+  process.exit(1);
+}
 
 /** The chromium project's spec files: every one the other projects do not run. */
 const files = readdirSync(new URL("e2e/", root))

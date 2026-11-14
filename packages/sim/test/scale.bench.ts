@@ -163,10 +163,14 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   let gridOps: NetworkOp[] = [];
   const hooked: Record<string, { fn: () => void; beforeEach?: () => void; afterEach?: () => void }> = {
     "the step that applies one BuildRoadGrid at the cap over existing streets, its cells left to settle": {
+      // What step() does: the command, then the cells (step.ts). The step
+      // that lays a big change out walks none of it, but it is timed here
+      // so a step that starts to is caught.
       fn: () => {
         gridOps = applyGrid(grid);
         blockById(blocks, 0);
         stepCells(state);
+        settleCells(state);
       },
       afterEach: () => {
         syncCells(state);
@@ -192,6 +196,8 @@ test("the M1 scale network", async ({ bench, annotate }) => {
       beforeEach: () => {
         gridOps = applyGrid(grid);
         stepCells(state);
+        // The step that applied it walks none of it: the next one walks the first slice.
+        settleCells(state);
       },
       fn: () => settleCells(state),
       afterEach: () => {
