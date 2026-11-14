@@ -97,6 +97,39 @@ export function curvedCity(): { bytes: Buffer; state: SimState } {
   return { bytes: Buffer.from(serialize(state)), state };
 }
 
+/** Where the decorations fixture's avenue crosses its street, and its street T. Issue 87. */
+export const SIGNAL_CROSS = { x: 4550, z: 4650 };
+export const YIELD_TEE = { x: 4250, z: 4700 };
+
+/**
+ * The roads of the decorations fixture, in build order (issue 87): a street
+ * running straight on into an avenue and one bent into another, a street
+ * T, and an avenue crossing a street.
+ */
+export function decorationRoads(): Road[] {
+  return [
+    // Street into avenue, straight on.
+    [[4150, 4450], [4250, 4450], "street"],
+    [[4250, 4450], [4420, 4450], "avenue"],
+    // Street into avenue, bent 20 degrees.
+    [[4150, 4560], [4250, 4560], "street"],
+    [[4250, 4560], [4391, 4611], "avenue"],
+    // A T of streets: a yield sign on each of its three roads.
+    [[4150, YIELD_TEE.z], [4350, YIELD_TEE.z], "street"],
+    [[YIELD_TEE.x, YIELD_TEE.z], [YIELD_TEE.x, 4820], "street"],
+    // An avenue crossing a street: a traffic light on each of its four roads.
+    [[SIGNAL_CROSS.x, 4500], [SIGNAL_CROSS.x, 4850], "avenue"],
+    [[4460, SIGNAL_CROSS.z], [4660, SIGNAL_CROSS.z], "street"],
+  ];
+}
+
+/** The decorations fixture city. */
+export function decorationCity(): { bytes: Buffer; state: SimState } {
+  const state = createState(SEED);
+  buildRoads(state, decorationRoads());
+  return { bytes: Buffer.from(serialize(state)), state };
+}
+
 /** Ground height at (x, z) on the fixture seed's map. */
 export function groundAt(x: number, z: number): number {
   return heightAt(generateTerrain(SEED), x, z);

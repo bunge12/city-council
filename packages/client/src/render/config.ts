@@ -202,6 +202,56 @@ export const ROADS = {
     underside: 0x8e8a82,
     pier: 0xa7a296,
   },
+  /**
+   * Rounded kerb corners (issue 87). Where two roads meet at under 180
+   * degrees, the kerbs turn through an arc of about `radius` metres, the
+   * smaller of the two roads' radii by type id. Each road is cut back
+   * further to make room, by at most `maxCut` metres past the sharp corner.
+   * The arc is drawn as `steps` straight pieces.
+   */
+  corners: {
+    radius: { street: 6, avenue: 9, oneWay: 6, highway: 12 } as Readonly<Record<string, number>>,
+    radiusDefault: 6,
+    maxCut: 14,
+    steps: 6,
+  },
+  /**
+   * Where a road of one width runs on into a road of another, bent by at
+   * most `maxBend` radians, the narrow road widens into the wide one over
+   * `ratio` metres for each metre of difference in half-width (issue 87).
+   */
+  taper: { ratio: 5, maxBend: 0.8 },
+  /**
+   * Zebra crossings, on each road at a junction of three or more (issue 87).
+   * Metres: the crossing starts `gap` past the junction and is `length`
+   * long; its bars are `bar` wide with `space` between, and stop `margin`
+   * short of each kerb. Lane lines stop `gap` short of it. None on types
+   * not in `types`, or on a road too short to have room at both ends.
+   */
+  crossings: {
+    gap: 0.8,
+    length: 3,
+    bar: 0.5,
+    space: 0.55,
+    margin: 0.5,
+    types: ["street", "avenue", "oneWay"] as readonly string[],
+  },
+  /**
+   * Signals and signs at junctions of three or more roads (issue 87). Drawn
+   * in the street band only. A junction with an avenue gets a traffic light
+   * on each road that brings traffic in, and one of streets and one-ways
+   * gets a yield sign on each. They stand `kerbGap` metres outside the
+   * kerb on the right of the incoming traffic, `setback` metres back from
+   * the crossing. Decoration only: the sim has no signals.
+   */
+  props: {
+    signalTypes: ["avenue"] as readonly string[],
+    yieldTypes: ["street", "oneWay"] as readonly string[],
+    kerbGap: 1,
+    setback: 1.5,
+    signal: { poleHeight: 6.2, mast: 5.5, pole: 0x5d6168, head: 0x2b2d30, housing: 0xd2a72a, red: 0xe03a2c, amber: 0xf2a33a, green: 0x39c46a },
+    yield: { poleHeight: 2.1, size: 0.9, pole: 0x8d9198, red: 0xc8262b, white: 0xf2f2ee, back: 0x9da1a6 },
+  },
 } as const;
 
 /**

@@ -521,14 +521,39 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
   // back. Where a narrow road meets a wide one nearly head on, the kerbs
   // meet behind the wide road's node, and the narrow road tapers into it.
   const corners: ({ x: number; z: number } | "bevel" | null)[] = arms.map(() => null);
+  // Corners whose kerbs turn through an arc rather than meet at a point,
+  // and how far along each kerb the arc's ends lie: before the cut, when
+  // another corner cuts the road back further.
+  const rounded = arms.map(() => false);
+  const arcFrom = arms.map(() => 0);
+  const arcTo = arms.map(() => 0);
+  const taper = taperArms(arms, gaps);
   for (let i = 0; i < k; i++) {
     const meet = meets[i];
     const gap = gaps[i] ?? 0;
     if (!meet || gap >= Math.PI - STRAIGHT) continue;
     if ((meet.ti < 0 && meet.tj < 0) || meet.ti > ROADS.maxTrim || meet.tj > ROADS.maxTrim) continue;
-    trims[i] = Math.max(trims[i] ?? 0, meet.ti);
-    trims[(i + 1) % k] = Math.max(trims[(i + 1) % k] ?? 0, meet.tj);
-    corners[i] = at(arms[i] as Arm, meet.ti);
+    const a = arms[i] as Arm;
+    const b = arms[(i + 1) % k] as Arm;
+    // Room for the arc: each kerb gives up the arc's tangent length past the sharp corner.
+    let cut = 0;
+    if (!taper && meet.ti >= 0 && meet.tj >= 0) {
+      const radius = Math.min(cornerRadius(a.type), cornerRadius(b.type));
+      cut = Math.min(ROADS.corners.maxCut, radius / Math.tan(gap / 2));
+      rounded[i] = cut > 1e-3;
+      arcFrom[i] = meet.ti + cut;
+      arcTo[i] = meet.tj + cut;
+    }
+    trims[i] = Math.max(trims[i] ?? 0, meet.ti + cut);
+    trims[(i + 1) % k] = Math.max(trims[(i + 1) % k] ?? 0, meet.tj + cut);
+    corners[i] = at(a, meet.ti);
+  }
+  // A narrow road running on into a wide one widens over a stretch of its own length.
+  if (taper) {
+    const narrow = taper.narrow;
+    const n = arms[narrow] as Arm;
+    const w = arms[1 - narrow] as Arm;
+    trims[narrow] = Math.max(trims[narrow] ?? 0, Math.min(ROADS.maxTrim, (w.half - n.half) * ROADS.taper.ratio));
   }
   // A short road cannot give more than half its length to each end, or all
   // of it when the far end is a dead end. Where that leaves a corner short
@@ -549,7 +574,8 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
   // the outer corner without covering road the strips already draw.
   for (let i = 0; i < k; i++) {
     const gap = gaps[i] ?? 0;
-    if (gap <= Math.PI + STRAIGHT) continue;
+    // Round the outside of a taper the kerbs run straight from the narrow road's cut to the wide one's.
+    if (gap <= Math.PI + STRAIGHT || taper) continue;
     const a = arms[i] as Arm;
     const b = arms[(i + 1) % k] as Arm;
     const meet = meets[i];
@@ -560,49 +586,178 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
     if (reach <= ROADS.miterLimit * Math.max(a.half, b.half)) corners[i] = p;
   }
 
-  const ring: number[] = [];
-  let widest = arms[0] as Arm;
-  for (let i = 0; i < k; i++) {
-    const a = arms[i] as Arm;
-    if (a.half > widest.half) widest = a;
-    const t = trims[i] ?? 0;
-    if (a.path.curved) {
-      // The strip's cut edge, on the curve: the same points the strip ends on.
-      const f = a.path.frame(a.fromA ? t : a.path.length - t);
-      const side = a.fromA ? 1 : -1;
-      ring.push(f.x - f.nx * a.half * side, f.z - f.nz * a.half * side);
-      ring.push(f.x + f.nx * a.half * side, f.z + f.nz * a.half * side);
-    } else {
-      ring.push(x + a.dx * t - a.nx * a.half, z + a.dz * t - a.nz * a.half);
-      ring.push(x + a.dx * t + a.nx * a.half, z + a.dz * t + a.nz * a.half);
-    }
-    const c = corners[i];
-    if (c === "bevel") {
-      const b = arms[(i + 1) % k] as Arm;
-      ring.push(x + a.nx * a.half, z + a.nz * a.half);
-      ring.push(x - b.nx * b.half, z - b.nz * b.half);
-    } else if (c) {
-      ring.push(c.x, c.z);
-    }
-  }
   // A wide road's kerbs at the node can stand out past a narrow
-  // neighbour's, as at a sharp fork. Take in every kerb corner at the node
-  // that lies outside the polygon so far, so no road is left uncovered.
-  // A corner already on another road's strip, past its cut, is drawn there.
+  // neighbour's, as at a sharp fork. Every kerb corner at the node that
+  // lies on no other road's strip, past its cut, goes into the polygon
+  // below. A corner it falls in stays sharp, so the polygon still reaches it.
   const onStrip = (px: number, pz: number) =>
     arms.some((b, i) => {
       const t = px * b.dx + pz * b.dz;
       const o = px * b.nx + pz * b.nz;
       return t > (trims[i] ?? 0) + 1e-6 && Math.abs(o) < b.half - 1e-6;
     });
+  const kerbCorners: [number, number][] = [];
   for (const a of arms) {
     for (const side of [1, -1]) {
       const px = a.nx * a.half * side;
       const pz = a.nz * a.half * side;
-      if (!onStrip(px, pz)) widen(ring, px, pz, x, z);
+      if (!onStrip(px, pz)) kerbCorners.push([px, pz]);
     }
   }
+  /** The corner between arm i and the next that the ray from the node through (px, pz) passes, or -1. */
+  const cornerOf = (px: number, pz: number): number => {
+    const ang = Math.atan2(pz, px);
+    for (let i = 0; i < k; i++) {
+      let off = ang - (arms[i] as Arm).angle;
+      while (off < 0) off += 2 * Math.PI;
+      while (off >= 2 * Math.PI) off -= 2 * Math.PI;
+      if (off > 1e-9 && off < (gaps[i] ?? 0) - 1e-9) return i;
+    }
+    return -1;
+  };
+
+  const makeRing = (): number[] => {
+    const ring: number[] = [];
+    for (let i = 0; i < k; i++) {
+      const a = arms[i] as Arm;
+      const t = trims[i] ?? 0;
+      if (a.path.curved) {
+        // A curved kerb bends away from the straight line between the corner
+        // and the cut, so the polygon follows it there.
+        const before = (i + k - 1) % k;
+        kerbRun(ring, a, kerbStart(corners[before], rounded[before] ? Math.min(arcTo[before] ?? 0, t) : undefined, meets[before]?.tj), t, -1);
+        // The strip's cut edge, on the curve: the same points the strip ends on.
+        const f = a.path.frame(a.fromA ? t : a.path.length - t);
+        const side = a.fromA ? 1 : -1;
+        ring.push(f.x - f.nx * a.half * side, f.z - f.nz * a.half * side);
+        ring.push(f.x + f.nx * a.half * side, f.z + f.nz * a.half * side);
+        kerbRun(ring, a, t, kerbStart(corners[i], rounded[i] ? Math.min(arcFrom[i] ?? 0, t) : undefined, meets[i]?.ti), 1);
+      } else {
+        ring.push(x + a.dx * t - a.nx * a.half, z + a.dz * t - a.nz * a.half);
+        ring.push(x + a.dx * t + a.nx * a.half, z + a.dz * t + a.nz * a.half);
+      }
+      const c = corners[i];
+      if (c === "bevel") {
+        const b = arms[(i + 1) % k] as Arm;
+        ring.push(x + a.nx * a.half, z + a.nz * a.half);
+        ring.push(x - b.nx * b.half, z - b.nz * b.half);
+      } else if (c && rounded[i]) {
+        const b = arms[(i + 1) % k] as Arm;
+        const tb = trims[(i + 1) % k] ?? 0;
+        const ta = Math.min(arcFrom[i] ?? 0, t);
+        const tc = Math.min(arcTo[i] ?? 0, tb);
+        const from = kerbAt(a, ta, 1, x, z);
+        const to = kerbAt(b, tc, -1, x, z);
+        // On a curved kerb the arc leaves along the kerb, so it bends toward where the kerbs' tangents there meet.
+        const control = a.path.curved || b.path.curved ? (tangentMeet(armKerb(a, ta, 1), armKerb(b, tc, -1)) ?? c) : c;
+        if (ta < t - 1e-6) ring.push(from.x, from.z);
+        roundCorner(ring, from, to, control);
+        if (tc < tb - 1e-6) ring.push(to.x, to.z);
+      } else if (c) {
+        ring.push(c.x, c.z);
+      }
+    }
+    return ring;
+  };
+  let ring = makeRing();
+  // A rounded corner that leaves a kerb corner outside stays sharp, as the
+  // polygon reached it before corners were rounded.
+  for (let pass = 0; pass < k; pass++) {
+    let changed = false;
+    for (const [px, pz] of kerbCorners) {
+      const i = cornerOf(px, pz);
+      if (i < 0 || !rounded[i] || outsideAt(ring, px, pz, x, z) < 0) continue;
+      rounded[i] = false;
+      changed = true;
+    }
+    if (!changed) break;
+    ring = makeRing();
+  }
+  // Take in each of those kerb corners that lies outside the polygon so
+  // far, so no road is left uncovered.
+  for (const [px, pz] of kerbCorners) widen(ring, px, pz, x, z);
+  let widest = arms[0] as Arm;
+  for (const a of arms) if (a.half > widest.half) widest = a;
   return { node, x, z, segs: arms.map((a) => a.seg), trims, ring, type: widest.type };
+}
+
+/** A kerb of arm `a` at distance `t` from the node at (x, z): left with `side` 1, right with -1. */
+function kerbAt(a: Arm, t: number, side: number, x: number, z: number): { x: number; z: number } {
+  if (a.path.curved) return armKerb(a, t, side);
+  return { x: x + a.dx * t + a.nx * a.half * side, z: z + a.dz * t + a.nz * a.half * side };
+}
+
+/** Where two kerbs' tangent lines meet, each running back toward the node from its point. Null when they do not meet in front. */
+function tangentMeet(p: { x: number; z: number; dx: number; dz: number }, q: { x: number; z: number; dx: number; dz: number }): { x: number; z: number } | null {
+  const det = -(p.dx * q.dz - p.dz * q.dx);
+  if (Math.abs(det) < 1e-9) return null;
+  const ex = q.x - p.x;
+  const ez = q.z - p.z;
+  const a = (-ex * q.dz + q.dx * ez) / det;
+  const b = (p.dx * ez - p.dz * ex) / det;
+  // Both back toward the node from the cut, not out along the road.
+  if (a > 1e-6 || b > 1e-6) return null;
+  return { x: p.x + p.dx * a, z: p.z + p.dz * a };
+}
+
+/**
+ * How far from the node a kerb runs straight from its corner: from the
+ * sharp corner, from the end of its arc when the corner is rounded, or
+ * from the node when it is bevelled, mitred or open.
+ */
+function kerbStart(corner: { x: number; z: number } | "bevel" | null | undefined, arcEnd: number | undefined, meet: number | undefined): number {
+  if (arcEnd !== undefined && corner && corner !== "bevel") return arcEnd;
+  if (corner && corner !== "bevel") return Math.max(0, meet ?? 0);
+  return 0;
+}
+
+/** Points on arm `a`'s kerb on `side`, strictly between distances `from` and `to` from the node, in that order, about every 2 m. */
+function kerbRun(ring: number[], a: Arm, from: number, to: number, side: number): void {
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return;
+  const span = to - from;
+  const n = Math.ceil(Math.abs(span) / KERB_RUN_STEP);
+  for (let s = 1; s < n; s++) {
+    const p = armKerb(a, from + (span * s) / n, side);
+    ring.push(p.x, p.z);
+  }
+}
+
+/** Metres between points the junction polygon takes along a curved kerb. */
+const KERB_RUN_STEP = 2;
+
+/** The kerb radius of a corner on a road of `type`, metres. */
+function cornerRadius(type: RoadType): number {
+  return ROADS.corners.radius[type.id] ?? ROADS.corners.radiusDefault;
+}
+
+/**
+ * Whether the two roads at a node are a taper: different widths, bent by
+ * no more than `ROADS.taper.maxBend`. Returns which of the two is narrow.
+ */
+function taperArms(arms: readonly Arm[], gaps: readonly number[]): { narrow: number } | null {
+  if (arms.length !== 2) return null;
+  const [a, b] = arms as [Arm, Arm];
+  if (Math.abs(a.half - b.half) < 1e-6) return null;
+  const bend = Math.abs((gaps[0] ?? Math.PI) - Math.PI);
+  if (bend > ROADS.taper.maxBend) return null;
+  return { narrow: a.half < b.half ? 0 : 1 };
+}
+
+/**
+ * Pushes the inside points of a kerb's arc round a corner onto `ring`,
+ * from `from` on one road's kerb to `to` on the next, bending toward the
+ * sharp corner `c` the kerbs would make. A quadratic with `c` as its
+ * control point leaves each kerb along it, so the turn has no kink.
+ */
+function roundCorner(ring: number[], from: { x: number; z: number }, to: { x: number; z: number }, c: { x: number; z: number }): void {
+  const steps = ROADS.corners.steps;
+  for (let s = 1; s < steps; s++) {
+    const u = s / steps;
+    const w0 = (1 - u) * (1 - u);
+    const w1 = 2 * u * (1 - u);
+    const w2 = u * u;
+    ring.push(w0 * from.x + w1 * c.x + w2 * to.x, w0 * from.z + w1 * c.z + w2 * to.z);
+  }
 }
 
 /**
@@ -610,9 +765,19 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
  * (x, z) in angle order, if it lies outside it. The polygon stays star-shaped.
  */
 function widen(ring: number[], px: number, pz: number, x: number, z: number): void {
+  const at = outsideAt(ring, px, pz, x, z);
+  if (at >= 0) ring.splice(at * 2, 0, x + px, z + pz);
+}
+
+/**
+ * Where point (x + px, z + pz) would go into `ring`, a polygon star-shaped
+ * about (x, z) in angle order, as a vertex index, when it lies outside it.
+ * -1 when it lies inside.
+ */
+function outsideAt(ring: readonly number[], px: number, pz: number, x: number, z: number): number {
   const n = ring.length / 2;
   const reach = Math.sqrt(px * px + pz * pz);
-  if (reach === 0) return;
+  if (reach === 0) return -1;
   const ux = px / reach;
   const uz = pz / reach;
   for (let k = 0; k < n; k++) {
@@ -629,9 +794,9 @@ function widen(ring: number[], px: number, pz: number, x: number, z: number): vo
     const w = (ux * az - uz * ax) / det;
     if (s <= 0 || w < 0 || w > 1) continue;
     // The edge the ray crosses, and the side of the ring the point is on.
-    if (reach > s + 1e-6) ring.splice((k + 1) * 2, 0, x + px, z + pz);
-    return;
+    return reach > s + 1e-6 ? k + 1 : -1;
   }
+  return -1;
 }
 
 /** How far `seg` is cut back at `node`, given the junction there. */
@@ -719,6 +884,47 @@ export interface RoadChunkGeometry {
   /** Segments and junctions drawn. */
   segments: number;
   junctions: number;
+  /** Traffic lights and yield signs to stand in this chunk: x, y, z and turn about y for each, `PROP_STRIDE` numbers apiece. */
+  signals: Float32Array;
+  yields: Float32Array;
+}
+
+/** Numbers per prop in `RoadChunkGeometry.signals` and `yields`: x, y, z and turn about y. */
+export const PROP_STRIDE = 4;
+
+/** Whether `type` gets zebra crossings. */
+function crosses(type: RoadType): boolean {
+  return ROADS.crossings.types.includes(type.id);
+}
+
+/**
+ * Where segment `seg`'s zebra crossings lie, as distances from node A: one
+ * at each end that is a junction of three or more roads, when the segment
+ * is on the ground and of a type that has them, and the crossing with a gap
+ * each side fits between the cut and the segment's middle. `t0` and `t1`
+ * are the cuts. Null at an end with none. Each end depends only on its own
+ * junction, since a junction never cuts a road back past its middle, so a
+ * change at one end never moves the crossing at the other.
+ */
+export function crossingsOf(
+  net: RoadNet,
+  seg: number,
+  f: SegPath,
+  t0: number,
+  t1: number,
+  junctions: (node: number) => Junction | null,
+): { a: [number, number] | null; b: [number, number] | null } {
+  const none = { a: null, b: null };
+  if (!crosses(f.type) || isRaised(net, seg) || net.segLevelA[seg] === LEVEL_BRIDGE) return none;
+  const c = ROADS.crossings;
+  const at = (node: number) => (junctions(node)?.segs.length ?? 0) >= 3 && nodeLift(net, node) === 0;
+  const room = 2 * c.gap + c.length;
+  const atA = f.length / 2 - t0 >= room && at(net.segA[seg] ?? NONE);
+  const atB = t1 - f.length / 2 >= room && at(net.segB[seg] ?? NONE);
+  return {
+    a: atA ? [t0 + c.gap, t0 + c.gap + c.length] : null,
+    b: atB ? [t1 - c.gap - c.length, t1 - c.gap] : null,
+  };
 }
 
 const surfaceColour = (type: RoadType) => linearRgb(ROADS.surface[type.id] ?? ROADS.surfaceDefault);
@@ -791,6 +997,8 @@ export function buildRoadChunk(
   const m = ROADS.markings;
   let segCount = 0;
   let junctionCount = 0;
+  const signals: number[] = [];
+  const yields: number[] = [];
 
   const ground = (mesh: Mesh, x: number, z: number, rgb: readonly number[]): number => {
     const v = mesh.vertex(x, heightAt(terrain, x, z), z, rgb);
@@ -842,6 +1050,10 @@ export function buildRoadChunk(
     const lineRgb = lineColour === undefined ? null : linearRgb(lineColour);
     const rgb = surfaceColour(f.type);
     const paints = paintFor(f.type);
+    const cross = crossingsOf(net, seg, f, t0, t1, junctions);
+    // Lane lines and arrows stop short of a crossing.
+    const paintFrom = cross.a ? cross.a[1] + m.width + ROADS.crossings.gap : t0;
+    const paintTo = cross.b ? cross.b[0] - m.width - ROADS.crossings.gap : t1;
     let drew = false;
 
     // City lines run the whole centre line; they are one colour and unlit, so overlaps at junctions do not show.
@@ -902,8 +1114,9 @@ export function buildRoadChunk(
         prev = end;
         drew = true;
         const piece: Piece = { t0: s0, t1: s1, r0: start.hr, l0: start.hl, r1: end.hr, l1: end.hl };
-        for (const paint of paints) paintPiece(markings, f, piece, paint, m.width);
-        if (f.type.oneWay) arrows(markings, f, piece, t0, t1);
+        for (const paint of paints) paintPiece(markings, f, piece, paint, m.width, paintFrom, paintTo);
+        if (f.type.oneWay) arrows(markings, f, piece, paintFrom, paintTo);
+        for (const span of [cross.a, cross.b]) if (span) zebra(markings, f, piece, span);
         if (bridge) bridgeSides(surface, f, s0, s1, deckAt);
       }
     }
@@ -949,6 +1162,7 @@ export function buildRoadChunk(
       }
       for (let k = 0; k < sides; k++) lines.indices.push(centre, ring[(k + 1) % sides] ?? 0, ring[k] ?? 0);
     }
+    if (j) props(net, terrain, j, junctions, signals, yields);
     if (!j || j.ring.length < 6) continue;
     const rgb = surfaceColour(j.type);
     const lift = nodeLift(net, node);
@@ -967,7 +1181,77 @@ export function buildRoadChunk(
     if (surface.indices.length > before) junctionCount++;
   }
 
-  return { surface: surface.done(), markings: markings.done(), lines: lines.done(), segments: segCount, junctions: junctionCount };
+  return {
+    surface: surface.done(),
+    markings: markings.done(),
+    lines: lines.done(),
+    segments: segCount,
+    junctions: junctionCount,
+    signals: Float32Array.from(signals),
+    yields: Float32Array.from(yields),
+  };
+}
+
+/**
+ * The traffic lights or yield signs at junction `j`, pushed onto `signals`
+ * or `yields`. A junction of three or more roads on the ground gets lights
+ * when one of its roads is of a `ROADS.props.signalTypes` type, and yield
+ * signs when all are of `yieldTypes`. Each road that brings traffic in gets
+ * one, outside the kerb on that traffic's right, just back from the
+ * crossing, turned to face it. A spot on another road is left empty.
+ */
+function props(
+  net: RoadNet,
+  terrain: Terrain,
+  j: Junction,
+  junctions: (node: number) => Junction | null,
+  signals: number[],
+  yields: number[],
+): void {
+  if (j.segs.length < 3 || nodeLift(net, j.node) !== 0) return;
+  const P = ROADS.props;
+  const types = j.segs.map((s) => roadTypeOf(net, s).id);
+  const into = types.some((t) => P.signalTypes.includes(t)) ? signals : types.every((t) => P.yieldTypes.includes(t)) ? yields : null;
+  if (!into) return;
+  const paths = j.segs.map((s) => segPath(net, s));
+  if (j.segs.some((s) => isRaised(net, s) || net.segLevelA[s] === LEVEL_BRIDGE)) return;
+  const arms = j.segs.map((s, i) => {
+    const f = paths[i] as SegPath;
+    const fromA = net.segA[s] === j.node;
+    return { seg: s, f, fromA, ...f.leaving(fromA) };
+  });
+  for (let i = 0; i < arms.length; i++) {
+    const a = arms[i] as (typeof arms)[number];
+    // A one-way runs from node A to node B, so it brings traffic in only at B.
+    if (a.f.type.oneWay && a.fromA) continue;
+    const trim = j.trims[i] ?? 0;
+    const other = a.fromA ? (net.segB[a.seg] ?? NONE) : (net.segA[a.seg] ?? NONE);
+    const t0 = a.fromA ? trim : trimAt(junctions(other), a.seg);
+    const t1 = a.fromA ? a.f.length - trimAt(junctions(other), a.seg) : a.f.length - trim;
+    const cross = crossingsOf(net, a.seg, a.f, t0, t1, junctions);
+    const span = a.fromA ? cross.a : cross.b;
+    const back = trim + (span ? ROADS.crossings.gap + ROADS.crossings.length : 0) + P.setback;
+    if (back > a.f.length / 2) continue;
+    const fr = a.f.frame(a.fromA ? back : a.f.length - back);
+    // The frame runs from node A; turn it to run away from this node.
+    const dx = a.fromA ? fr.dx : -fr.dx;
+    const dz = a.fromA ? fr.dz : -fr.dz;
+    // Incoming traffic runs toward the node, along (-dx, -dz). Its right,
+    // forward cross up in this right-handed frame with y up, is (dz, -dx).
+    const out = a.f.half + P.kerbGap;
+    const x = fr.x + dz * out;
+    const z = fr.z - dx * out;
+    const clear = arms.every((b, k) => {
+      if (k === i) return true;
+      const px = x - j.x;
+      const pz = z - j.z;
+      const t = px * b.dx + pz * b.dz;
+      const o = -px * b.dz + pz * b.dx;
+      return !(t > -P.kerbGap && t < b.f.length && Math.abs(o) < b.f.half + P.kerbGap / 2);
+    });
+    if (!clear) continue;
+    into.push(x, heightAt(terrain, x, z), z, Math.atan2(dx, dz));
+  }
 }
 
 /**
@@ -1093,19 +1377,39 @@ function paintQuad(mesh: Mesh, f: SegPath, p: Piece, ta: number, tb: number, o0:
   mesh.quad(at(ta, o0), at(tb, o0), at(tb, o1), at(ta, o1));
 }
 
-function paintPiece(mesh: Mesh, f: SegPath, p: Piece, paint: Paint, width: number): void {
+/** A painted line on a strip piece, only where it lies between `from` and `to` along the segment. */
+function paintPiece(mesh: Mesh, f: SegPath, p: Piece, paint: Paint, width: number, from: number, to: number): void {
   const o0 = paint.offset - width / 2;
   const o1 = paint.offset + width / 2;
+  const lo = Math.max(p.t0, from);
+  const hi = Math.min(p.t1, to);
+  if (hi - lo <= 1e-3) return;
   if (!paint.dashed) {
-    paintQuad(mesh, f, p, p.t0, p.t1, o0, o1, paint.rgb);
+    paintQuad(mesh, f, p, lo, hi, o0, o1, paint.rgb);
     return;
   }
   const period = ROADS.markings.dash + ROADS.markings.gap;
   // Dashes sit at fixed places along the segment, so they line up across pieces.
-  for (let start = Math.floor(p.t0 / period) * period; start < p.t1; start += period) {
-    const ta = Math.max(p.t0, start);
-    const tb = Math.min(p.t1, start + ROADS.markings.dash);
+  for (let start = Math.floor(lo / period) * period; start < hi; start += period) {
+    const ta = Math.max(lo, start);
+    const tb = Math.min(hi, start + ROADS.markings.dash);
     if (tb - ta > 1e-3) paintQuad(mesh, f, p, ta, tb, o0, o1, paint.rgb);
+  }
+}
+
+/** The bars of a zebra crossing from `span[0]` to `span[1]` along the segment, the part on piece `p`. */
+function zebra(mesh: Mesh, f: SegPath, p: Piece, span: readonly [number, number]): void {
+  const lo = Math.max(p.t0, span[0]);
+  const hi = Math.min(p.t1, span[1]);
+  if (hi - lo <= 1e-3) return;
+  const c = ROADS.crossings;
+  const white = linearRgb(ROADS.markings.white);
+  const usable = 2 * f.half - 2 * c.margin;
+  const count = Math.max(1, Math.floor((usable + c.space) / (c.bar + c.space)));
+  const total = count * c.bar + (count - 1) * c.space;
+  for (let k = 0; k < count; k++) {
+    const o = -total / 2 + k * (c.bar + c.space);
+    paintQuad(mesh, f, p, lo, hi, o, o + c.bar, white);
   }
 }
 
@@ -1147,6 +1451,14 @@ function arrows(mesh: Mesh, f: SegPath, p: Piece, t0: number, t1: number): void 
 
 // ---------------------------------------------------------------------------
 // What a change touches
+
+/**
+ * Furthest along a road, from its node, that a junction changes what is
+ * drawn: its sharpest corner, the room for a rounded kerb past it, and the
+ * crossing and the lane lines that stop short of it.
+ */
+const JUNCTION_REACH =
+  ROADS.maxTrim + ROADS.corners.maxCut + 3 * ROADS.crossings.gap + ROADS.crossings.length + ROADS.markings.width;
 
 /**
  * Which chunks each road segment and node draws in, kept current from the
@@ -1234,7 +1546,7 @@ export class RoadChunks {
     for (const seg of roadSegmentsAt(net, node)) {
       const f = segPath(net, seg);
       const fromA = net.segA[seg] === node;
-      const reach = Math.min(ROADS.maxTrim, f.length / 2);
+      const reach = Math.min(JUNCTION_REACH, f.length / 2);
       if (f.curved) {
         if (fromA) pathChunks(f, 0, reach, into);
         else pathChunks(f, f.length - reach, f.length, into);
@@ -1289,9 +1601,10 @@ export const MASK_SIDE = Math.ceil(CHUNK_SIZE / ROADS.maskCell);
  * Which cells of chunk `chunk` are too close to a road for a tree or a tuft
  * of grass, as `MASK_*` bits per cell, row by row along z. Null when no road
  * comes near. `segs` are the road segments that might come near: those with
- * pieces in this chunk or its neighbours.
+ * pieces in this chunk or its neighbours. `rings` are the polygons of the
+ * junctions that might: a rounded kerb or a taper reaches past the strips.
  */
-export function roadMask(net: RoadNet, chunk: number, segs: Iterable<number>): Uint8Array | null {
+export function roadMask(net: RoadNet, chunk: number, segs: Iterable<number>, rings: Iterable<readonly number[]> = []): Uint8Array | null {
   const ci = chunk % CHUNKS_PER_SIDE;
   const cj = Math.floor(chunk / CHUNKS_PER_SIDE);
   const x0 = ci * CHUNK_SIZE;
@@ -1338,7 +1651,56 @@ export function roadMask(net: RoadNet, chunk: number, segs: Iterable<number>): U
       }
     }
   }
+  const treeReach = ROADS.decorClearance.trees + slack;
+  const grassReach = ROADS.decorClearance.grass + slack;
+  for (const ring of rings) {
+    const n = ring.length / 2;
+    if (n < 3) continue;
+    let minX = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxZ = -Infinity;
+    for (let k = 0; k < n; k++) {
+      minX = Math.min(minX, ring[k * 2] ?? 0);
+      maxX = Math.max(maxX, ring[k * 2] ?? 0);
+      minZ = Math.min(minZ, ring[k * 2 + 1] ?? 0);
+      maxZ = Math.max(maxZ, ring[k * 2 + 1] ?? 0);
+    }
+    const i0 = Math.max(0, Math.floor((minX - treeReach - x0) / cell));
+    const i1 = Math.min(MASK_SIDE - 1, Math.floor((maxX + treeReach - x0) / cell));
+    const j0 = Math.max(0, Math.floor((minZ - treeReach - z0) / cell));
+    const j1 = Math.min(MASK_SIDE - 1, Math.floor((maxZ + treeReach - z0) / cell));
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const d = ringDistance(ring, x0 + (i + 0.5) * cell, z0 + (j + 0.5) * cell);
+        if (d > treeReach) continue;
+        mask ??= new Uint8Array(MASK_SIDE * MASK_SIDE);
+        const m = j * MASK_SIDE + i;
+        mask[m] = (mask[m] ?? 0) | MASK_TREES | (d <= grassReach ? MASK_GRASS : 0);
+      }
+    }
+  }
   return mask;
+}
+
+/** Distance from (x, z) to the polygon `ring`, x and z pairs in order: 0 inside it. */
+export function ringDistance(ring: readonly number[], x: number, z: number): number {
+  const n = ring.length / 2;
+  let inside = false;
+  let best = Infinity;
+  for (let k = 0, l = n - 1; k < n; l = k++) {
+    const ax = ring[l * 2] ?? 0;
+    const az = ring[l * 2 + 1] ?? 0;
+    const bx = ring[k * 2] ?? 0;
+    const bz = ring[k * 2 + 1] ?? 0;
+    if (az > z !== bz > z && x < ax + ((z - az) * (bx - ax)) / (bz - az)) inside = !inside;
+    const ex = bx - ax;
+    const ez = bz - az;
+    const len2 = ex * ex + ez * ez;
+    const t = len2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * ex + (z - az) * ez) / len2)) : 0;
+    best = Math.min(best, Math.hypot(x - ax - ex * t, z - az - ez * t));
+  }
+  return inside ? 0 : best;
 }
 
 /** True when world point (x, z) in chunk `chunk` falls in a masked cell with `bit` set. */
