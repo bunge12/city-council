@@ -91,7 +91,8 @@ describe("the scale city", () => {
       expect(state.roads.segA[id]).toBe(city.state.roads.segA[id]);
       expect(state.roads.segB[id]).toBe(city.state.roads.segB[id]);
     }
-  });
+    // The copy loaded from a save builds its 2.9 million zoning cells on its first step, a few seconds.
+  }, 60_000);
 });
 
 /**
