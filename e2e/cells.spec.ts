@@ -72,11 +72,17 @@ async function cellStats(page: Page): Promise<CellStats> {
   return stats;
 }
 
+/** Waits until every chunk the overlay has to build is built: they go a few a frame. */
+async function cellsBuilt(page: Page): Promise<void> {
+  await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 120_000 });
+}
+
 /** Turns the overlay on with its shortcut and waits until it is drawn. */
 async function overlayOn(page: Page): Promise<void> {
   await page.locator("#view").focus();
   await page.keyboard.press("o");
   await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe("true");
+  await cellsBuilt(page);
 }
 
 /** Turns the overlay on or off with its shortcut, if it is not that way already. */
@@ -85,6 +91,7 @@ async function setOverlay(page: Page, on: boolean): Promise<void> {
   await page.locator("#view").focus();
   await page.keyboard.press("o");
   await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe(String(on));
+  if (on) await cellsBuilt(page);
   // The next frame draws it.
   await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
@@ -351,9 +358,29 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   }
   const city = zonedScaleCity(30_000);
   const backend = await openCity(page, query, "Thirty thousand zoned", city.bytes);
+  // The gaps between frames while it fills in: the longest is how long the page stood still.
+  await page.evaluate(() => {
+    const w = window as unknown as { gaps: number[]; recording: boolean };
+    w.gaps = [];
+    w.recording = true;
+    let last = performance.now();
+    const tick = () => {
+      const now = performance.now();
+      w.gaps.push(now - last);
+      last = now;
+      if (w.recording) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
   const start = Date.now();
   await overlayOn(page);
   const firstShowMs = Date.now() - start;
+  const gaps = await page.evaluate(() => {
+    const w = window as unknown as { gaps: number[]; recording: boolean };
+    w.recording = false;
+    return [...w.gaps].sort((a, b) => b - a);
+  });
+  const longestFramesMs = gaps.slice(0, 3).map((g) => Math.round(g));
   const stats = await cellStats(page);
   expect(stats.zoned).toBe(city.zoned);
   const overlay: Record<string, number> = {};
@@ -364,7 +391,7 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
     overlay[band] = await frameTime(page, 20);
     await attach(testInfo, `30,000 segments, every cell zoned, ${band} band`, await canvasShot(page));
   }
-  const report = { backend, zonedCells: stats.zoned, unzonedCells: stats.unzoned, chunks: stats.chunks, buildMs: stats.lastBuildMs, firstShowMs, plainFrameMs: plain, overlayFrameMs: overlay };
+  const report = { backend, zonedCells: stats.zoned, unzonedCells: stats.unzoned, chunks: stats.chunks, buildMs: stats.lastBuildMs, firstShowMs, longestFramesMs, framesWhileFilling: gaps.length, plainFrameMs: plain, overlayFrameMs: overlay };
   console.log(`30,000 segments, every cell zoned: ${JSON.stringify(report)}`);
   await testInfo.attach("frame times", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
   // As with the roads' scale check (roads.spec.ts): a machine with a GPU

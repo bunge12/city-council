@@ -507,6 +507,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   const cellReadout = () => {
     const cells = view.cellStats();
     document.body.dataset["zoningOverlay"] = String(cells?.visible ?? false);
+    document.body.dataset["cellsPending"] = String(cells?.pending ?? 0);
     if (!cells || cells.totalRebuilt === 0) return;
     setViewReadout({
       cells: `${cells.zoned} zoned and ${cells.unzoned} unzoned in ${cells.chunks} chunks`,
@@ -516,9 +517,9 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   const showCells = (update: MirrorUpdate) => {
     if (update.kind === "snapshot") view.showCells();
     else if (update.cellChunks.length > 0) view.updateCells(update.cellChunks);
-    else return;
-    cellReadout();
   };
+  // Chunks are built over frames, so the readout follows the frames.
+  view.onFrame(cellReadout);
   const setCellsVisible = (on: boolean) => {
     view.setCellsVisible(on);
     cellReadout();

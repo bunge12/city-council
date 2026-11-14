@@ -19,7 +19,7 @@ import {
   WebGPURenderer,
 } from "three/webgpu";
 import { heightAt, mapSize, type Terrain } from "@city-council/sim";
-import { FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, TERRAIN_LODS } from "./config";
+import { CELLS, FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, TERRAIN_LODS } from "./config";
 import type { ZoomBand } from "../camera/zoom-band";
 import { createCellLayer, type CellLayer, type CellSource, type CellStats } from "./cell-meshes";
 import { createDecorLayer, type DecorLayer } from "./decor-meshes";
@@ -76,9 +76,9 @@ export interface View {
   setCellSource(source: CellSource): void;
   /** Shows or hides the zoning overlay. */
   setCellsVisible(on: boolean): void;
-  /** Redraws the cells of every chunk, as after a snapshot. */
+  /** Redraws the cells of every chunk, as after a snapshot, over the next frames. */
   showCells(): void;
-  /** Redraws the cells of the chunks a delta changed. */
+  /** Redraws the cells of the chunks a delta changed, over the next frames. */
   updateCells(chunks: readonly number[]): void;
   cellStats(): CellStats | null;
   /** Switches the lighting to a graphics preset once its shaders are compiled. */
@@ -227,6 +227,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     const seconds = last >= 0 ? (time - last) / 1000 : 0;
     for (const b of before) b(seconds);
     terrainRoot?.decor.update(camera.position);
+    terrainRoot?.cells?.update(camera.position, CELLS.buildBudgetMs);
     const shown = terrainRoot?.terrain;
     lighting.update(camera, shown ? (x, z) => heightAt(shown, x, z) : null);
     renderer.render(scene, camera);

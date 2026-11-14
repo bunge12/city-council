@@ -479,4 +479,9 @@ export const CELLS = {
    * under the road beside it.
    */
   lift: { base: 0.12, perMetre: 0.0009 },
+  /**
+   * Milliseconds a frame may spend building cell chunks. A big change, such
+   * as turning the overlay on over a whole city, is spread over frames.
+   */
+  buildBudgetMs: 6,
 } as const;

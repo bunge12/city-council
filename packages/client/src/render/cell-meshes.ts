@@ -4,7 +4,12 @@
 //
 // The overlay is drawn only while it is on. Nothing is built until it is
 // first turned on, and a chunk that changes while it is off is rebuilt when
-// it comes back on, so a player who never opens it pays nothing.
+// it comes back on, so a player who never opens it pays nothing. Chunks are
+// built a few at a time, nearest the camera first, within a time budget per
+// frame (`CELLS.buildBudgetMs`), so turning it on over a big city fills it
+// in over frames instead of stopping the page. The first chunk still waits
+// for the client's cell index, which the mirror builds on its first question
+// about cells (PRD, "Cells in the protocol").
 //
 // Zoom bands (PRD, "Zoom bands"): the street and district bands show each
 // cell's lines; the city band shows flat colour with no lines, so an
@@ -16,7 +21,7 @@
 
 import { attribute, cameraPosition, float, fwidth, max, min, mix, positionLocal, sRGBTransferEOTF, step, uniform, vec3, vec4 } from "three/tsl";
 import { BufferAttribute, BufferGeometry, DoubleSide, Group, Mesh, MeshBasicNodeMaterial, type Object3D } from "three/webgpu";
-import { CHUNKS_PER_SIDE, type ChunkCellShapes } from "@city-council/sim";
+import { CHUNKS_PER_SIDE, CHUNK_SIZE, type ChunkCellShapes } from "@city-council/sim";
 import type { ZoomBand } from "../camera/zoom-band";
 import { buildCellChunk, type CellArrays } from "./cell-geometry";
 import { CELLS } from "./config";
@@ -38,20 +43,32 @@ export interface CellStats {
   /** Cells drawn filled, and as outlines only. */
   zoned: number;
   unzoned: number;
-  /** Chunks rebuilt by the last change, and since the overlay was first built. */
+  /** Chunks waiting to be built. */
+  pending: number;
+  /**
+   * Chunks the last change rebuilt, counted from when chunks started
+   * waiting until none were left, and every chunk built since the layer
+   * was made. `lastBuildMs` is the time that last change took, summed over
+   * the frames it was spread across.
+   */
   lastRebuilt: number;
   totalRebuilt: number;
-  /** Milliseconds the last rebuild took. */
   lastBuildMs: number;
 }
 
 export interface CellLayer {
-  /** Shows or hides the overlay. Showing it builds any chunk that changed while it was hidden. */
+  /** Shows or hides the overlay. A chunk that changed while it was hidden is built once it shows. */
   setVisible(on: boolean): void;
-  /** Every chunk may have changed, as after a snapshot. */
+  /** Every chunk may have changed, as after a snapshot. Marks them all to build. */
   reset(): void;
-  /** The chunks a delta changed, as the mirror numbers them. */
+  /** Marks the chunks a delta changed, as the mirror numbers them, to build. */
   apply(chunks: readonly number[]): void;
+  /**
+   * Called once a frame: builds waiting chunks, nearest the camera at
+   * (x, z) first, for about `budgetMs`, so a big change spreads over
+   * frames instead of stopping one.
+   */
+  update(camera: { x: number; z: number }, budgetMs: number): void;
   setBand(band: ZoomBand): void;
   stats(): CellStats;
   dispose(): void;
@@ -115,7 +132,7 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
   const chunks: (ChunkMesh | null)[] = new Array<ChunkMesh | null>(CHUNKS_PER_SIDE * CHUNKS_PER_SIDE).fill(null);
   /** Chunks that changed while the overlay was hidden, or every chunk before it was first built. */
   const dirty = new Set<number>(chunks.keys());
-  let stats: CellStats = { visible: false, chunks: 0, zoned: 0, unzoned: 0, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0 };
+  let stats: CellStats = { visible: false, chunks: 0, zoned: 0, unzoned: 0, pending: dirty.size, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0 };
 
   function clear(c: number): void {
     const old = chunks[c];
@@ -144,13 +161,11 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     chunks[c] = { mesh, zoned: arrays.zoned, unzoned: arrays.unzoned };
   }
 
-  /** Builds every dirty chunk, if the overlay is on. */
-  function flush(): void {
-    if (!root.visible || dirty.size === 0) return;
-    const start = performance.now();
-    const list = [...dirty].sort((a, b) => a - b);
-    dirty.clear();
-    for (const c of list) build(c);
+  /** Chunks built since the dirty set was last empty, and the milliseconds they took. */
+  let batch = 0;
+  let batchMs = 0;
+
+  function count(): Pick<CellStats, "chunks" | "zoned" | "unzoned"> {
     let n = 0;
     let zoned = 0;
     let unzoned = 0;
@@ -160,31 +175,56 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
       zoned += c.zoned;
       unzoned += c.unzoned;
     }
-    stats = {
-      visible: true,
-      chunks: n,
-      zoned,
-      unzoned,
-      lastRebuilt: list.length,
-      totalRebuilt: stats.totalRebuilt + list.length,
-      lastBuildMs: performance.now() - start,
+    return { chunks: n, zoned, unzoned };
+  }
+
+  /**
+   * Builds dirty chunks, nearest the camera first, until `budgetMs` has
+   * gone; at least one a frame, so the overlay always fills in. Nothing
+   * while the overlay is off.
+   */
+  function update(camera: { x: number; z: number }, budgetMs: number): void {
+    if (!root.visible || dirty.size === 0) return;
+    const start = performance.now();
+    const centre = (c: number) => {
+      const ci = c % CHUNKS_PER_SIDE;
+      const cj = (c - ci) / CHUNKS_PER_SIDE;
+      return Math.hypot((ci + 0.5) * CHUNK_SIZE - camera.x, (cj + 0.5) * CHUNK_SIZE - camera.z);
     };
+    const list = [...dirty].map((c) => ({ c, d: centre(c) })).sort((a, b) => a.d - b.d || a.c - b.c);
+    let built = 0;
+    for (const { c } of list) {
+      if (built > 0 && performance.now() - start >= budgetMs) break;
+      dirty.delete(c);
+      build(c);
+      built++;
+    }
+    batch += built;
+    batchMs += performance.now() - start;
+    stats = { ...stats, ...count(), pending: dirty.size, totalRebuilt: stats.totalRebuilt + built };
+    if (dirty.size === 0) {
+      stats = { ...stats, lastRebuilt: batch, lastBuildMs: batchMs };
+      batch = 0;
+      batchMs = 0;
+    }
+  }
+
+  function markAll(): void {
+    for (let c = 0; c < chunks.length; c++) dirty.add(c);
+    stats = { ...stats, pending: dirty.size };
   }
 
   return {
     setVisible(on) {
       root.visible = on;
       stats = { ...stats, visible: on };
-      flush();
     },
-    reset() {
-      for (let c = 0; c < chunks.length; c++) dirty.add(c);
-      flush();
-    },
+    reset: markAll,
     apply(changed) {
       for (const c of changed) dirty.add(c);
-      flush();
+      stats = { ...stats, pending: dirty.size };
     },
+    update,
     setBand(band) {
       lines.value = band === "city" ? 0 : 1;
     },
