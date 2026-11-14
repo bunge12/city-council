@@ -57,5 +57,5 @@ test("buildings grow on zoned cells over game time, and the debug panel times th
   const debug = page.getByRole("region", { name: "Debug panel" });
   await debug.screenshot({ path: info.outputPath("debug-panel.png") });
   await page.screenshot({ path: info.outputPath("page.png") });
-  await info.attach("grown", { body: JSON.stringify({ buildings, residents }), contentType: "application/json" });
+  await info.attach("grown", { body: JSON.stringify({ buildings, residents, tick: await page.locator("#sim-tick").textContent() }), contentType: "application/json" });
 });
