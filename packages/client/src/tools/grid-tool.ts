@@ -43,6 +43,7 @@ import type { RoadNet } from "../render/road-geometry";
 import type { PreviewLook, PreviewShape } from "../render/road-preview-geometry";
 import type { SnapMark } from "../render/snap-marks-geometry";
 import { GRID_TOOL, SNAP } from "./config";
+import { cellCornerSource, cellEdgeSource, type CellLookup } from "./cell-snap";
 import { nodeSource, segmentSource, snapPoint, startSource, type Snap } from "./snap";
 import type { RoadToolState } from "./road-tool";
 
@@ -289,10 +290,10 @@ export function gridMarks(payload: BuildRoadGridPayload, cuts: readonly BuildPoi
 
 /** What the controller needs from the page. */
 export interface GridToolHost {
-  get(): GridToolState & Pick<RoadToolState, "tool" | "roadType">;
+  get(): GridToolState & Pick<RoadToolState, "tool" | "roadType" | "guides">;
   set(patch: Partial<GridToolState & Pick<RoadToolState, "tool" | "roadNote" | "roadStart" | "roadControl" | "roadChain">>): void;
-  /** The mirror's roads and the map, or null before the first snapshot. */
-  world(): { net: RoadNet; terrain: Terrain } | null;
+  /** The mirror's roads and the map, and its zoned cells for the snap, or null before the first snapshot. */
+  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup } | null;
   /** Sends `BuildRoadGrid` and resolves once the sim has built it, or with why it did not. */
   send(payload: BuildRoadGridPayload): Promise<CommandResult>;
 }
@@ -360,11 +361,16 @@ export class GridToolController {
     this.host.set({ gridNote: null, ...NO_RECTANGLE });
   }
 
-  /** Where the pointer at `ground` lands: on a road node or segment, as the road tool snaps, or where it is. */
+  /**
+   * Where the pointer at `ground` lands: on a road node or segment, as the
+   * road tool snaps, or on the corners and edges of zoned cells when the
+   * road tool's cell guide is on (issue M2-08), or where it is.
+   */
   snap(ground: BuildPoint, view: GridSnapView): Snap | null {
     const world = this.host.world();
     if (!world) return null;
-    const type = typeById(this.host.get().roadType);
+    const s = this.host.get();
+    const type = typeById(s.roadType);
     return snapPoint(
       ground.x,
       ground.z,
@@ -373,12 +379,13 @@ export class GridToolController {
         start: null,
         source: null,
         metresPerPixel: view.metresPerPixel,
-        guides: { angle: false, length: false, grid: false, lines: false, offset: false },
+        guides: { angle: false, length: false, grid: false, lines: false, offset: false, cells: s.guides.cells },
         free: view.free,
         gridStep: world.terrain.spacing,
         roadWidth: type.width,
+        cells: world.cells ?? null,
       },
-      [nodeSource, segmentSource],
+      [nodeSource, cellCornerSource, segmentSource, cellEdgeSource],
     );
   }
 

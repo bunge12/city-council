@@ -1,10 +1,14 @@
 // Spatial index over the road graph: what road is near a point, without a
 // scan of every segment.
 //
-// One grid cell per 500 m chunk. Each cell lists, in ascending id order, the
-// nodes inside it and the segments that touch it. Positions off the map fall
-// in the nearest edge cell, so a road partly off the map is still found and a
-// stray coordinate cannot make the grid grow.
+// A grid of 125 m cells, four to a 500 m chunk's side. Each cell lists, in
+// ascending id order, the nodes inside it and the segments that touch it.
+// Positions off the map fall in the nearest edge cell, so a road partly off
+// the map is still found and a stray coordinate cannot make the grid grow.
+// The cells were once whole chunks, but a dense grid of streets puts
+// hundreds of segments in a chunk, and checking a planned road scanned all
+// of them for every piece of it (issue #128). The size changes how much a
+// query looks at, never what it answers.
 //
 // The index is derived data (PRD, "Derived data"). It is never saved or
 // hashed. `roadIndexOf` builds it from the graph arrays the first time a
@@ -50,6 +54,14 @@ export const NETWORKS_ALL = NETWORKS_ROAD | NETWORKS_RAIL | NETWORKS_PATH;
  * cell corner.
  */
 const CELL_MARGIN = 1e-3;
+
+/**
+ * Index cells along each side of a chunk. Not a balance number: it sets
+ * only how fast a query runs. On the 30,000 segment city, a grid at the cap
+ * over existing streets is about twice as quick to apply at 125 m as at
+ * 500 m, and smaller cells gain little more.
+ */
+const CELLS_PER_CHUNK = 4;
 
 /** A grid index over one network. Derived data: not state. */
 export interface RoadIndex {
@@ -129,14 +141,13 @@ function nodeCell(index: Grid, node: number): number {
 
 /**
  * The 500 m chunk node `node` is in, as `cj * CHUNKS_PER_SIDE + ci`, with
- * off-map positions in the nearest edge chunk. The same cell the index files
- * it under.
+ * off-map positions in the nearest edge chunk.
  */
 export function chunkOfNode(net: RoadNetwork, node: number): number {
   return nodeCell({ net, cellsPerSide: CHUNKS_PER_SIDE, cellSize: CHUNK_SIZE }, node);
 }
 
-/** Calls `visit` with each 500 m chunk segment `seg` touches: the cells the index files it under. */
+/** Calls `visit` with each 500 m chunk segment `seg` touches, by the same test the index files it with. */
 export function forSegmentChunks(net: RoadNetwork, seg: number, visit: (chunk: number) => void): void {
   forSegmentCells({ net, cellsPerSide: CHUNKS_PER_SIDE, cellSize: CHUNK_SIZE }, seg, visit);
 }
@@ -166,11 +177,11 @@ export function unindexSegment(index: RoadIndex, seg: number): void {
  * that, use `roadIndexOf`. The client builds one over its read-only copy.
  */
 export function buildRoadIndex(net: RoadNetwork): RoadIndex {
-  const n = CHUNKS_PER_SIDE;
+  const n = CHUNKS_PER_SIDE * CELLS_PER_CHUNK;
   const index: RoadIndex = {
     net,
     cellsPerSide: n,
-    cellSize: CHUNK_SIZE,
+    cellSize: CHUNK_SIZE / CELLS_PER_CHUNK,
     nodeCells: Array.from({ length: n * n }, () => []),
     segCells: Array.from({ length: n * n }, () => []),
   };

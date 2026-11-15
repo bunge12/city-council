@@ -24,6 +24,7 @@ import {
   type GridPreview,
   type GridToolState,
 } from "../src/tools/grid-tool";
+import { DEFAULT_GUIDES } from "../src/tools/config";
 import type { RoadToolState } from "../src/tools/road-tool";
 
 // Places on the map of seed 2026, as the sim's grid tests use them.
@@ -32,14 +33,14 @@ const terrain = generateTerrain(SEED);
 /** Dry land north of an inlet that widens to the south-west. */
 const INLET = { x0: 3300, z0: 6400, x1: 3800, z1: 6800 };
 
-type State = GridToolState & Pick<RoadToolState, "tool" | "roadType" | "roadNote" | "roadStart" | "roadControl" | "roadChain">;
+type State = GridToolState & Pick<RoadToolState, "tool" | "roadType" | "roadNote" | "roadStart" | "roadControl" | "roadChain" | "guides">;
 
 function setup(send?: (payload: BuildRoadGridPayload) => Promise<CommandResult>) {
   const { client, host: hostEnd } = memoryTransportPair();
   let now = 0;
   const host = new SimHost(createBareState(SEED), hostEnd, () => now);
   const mirror = new SimMirror(client, "p1");
-  let state: State = { ...INITIAL_GRID_TOOL, tool: null, roadType: "street", roadNote: null, roadStart: null, roadControl: null, roadChain: 0 };
+  let state: State = { ...INITIAL_GRID_TOOL, tool: null, roadType: "street", roadNote: null, roadStart: null, roadControl: null, roadChain: 0, guides: DEFAULT_GUIDES };
   const sent: BuildRoadGridPayload[] = [];
   const tool = new GridToolController({
     get: () => state,

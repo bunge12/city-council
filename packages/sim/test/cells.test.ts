@@ -644,18 +644,20 @@ describe("settling a big change over a few ticks", () => {
     expect(cellsSettled(state)).toBe(true);
   });
 
-  it("settles a curved street through a curved street at once", () => {
+  it("gives a curved street through a curved street a few ticks", () => {
     const state = createState(SEED);
     ok(state, curve([4150, 4500], [4650, 4500], [4400, 4300]));
     const before = live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).length;
     // About 550 m of curve from north of it to south, cutting it.
     ok(state, curve([4200, 4350], [4550, 4750], [4600, 4350]));
     expect(live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).length).toBe(before + 3);
-    expect(state.cellsReadyAt).toBe(0);
-    expect(cellsSettled(state)).toBe(true);
+    // 3 at 3,000 cells a tick with the rewalk allowance (zoning.json).
+    expect(state.cellsReadyAt).toBeLessThanOrEqual(state.tick + 3);
+    while (!cellsSettled(state)) step(state);
+    expect(state.tick).toBe(state.cellsReadyAt);
   });
 
-  it("gives a long curved street through two curved streets a tick or two at most", () => {
+  it("gives a long curved street through two curved streets well under a second of game time", () => {
     const state = createState(SEED);
     ok(state, curve([4150, 4500], [4650, 4500], [4400, 4300]));
     ok(state, curve([4150, 4900], [4650, 4900], [4400, 4700]));
@@ -663,7 +665,8 @@ describe("settling a big change over a few ticks", () => {
     // About 750 m of curve, from north of the first to south of the second, cutting both.
     ok(state, curve([4200, 4350], [4600, 4980], [4650, 4350]));
     expect(live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).length).toBe(before + 5);
-    expect(state.cellsReadyAt).toBeLessThanOrEqual(state.tick + 2);
+    // 6 at 3,000 cells a tick with the rewalk allowance (zoning.json).
+    expect(state.cellsReadyAt).toBeLessThanOrEqual(state.tick + 6);
   });
 
   it("gives a grid too big for one tick the tick it settles by, and walks it a slice a step", () => {
@@ -676,6 +679,23 @@ describe("settling a big change over a few ticks", () => {
     expect(cellsSettled(state)).toBe(true);
     expect(rebuilt(state)).toEqual(cellStatuses(state));
     expect(overlappingOpenCells(state)).toBe(0);
+  });
+
+  it("walks a grid laid over streets at the slice pace, done before the step that walks whatever is left", () => {
+    // Over streets, a walk sends cells round again past its counted size.
+    // The ready tick allows for that (settleRewalkAllowance in zoning.json),
+    // so the walk is done a slice a step and the last step is not left a
+    // pile that takes it over the tick budget.
+    const state = createState(SEED);
+    ok(state, road([4150, 4548], [4650, 4548]));
+    ok(state, road([4248, 4450], [4248, 4950]));
+    ok(state, bigGrid());
+    expect(state.cellsReadyAt).toBeGreaterThan(state.tick + 1);
+    while (state.tick + 1 < state.cellsReadyAt) step(state);
+    expect(cellsWalked(state)).toBe(true);
+    step(state);
+    expect(cellsSettled(state)).toBe(true);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
   });
 
   it("folds a second big change into one still settling, with ticks of its own after the first's", () => {

@@ -1,0 +1,38 @@
+{
+  "_about": "Which spec files each Playwright project runs, read by playwright.config.ts and by scripts/e2e-shard.mjs, which deals the chromium project's files out to CI runners. `walkthrough` is a pattern of file names; the rest are lists of them. The chromium project runs every other spec file. `seconds` is how long each chromium file took on a CI runner with one worker, from the list reporter's lines in a CI log, rounded (CI run 43635015670, November 2026; zone-tool.spec.ts was new then and is a guess). The shard script balances the runners by it, so a file that gets much slower or much faster should have its number brought up to date. A file not listed counts as `defaultSeconds`.",
+  "walkthrough": "walkthrough\\.spec\\.ts$",
+  "roads": [
+    "roads.spec.ts",
+    "cells.spec.ts"
+  ],
+  "defaultSeconds": 90,
+  "seconds": {
+    "blocks.spec.ts": 38,
+    "bridges.spec.ts": 57,
+    "camera.spec.ts": 73,
+    "city-file.spec.ts": 96,
+    "connections.spec.ts": 32,
+    "decor.spec.ts": 97,
+    "dock.spec.ts": 55,
+    "drawing-modes.spec.ts": 152,
+    "edit-tools.spec.ts": 138,
+    "grid-tool.spec.ts": 132,
+    "guides.spec.ts": 273,
+    "levels.spec.ts": 48,
+    "presets.spec.ts": 268,
+    "render.spec.ts": 25,
+    "replay.spec.ts": 18,
+    "road-tool.spec.ts": 95,
+    "route-tool.spec.ts": 39,
+    "save-load.spec.ts": 95,
+    "scale.spec.ts": 306,
+    "sim-worker.spec.ts": 20,
+    "smoke.spec.ts": 1,
+    "snapping.spec.ts": 153,
+    "terrain.spec.ts": 6,
+    "two-tabs.spec.ts": 126,
+    "ui-shell.spec.ts": 182,
+    "undo.spec.ts": 72,
+    "zone-tool.spec.ts": 90
+  }
+}

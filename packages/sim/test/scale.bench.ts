@@ -25,6 +25,7 @@ import {
   routingGraphOf,
   serialize,
   serializeDetached,
+  serializeDetachedSteps,
   step,
   type BuildRoadPayload,
   type BuildRoadGridPayload,
@@ -162,10 +163,14 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   let gridOps: NetworkOp[] = [];
   const hooked: Record<string, { fn: () => void; beforeEach?: () => void; afterEach?: () => void }> = {
     "the step that applies one BuildRoadGrid at the cap over existing streets, its cells left to settle": {
+      // What step() does: the command, then the cells (step.ts). The step
+      // that lays a big change out walks none of it, but it is timed here
+      // so a step that starts to is caught.
       fn: () => {
         gridOps = applyGrid(grid);
         blockById(blocks, 0);
         stepCells(state);
+        settleCells(state);
       },
       afterEach: () => {
         syncCells(state);
@@ -191,6 +196,8 @@ test("the M1 scale network", async ({ bench, annotate }) => {
       beforeEach: () => {
         gridOps = applyGrid(grid);
         stepCells(state);
+        // The step that applied it walks none of it: the next one walks the first slice.
+        settleCells(state);
       },
       fn: () => settleCells(state),
       afterEach: () => {
@@ -211,6 +218,33 @@ test("the M1 scale network", async ({ bench, annotate }) => {
       },
     },
   };
+  // An autosave is written a part at a time, one part between two ticks
+  // (issue #83, snapshot.ts), so each part is what holds a tick up. Each
+  // part is timed on its own: the hook writes the parts before it, and
+  // finishes the save after.
+  let save: ReturnType<typeof serializeDetachedSteps> | null = null;
+  const saveParts = (() => {
+    const steps = serializeDetachedSteps(state);
+    let n = 1;
+    while (!steps.next().done) n++;
+    return n;
+  })();
+  const partNames: string[] = [];
+  for (let part = 0; part < saveParts; part++) {
+    const name = `part ${part + 1} of ${saveParts} of an autosave, written between two ticks`;
+    partNames.push(name);
+    hooked[name] = {
+      beforeEach: () => {
+        save = serializeDetachedSteps(state);
+        for (let i = 0; i < part; i++) save.next();
+      },
+      fn: () => void save?.next(),
+      afterEach: () => {
+        while (save && !save.next().done);
+        save = null;
+      },
+    };
+  }
   const cases: Record<string, () => void> = {
     // Plan and build, with the spatial index, the routing graph, the
     // blocks and the zoning cells kept current, then the take-back.
@@ -260,7 +294,7 @@ test("the M1 scale network", async ({ bench, annotate }) => {
     },
     "one tick with nothing queued": () => step(state),
     "rebuild every block, for comparison": () => void buildBlockIndex(net),
-    "serialize the city, as an autosave does": () => void serializeDetached(state),
+    "serialize the whole city in one go, for comparison with the parts of an autosave": () => void serializeDetached(state),
     "serialize the city with its log inside, as a city file": () => void serialize(state),
   };
   // Fixed run counts for the slow cases. By default a case runs at least
@@ -324,6 +358,8 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   expect(meanMs["one tick with nothing queued"]).toBeLessThan(TICK_BUDGET_MS);
   // A big grid's steps, each on its own: applying it, taking it back, and a slice of its cells settling.
   for (const name of Object.keys(hooked)) expect(meanMs[name], name).toBeLessThan(TICK_BUDGET_MS);
-  // An autosave runs between two ticks and holds up the next one (issue #83).
-  expect(meanMs["serialize the city, as an autosave does"]).toBeLessThan(TICK_BUDGET_MS);
+  // A part of an autosave runs between two ticks and holds up the next one
+  // (issue #83). The whole save is reported above, for comparison: it no
+  // longer runs in one go, so it is not held to the budget.
+  for (const name of partNames) expect(meanMs[name], name).toBeLessThan(TICK_BUDGET_MS);
 }, 600_000);

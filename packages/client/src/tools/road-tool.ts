@@ -56,6 +56,7 @@ import {
 } from "@city-council/sim";
 import { liveNode, type RoadNet } from "../render/road-geometry";
 import { DEFAULT_GUIDES, type GuideId, type GuideToggles } from "./config";
+import type { CellLookup } from "./cell-snap";
 import { roadEnd, snapPoint, startSource, type Snap } from "./snap";
 
 /** The road types the tool offers, in toolbar order. Highway waits for M5. */
@@ -245,8 +246,8 @@ export interface SnapView {
 export interface RoadToolHost {
   get(): RoadToolState;
   set(patch: Partial<RoadToolState>): void;
-  /** The mirror's roads and the map, or null before the first snapshot. */
-  world(): { net: RoadNet; terrain: Terrain } | null;
+  /** The mirror's roads and the map, and its zoned cells for the snap, or null before the first snapshot. */
+  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup } | null;
   /** Sends `BuildRoad` and resolves once the sim has built it, or with why it did not. */
   send(payload: BuildRoadPayload): Promise<CommandResult>;
 }
@@ -349,17 +350,19 @@ export class RoadToolController {
       free: view.free,
       gridStep: world.terrain.spacing,
       roadWidth: typeById(s.roadType).width,
+      cells: world.cells ?? null,
     };
     if (s.roadControl) {
       // A curve's end. The angle and length guides measure a straight road
       // from its start, which a curve's end is not, so only the points that
       // fix an end catch it: nodes, segments, guide lines and the grid. A
-      // parallel offset runs beside a road, which a curve does not.
+      // parallel offset runs beside a road, which a curve does not, and the
+      // cell snap's setback assumes one (issue M2-08).
       return snapPoint(cursor.x, cursor.z, {
         ...base,
         start: s.roadControl,
         source: null,
-        guides: { ...s.guides, angle: false, length: false, offset: false },
+        guides: { ...s.guides, angle: false, length: false, offset: false, cells: false },
       });
     }
     const start = s.roadStart;

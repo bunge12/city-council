@@ -240,6 +240,12 @@ interface SettleJob {
   queue: ClaimQueue;
   seeds: Seed[];
   nextSeed: number;
+  /**
+   * Set by the step whose command made this job too big for one tick, which
+   * has spent its time laying the change out. Its walk starts on the next
+   * step. Walked in fewer or more steps, a change settles to the same cells.
+   */
+  fresh?: boolean;
 }
 
 /**
@@ -292,6 +298,21 @@ export interface CellIndex {
    * `followCells` last asked. Null until it first asks: the sim keeps none.
    */
   dirty: Set<number> | null;
+  /**
+   * What changed for the grower's candidates (buildings/candidates.ts)
+   * since it last looked: segments laid out again, the nodes at their ends
+   * before and after, and the front cells, at depth 0, of other segments
+   * whose status changed, as `segment * KEY_STRIDE + column`. Null until
+   * the grower first builds its candidates.
+   */
+  watch: CellWatch | null;
+}
+
+/** See `CellIndex.watch`. */
+export interface CellWatch {
+  segs: Set<number>;
+  nodes: Set<number>;
+  fronts: Set<number>;
 }
 
 // Scratch space. The sim runs on one thread, and no two users of one of
@@ -669,6 +690,7 @@ function setStatus(index: CellIndex, seg: number, s: SegShape, local: number, no
     index.dirty.add(chunkAt(x, z));
   }
   if ((was === CELL_OPEN) !== (now === CELL_OPEN)) fileCell(index, index.openBuckets, seg, s, local, now === CELL_OPEN);
+  if (index.watch && was !== now && local % DEPTH === 0) index.watch.fronts.add(seg * KEY_STRIDE + local / DEPTH);
 }
 
 /** Cell statuses as bits, for picking which cells to look at again. */
@@ -731,6 +753,7 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     spare: null,
     follows: false,
     dirty: null,
+    watch: null,
   };
   const limit = segmentIdLimit(net);
   const order: number[] = [];
@@ -905,6 +928,14 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   }
   if (changed.length === 0 && limit === oldLimit) return null;
   noteCellsRelaid(net, changed);
+  if (index.watch) {
+    const { segs, nodes } = index.watch;
+    for (const { id, shape } of changed) {
+      segs.add(id);
+      if (shape) nodes.add(shape.a).add(shape.b);
+      if (isSegment(net, id)) nodes.add(net.segA[id] ?? 0).add(net.segB[id] ?? 0);
+    }
+  }
   // A change still settling is folded into this one rather than finished
   // here, which could take far longer than a tick. Its tasks run now, so
   // the buckets match the shapes, and its cells still to walk join this
@@ -1311,7 +1342,9 @@ export function stepCells(state: SimState): void {
   if (!result) return;
   const { cells, work, folded } = result;
   state.cells = cells;
-  const ticks = ceilOf(work / ZONING_BALANCE.settleCellsPerTick);
+  // The walk can send cells round again past its counted size, so the
+  // ready tick allows for that, and the last step is not left a pile.
+  const ticks = ceilOf((work * ZONING_BALANCE.settleRewalkAllowance) / ZONING_BALANCE.settleCellsPerTick);
   if (ticks <= 1) {
     // While an earlier change is still settling, by the state's own clock,
     // this one adds its tick to the wait, so its work has a slice of its
@@ -1327,18 +1360,26 @@ export function stepCells(state: SimState): void {
   // loaded mid-settle, which settled everything at load, agrees.
   const from = state.cellsReadyAt > state.tick ? state.cellsReadyAt : state.tick;
   state.cellsReadyAt = from + ticks;
+  if (index.pending) index.pending.fresh = true;
 }
 
 /**
  * Walks one slice of a change still settling, once a step, paused or not.
- * The step whose tick is the last before `state.cellsReadyAt` walks
- * whatever is left, however much that is, so the cells are settled on that
- * tick on every machine, whatever its speed (CLAUDE.md rule 5).
+ * The step that applied a change too big for one tick walks none of it:
+ * laying the change out was that step's work. The step whose tick is the
+ * last before `state.cellsReadyAt` walks whatever is left, however much
+ * that is, so the cells are settled on that tick on every machine,
+ * whatever its speed (CLAUDE.md rule 5).
  */
 export function settleCells(state: SimState): void {
   const index = live.get(state.roads);
   if (!index?.pending) return;
-  drain(index, state.tick + 1 >= state.cellsReadyAt ? Infinity : ZONING_BALANCE.settleCellsPerTick);
+  const last = state.tick + 1 >= state.cellsReadyAt;
+  if (index.pending.fresh && !last) {
+    index.pending.fresh = false;
+    return;
+  }
+  drain(index, last ? Infinity : ZONING_BALANCE.settleCellsPerTick);
 }
 
 /** Whether the sim may read which cells are blocked: no change of roads is still settling. */

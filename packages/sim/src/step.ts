@@ -1,3 +1,4 @@
+import { GROWER } from "./buildings/grower";
 import { applyPending, type DroppedCommand } from "./commands";
 import type { SimState } from "./state";
 import { settleCells } from "./zoning/cell-index";
@@ -8,8 +9,8 @@ export interface System {
   run(state: SimState): void;
 }
 
-/** The systems `step` runs each tick, in this fixed order. None yet. */
-export const SYSTEMS: readonly System[] = [];
+/** The systems `step` runs each tick, in this fixed order. */
+export const SYSTEMS: readonly System[] = [GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";

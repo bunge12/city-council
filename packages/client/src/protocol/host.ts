@@ -302,6 +302,7 @@ export class SimHost {
       ...(buildings ? { buildings } : {}),
       ...(undo ? { undo } : {}),
       ...(dropped.length > 0 ? { dropped } : {}),
+      rng: this.state.rng.slice(),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };

@@ -71,8 +71,14 @@ jobs:
   #
   # Each job runs one project with `--no-deps`. The dependencies between
   # projects in playwright.config.ts only keep them from sharing a machine,
-  # and here each has its own. `--shard` deals out spec files in name order,
-  # so a new spec file is picked up without a change here.
+  # and here each has its own.
+  #
+  # The chromium runners get their spec files from scripts/e2e-shard.mjs,
+  # which deals them out by how long each took on CI (e2e/projects.json).
+  # Playwright's `--shard` deals out the same number of tests to each, and
+  # one runner took 13 to 17 minutes while another took one. A new spec
+  # file is picked up without a change here, at a guessed length until its
+  # seconds are added.
   e2e:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -87,12 +93,12 @@ jobs:
           # page in the other worker on a slow runner, and its locators and
           # screenshots time out. Six shards keep the wall time about where
           # two workers on four had it.
-          - { id: chromium-1, args: "--project chromium --workers=1 --shard=1/6" }
-          - { id: chromium-2, args: "--project chromium --workers=1 --shard=2/6" }
-          - { id: chromium-3, args: "--project chromium --workers=1 --shard=3/6" }
-          - { id: chromium-4, args: "--project chromium --workers=1 --shard=4/6" }
-          - { id: chromium-5, args: "--project chromium --workers=1 --shard=5/6" }
-          - { id: chromium-6, args: "--project chromium --workers=1 --shard=6/6" }
+          - { id: chromium-1, files: "1/6", args: "--project chromium --workers=1" }
+          - { id: chromium-2, files: "2/6", args: "--project chromium --workers=1" }
+          - { id: chromium-3, files: "3/6", args: "--project chromium --workers=1" }
+          - { id: chromium-4, files: "4/6", args: "--project chromium --workers=1" }
+          - { id: chromium-5, files: "5/6", args: "--project chromium --workers=1" }
+          - { id: chromium-6, files: "6/6", args: "--project chromium --workers=1" }
           # One worker: software WebGPU takes most of a runner's CPU. In CI
           # the roads project is fully parallel, so its one file is dealt
           # out test by test.
@@ -114,8 +120,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/playwright-browsers
       # The roads and walkthrough projects run headed (see
-      # playwright.config.ts), so give them a display.
-      - run: xvfb-run -a pnpm e2e ${{ matrix.args }}
+      # playwright.config.ts), so give them a display. Only the walkthrough
+      # needs the production build served.
+      - env:
+          ARGS: ${{ matrix.args }}
+          FILES: ${{ matrix.files }}
+          E2E_DEV_SERVER_ONLY: ${{ startsWith(matrix.id, 'walkthrough') && '0' || '1' }}
+        run: |
+          files=""
+          if [ -n "$FILES" ]; then
+            files=$(node scripts/e2e-shard.mjs "$FILES")
+            echo "Spec files: $files"
+          fi
+          eval "xvfb-run -a pnpm e2e $ARGS $files"
       - uses: actions/upload-artifact@v4
         if: always() && startsWith(matrix.id, 'walkthrough')
         with:

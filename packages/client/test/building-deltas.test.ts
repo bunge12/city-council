@@ -76,6 +76,7 @@ describe("building deltas in the mirror", () => {
         logFrom: last.logFrom + last.log.length,
         log: [],
         buildings,
+        rng: state.rng.slice(),
         steps: 0,
         timings: [],
       };
