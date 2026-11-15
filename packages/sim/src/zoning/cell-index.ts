@@ -1354,6 +1354,21 @@ export function syncCells(state: SimState): CellIndex {
 }
 
 /**
+ * The cell index of `state`'s roads with the cells in state laid out for
+ * the roads as they are now, but without walking any change still
+ * settling: segment shapes and runs are current, statuses may not be. For
+ * the building index (buildings/where.ts), which follows the shapes and
+ * must not walk a big change in one step, past the tick budget the slicing
+ * protects.
+ */
+export function laidOutCells(state: SimState): CellIndex {
+  const { index, built } = indexOf(state);
+  if (built) drain(index, Infinity);
+  else state.cells = update(index, state.cells)?.cells ?? state.cells;
+  return index;
+}
+
+/**
  * Brings the cells up to date after a command that may have changed the
  * roads (commands.ts). The zone and density arrays in state are laid out
  * for the new roads at once. A change that walks no more than

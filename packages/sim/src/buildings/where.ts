@@ -38,6 +38,7 @@ import {
   columnExists,
   columnMover,
   columnStatus,
+  laidOutCells,
   lotCorners,
   nextColumn,
   syncCells,
@@ -234,10 +235,14 @@ function catchUp(state: SimState, bi: BuildingIndex): void {
  * change of roads since. Buildings are filed in id order, so where two lots
  * overlap, which a well-run city never has, the lower id holds the cell.
  */
-function indexOf(state: SimState): { bi: BuildingIndex; cellIndex: CellIndex } {
-  const cellIndex = syncCells(state);
+function indexOf(state: SimState, settle = true): { bi: BuildingIndex; cellIndex: CellIndex } {
+  // Filing follows the segment shapes alone, so a change still settling
+  // need not be walked to file. Building the index afresh lists the
+  // buildings whose lot does not stand, which needs the statuses.
+  const known = live.get(state.buildings);
+  const cellIndex = settle || !known ? syncCells(state) : laidOutCells(state);
   const b = state.buildings;
-  let bi = live.get(b);
+  let bi = known;
   if (!bi || bi.cellIndex !== cellIndex) {
     cellIndex.buildingWatch = { relaid: new Map(), nodes: new Set(), blocked: new Set() };
     bi = build(b, cellIndex);
@@ -313,7 +318,7 @@ export function fileBuilding(state: SimState, id: number): void {
  */
 export function unfileBuilding(state: SimState, id: number): Column[] {
   if (!current(state)) return [];
-  const { bi } = indexOf(state);
+  const { bi } = indexOf(state, false);
   bi.toCheck.delete(id);
   bi.lost.delete(id);
   const fronts = unfile(bi, id);
@@ -413,7 +418,7 @@ export function buildingWorkDue(state: SimState): boolean {
 
 /** The buildings a change of roads took the ground of, ascending, and forgets them. */
 export function takeLostBuildings(state: SimState): number[] {
-  const { bi } = indexOf(state);
+  const { bi } = indexOf(state, false);
   const ids = [...bi.lost].sort((p, q) => p - q);
   bi.lost.clear();
   return ids;

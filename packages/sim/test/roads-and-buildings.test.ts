@@ -45,7 +45,7 @@ import { candidateSets } from "../src/buildings/candidates";
 import { buildingIndexSets, lotStands, segmentBuildings } from "../src/buildings/where";
 import { nextInt, seedRng } from "../src/rng";
 import { isSegment, segmentIdLimit } from "../src/roads/network";
-import { cellsSettled, syncCells } from "../src/zoning/cell-index";
+import { cellsSettled, cellsWalked, syncCells } from "../src/zoning/cell-index";
 
 // M2-11: roads, rezoning and buildings.
 
@@ -440,8 +440,11 @@ describe("a big change of roads", () => {
     ok(state, command("BuildRoadGrid", payload));
     const ready = state.cellsReadyAt;
     expect(ready).toBeGreaterThan(state.tick + 1);
+    // Following the grid did not walk its cells in one step, past the tick budget.
+    expect(cellsWalked(state)).toBe(false);
     // Mid-settle: nothing the grid blocks has gone yet.
     step(state);
+    expect(cellsWalked(state)).toBe(false);
     expect(live(state)).toEqual(before);
     // One copy saved now and one saved on the last tick before the cells settle.
     const early = deserialize(serialize(state)).state;
