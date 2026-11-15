@@ -30,7 +30,7 @@ import { ZONING_BALANCE } from "../zoning/balance";
 import { CELL_OPEN, columnStatus, nextColumn, syncCells, type Column } from "../zoning/cell-index";
 import { ZONE_NONE, cellSlot, localIndex, type CellRef } from "../zoning/cells";
 import { BUILDINGS_BALANCE, typesFor } from "./balance";
-import { NO_BUILDING, cellBuildings } from "./where";
+import { NO_BUILDING, segmentBuildings } from "./where";
 
 /** A lot a building type fits. Its first column and size, as a building row holds them. */
 export interface Lot {
@@ -142,8 +142,9 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
   const zone = cells.zone[slot] ?? ZONE_NONE;
   const density = cells.density[slot] ?? 0;
   if (zone === ZONE_NONE) return refuse("unzoned", "The ground is not zoned");
-  const onCell = cellBuildings(state);
-  if (onCell[slot] !== NO_BUILDING) return refuse("built", "A building stands here");
+  const onCell = segmentBuildings(state);
+  const builtOn = (col: Column, depth: number): boolean => (onCell[col.seg]?.[localIndex(col.side, col.place, depth)] ?? NO_BUILDING) !== NO_BUILDING;
+  if (builtOn(start, ref.depth)) return refuse("built", "A building stands here");
   const label = zoneLabel(zone, density);
   const types = typesFor(zone, density);
   if (types.length === 0) return refuse("no-types", `Nothing grows in ${label}`);
@@ -157,7 +158,7 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
       columnStatus(index, col, d) === CELL_OPEN &&
       cells.zone[run + d] === zone &&
       cells.density[run + d] === density &&
-      onCell[run + d] === NO_BUILDING
+      !builtOn(col, d)
     ) {
       d++;
     }

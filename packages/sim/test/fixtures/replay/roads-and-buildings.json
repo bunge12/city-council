@@ -1,0 +1,151 @@
+{
+  "description": "Roads and buildings on seed 2026. p1 builds a street and zones R1 four deep along its north side; p2 zones C1 three deep along its south side. After twelve days of growth p2 runs a street south from x 4296, which splits the first street under the houses across it and clears the shops in its way. p1 clears its lowest-numbered house with BulldozeBuilding, named on the piece the split moved it to, then runs a street north from x 4248 through its houses. p2 bulldozes its street, and undoes that three days later, which clears what grew on the ground meanwhile. Twenty-four game days.",
+  "seed": 2026,
+  "untilTick": 2400,
+  "balance": "220ab1c499717d01",
+  "hash": "2b05cd55abb7892c",
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4600
+        },
+        "to": {
+          "x": 4392,
+          "z": 4600
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 4202,
+              "z": 4579
+            },
+            "to": {
+              "x": 4390,
+              "z": 4579
+            },
+            "width": 28
+          }
+        ]
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 3,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "commercial",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 4202,
+              "z": 4617
+            },
+            "to": {
+              "x": 4390,
+              "z": 4617
+            },
+            "width": 20
+          }
+        ]
+      }
+    },
+    {
+      "tick": 1200,
+      "seq": 4,
+      "playerId": "p2",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4296,
+          "z": 4600
+        },
+        "to": {
+          "x": 4296,
+          "z": 4700
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1300,
+      "seq": 5,
+      "playerId": "p1",
+      "type": "BulldozeBuilding",
+      "payload": {
+        "buildings": [
+          {
+            "id": 0,
+            "segment": 2,
+            "side": 0,
+            "place": 7
+          }
+        ]
+      }
+    },
+    {
+      "tick": 1400,
+      "seq": 6,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4248,
+          "z": 4500
+        },
+        "to": {
+          "x": 4248,
+          "z": 4600
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1600,
+      "seq": 7,
+      "playerId": "p2",
+      "type": "BulldozeRoad",
+      "payload": {
+        "segments": [
+          4
+        ],
+        "ends": [
+          [
+            4296,
+            4600,
+            4296,
+            4700
+          ]
+        ],
+        "types": [
+          "street"
+        ]
+      }
+    },
+    {
+      "tick": 1900,
+      "seq": 8,
+      "playerId": "p2",
+      "type": "Undo",
+      "payload": {}
+    }
+  ]
+}

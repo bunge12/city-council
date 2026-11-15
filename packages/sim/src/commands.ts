@@ -1,3 +1,5 @@
+import { bulldozeBuildings, planBulldozeBuildings } from "./buildings/bulldoze";
+import { keepBuildings } from "./buildings/upkeep";
 import { LOG_PAGE_SIZE, logLength, recordEntry } from "./log";
 import { buildRoad, planRoad } from "./roads/build";
 import { buildRoadGrid, checkRoadGrid, gridProblemReason, planRoadGrid, type GridProblem } from "./roads/grid";
@@ -210,6 +212,23 @@ const ZoneCells: CommandDef = {
   applyIfValid: (state, command) => zoneCellsIfValid(state, command.payload),
 };
 
+/**
+ * Clears the buildings in `payload.buildings`, each named by its id and its
+ * lot's first cell as the player saw them, and refuses the whole command if
+ * any changed since. See buildings/bulldoze.ts. Free until M4. No undo
+ * record yet: that is issue #111.
+ */
+const BulldozeBuilding: CommandDef = {
+  validate: (state, command) => {
+    const result = planBulldozeBuildings(state, command.payload);
+    return result.ok ? null : result.reason;
+  },
+  apply: (state, command) => {
+    const result = planBulldozeBuildings(state, command.payload);
+    if (result.ok) bulldozeBuildings(state, result.ids);
+  },
+};
+
 /** Every command type the sim accepts, by name. */
 export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   NoOp,
@@ -220,6 +239,7 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   UpgradeRoad,
   Undo,
   ZoneCells,
+  BulldozeBuilding,
 });
 
 /** Checks a command against the current state without changing anything. */
@@ -308,13 +328,18 @@ export function enqueue(state: SimState, command: Command): void {
  * The zoning cells are brought up to date with the roads before the first
  * command and after each one (zoning/cell-index.ts), so the cells of a
  * removed road are read before it goes. A big change settles over the next
- * few ticks (`stepCells`).
+ * few ticks (`stepCells`). The buildings follow each time
+ * (buildings/upkeep.ts): the ones whose ground went are removed on the
+ * command's tick, and the ones a new road blocks once the cells settle.
  */
 export function applyPending(state: SimState): DroppedCommand[] {
   const queue = state.pending;
   state.pending = [];
   const dropped: DroppedCommand[] = [];
-  if (queue.length > 0) stepCells(state);
+  if (queue.length > 0) {
+    stepCells(state);
+    keepBuildings(state);
+  }
   for (const command of queue) {
     const def = commandDef(command);
     let reason: string | null;
@@ -328,6 +353,7 @@ export function applyPending(state: SimState): DroppedCommand[] {
       dropped.push({ seq: command.seq, playerId: command.playerId, type: command.type, reason });
     } else {
       stepCells(state);
+      keepBuildings(state);
       recordEntry(state, {
         tick: state.tick,
         seq: command.seq,

@@ -14,10 +14,11 @@
 //   `growthTries` cells and adds nothing: the most lot finder calls a tick
 //   can make;
 // - the first growing tick after the same street once tens of thousands of
-//   buildings stand. That tick rebuilds the building index (where.ts,
-//   M2-09) for the new cell layout, which costs about 3 µs a building. It
-//   is reported and not held to the budget: see the PRD under "The
-//   grower".
+//   buildings stand. The building index (where.ts) files again only the
+//   buildings near the segments the street laid out again (M2-11), so this
+//   is held to the budget like the rest;
+// - the buildings' upkeep after a grid at the cap over the grown city, as a
+//   command pays it (buildings/upkeep.ts).
 
 import { expect, test } from "vitest";
 import {
@@ -33,6 +34,7 @@ import {
 import { buildingCount, removeBuilding } from "../src/buildings/buildings";
 import { forgetCandidates } from "../src/buildings/candidates";
 import { grow, growOne } from "../src/buildings/grower";
+import { keepBuildings } from "../src/buildings/upkeep";
 import { ROAD_BUILD } from "../src/roads/balance";
 import { buildRoad, type RoadPlan } from "../src/roads/build";
 import { buildRoadGrid } from "../src/roads/grid";
@@ -187,6 +189,29 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
     },
   });
 
+  // What a command pays after a grid at the cap over the built city: the
+  // building index filed again near it, and once the cells settle, the
+  // check that removes the buildings under its streets (upkeep.ts). The
+  // first run removes them, so later runs measure the filing and the check.
+  const upkeep = `the buildings' upkeep after a grid at the cap over existing streets, with ${standing} buildings standing`;
+  {
+    const r = await bench(
+      upkeep,
+      {
+        writeResult: `bench-results/grower-upkeep.json`,
+        async: false,
+        beforeEach: () => {
+          buildGrid(grid);
+          state.tick = tick;
+          state.cellsReadyAt = 0;
+        },
+        afterEach: takeBackRoads,
+      },
+      () => keepBuildings(state),
+    ).run(runs);
+    results[upkeep] = { mean: r.latency.mean, p99: r.latency.p99 ?? 0, max: r.latency.max };
+  }
+
   const round = (v: number) => Math.round(v * 100) / 100;
   const report = {
     city: { segments: counts.segments, cells: state.cells.zone.length, frontCells: state.cells.zone.length / DEPTH },
@@ -195,7 +220,7 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   };
   await annotate(JSON.stringify(report, null, 2), "grower");
   for (const [name, r] of Object.entries(results)) {
-    if (name.includes("from scratch") || name.includes("standing")) continue;
+    if (name.includes("from scratch")) continue;
     expect(r.max, name).toBeLessThan(TICK_BUDGET_MS);
   }
 }, 600_000);

@@ -35,7 +35,7 @@ import { BUILDINGS_BALANCE, BUILDING_TYPES, type BuildingType } from "./balance"
 import { addBuilding } from "./buildings";
 import { candidateAt, candidateCount } from "./candidates";
 import { lotOptions, type Lot } from "./lots";
-import { cellBuildings } from "./where";
+import { segmentBuildings } from "./where";
 
 /** Name the timer hook reports for the grower. */
 export const GROWER_SYSTEM = "grower";
@@ -73,7 +73,7 @@ function chooseLot(rng: Uint32Array, lots: readonly Lot[], free: number): Lot {
 export function growOne(state: SimState): number {
   for (let tries = 0; tries < BUILDINGS_BALANCE.growthTries; tries++) {
     const index = syncCells(state);
-    const onCell = () => cellBuildings(state);
+    const onCell = () => segmentBuildings(state);
     const count = candidateCount(state, index, onCell);
     if (count === 0) return -1;
     const ref = candidateAt(state, index, onCell, nextInt(state.rng, count));

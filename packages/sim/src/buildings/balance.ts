@@ -33,6 +33,8 @@ export interface BuildingsBalance {
   growthPerDay: number;
   /** Free cells the grower draws for one building before it gives that building up. */
   growthTries: number;
+  /** The most buildings one `BulldozeBuilding` may name (M2-11). */
+  bulldozeMaxBuildings: number;
   types: BuildingTypeBalance[];
 }
 
@@ -78,6 +80,8 @@ export function checkBuildingsBalance(data: unknown): string[] {
   if (!Number.isSafeInteger(perDay) || (perDay as number) < 0) errors.push("growthPerDay must be a whole number of at least 0");
   const tries = data["growthTries"];
   if (!Number.isSafeInteger(tries) || (tries as number) < 1) errors.push("growthTries must be a whole number of at least 1");
+  const most = data["bulldozeMaxBuildings"];
+  if (!Number.isSafeInteger(most) || (most as number) < 1) errors.push("bulldozeMaxBuildings must be a whole number of at least 1");
   const deepest = ZONING_BALANCE.zoneDepthCells;
   const types = data["types"];
   if (!Array.isArray(types) || types.length === 0) {

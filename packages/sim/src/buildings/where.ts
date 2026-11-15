@@ -1,39 +1,75 @@
-// Where buildings stand (M2-09). Derived data (PRD, "Derived data"): which
-// building stands on each cell, and which 500 m chunk each building is in,
-// rebuilt from the buildings in state and the cells, never saved or hashed.
+// Where buildings stand (M2-09, M2-11). Derived data (PRD, "Derived data"):
+// which building stands on each cell, and which 500 m chunk each building
+// is in, built from the buildings in state and the cells, never saved or
+// hashed.
 //
 // A building's row names its lot by its first column and its size
 // (buildings.ts). The lot's cells are found by walking the strip from that
 // column (`nextColumn`), across a segment end where the road runs straight
-// on, so they follow from the roads as they are. The index is built on
-// first use and kept up to date as buildings come and go; any change of
-// roads lays the cells out again, and the next question rebuilds it.
+// on, so they follow from the roads as they are.
+//
+// The index is kept by segment: for each segment a building stands on, the
+// building on each cell of its run. It is built on first use and kept
+// current after, as buildings come and go and as the roads change. A change
+// of roads tells it which segments were laid out again and the nodes at
+// their ends (`CellIndex.buildingWatch`). Only the buildings filed on those
+// segments, or on the segments a lot could reach from those nodes
+// (`segmentsNear`, as the grower's candidates do), are filed again, so a
+// street across a grown city costs the buildings near it and not all of
+// them.
+//
+// On the sim, filing again first moves each such building's row onto the
+// ground it stood on (`columnMover`): a split, a join, an upgrade and a
+// reverse renumber the cells under a building but keep them. A building
+// whose first cell has no segment any more, or whose lot the strip no
+// longer holds, is lost, and the sim removes it (upkeep.ts). Each building
+// filed again waits to be checked against the cells' status once they
+// settle, with any building on a segment where a cell stopped being open.
+// A client's copy (`CellIndex.follows`) only files: its rows come from the
+// sim.
 
 import { BUILDING_ALIVE, BUILDING_ARRAYS, type BuildingState } from "./buildings";
+import { segmentsNear } from "./candidates";
+import { noteBuildingChanged } from "./changes";
 import type { SimState } from "../state";
-import { CELL_OPEN, chunkAt, columnExists, columnStatus, lotCorners, nextColumn, syncCells, type CellIndex, type Column } from "../zoning/cell-index";
+import {
+  CELL_OPEN,
+  chunkAt,
+  columnExists,
+  columnMover,
+  columnStatus,
+  lotCorners,
+  nextColumn,
+  syncCells,
+  type CellIndex,
+  type Column,
+} from "../zoning/cell-index";
 import { ZONING_BALANCE } from "../zoning/balance";
-import { localIndex, type CellState } from "../zoning/cells";
+import { localIndex } from "../zoning/cells";
 
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
 
 /** No building on a cell, or no chunk for a building whose lot is not there. */
 export const NO_BUILDING = -1;
 
-/** Fields `filed` keeps per building, to find its cells again once its row is gone. */
-const FILED = 6;
-
 interface BuildingIndex {
-  /** The cell layout this was built for. A new layout means the roads changed. */
-  cells: CellState;
-  /** By slot in `cells.zone`: the building on the cell, or NO_BUILDING. */
-  cellBuilding: Int32Array;
+  /** The cell index this was built for. A new one means a new city. */
+  cellIndex: CellIndex;
+  /** By segment id: the building on each cell of its run, or NO_BUILDING. Null where no building stands. */
+  segCells: (Int32Array | null)[];
   /** By building id: the chunk its lot's centre is in, or NO_BUILDING. */
   chunk: number[];
   /** Building ids by chunk. */
   byChunk: Map<number, Set<number>>;
-  /** By building id, FILED numbers: the first column and size it was filed with. */
-  filed: number[];
+  /** By building id: the depth it was filed with, then the segment and front cell of each column it holds. */
+  filed: (number[] | null)[];
+  /**
+   * Buildings to check once the cells settle: filed again since the last
+   * check, or, in an index built afresh, any whose lot did not stand.
+   */
+  toCheck: Set<number>;
+  /** Buildings whose ground a change of roads took, for the sim to remove. Never on a copy. */
+  lost: Set<number>;
 }
 
 const live = new WeakMap<BuildingState, BuildingIndex>();
@@ -58,19 +94,34 @@ function firstColumnOf(b: BuildingState, id: number): Column {
   return { seg: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0, dir: b.dir[id] ?? 0 };
 }
 
-function file(bi: BuildingIndex, index: CellIndex, first: Column, width: number, depth: number, id: number): void {
-  bi.filed.length = Math.max(bi.filed.length, (id + 1) * FILED);
-  bi.filed.splice(id * FILED, FILED, first.seg, first.side, first.place, first.dir, width, depth);
+const isLive = (b: BuildingState, id: number): boolean => ((b.flags[id] ?? 0) & BUILDING_ALIVE) !== 0;
+
+/** Files building `id` on its lot's cells. Returns false, filing nothing, if the strip does not hold the lot. */
+function file(bi: BuildingIndex, b: BuildingState, id: number): boolean {
+  const first = firstColumnOf(b, id);
+  const width = b.width[id] ?? 0;
+  const depth = b.depth[id] ?? 0;
+  const index = bi.cellIndex;
   bi.chunk[id] = NO_BUILDING;
   const cols = lotColumns(index, first, width);
-  if (!cols) return;
-  const cells = bi.cells;
-  for (const col of cols) {
-    const start = (cells.offset[col.seg] ?? 0) + localIndex(col.side, col.place, 0);
-    for (let d = 0; d < depth && d < DEPTH; d++) if (bi.cellBuilding[start + d] === NO_BUILDING) bi.cellBuilding[start + d] = id;
+  if (!cols) {
+    bi.filed[id] = null;
+    return false;
   }
+  const rec = [depth];
+  for (const col of cols) {
+    const start = localIndex(col.side, col.place, 0);
+    let cells = bi.segCells[col.seg];
+    if (!cells) {
+      cells = new Int32Array(index.segs[col.seg]?.status?.length ?? 0).fill(NO_BUILDING);
+      bi.segCells[col.seg] = cells;
+    }
+    for (let d = 0; d < depth && d < DEPTH; d++) if (cells[start + d] === NO_BUILDING) cells[start + d] = id;
+    rec.push(col.seg, start);
+  }
+  bi.filed[id] = rec;
   const corners = lotCorners(index, first, width, depth);
-  if (!corners) return;
+  if (!corners) return true;
   const x = ((corners[0] ?? 0) + (corners[2] ?? 0) + (corners[4] ?? 0) + (corners[6] ?? 0)) / 4;
   const z = ((corners[1] ?? 0) + (corners[3] ?? 0) + (corners[5] ?? 0) + (corners[7] ?? 0)) / 4;
   const chunk = chunkAt(x, z);
@@ -78,49 +129,128 @@ function file(bi: BuildingIndex, index: CellIndex, first: Column, width: number,
   let set = bi.byChunk.get(chunk);
   if (!set) bi.byChunk.set(chunk, (set = new Set()));
   set.add(id);
+  return true;
 }
 
-function unfile(bi: BuildingIndex, index: CellIndex, id: number): void {
-  if (id * FILED >= bi.filed.length) return;
-  const f = bi.filed.slice(id * FILED, (id + 1) * FILED);
-  const first: Column = { seg: f[0] ?? 0, side: f[1] ?? 0, place: f[2] ?? 0, dir: f[3] ?? 0 };
-  const cols = lotColumns(index, first, f[4] ?? 0);
-  if (cols) {
-    const cells = bi.cells;
-    for (const col of cols) {
-      const start = (cells.offset[col.seg] ?? 0) + localIndex(col.side, col.place, 0);
-      for (let d = 0; d < (f[5] ?? 0) && d < DEPTH; d++) if (bi.cellBuilding[start + d] === id) bi.cellBuilding[start + d] = NO_BUILDING;
+/**
+ * Takes building `id` off the cells it was filed on, from what `file`
+ * kept, so it works whatever the row or the roads say now. Returns the
+ * front cells it held, as segment and place in the run.
+ */
+function unfile(bi: BuildingIndex, id: number): number[] {
+  const rec = bi.filed[id];
+  const fronts: number[] = [];
+  if (rec) {
+    const depth = rec[0] ?? 0;
+    for (let i = 1; i < rec.length; i += 2) {
+      const seg = rec[i] ?? 0;
+      const start = rec[i + 1] ?? 0;
+      fronts.push(seg, start);
+      const cells = bi.segCells[seg];
+      if (!cells) continue;
+      for (let d = 0; d < depth && d < DEPTH && start + d < cells.length; d++) if (cells[start + d] === id) cells[start + d] = NO_BUILDING;
     }
   }
+  bi.filed[id] = null;
   const chunk = bi.chunk[id] ?? NO_BUILDING;
   if (chunk !== NO_BUILDING) bi.byChunk.get(chunk)?.delete(id);
   bi.chunk[id] = NO_BUILDING;
-  bi.filed.fill(0, id * FILED, (id + 1) * FILED);
+  return fronts;
+}
+
+/** A building index for `cellIndex`, every live building filed in id order. */
+function build(b: BuildingState, cellIndex: CellIndex): BuildingIndex {
+  const bi: BuildingIndex = {
+    cellIndex,
+    segCells: new Array<Int32Array | null>(cellIndex.segs.length).fill(null),
+    chunk: [],
+    byChunk: new Map(),
+    filed: [],
+    toCheck: new Set(),
+    lost: new Set(),
+  };
+  for (let id = 0; id < b.flags.length; id++) {
+    if (!isLive(b, id)) continue;
+    file(bi, b, id);
+    if (!stands(cellIndex, b, id)) bi.toCheck.add(id);
+  }
+  return bi;
+}
+
+/** Adds to `out` every building filed on segment `seg`. */
+function collect(bi: BuildingIndex, seg: number, out: Set<number>): void {
+  const cells = bi.segCells[seg];
+  if (!cells) return;
+  for (const id of cells) if (id !== NO_BUILDING) out.add(id);
+}
+
+/** Brings `bi` up to date with the changes of roads its cell index has seen since it last looked, as the header says. */
+function catchUp(state: SimState, bi: BuildingIndex): void {
+  const index = bi.cellIndex;
+  const watch = index.buildingWatch;
+  if (!watch || (watch.relaid.size === 0 && watch.nodes.size === 0)) return;
+  const b = state.buildings;
+  const affected = new Set<number>();
+  for (const seg of watch.relaid.keys()) collect(bi, seg, affected);
+  const near = new Set<number>();
+  for (const node of watch.nodes) segmentsNear(index, state.roads, node, near);
+  for (const seg of near) collect(bi, seg, affected);
+  const ids = [...affected].sort((p, q) => p - q);
+  for (const id of ids) unfile(bi, id);
+  bi.segCells.length = index.segs.length;
+  for (let seg = 0; seg < bi.segCells.length; seg++) bi.segCells[seg] ??= null;
+  for (const seg of watch.relaid.keys()) if (seg < bi.segCells.length) bi.segCells[seg] = null;
+  if (!index.follows) {
+    const move = columnMover(index, watch.relaid.keys());
+    for (const id of ids) {
+      const seg = b.firstSeg[id] ?? 0;
+      if (!isLive(b, id) || !watch.relaid.has(seg)) continue;
+      const old = watch.relaid.get(seg) ?? null;
+      const col = old ? move(old, firstColumnOf(b, id)) : null;
+      if (!col) {
+        bi.lost.add(id);
+        continue;
+      }
+      if (col.seg === seg && col.side === b.firstSide[id] && col.place === b.firstPlace[id] && col.dir === b.dir[id]) continue;
+      b.firstSeg[id] = col.seg;
+      b.firstSide[id] = col.side;
+      b.firstPlace[id] = col.place;
+      b.dir[id] = col.dir;
+      noteBuildingChanged(b, id);
+    }
+  }
+  for (const id of ids) {
+    if (!isLive(b, id) || bi.lost.has(id)) continue;
+    if (file(bi, b, id)) bi.toCheck.add(id);
+    else if (!index.follows) bi.lost.add(id);
+  }
+  watch.relaid.clear();
+  watch.nodes.clear();
 }
 
 /**
  * The building index of `state`, with the cells settled and laid out for
- * the roads as they are now. Built on first use, and again after the roads
- * change. Buildings are filed in id order, so where two lots overlap, which
- * a well-run city never has, the lower id holds the cell.
+ * the roads as they are now, built on first use and caught up with any
+ * change of roads since. Buildings are filed in id order, so where two lots
+ * overlap, which a well-run city never has, the lower id holds the cell.
  */
 function indexOf(state: SimState): { bi: BuildingIndex; cellIndex: CellIndex } {
   const cellIndex = syncCells(state);
   const b = state.buildings;
-  const known = live.get(b);
-  if (known && known.cells === state.cells) return { bi: known, cellIndex };
-  const bi: BuildingIndex = {
-    cells: state.cells,
-    cellBuilding: new Int32Array(state.cells.zone.length).fill(NO_BUILDING),
-    chunk: [],
-    byChunk: new Map(),
-    filed: [],
-  };
-  for (let id = 0; id < b.flags.length; id++) {
-    if (((b.flags[id] ?? 0) & BUILDING_ALIVE) !== 0) file(bi, cellIndex, firstColumnOf(b, id), b.width[id] ?? 0, b.depth[id] ?? 0, id);
+  let bi = live.get(b);
+  if (!bi || bi.cellIndex !== cellIndex) {
+    cellIndex.buildingWatch = { relaid: new Map(), nodes: new Set(), blocked: new Set() };
+    bi = build(b, cellIndex);
+    live.set(b, bi);
+  } else {
+    catchUp(state, bi);
   }
-  live.set(b, bi);
   return { bi, cellIndex };
+}
+
+/** Builds the building index now if there is none, so a host's load pays for it and not a tick. */
+export function prepareBuildingIndex(state: SimState): void {
+  indexOf(state);
 }
 
 /**
@@ -135,61 +265,175 @@ export function lotProblem(state: SimState, first: Column, width: number, depth:
   if (!cols) return "the strip ends before the lot does";
   const cells = state.cells;
   for (const col of cols) {
-    const start = (cells.offset[col.seg] ?? 0) + localIndex(col.side, col.place, 0);
+    const local = localIndex(col.side, col.place, 0);
+    const start = (cells.offset[col.seg] ?? 0) + local;
+    const held = bi.segCells[col.seg];
     for (let d = 0; d < depth; d++) {
       if (columnStatus(cellIndex, col, d) !== CELL_OPEN) return `a cell of the lot on segment ${col.seg} is blocked`;
       if (cells.zone[start + d] !== zone || cells.density[start + d] !== density) return `a cell of the lot on segment ${col.seg} is not zoned for it`;
-      if (bi.cellBuilding[start + d] !== NO_BUILDING) return `a cell of the lot on segment ${col.seg} has a building`;
+      if (held && held[local + d] !== NO_BUILDING) return `a cell of the lot on segment ${col.seg} has a building`;
     }
   }
   return null;
 }
 
-/** Files a building just added, if the index exists and is current. Otherwise the next question builds it. */
-export function fileBuilding(state: SimState, id: number): void {
-  const bi = live.get(state.buildings);
-  if (!bi) return;
-  const cellIndex = syncCells(state);
-  if (bi.cells !== state.cells) {
-    live.delete(state.buildings);
-    return;
-  }
-  const b = state.buildings;
-  file(bi, cellIndex, firstColumnOf(b, id), b.width[id] ?? 0, b.depth[id] ?? 0, id);
+/**
+ * Whether building `id`'s lot is all there and every cell of it open, with
+ * the cells as they are now. Its zoning does not count: a rezoned building
+ * stands (PRD, "Rezoning").
+ */
+export function lotStands(state: SimState, id: number): boolean {
+  return stands(syncCells(state), state.buildings, id);
 }
 
-/** Unfiles a building about to be removed, or whose row is about to change, if the index exists and is current. */
-export function unfileBuilding(state: SimState, id: number): void {
-  const bi = live.get(state.buildings);
-  if (!bi) return;
-  const cellIndex = syncCells(state);
-  if (bi.cells !== state.cells) {
-    live.delete(state.buildings);
-    return;
+function stands(cellIndex: CellIndex, b: BuildingState, id: number): boolean {
+  const cols = lotColumns(cellIndex, firstColumnOf(b, id), b.width[id] ?? 0);
+  if (!cols) return false;
+  const depth = b.depth[id] ?? 0;
+  for (const col of cols) for (let d = 0; d < depth; d++) if (columnStatus(cellIndex, col, d) !== CELL_OPEN) return false;
+  return true;
+}
+
+/** The current index, if there is one, without building or catching it up. */
+function current(state: SimState): BuildingIndex | null {
+  return live.get(state.buildings) ?? null;
+}
+
+/** Files a building just added, if the index exists. Otherwise the next question builds it. */
+export function fileBuilding(state: SimState, id: number): void {
+  if (!current(state)) return;
+  const { bi } = indexOf(state);
+  file(bi, state.buildings, id);
+}
+
+/**
+ * Unfiles a building about to be removed, or whose row is about to change,
+ * if the index exists. Returns the columns it held, so the grower can look
+ * at them again.
+ */
+export function unfileBuilding(state: SimState, id: number): Column[] {
+  if (!current(state)) return [];
+  const { bi } = indexOf(state);
+  bi.toCheck.delete(id);
+  bi.lost.delete(id);
+  const fronts = unfile(bi, id);
+  const cols: Column[] = [];
+  for (let i = 0; i < fronts.length; i += 2) {
+    const local = fronts[i + 1] ?? 0;
+    const rest = local / DEPTH;
+    cols.push({ seg: fronts[i] ?? 0, side: rest & 1, place: rest >> 1, dir: 0 });
   }
-  unfile(bi, cellIndex, id);
+  return cols;
 }
 
 /** The chunk building `id` was filed in, or NO_BUILDING, without building the index. For deltas. */
 export function filedChunk(state: SimState, id: number): number {
-  const bi = live.get(state.buildings);
-  return bi && bi.cells === state.cells ? (bi.chunk[id] ?? NO_BUILDING) : NO_BUILDING;
+  const bi = current(state);
+  return bi && bi.cellIndex === syncCells(state) ? (bi.chunk[id] ?? NO_BUILDING) : NO_BUILDING;
 }
 
 /** Whether the building index exists and fits the cells, so a delta can report chunks. */
 export function hasBuildingIndex(state: SimState): boolean {
-  return live.get(state.buildings)?.cells === state.cells;
+  const bi = current(state);
+  return !!bi && bi.cellIndex === syncCells(state);
+}
+
+/** By segment id, the building on each cell of its run, or null where none stands. Read only. */
+export function segmentBuildings(state: SimState): readonly (Int32Array | null)[] {
+  return indexOf(state).bi.segCells;
 }
 
 /** The building standing on the cell at `slot` of `state.cells.zone`, or NO_BUILDING. */
 export function buildingOnSlot(state: SimState, slot: number): number {
   const { bi } = indexOf(state);
-  return bi.cellBuilding[slot] ?? NO_BUILDING;
+  const offset = state.cells.offset;
+  if (!(Number.isInteger(slot) && slot >= 0 && slot < (offset[offset.length - 1] ?? 0))) return NO_BUILDING;
+  // The last segment whose run starts at or before the slot.
+  let lo = 0;
+  let hi = offset.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if ((offset[mid] ?? 0) <= slot) lo = mid;
+    else hi = mid;
+  }
+  return bi.segCells[lo]?.[slot - (offset[lo] ?? 0)] ?? NO_BUILDING;
 }
 
-/** By slot in `state.cells.zone`, the building on each cell or NO_BUILDING. Read only. For the lot finder and tests. */
+/** By slot in `state.cells.zone`, the building on each cell or NO_BUILDING. A new array each call. For tests. */
 export function cellBuildings(state: SimState): Int32Array {
-  return indexOf(state).bi.cellBuilding;
+  return flatten(state, indexOf(state).bi);
+}
+
+function flatten(state: SimState, bi: BuildingIndex): Int32Array {
+  const { offset, zone } = state.cells;
+  const out = new Int32Array(zone.length).fill(NO_BUILDING);
+  bi.segCells.forEach((cells, seg) => cells && out.set(cells.subarray(0, (offset[seg + 1] ?? 0) - (offset[seg] ?? 0)), offset[seg] ?? 0));
+  return out;
+}
+
+/**
+ * The index as kept and as built afresh from state, each as the building on
+ * every cell by slot and the chunk of every building, for tests that check
+ * the two never part.
+ */
+export function buildingIndexSets(state: SimState): { kept: { cells: Int32Array; chunks: number[] }; fresh: { cells: Int32Array; chunks: number[] } } {
+  const { bi, cellIndex } = indexOf(state);
+  const fresh = build(state.buildings, cellIndex);
+  const chunks = (x: BuildingIndex) => Array.from(state.buildings.flags, (_, id) => (isLive(state.buildings, id) ? (x.chunk[id] ?? NO_BUILDING) : NO_BUILDING));
+  return { kept: { cells: flatten(state, bi), chunks: chunks(bi) }, fresh: { cells: flatten(state, fresh), chunks: chunks(fresh) } };
+}
+
+/** The ids of the buildings filed on any of `segs`, ascending. */
+export function buildingsOnSegments(state: SimState, segs: Iterable<number>): number[] {
+  const { bi } = indexOf(state);
+  const out = new Set<number>();
+  for (const seg of segs) collect(bi, seg, out);
+  return [...out].sort((p, q) => p - q);
+}
+
+/** The ids of the buildings filed on any cell of `keys`, as `segment * CELL_KEY_STRIDE + place in its run`, ascending. */
+export function buildingsOnCells(state: SimState, keys: readonly number[], stride: number): number[] {
+  const { bi } = indexOf(state);
+  const out = new Set<number>();
+  for (const key of keys) {
+    const seg = Math.floor(key / stride);
+    const id = bi.segCells[seg]?.[key - seg * stride] ?? NO_BUILDING;
+    if (id !== NO_BUILDING) out.add(id);
+  }
+  return [...out].sort((p, q) => p - q);
+}
+
+/** Whether the sim has buildings to remove or check (upkeep.ts), without building the index. */
+export function buildingWorkDue(state: SimState): boolean {
+  const bi = current(state);
+  if (!bi) return state.buildings.flags.length > 0;
+  const watch = bi.cellIndex.buildingWatch;
+  return bi.toCheck.size > 0 || bi.lost.size > 0 || (!!watch && (watch.blocked.size > 0 || watch.relaid.size > 0 || watch.nodes.size > 0));
+}
+
+/** The buildings a change of roads took the ground of, ascending, and forgets them. */
+export function takeLostBuildings(state: SimState): number[] {
+  const { bi } = indexOf(state);
+  const ids = [...bi.lost].sort((p, q) => p - q);
+  bi.lost.clear();
+  return ids;
+}
+
+/**
+ * The buildings to check against the cells now, ascending, and forgets
+ * them: the ones waiting (`BuildingIndex.toCheck`) and the ones on a
+ * segment where a cell stopped being open. Only once the cells have
+ * settled.
+ */
+export function takeBuildingsToCheck(state: SimState): number[] {
+  const { bi, cellIndex } = indexOf(state);
+  const watch = cellIndex.buildingWatch;
+  const set = bi.toCheck;
+  if (watch) for (const seg of watch.blocked) collect(bi, seg, set);
+  const ids = [...set].sort((p, q) => p - q);
+  bi.toCheck = new Set();
+  watch?.blocked.clear();
+  return ids;
 }
 
 /** The ids of the buildings whose lot's centre is in 500 m chunk `chunk`, ascending. */
@@ -226,7 +470,7 @@ export interface BuildingInfo {
 /** Building `id` with its lot's corners, or null if there is no such building. */
 export function buildingInfo(state: SimState, id: number): BuildingInfo | null {
   const b = state.buildings;
-  if (!Number.isInteger(id) || id < 0 || id >= b.flags.length || ((b.flags[id] ?? 0) & BUILDING_ALIVE) === 0) return null;
+  if (!Number.isInteger(id) || id < 0 || id >= b.flags.length || !isLive(b, id)) return null;
   const { bi, cellIndex } = indexOf(state);
   const row = Object.fromEntries(BUILDING_ARRAYS.filter((key) => key !== "flags").map((key) => [key, b[key][id] ?? 0])) as Omit<
     BuildingInfo,
