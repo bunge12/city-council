@@ -1,6 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
+import projectFiles from "./e2e/projects.json" with { type: "json" };
 
 const isCI = Boolean(process.env["CI"]);
+
+/** The walkthrough's spec files, a pattern shared with scripts/e2e-shard.mjs (e2e/projects.json). */
+const walkthroughFiles = new RegExp(projectFiles.walkthrough);
 
 /**
  * Where the M0 walkthrough runs. Unset, it runs against a production build
@@ -11,6 +15,13 @@ const isCI = Boolean(process.env["CI"]);
  */
 const remoteBase = process.env["BASE_URL"];
 const walkthroughBase = remoteBase ?? "http://localhost:4173/";
+
+/**
+ * Only the walkthrough opens the production build. A CI runner that runs
+ * another project sets E2E_DEV_SERVER_ONLY and skips building and serving
+ * it, which saves it about twenty seconds before its first test.
+ */
+const devServerOnly = process.env["E2E_DEV_SERVER_ONLY"] === "1";
 
 /**
  * WebGPU for the walkthrough. Chrome on macOS and Windows has it on. On
@@ -54,7 +65,9 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: [/walkthrough\.spec\.ts$/, "roads.spec.ts", "cells.spec.ts", ...(process.env["SCALE_WEBGPU"] ? ["scale.spec.ts"] : [])],
+      // Every file the other projects do not run. In CI its files are dealt
+      // out to runners by scripts/e2e-shard.mjs, by how long each takes.
+      testIgnore: [walkthroughFiles, ...projectFiles.roads, ...(process.env["SCALE_WEBGPU"] ? ["scale.spec.ts"] : [])],
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -68,7 +81,7 @@ export default defineConfig({
       // when the project is fully parallel, and each runs one worker.
       name: "roads",
       // With SCALE_WEBGPU set, the scale check runs here too, for its WebGPU numbers (see scale.spec.ts).
-      testMatch: process.env["SCALE_WEBGPU"] ? ["roads.spec.ts", "cells.spec.ts", "scale.spec.ts"] : ["roads.spec.ts", "cells.spec.ts"],
+      testMatch: process.env["SCALE_WEBGPU"] ? [...projectFiles.roads, "scale.spec.ts"] : projectFiles.roads,
       fullyParallel: isCI,
       dependencies: remoteBase ? [] : ["chromium"],
       use: {
@@ -84,7 +97,7 @@ export default defineConfig({
       // its WebGPU device, and a headless page's screenshots leave out a
       // WebGPU canvas. On Linux without a display, run it under `xvfb-run`.
       name: "walkthrough",
-      testMatch: /walkthrough\.spec\.ts$/,
+      testMatch: walkthroughFiles,
       // Software WebGPU takes most of a CI runner's CPU, and a page in
       // another test then misses key presses. So the walkthrough starts
       // after the other projects finish. Against a public address it runs
@@ -110,11 +123,15 @@ export default defineConfig({
           reuseExistingServer: !isCI,
           timeout: 60_000,
         },
-        {
-          command: "pnpm --filter @city-council/client build && pnpm --filter @city-council/client preview",
-          url: "http://localhost:4173",
-          reuseExistingServer: !isCI,
-          timeout: 120_000,
-        },
+        ...(devServerOnly
+          ? []
+          : [
+              {
+                command: "pnpm --filter @city-council/client build && pnpm --filter @city-council/client preview",
+                url: "http://localhost:4173",
+                reuseExistingServer: !isCI,
+                timeout: 120_000,
+              },
+            ]),
       ],
 });
