@@ -86,5 +86,7 @@ export function builtFixtureCity(): { bytes: Buffer; state: SimState; counts: nu
   const { state } = fixtureCity();
   zoneSides(state, PAIRS_FROM);
   const counts = buildEverySide(state);
+  // Saved paused: a building the grower adds during a test would change the counts and the screenshots.
+  state.speed = 0;
   return { bytes: Buffer.from(serialize(state)), state, counts, buildings: buildingCount(state.buildings) };
 }
