@@ -118,7 +118,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(mirror.state?.tick).toBe(20 + MAX_CATCH_UP_STEPS);
   });
 
-  it("sends deltas only when something changed, carrying only tick, speed and new log", async () => {
+  it("sends deltas only when something changed, carrying only tick, speed, the generator and new log", async () => {
     const { mirror, run, received } = setup();
     await mirror.sendCommand("SetSpeed", { speed: 0 });
     run(100);
@@ -127,14 +127,14 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["log", "logFrom", "seq", "speed", "steps", "tick", "timings", "type", "v"].sort(),
+      ["log", "logFrom", "rng", "seq", "speed", "steps", "tick", "timings", "type", "v"].sort(),
     );
   });
 
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["commands", "cells"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["commands", "cells", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -186,6 +186,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       speed: 1,
       logFrom: 99,
       log: [],
+      rng: new Uint32Array(4),
       steps: 1,
       timings: [],
     });
