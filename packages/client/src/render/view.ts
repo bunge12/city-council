@@ -94,9 +94,12 @@ export interface View {
   /**
    * Brings the buildings in line with a delta: every building in the chunks
    * whose roads changed is placed again, and in `changed` only the
-   * buildings that came or went are written.
+   * buildings that came or went are written. `ids` are the buildings the
+   * delta carried: the chunks they were drawn in and are in now are
+   * brought up to date too, for a delta whose road change left the
+   * mirror unable to say where they are.
    */
-  updateBuildings(roadChunks: readonly number[], changed: readonly number[]): void;
+  updateBuildings(roadChunks: readonly number[], changed: readonly number[], ids: readonly number[]): void;
   buildingStats(): BuildingStats | null;
   /** The colours building `id` is drawn in, as sRGB hex, or null. For tests. */
   buildingTint(id: number): { wall: number; roof: number; trim: number } | null;
@@ -350,12 +353,14 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       buildingSource = source;
     },
     showBuildings: () => terrainRoot?.buildings?.reset(),
-    updateBuildings(roadChunks, changed) {
+    updateBuildings(roadChunks, changed, ids) {
       const layer = terrainRoot?.buildings;
       if (!layer) return;
       layer.rebuild(roadChunks);
-      // A lot whose centre is over a chunk line from a changed road can lose its building to it.
+      // A lot whose centre is over a chunk line from a changed road can lose its building to it, or move.
       layer.apply([...new Set([...changed, ...roadChunks.flatMap(neighbourhood)])]);
+      // With roads in the same delta the mirror cannot name the chunks of the buildings it carried.
+      if (roadChunks.length > 0 || changed.length === 0) layer.applyIds(ids);
     },
     buildingStats: () => terrainRoot?.buildings?.stats() ?? null,
     buildingTint: (id) => terrainRoot?.buildings?.tintOf(id) ?? null,

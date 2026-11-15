@@ -20,7 +20,7 @@
 //
 // The renderer reads the mirror; it never writes it.
 
-import { attribute, floor, fract, mix, mod, select, sRGBTransferEOTF, step, uniform, vec3 } from "three/tsl";
+import { attribute, floor, fract, mix, mod, select, sRGBTransferEOTF, step, uniform, varying, vec3 } from "three/tsl";
 import {
   BufferAttribute,
   BufferGeometry,
@@ -48,6 +48,8 @@ import { tintFor } from "./building-tint";
 export interface BuildingSource {
   /** Every building whose lot's centre is in the chunk, with its lot's corners. Empty before the first snapshot. */
   buildingsInChunk(chunk: number): BuildingInfo[];
+  /** The chunk building `id`'s lot's centre is in, or -1 if there is no such building or lot. */
+  buildingChunk(id: number): number;
 }
 
 /** What the layer reports, for the debug panel and tests. */
@@ -80,6 +82,12 @@ export interface BuildingLayer {
   rebuild(chunks: readonly number[]): void;
   /** Buildings came or went in these chunks: only those are written. */
   apply(chunks: readonly number[]): void;
+  /**
+   * These buildings came, went or changed, in chunks not known yet: the
+   * chunks they are drawn in and the ones the mirror puts them in now are
+   * brought up to date, as `apply` does, on the next update.
+   */
+  applyIds(ids: readonly number[]): void;
   /** Called once a frame: reads waiting chunks, nearest the camera at (x, z) first, for about `budgetMs`. */
   update(camera: { x: number; z: number }, budgetMs: number): void;
   /**
@@ -141,9 +149,11 @@ function buildingMaterial(theme: Theme): MeshLambertNodeMaterial {
   const stretch = attribute<"vec2">("buildingScale", "vec2");
   const glass = linear(theme.fixed.glass);
   const pave = linear(theme.fixed.paving);
-  const wall = unpack(tint.x);
-  const roof = unpack(tint.y);
-  const trim = unpack(tint.z);
+  // Unpacked per vertex: the packed number is exact there, and the same at
+  // every vertex of an instance, so the colours reach the fragments whole.
+  const wall = varying(unpack(tint.x));
+  const roof = varying(unpack(tint.y));
+  const trim = varying(unpack(tint.z));
   const colour = select(surface.lessThan(0.5), wall, select(surface.lessThan(1.5), roof, select(surface.lessThan(2.5), trim, select(surface.lessThan(3.5), glass, pave))));
   // Windows along the wall, in the lot's metres: the stretch of this instance along the wall's axis is taken out.
   const kind = facade.w;
@@ -239,6 +249,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   /** Chunks waiting, and whether each is to be rebuilt or only brought up to date. */
   const dirty = new Map<number, "rebuild" | "apply">();
   let lotChunks = new Set<number>();
+  /** Buildings whose chunks are to be found at the next update. */
+  let pendingIds = new Set<number>();
   let stats: BuildingStats = { buildings: 0, models: 0, pending: 0, lastWrites: 0, totalWrites: 0, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0 };
   let batchWrites = 0;
   let batchRebuilt = 0;
@@ -363,6 +375,23 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     byChunk.get(chunk)?.delete(id);
   }
 
+  /** Files a lot by its corners' chunks, and notes them for the overlay and the decoration. */
+  function fileLot(id: number, chunks: readonly number[]): void {
+    for (const c of chunks) {
+      lotChunks.add(c);
+      let set = byLotChunk.get(c);
+      if (!set) byLotChunk.set(c, (set = new Set()));
+      set.add(id);
+    }
+  }
+
+  function unfileLot(id: number, chunks: readonly number[]): void {
+    for (const c of chunks) {
+      lotChunks.add(c);
+      byLotChunk.get(c)?.delete(id);
+    }
+  }
+
   function remove(id: number): void {
     const d = drawn.get(id);
     if (!d) return;
@@ -383,10 +412,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     m.count = last;
     m.mesh.count = last;
     unfile(id, d.chunk);
-    for (const c of d.lotChunks) {
-      lotChunks.add(c);
-      byLotChunk.get(c)?.delete(id);
-    }
+    unfileLot(id, d.lotChunks);
     drawn.delete(id);
   }
 
@@ -401,12 +427,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     write(m, slot, place, info.width, typeId, tint);
     const corners = info.corners ? [...info.corners] : [];
     const lots = cornerChunks(corners);
-    for (const c of lots) {
-      lotChunks.add(c);
-      let set = byLotChunk.get(c);
-      if (!set) byLotChunk.set(c, (set = new Set()));
-      set.add(info.id);
-    }
+    fileLot(info.id, lots);
     drawn.set(info.id, { model: m, slot, chunk, sig, lotChunks: lots, corners, tint });
     file(info.id, chunk);
   }
@@ -420,15 +441,21 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       seen.add(info.id);
       const sig = `${info.type}/${info.variant}/${info.width}/${info.depth}/${info.builtAt}`;
       const d = drawn.get(info.id);
-      if (d && d.sig === sig && mode === "apply" && d.chunk === c) continue;
+      if (d && d.sig === sig && mode === "apply" && d.chunk === c && sameCorners(d.corners, info.corners)) continue;
       const place = placeLot(info.corners, height);
-      if (d && d.sig === sig && sameCorners(d.corners, info.corners)) {
-        // The same building on the same lot: placed again in its own instance, as the ground or the model may differ.
+      if (d && d.sig === sig) {
+        // The same building: placed again in its own instance, on its lot as it is now.
         write(d.model, d.slot, place, info.width, BUILDING_TYPES[info.type]?.id ?? "", d.tint);
         if (d.chunk !== c) {
           unfile(info.id, d.chunk);
           d.chunk = c;
           file(info.id, c);
+        }
+        if (!sameCorners(d.corners, info.corners)) {
+          unfileLot(info.id, d.lotChunks);
+          d.corners = [...info.corners];
+          d.lotChunks = cornerChunks(d.corners);
+          fileLot(info.id, d.lotChunks);
         }
         continue;
       }
@@ -453,7 +480,22 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     },
     rebuild: (chunks) => mark(chunks, "rebuild"),
     apply: (chunks) => mark(chunks, "apply"),
+    applyIds(ids) {
+      for (const id of ids) pendingIds.add(id);
+    },
     update(camera, budgetMs) {
+      if (pendingIds.size > 0) {
+        const ids = pendingIds;
+        pendingIds = new Set();
+        const chunks: number[] = [];
+        for (const id of ids) {
+          const d = drawn.get(id);
+          if (d) chunks.push(d.chunk);
+          const now = source.buildingChunk(id);
+          if (now >= 0) chunks.push(now);
+        }
+        mark(chunks, "apply");
+      }
       if (dirty.size === 0) return;
       const start = performance.now();
       const distance = (c: number) => {

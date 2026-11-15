@@ -160,6 +160,10 @@ function fakeSource() {
   };
   const source: BuildingSource = {
     buildingsInChunk: (chunk) => [...rows.values()].filter((b) => chunkOf(b) === chunk).sort((a, b) => a.id - b.id),
+    buildingChunk: (id) => {
+      const b = rows.get(id);
+      return b ? chunkOf(b) : -1;
+    },
   };
   const house = BUILDING_TYPES.findIndex((t) => t.id === "single-family-home");
   const put = (id: number, x: number, z: number, variant = 0, type = house) => {
@@ -189,6 +193,7 @@ function fakeSource() {
 
 /** Runs the layer's frame work until nothing waits. */
 function settle(layer: ReturnType<typeof createBuildingLayer>): void {
+  layer.update({ x: 0, z: 0 }, 1000);
   for (let k = 0; k < 1000 && layer.stats().pending > 0; k++) layer.update({ x: 0, z: 0 }, 1000);
 }
 
@@ -229,6 +234,18 @@ describe("the building layer", () => {
     layer.apply([chunk]);
     settle(layer);
     expect(layer.stats()).toMatchObject({ buildings: 4, lastWrites: 0, lastRebuilt: 0 });
+    // A building that came with a change of roads, named by id alone, is found and written.
+    put(6, 4000 + 6 * 16, 4000);
+    layer.applyIds([6]);
+    settle(layer);
+    expect(layer.stats()).toMatchObject({ buildings: 5, lastWrites: 1, lastRebuilt: 0 });
+    rows.delete(6);
+    // A lot that moved with its row unchanged, as when a road widens, is placed again.
+    const moved = rows.get(0);
+    if (moved?.corners) moved.corners = moved.corners.map((v, i) => (i % 2 === 1 ? v + 2 : v));
+    layer.apply([chunk]);
+    settle(layer);
+    expect(layer.stats()).toMatchObject({ buildings: 4, lastWrites: 1, lastRebuilt: 0 });
     // A change of roads places every building in the chunk again.
     layer.rebuild([chunk]);
     settle(layer);

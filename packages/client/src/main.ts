@@ -530,7 +530,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   });
   // Buildings come from the mirror alone too: a snapshot draws them all,
   // nearest the camera first, and a delta the chunks it changed.
-  view.setBuildingSource({ buildingsInChunk: (chunk) => mirror.buildingsInChunk(chunk) });
+  view.setBuildingSource({ buildingsInChunk: (chunk) => mirror.buildingsInChunk(chunk), buildingChunk: (id) => mirror.buildingChunk(id) });
   const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
   const buildingReadout = () => {
     const b = view.buildingStats();
@@ -544,8 +544,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   };
   const showBuildings = (update: MirrorUpdate) => {
     if (update.kind === "snapshot") view.showBuildings();
-    else if (update.roadChunks.length > 0 || update.cellChunks.length > 0 || update.buildingChunks.length > 0) {
-      view.updateBuildings(update.roadChunks, [...new Set([...update.cellChunks, ...update.buildingChunks])]);
+    else if (update.roadChunks.length > 0 || update.cellChunks.length > 0 || update.buildingChunks.length > 0 || update.buildingIds.length > 0) {
+      view.updateBuildings(update.roadChunks, [...new Set([...update.cellChunks, ...update.buildingChunks])], update.buildingIds);
     }
   };
   view.onFrame(buildingReadout);

@@ -51,7 +51,10 @@ export interface HostStats {
  * carried: a building whose road moved under it, as an upgrade moves a
  * road's edge, keeps its row and is not listed. A view that draws
  * buildings must redraw them in every chunk of `roadChunks` and
- * `cellChunks` too.
+ * `cellChunks` too, and look up where each of `buildingIds` is and was:
+ * a building that came in such a delta changed no cell, so its chunk may
+ * be in neither list. `buildingIds` names every building the delta
+ * carried a row for, ascending, whether or not anything asked.
  * `steps` is how many sim steps the delta covers: after one or more, every
  * command the host had queued before it has been applied or dropped.
  * Listeners run before `sendCommandSettled` resolves for the commands the
@@ -66,6 +69,7 @@ export type MirrorUpdate =
       roadSegs: readonly number[];
       cellChunks: readonly number[];
       buildingChunks: readonly number[];
+      buildingIds: readonly number[];
       steps: number;
     };
 
@@ -172,6 +176,11 @@ export class SimMirror {
     const state = this.current;
     if (!state) return [];
     return buildingsInChunk(state, chunk).flatMap((id) => buildingInfo(state, id) ?? []);
+  }
+
+  /** The chunk building `id`'s lot's centre is in, or -1 if there is none. */
+  buildingChunk(id: number): number {
+    return this.current ? (buildingInfo(this.current, id)?.chunk ?? -1) : -1;
   }
 
   /**
@@ -294,7 +303,8 @@ export class SimMirror {
     // The copy now holds what these commands did, so their senders can look.
     for (const entry of delta.log) if (entry.playerId === this.playerId) this.settle(entry.seq, { ok: true });
     this.settleDropped(delta);
-    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs, cellChunks, buildingChunks, steps: delta.steps });
+    const buildingIds = delta.buildings ? [...delta.buildings.ids] : [];
+    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs, cellChunks, buildingChunks, buildingIds, steps: delta.steps });
   }
 
   private settleDropped(delta: Extract<FromSimMessage, { type: "delta" }>): void {
