@@ -9,7 +9,7 @@
 // rebuilds its own and nothing about a host's history can leak into it.
 
 import { prepareCandidates } from "./buildings/candidates";
-import { cellBuildings } from "./buildings/where";
+import { prepareBuildingIndex, segmentBuildings } from "./buildings/where";
 import { blockIndexOf, listBlocks } from "./roads/blocks";
 import { routingGraphOf } from "./roads/routing";
 import { roadIndexOf } from "./roads/spatial";
@@ -29,6 +29,6 @@ export function prepareDerived(state: SimState): void {
   routingGraphOf(state.roads);
   listBlocks(blockIndexOf(state.roads));
   const index = syncCells(state);
-  cellBuildings(state);
-  prepareCandidates(state, index, () => cellBuildings(state));
+  prepareBuildingIndex(state);
+  prepareCandidates(state, index, () => segmentBuildings(state));
 }

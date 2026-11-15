@@ -306,6 +306,26 @@ export interface CellIndex {
    * the grower first builds its candidates.
    */
   watch: CellWatch | null;
+  /**
+   * What changed for the building index (buildings/where.ts) since it last
+   * looked: each segment laid out again with the shape it had when the
+   * index last looked, the nodes at their ends before and after, and the
+   * segments with a cell that stopped being open. Null until the building
+   * index is first built.
+   */
+  buildingWatch: BuildingWatch | null;
+}
+
+/** A segment as the cell index last saw it. Opaque outside this module. */
+export type OldShape = SegShape;
+
+/** See `CellIndex.buildingWatch`. */
+export interface BuildingWatch {
+  /** By segment id laid out again, its shape before the first of those changes, or null if it was not live. */
+  relaid: Map<number, OldShape | null>;
+  nodes: Set<number>;
+  /** Segments with a cell whose status changed to anything but CELL_OPEN. */
+  blocked: Set<number>;
 }
 
 /** See `CellIndex.watch`. */
@@ -691,6 +711,7 @@ function setStatus(index: CellIndex, seg: number, s: SegShape, local: number, no
   }
   if ((was === CELL_OPEN) !== (now === CELL_OPEN)) fileCell(index, index.openBuckets, seg, s, local, now === CELL_OPEN);
   if (index.watch && was !== now && local % DEPTH === 0) index.watch.fronts.add(seg * KEY_STRIDE + local / DEPTH);
+  if (index.buildingWatch && was !== now && now !== CELL_OPEN) index.buildingWatch.blocked.add(seg);
 }
 
 /** Cell statuses as bits, for picking which cells to look at again. */
@@ -754,6 +775,7 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     follows: false,
     dirty: null,
     watch: null,
+    buildingWatch: null,
   };
   const limit = segmentIdLimit(net);
   const order: number[] = [];
@@ -932,6 +954,14 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     const { segs, nodes } = index.watch;
     for (const { id, shape } of changed) {
       segs.add(id);
+      if (shape) nodes.add(shape.a).add(shape.b);
+      if (isSegment(net, id)) nodes.add(net.segA[id] ?? 0).add(net.segB[id] ?? 0);
+    }
+  }
+  if (index.buildingWatch) {
+    const { relaid, nodes } = index.buildingWatch;
+    for (const { id, shape } of changed) {
+      if (!relaid.has(id)) relaid.set(id, shape);
       if (shape) nodes.add(shape.a).add(shape.b);
       if (isSegment(net, id)) nodes.add(net.segA[id] ?? 0).add(net.segB[id] ?? 0);
     }
@@ -1320,6 +1350,21 @@ export function syncCells(state: SimState): CellIndex {
   const { index, built } = indexOf(state);
   if (!built) state.cells = update(index, state.cells)?.cells ?? state.cells;
   drain(index, Infinity);
+  return index;
+}
+
+/**
+ * The cell index of `state`'s roads with the cells in state laid out for
+ * the roads as they are now, but without walking any change still
+ * settling: segment shapes and runs are current, statuses may not be. For
+ * the building index (buildings/where.ts), which follows the shapes and
+ * must not walk a big change in one step, past the tick budget the slicing
+ * protects.
+ */
+export function laidOutCells(state: SimState): CellIndex {
+  const { index, built } = indexOf(state);
+  if (built) drain(index, Infinity);
+  else state.cells = update(index, state.cells)?.cells ?? state.cells;
   return index;
 }
 
@@ -1815,4 +1860,82 @@ export function lotCorners(index: CellIndex, first: Column, width: number, depth
   columnEdge(s0, first.side, first.place, 1 - first.dir, depth, near);
   columnEdge(s1, last.side, last.place, last.dir, depth, far);
   return [near[0] ?? 0, near[1] ?? 0, near[2] ?? 0, near[3] ?? 0, far[2] ?? 0, far[3] ?? 0, far[0] ?? 0, far[1] ?? 0];
+}
+
+// ---- Following buildings across a change of roads ----
+
+/**
+ * A function that names, on the roads `index` has now, the column that
+ * stood on the same anchor cell as `col` did on segment shape `old`, going
+ * the same way along the road, or null when no segment has that ground any
+ * more. `relaid` are the segments laid out again since `old` was current:
+ * the only ones whose cells can have taken that ground over. A split, a
+ * join, an upgrade and a reverse all keep each cell's anchor cell
+ * (`relayout`), so a building's first column follows its ground through
+ * them.
+ */
+export function columnMover(index: CellIndex, relaid: Iterable<number>): (old: OldShape, col: Column) => Column | null {
+  const byAnchor = new Map<string, number[]>();
+  for (const id of relaid) {
+    const s = index.segs[id];
+    if (!s?.status) continue;
+    const key = anchorKeyOf(s);
+    const list = byAnchor.get(key);
+    if (list) list.push(id);
+    else byAnchor.set(key, [id]);
+  }
+  for (const list of byAnchor.values()) list.sort((p, q) => p - q);
+  return (old, col) => {
+    if (!old.status || col.place < 0 || col.place >= old.places) return null;
+    const k = old.reversed ? old.from + old.places - 1 - col.place : old.from + col.place;
+    const anchorSide = old.reversed ? 1 - col.side : col.side;
+    // Toward the anchor's far end, or back toward its start.
+    const forward = (col.dir === 0) !== old.reversed;
+    for (const id of byAnchor.get(anchorKeyOf(old)) ?? []) {
+      const s = index.segs[id] as SegShape;
+      const local = localOfAnchorCell(s, k, anchorSide, 0);
+      if (local < 0) continue;
+      const rest = local / DEPTH;
+      return { seg: id, side: rest & 1, place: rest >> 1, dir: forward !== s.reversed ? 0 : 1 };
+    }
+    return null;
+  };
+}
+
+/**
+ * The keys, `segment * CELL_KEY_STRIDE + place in its run`, of the open
+ * cells of `index` that the surfaces of segments `segs` of `net` would
+ * cover, as a change of roads that brought those segments would find them
+ * (`update`): a surface piece overlapping a cell that is not a fold. For a
+ * preview: `net` may hold a change `index` has not seen, and nothing in the
+ * index changes. A cell on the same anchor as one of the segments is its
+ * own road's, cut from it by a split, and only touches its surface.
+ */
+export function openCellsUnder(index: CellIndex, net: RoadNetwork, segs: readonly number[]): number[] {
+  const out = new Set<number>();
+  const box = new Float64Array(4);
+  const quad = new Float64Array(8);
+  for (const id of segs) {
+    const shape = shapeOf(net, id);
+    if (!shape) continue;
+    const anchor = anchorKeyOf(shape);
+    for (let k = 0; k < shape.pieces; k++) {
+      const piece = surfacePiece(shape, k);
+      quadBoxInto(piece, box);
+      const pieceBox = Float64Array.from(box);
+      forOverlappingCells(
+        index,
+        piece,
+        pieceBox,
+        BIT_OPEN,
+        (key) => {
+          const seg = segOfKey(key);
+          cellQuad(index.segs[seg] as SegShape, key - seg * KEY_STRIDE, quad);
+          if (isConvexQuad(quad)) out.add(key);
+        },
+        (key, seg) => out.has(key) || (index.segs[seg] ? anchorKeyOf(index.segs[seg] as SegShape) === anchor : true),
+      );
+    }
+  }
+  return [...out].sort((p, q) => p - q);
 }

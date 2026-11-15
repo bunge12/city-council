@@ -11,8 +11,9 @@
 // cells. Which building stands on each cell is derived (where.ts).
 //
 // Only this module and its callers in the sim add or remove buildings. The
-// grower (grower.ts, issue 10) adds them. No command removes one yet:
-// `BulldozeBuilding` is issue 11.
+// grower (grower.ts, issue 10) adds them. `BulldozeBuilding` (bulldoze.ts)
+// removes the ones a player names, and the upkeep after a change of roads
+// (upkeep.ts) the ones whose ground went or was blocked.
 
 import { isSegment, resized, segmentIdLimit, type AnyTypedArray, type RoadNetwork } from "../roads/network";
 import type { SimState } from "../state";
@@ -234,8 +235,9 @@ function noteLotFronts(state: SimState, first: Column, width: number): void {
 export function removeBuilding(state: SimState, id: number): void {
   const b = state.buildings;
   if (!isBuilding(b, id)) throw new RangeError(`building ${id} does not exist`);
-  unfileBuilding(state, id);
-  noteLotFronts(state, { seg: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0, dir: b.dir[id] ?? 0 }, b.width[id] ?? 0);
+  // The columns it was filed on, which a lot a change of roads took may no
+  // longer walk to from its row.
+  noteColumns(state, unfileBuilding(state, id));
   const arrays = b as unknown as Record<BuildingKey, AnyTypedArray>;
   for (const key of BUILDING_ARRAYS) arrays[key][id] = 0;
   const free = resized(b.free, b.free.length + 1);

@@ -22,7 +22,7 @@ import { submit } from "./seen-ends";
 import { removeBuilding } from "../src/buildings/buildings";
 import { candidateSets } from "../src/buildings/candidates";
 import { grow } from "../src/buildings/grower";
-import { cellBuildings } from "../src/buildings/where";
+import { segmentBuildings } from "../src/buildings/where";
 import { nextInt, seedRng } from "../src/rng";
 import { isSegment } from "../src/roads/network";
 import { syncCells } from "../src/zoning/cell-index";
@@ -88,7 +88,7 @@ function buildings(state: SimState): BuildingRow[] {
 
 /** The grower's kept candidates agree with a fresh scan of the city. */
 function expectCandidatesCurrent(state: SimState): void {
-  const { kept, fresh } = candidateSets(state, syncCells(state), () => cellBuildings(state));
+  const { kept, fresh } = candidateSets(state, syncCells(state), () => segmentBuildings(state));
   expect(kept).toEqual(fresh);
 }
 

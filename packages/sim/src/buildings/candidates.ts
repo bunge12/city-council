@@ -58,12 +58,12 @@ interface Candidates {
 const live = new WeakMap<BuildingState, Candidates>();
 
 /**
- * The building on each cell, by slot, as `cellBuildings` gives it. Asked
- * only for a front cell that is open and zoned, so a city with no zoned
- * frontage never builds the building index (where.ts), which allocates an
- * array the size of every cell each time the roads change.
+ * The building on each cell, by segment and place in its run, as
+ * `segmentBuildings` gives it (where.ts). Asked only for a front cell that
+ * is open and zoned, so a city with no zoned frontage never builds the
+ * building index.
  */
-export type OnCell = () => Int32Array;
+export type OnCell = () => readonly (Int32Array | null)[];
 
 /** The last segment whose run starts at or before `slot`: segments with no cells share a start with the next one. */
 function segmentOfSlot(offset: Int32Array, slot: number): number {
@@ -101,7 +101,7 @@ function isCandidate(state: SimState, index: CellIndex, onCell: OnCell, seg: num
   const status = index.segs[seg]?.status;
   if (!status || status[col * DEPTH] !== CELL_OPEN) return 0;
   const slot = (state.cells.offset[seg] ?? 0) + col * DEPTH;
-  return state.cells.zone[slot] !== ZONE_NONE && onCell()[slot] === NO_BUILDING ? 1 : 0;
+  return state.cells.zone[slot] !== ZONE_NONE && (onCell()[seg]?.[col * DEPTH] ?? NO_BUILDING) === NO_BUILDING ? 1 : 0;
 }
 
 /** Makes room for segment ids below `limit`. */
@@ -158,8 +158,13 @@ function refreshColumn(c: Candidates, state: SimState, onCell: OnCell, seg: numb
   setCount(c, seg, (c.counts[seg] ?? 0) + (now === 1 ? 1 : -1));
 }
 
-/** Adds to `out` every segment a lot could reach from `node`, as the header says. */
-function segmentsNear(c: Candidates, net: RoadNetwork, node: number, out: Set<number>): void {
+/**
+ * Adds to `out` every segment a lot could reach from `node`, as the header
+ * says: the segments at the node, and on through any shorter than the
+ * widest lot, up to that many segments away. The building index
+ * (where.ts) looks again at the same ones.
+ */
+export function segmentsNear(index: CellIndex, net: RoadNetwork, node: number, out: Set<number>): void {
   const reach = BUILDINGS_BALANCE.maxLotWidth;
   let ring = [node];
   const seen = new Set<number>(ring);
@@ -169,7 +174,7 @@ function segmentsNear(c: Candidates, net: RoadNetwork, node: number, out: Set<nu
       if (!isNode(net, n)) continue;
       for (let seg = net.nodeFirstSeg[n] ?? NONE; seg !== NONE; seg = nextSegmentAt(net, seg, n)) {
         out.add(seg);
-        if ((c.index.segs[seg]?.places ?? 0) >= reach) continue;
+        if ((index.segs[seg]?.places ?? 0) >= reach) continue;
         const other = net.segA[seg] === n ? (net.segB[seg] ?? NONE) : (net.segA[seg] ?? NONE);
         if (!seen.has(other)) {
           seen.add(other);
@@ -198,12 +203,12 @@ function build(state: SimState, index: CellIndex, onCell: OnCell): Candidates {
 
 /**
  * The candidates of `state`, current. `index` and `onCell` are the cell
- * index and the building on each cell, as `syncCells` and `cellBuildings`
+ * index and the building on each cell, as `syncCells` and `segmentBuildings`
  * give them now.
  */
 function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidates {
-  let found: Int32Array | null = null;
-  const onCell = (): Int32Array => (found ??= ask());
+  let found: readonly (Int32Array | null)[] | null = null;
+  const onCell = (): readonly (Int32Array | null)[] => (found ??= ask());
   let c = live.get(state.buildings);
   if (!c || c.index !== index) {
     c = build(state, index, onCell);
@@ -214,7 +219,7 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
   const watch = index.watch;
   if (watch) {
     for (const seg of watch.segs) c.segs.add(seg);
-    for (const node of watch.nodes) segmentsNear(c, state.roads, node, c.segs);
+    for (const node of watch.nodes) segmentsNear(c.index, state.roads, node, c.segs);
     for (const key of watch.fronts) c.fronts.add(key);
     watch.segs.clear();
     watch.nodes.clear();

@@ -1,4 +1,5 @@
 import { GROWER } from "./buildings/grower";
+import { keepBuildings } from "./buildings/upkeep";
 import { applyPending, type DroppedCommand } from "./commands";
 import type { SimState } from "./state";
 import { settleCells } from "./zoning/cell-index";
@@ -33,10 +34,14 @@ function timed(timer: SystemTimer | undefined, name: string, run: () => void): v
   timer?.end(name);
 }
 
+/** Name the timer hook reports for removing buildings whose cells a change of roads blocked. */
+export const BUILDINGS_SYSTEM = "buildings";
+
 /**
- * Applies queued commands, walks a slice of any zoning cells still settling,
- * then, unless the game is paused, runs every system and advances exactly
- * one tick.
+ * Removes any buildings a settled change of roads left on blocked cells
+ * (buildings/upkeep.ts), applies queued commands, walks a slice of any
+ * zoning cells still settling, then, unless the game is paused, runs every
+ * system and advances exactly one tick.
  *
  * Returns the queued commands it dropped, with why, for the host to pass
  * on to their senders. Replay has no one to tell and ignores them.
@@ -47,6 +52,9 @@ function timed(timer: SystemTimer | undefined, name: string, run: () => void): v
  */
 export function step(state: SimState, timer?: SystemTimer): DroppedCommand[] {
   let dropped: DroppedCommand[] = [];
+  // First, paused or not, so the tick a change of roads settles by is the
+  // tick its buildings go, whatever the step before it did.
+  timed(timer, BUILDINGS_SYSTEM, () => keepBuildings(state));
   timed(timer, COMMANDS_SYSTEM, () => void (dropped = applyPending(state)));
   // Paused or not, so a change made while paused still settles.
   timed(timer, CELLS_SYSTEM, () => settleCells(state));

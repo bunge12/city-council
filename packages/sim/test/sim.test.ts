@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CELLS_SYSTEM,
+  BUILDINGS_SYSTEM,
   COMMANDS_SYSTEM,
   GROWER_SYSTEM,
   LOG_PAGE_SIZE,
@@ -68,6 +69,8 @@ describe("step", () => {
       end: (name) => calls.push(`end ${name}`),
     });
     expect(calls).toEqual([
+      `start ${BUILDINGS_SYSTEM}`,
+      `end ${BUILDINGS_SYSTEM}`,
       `start ${COMMANDS_SYSTEM}`,
       `end ${COMMANDS_SYSTEM}`,
       `start ${CELLS_SYSTEM}`,
