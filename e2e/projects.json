@@ -3,7 +3,8 @@
   "walkthrough": "walkthrough\\.spec\\.ts$",
   "roads": [
     "roads.spec.ts",
-    "cells.spec.ts"
+    "cells.spec.ts",
+    "buildings.spec.ts"
   ],
   "defaultSeconds": 90,
   "seconds": {

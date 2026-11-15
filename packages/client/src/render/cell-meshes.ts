@@ -32,6 +32,8 @@ export interface CellSource {
   shapes(chunk: number): ChunkCellShapes | null;
   /** The copy's zone and density arrays, or null before the first snapshot. */
   cells(): { zone: ArrayLike<number>; density: ArrayLike<number> } | null;
+  /** By the same slots, the building on each cell or -1, or null for none at all. Cells with a building are not drawn. */
+  built?(): ArrayLike<number> | null;
 }
 
 /** What the overlay reports, for the debug panel and tests. */
@@ -147,7 +149,7 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     const shapes = source.shapes(c);
     const cells = source.cells();
     if (!shapes || !cells || shapes.slots.length === 0) return;
-    const arrays = buildCellChunk(shapes, cells.zone, cells.density, height);
+    const arrays = buildCellChunk(shapes, cells.zone, cells.density, height, source.built?.() ?? null);
     const geometry = geometryOf(arrays);
     if (!geometry) return;
     const mesh = new Mesh(geometry, material);

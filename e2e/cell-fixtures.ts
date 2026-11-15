@@ -48,16 +48,22 @@ export function zoneEverySide(state: SimState, back = 4): number[] {
   return counts;
 }
 
-/** The road fixture city with every zone at every density painted along its streets. */
+/**
+ * The road fixture city with every zone at every density painted along its
+ * streets. It is saved paused, so nothing grows on the cells until a test
+ * sets a speed: commands still apply while paused.
+ */
 export function zonedFixtureCity(): { bytes: Buffer; state: SimState; counts: number[] } {
   const { state } = fixtureCity();
   const counts = zoneEverySide(state);
+  state.speed = 0;
   return { bytes: Buffer.from(serialize(state)), state, counts };
 }
 
-/** The 30,000 segment scale city with every open cell zoned, cycling through the fifteen pairs. */
+/** The 30,000 segment scale city with every open cell zoned, cycling through the fifteen pairs, saved paused. */
 export function zonedScaleCity(segments: number): { bytes: Buffer; zoned: number } {
   const state = scaleCityState(segments);
+  state.speed = 0;
   syncCells(state);
   const status = cellStatuses(state);
   const { offset, zone, density } = state.cells;

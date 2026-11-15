@@ -1,0 +1,97 @@
+{
+  "_about": "The North American theme's palettes (issue M2-12, PRD \"Art direction\"): soft colours for each family of buildings, as sRGB hex. A building picks its wall, roof and trim colours from its type's family, by its id (render/building-tint.ts), so the same building has the same colours for every player and after every reload. `types` names each building type's family, by its id in the sim's buildings.json. `fixed` holds the colours no building tints. Presentation, not balance: no prices and no source years.",
+  "fixed": { "glass": "#41566b", "paving": "#8d8c86" },
+  "families": {
+    "house": {
+      "wall": ["#e8dcc4", "#c9d6d8", "#d9c2a6", "#f1ede2", "#b9c7b0", "#d8b9a7", "#a9b8c6", "#e3d29b"],
+      "roof": ["#5b5651", "#6e4c3e", "#46505a", "#7a6a58", "#3f4a3f"],
+      "trim": ["#f6f3ec", "#e9e3d4", "#cfc9bd", "#8a7560"]
+    },
+    "row": {
+      "wall": ["#b4654a", "#c9b79c", "#9a5a46", "#d6cdbd", "#8f6f5a", "#c48a6a", "#a7a08f"],
+      "roof": ["#4c4744", "#5b4a3f", "#3f454c", "#6b5a4b"],
+      "trim": ["#f2ede2", "#ded5c2", "#3b3a37"]
+    },
+    "apartment": {
+      "wall": ["#d9cfbf", "#c2b49b", "#b06a52", "#e6e1d6", "#a8b2b6", "#cbb28c"],
+      "roof": ["#6c6a66", "#56534f", "#7d776c"],
+      "trim": ["#f0ece4", "#b9b3a6", "#8c8478"]
+    },
+    "tower": {
+      "wall": ["#cfd3d4", "#b9c0c4", "#d8d2c6", "#a6aeb3", "#e2e0da"],
+      "roof": ["#6d7072", "#5d6063"],
+      "trim": ["#e9eaea", "#9aa1a6", "#c4c0b6"]
+    },
+    "shop": {
+      "wall": ["#e2c48f", "#c7d2c0", "#d7a98c", "#ede5d3", "#b9c8d6", "#c9937a", "#e7d7a5"],
+      "roof": ["#5a5550", "#6b5e52", "#4b5258"],
+      "trim": ["#2f5d50", "#7c2f2f", "#2e4a6b", "#efe9dc", "#8a5a2b"]
+    },
+    "store": {
+      "wall": ["#d8d3c8", "#c4bba9", "#e3ddd0", "#b8b6ad", "#cdb99a"],
+      "roof": ["#8a8a86", "#76766f", "#9b9890"],
+      "trim": ["#2d5f8a", "#a63c2f", "#3c7a4a", "#e0a030", "#5a5f66"]
+    },
+    "office": {
+      "wall": ["#c9ccc9", "#d6cfc1", "#b0b8bc", "#e0ddd5", "#bdb3a3"],
+      "roof": ["#6a6c6c", "#5a5c5d", "#77736c"],
+      "trim": ["#4f5a63", "#8c939a", "#e4e2dc"]
+    },
+    "industrial": {
+      "wall": ["#a9aba4", "#8f9a9c", "#b7ad98", "#9c8f7d", "#c2c0b6", "#7f8b80"],
+      "roof": ["#6f7473", "#5e6465", "#8a8680", "#4d5759"],
+      "trim": ["#c8473a", "#3f6f9a", "#d4a63a", "#5d6a5a", "#e2e0d8"]
+    },
+    "mixed": {
+      "wall": ["#b8634a", "#c8ae8a", "#9f5544", "#d9cdb6", "#a87d5f", "#cbb9a0"],
+      "roof": ["#4e4a46", "#5d544c", "#454b50"],
+      "trim": ["#efe8d8", "#2f4f45", "#6b2e2a", "#d7cdb8"]
+    }
+  },
+  "types": {
+    "single-family-home": "house",
+    "plex": "row",
+    "townhomes": "row",
+    "apartments": "apartment",
+    "low-tower": "tower",
+    "high-tower": "tower",
+    "corner-store": "shop",
+    "restaurant": "shop",
+    "shop-row": "shop",
+    "retail-block": "shop",
+    "small-office-park": "office",
+    "strip-mall": "store",
+    "small-mall": "store",
+    "retail-podium": "store",
+    "department-store": "store",
+    "big-box-store": "store",
+    "shopping-centre": "store",
+    "converted-house-office": "house",
+    "low-office-block": "office",
+    "office-pavilion": "office",
+    "mid-rise-office": "office",
+    "office-slab": "office",
+    "mid-rise-office-tower": "office",
+    "slim-office-tower": "tower",
+    "office-tower": "tower",
+    "tall-office-tower": "tower",
+    "workshop": "industrial",
+    "yard-depot": "industrial",
+    "small-factory": "industrial",
+    "light-industrial-unit": "industrial",
+    "warehouse": "industrial",
+    "medium-factory": "industrial",
+    "tank-farm": "industrial",
+    "processing-plant": "industrial",
+    "large-factory": "industrial",
+    "corner-walk-up": "mixed",
+    "shop-top-row": "mixed",
+    "main-street-block": "mixed",
+    "walk-up-over-shops": "mixed",
+    "mixed-mid-rise": "mixed",
+    "perimeter-block": "mixed",
+    "mixed-slab": "mixed",
+    "podium-tower": "tower",
+    "tall-podium-tower": "tower"
+  }
+}

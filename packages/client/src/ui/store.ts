@@ -80,6 +80,9 @@ export interface ViewReadout {
   /** Zoning cells drawn, and how many chunks the last cell change rebuilt. */
   cells: string;
   cellRebuilds: string;
+  /** Buildings drawn, and what the last change of buildings wrote. */
+  buildings: string;
+  buildingUpdates: string;
 }
 
 export const useViewReadout = create<ViewReadout>(() => ({
@@ -95,6 +98,8 @@ export const useViewReadout = create<ViewReadout>(() => ({
   roadRebuilds: "-",
   cells: "-",
   cellRebuilds: "-",
+  buildings: "-",
+  buildingUpdates: "-",
 }));
 
 /**

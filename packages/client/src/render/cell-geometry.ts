@@ -2,7 +2,7 @@
 // the mirror alone: where each cell is and whether it is blocked come from
 // the sim's own cell index run on the mirror's copy (`cellShapesInChunk`),
 // and what it is zoned for from the copy's `cells` arrays. A blocked cell
-// is not drawn.
+// is not drawn, and nor is a cell a building stands on (issue M2-12).
 //
 // Each open cell is one quad, four vertices of its own, lying on the ground
 // at its corners. A vertex carries the cell's fill colour, with alpha 255
@@ -58,16 +58,20 @@ const CORNER_UV = [0, 0, 255, 0, 255, 255, 0, 255] as const;
 /**
  * The overlay mesh for one chunk's cells. `zone` and `density` are the
  * mirror's `state.cells` arrays and `height` gives the ground under a point.
+ * `built`, by the same slots, is the building on each cell, or -1 for none
+ * (`cellBuildings`); a cell with a building is not drawn.
  */
 export function buildCellChunk(
   shapes: ChunkCellShapes,
   zone: ArrayLike<number>,
   density: ArrayLike<number>,
   height: (x: number, z: number) => number,
+  built: ArrayLike<number> | null = null,
 ): CellArrays {
   const { slots, statuses, corners } = shapes;
+  const shown = (k: number) => statuses[k] === CELL_OPEN && (built === null || (built[slots[k] ?? 0] ?? -1) < 0);
   let drawn = 0;
-  for (let k = 0; k < statuses.length; k++) if (statuses[k] === CELL_OPEN) drawn++;
+  for (let k = 0; k < statuses.length; k++) if (shown(k)) drawn++;
   const positions = new Float32Array(drawn * 12);
   const fills = new Uint8Array(drawn * 16);
   const uv = new Uint8Array(drawn * 8);
@@ -76,7 +80,7 @@ export function buildCellChunk(
   let zoned = 0;
   let n = 0;
   for (let k = 0; k < statuses.length; k++) {
-    if (statuses[k] !== CELL_OPEN) continue;
+    if (!shown(k)) continue;
     const slot = slots[k] ?? 0;
     const z = zone[slot] ?? ZONE_NONE;
     const d = density[slot] ?? DENSITY_NONE;
