@@ -16,6 +16,8 @@ import {
   replay,
   seedRng,
   type FromSimMessage,
+  segmentEnds,
+  segmentTypeId,
 } from "@city-council/sim";
 import { MAX_CATCH_UP_STEPS, PUMP_INTERVAL_MS, SimHost, typedArrayBuffers } from "../src/protocol/host";
 import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
@@ -237,7 +239,14 @@ describe("road deltas", () => {
       if (snap?.type !== "snapshot") throw new Error("no snapshot");
       return snap.state.roads;
     };
-    return { mirror, received, updates, tick, hostRoads, setDrop: (f: typeof drop) => (drop = f) };
+    /**
+     * Another player on the same host. The host here trusts the id each
+     * message claims, as a server trusts the id it stamps on a connection.
+     */
+    const join = (playerId: string) =>
+      // Its own copy of each message, as its own connection would give it.
+      new SimMirror({ send: (m, t) => client.send(m, t), onMessage: (h) => client.onMessage((m) => h(structuredClone(m))) }, playerId);
+    return { mirror, received, updates, tick, hostRoads, join, setDrop: (f: typeof drop) => (drop = f) };
   }
 
   const arrays = (net: unknown) =>
@@ -355,12 +364,18 @@ describe("road deltas", () => {
       for (let id = 0; roads && id < roads.segFlags.length; id++) if ((roads.segFlags[id] ?? 0) & 1) out.push(id);
       return out;
     };
+    /** A bulldoze or upgrade payload naming segment `seg`, with its ends as the copy has them. */
+    const picked = (seg: number | undefined) => {
+      const roads = mirror.state?.roads;
+      const known = roads && seg !== undefined;
+      return { segments: [seg], ends: known ? [segmentEnds(roads, seg)] : [], types: known ? [segmentTypeId(roads, seg)] : [] };
+    };
     for (let t = 0; t < 400; t++) {
       const roll = nextInt(rng, 10);
       const segs = live();
       if (roll < 4 || segs.length === 0) void mirror.sendCommand("BuildRoad", road(point(), point(), TYPES[nextInt(rng, 3)]));
-      else if (roll < 5) void mirror.sendCommand("BulldozeRoad", { segments: [segs[nextInt(rng, segs.length)]] });
-      else if (roll < 6) void mirror.sendCommand("UpgradeRoad", { segments: [segs[nextInt(rng, segs.length)]], type: "avenue" });
+      else if (roll < 5) void mirror.sendCommand("BulldozeRoad", picked(segs[nextInt(rng, segs.length)]));
+      else if (roll < 6) void mirror.sendCommand("UpgradeRoad", { ...picked(segs[nextInt(rng, segs.length)]), type: "avenue" });
       else void mirror.sendCommand("Undo");
       tick();
       if (t % 100 === 99) expect(arrays(mirror.state?.roads)).toEqual(arrays(hostRoads()));
@@ -396,6 +411,73 @@ describe("road deltas", () => {
     mirror.requestSnapshot();
     expect(arrays(mirror.state?.roads)).toEqual(arrays(hostRoads()));
     expect(mirror.state?.roads.segFlags.length).toBe(1);
+  });
+
+  describe("two players in one tick (issue 94)", () => {
+    it("tells the second player its command was dropped at the step, and why", async () => {
+      const { mirror, received, tick, join } = roadSetup();
+      const other = join("p2");
+      // The same street from both players. Each is valid when it arrives, so both are queued.
+      const first = mirror.sendCommandSettled("BuildRoad", road([4200, 4600], [4500, 4600]));
+      const second = other.sendCommandSettled("BuildRoad", road([4200, 4600], [4500, 4600]));
+      const queued = received.filter((m) => m.type === "commandResult").map((m) => [m.playerId, m.result]);
+      expect(queued).toEqual([
+        ["p1", { ok: true }],
+        ["p2", { ok: true }],
+      ]);
+      tick();
+      await expect(first).resolves.toEqual({ ok: true });
+      const result = await second;
+      expect(result.ok).toBe(false);
+      // The reason is the sim's, the one the second player would get had it arrived after the first was built.
+      const late = await other.sendCommand("BuildRoad", road([4200, 4600], [4500, 4600]));
+      expect(result).toEqual(late);
+      const delta = received.find((m) => m.type === "delta" && m.dropped);
+      expect(delta?.type === "delta" && delta.dropped).toEqual([
+        { seq: 1, playerId: "p2", type: "BuildRoad", reason: late.ok ? "" : late.reason },
+      ]);
+      // Only the first is in the log. The first player hears nothing about the second's.
+      expect(other.state?.log.map((e) => [e.playerId, e.seq])).toEqual([["p1", 1]]);
+    });
+
+    it("starts a reloaded page's seqs past those of its player still in the city", async () => {
+      const { mirror, received, tick, join } = roadSetup();
+      void mirror.sendCommand("NoOp");
+      tick();
+      void mirror.sendCommand("NoOp");
+      // A new page for the same player, as after a reload, while seq 2 is still queued.
+      const again = join("p1");
+      await again.sendCommand("NoOp");
+      const seqs = received.filter((m) => m.type === "commandResult").map((m) => m.seq);
+      expect(seqs).toEqual([1, 2, 3]);
+    });
+
+    it("still answers a plain sendCommand at the queue, before the step", async () => {
+      const { mirror, join } = roadSetup();
+      const other = join("p2");
+      void mirror.sendCommand("BuildRoad", road([4200, 4600], [4500, 4600]));
+      await expect(other.sendCommand("BuildRoad", road([4200, 4600], [4500, 4600]))).resolves.toEqual({ ok: true });
+    });
+
+    it("settles a command whose delta went missing from the snapshot that follows", async () => {
+      const { mirror, join, tick, setDrop } = roadSetup();
+      const other = join("p2");
+      const built = mirror.sendCommandSettled("BuildRoad", road([4200, 4600], [4500, 4600]));
+      const dropped = other.sendCommandSettled("BuildRoad", road([4200, 4600], [4500, 4600]));
+      // The first player's mirror loses the delta, then the next one does not line up and it asks for a snapshot.
+      let lost = false;
+      setDrop((m) => {
+        if (m.type !== "delta" || lost) return false;
+        lost = true;
+        return true;
+      });
+      tick();
+      await expect(dropped).resolves.toMatchObject({ ok: false });
+      void mirror.sendCommand("NoOp");
+      tick();
+      await expect(built).resolves.toEqual({ ok: true });
+      expect(mirror.state?.log.map((e) => e.type)).toEqual(["BuildRoad", "NoOp"]);
+    });
   });
 });
 

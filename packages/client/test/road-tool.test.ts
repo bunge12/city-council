@@ -17,7 +17,7 @@ import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror } from "../src/protocol/mirror";
 import { memoryTransportPair } from "../src/protocol/transport";
 import { buildPreviewGeometry, previewKey } from "../src/render/road-preview-geometry";
-import { INITIAL_ROAD_TOOL, RoadToolController, previewRoad, roadPayload, type RoadToolState } from "../src/tools/road-tool";
+import { INITIAL_ROAD_TOOL, ROAD_GONE, RoadToolController, previewRoad, roadPayload, type RoadToolState } from "../src/tools/road-tool";
 
 // Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000).
 const SEED = 2026;
@@ -48,10 +48,9 @@ function setup(send?: (payload: BuildRoadPayload) => Promise<CommandResult>) {
     world: () => (mirror.state ? { net: mirror.state.roads, terrain } : null),
     send: (payload) => {
       sent.push(payload);
-      return send ? send(payload) : mirror.sendCommand("BuildRoad", payload);
+      return send ? send(payload) : mirror.sendCommandSettled("BuildRoad", payload);
     },
   });
-  mirror.subscribe((u) => tool.mirrorUpdated(u));
   const tick = () => {
     for (let t = 0; t < 100; t += PUMP_INTERVAL_MS) {
       now += PUMP_INTERVAL_MS;
@@ -59,7 +58,10 @@ function setup(send?: (payload: BuildRoadPayload) => Promise<CommandResult>) {
     }
   };
   const settle = () => new Promise((r) => setTimeout(r, 0));
-  return { mirror, tool, tick, settle, sent, state: () => state };
+  /** Another player on the same host, with its own copy of each message. */
+  const join = (playerId: string) =>
+    new SimMirror({ send: (m, t) => client.send(m, t), onMessage: (h) => client.onMessage((m) => h(structuredClone(m))) }, playerId);
+  return { mirror, tool, tick, settle, sent, join, state: () => state };
 }
 
 describe("previewRoad", () => {
@@ -142,8 +144,9 @@ describe("RoadToolController", () => {
     expect(state().roadPending.map((p) => p.status)).toEqual(["sending"]);
     await settle();
     // Queued, not built: the preview stays until the step that builds it.
-    expect(state().roadPending.map((p) => p.status)).toEqual(["accepted"]);
+    expect(state().roadPending.map((p) => p.status)).toEqual(["sending"]);
     tick();
+    await settle();
     expect(state().roadPending).toEqual([]);
 
     tool.pickType("avenue");
@@ -388,6 +391,7 @@ describe("continuous mode (M1-10)", () => {
     tool.click({ x: 4400, z: 4700 });
     await settle();
     tick();
+    await settle();
     expect(state().roadStart).toEqual({ x: 4400, z: 4700 });
     expect(tool.escape()).toBe(true);
     expect(state()).toMatchObject({ tool: "road", roadStart: null, roadChain: 0 });
@@ -463,7 +467,7 @@ describe("continuous mode (M1-10)", () => {
     let calls = 0;
     const { tool, tick, settle, state, mirror } = setup((payload) => {
       calls++;
-      return calls === 2 ? Promise.resolve({ ok: false, reason: "Refused by the sim" }) : mirror.sendCommand("BuildRoad", payload);
+      return calls === 2 ? Promise.resolve({ ok: false, reason: "Refused by the sim" }) : mirror.sendCommandSettled("BuildRoad", payload);
     });
     tool.pickMode("continuous");
     tool.click({ x: 4200, z: 4600 });
@@ -475,6 +479,60 @@ describe("continuous mode (M1-10)", () => {
     expect(state()).toMatchObject({ roadStart: null, roadNote: "Refused by the sim", roadPending: [] });
     tick();
     expect(mirror.state?.log).toHaveLength(1);
+  });
+});
+
+describe("another player's road in the same tick (issue 94)", () => {
+  it("stops a continuous road at a segment dropped at the step, and says why", async () => {
+    const { mirror, tool, tick, settle, sent, join, state } = setup();
+    const other = join("p2");
+    tool.pickMode("continuous");
+    tool.click({ x: 4200, z: 4600 });
+    // The other player's street lands first, in the same tick, where this player's first segment goes.
+    void other.sendCommand("BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4300, z: 4600 }, type: "street" });
+    tool.click({ x: 4300, z: 4600 });
+    tool.click({ x: 4300, z: 4700 });
+    await settle();
+    // Both were valid when they arrived, so the sim queued this player's segment.
+    expect(state().roadPending.map((p) => p.status)).toEqual(["sending", "queued"]);
+    tick();
+    await settle();
+    // Dropped at the step: its preview goes with the reason, and the road ends there.
+    expect(state().roadPending).toEqual([]);
+    const net = mirror.state?.roads;
+    if (!net) throw new Error("no snapshot");
+    // The reason is the sim's: the one the preview gives now the other street is there.
+    expect(state().roadNote).toBe(previewRoad(net, terrain, { x: 4200, z: 4600 }, { x: 4300, z: 4600 }, "street").reason);
+    expect(state().roadNote).not.toBeNull();
+    expect(state().roadStart).toBeNull();
+    // The segment queued after it was never sent, so nothing carries on from a segment that is not there.
+    expect(sent).toHaveLength(1);
+    tick();
+    expect(mirror.state?.log.map((e) => e.playerId)).toEqual(["p2"]);
+  });
+});
+
+describe("an undo in the same step as a continuous road's segment", () => {
+  it("stops the road rather than carry on from the segment the undo took away", async () => {
+    const { mirror, tool, tick, settle, sent, state } = setup();
+    tool.pickMode("continuous");
+    tool.click({ x: 4200, z: 4600 });
+    tool.click({ x: 4300, z: 4600 });
+    await settle();
+    tick();
+    await settle();
+    tool.click({ x: 4300, z: 4700 });
+    tool.click({ x: 4400, z: 4700 });
+    // Ctrl+Z before the second segment is built: queued behind it, it takes it straight back.
+    void mirror.sendCommand("Undo");
+    await settle();
+    tick();
+    await settle();
+    expect(sent).toHaveLength(2);
+    expect(state().roadPending).toEqual([]);
+    expect(state().roadNote).toBe(ROAD_GONE);
+    expect(state().roadStart).toBeNull();
+    expect(mirror.state?.log.map((e) => e.type)).toEqual(["BuildRoad", "BuildRoad", "Undo"]);
   });
 });
 

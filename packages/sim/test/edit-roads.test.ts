@@ -10,15 +10,19 @@ import {
   planBulldoze,
   planRoad,
   planUpgrade,
+  SEGMENT_CHANGED,
+  segmentEnds,
+  segmentTypeId,
   serialize,
   step,
-  submit,
   type Command,
   type CommandResult,
   type RoadType,
   type SimState,
   type Terrain,
 } from "../src/index";
+import { submit, withEnds } from "./seen-ends";
+import { submit as submitRaw } from "../src/commands";
 import { cloneState } from "../src/state";
 import { minRadius, segmentQuad } from "../src/roads/curve";
 import { recordRoadChanges, drainRoadChanges } from "../src/roads/delta";
@@ -281,7 +285,7 @@ describe("BulldozeRoad", () => {
   it("prices a demolition from the balance file", () => {
     const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500], "avenue"));
-    const result = planBulldoze(state.roads, { segments: [0] });
+    const result = planBulldoze(state.roads, withEnds(state.roads, { segments: [0] }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.plan).toEqual({ segments: [0], nodes: [0, 1], length: 300, cost: 300 * typeOf("avenue").demolitionCostPerMetre });
@@ -302,7 +306,7 @@ describe("UpgradeRoad", () => {
     const { state, west, east } = crossroads();
     const net = state.roads;
     const ends = [net.segA[west], net.segB[west]];
-    const plan = planUpgrade(net, terrainOf(SEED), { segments: [west, east], type: "avenue" });
+    const plan = planUpgrade(net, terrainOf(SEED), withEnds(net, { segments: [west, east], type: "avenue" }));
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     const street = typeOf("street");
@@ -321,7 +325,7 @@ describe("UpgradeRoad", () => {
   it("never prices a downgrade below zero", () => {
     const state = createBareState(SEED);
     ok(state, road([4200, 4500], [4500, 4500], "avenue"));
-    const plan = planUpgrade(state.roads, terrainOf(SEED), { segments: [0], type: "street" });
+    const plan = planUpgrade(state.roads, terrainOf(SEED), withEnds(state.roads, { segments: [0], type: "street" }));
     expect(plan.ok && plan.plan.cost).toBe(0);
   });
 
@@ -366,11 +370,11 @@ describe("UpgradeRoad", () => {
     expect(bridge).toBeGreaterThanOrEqual(0);
     // Avenue ramps are held to a lower grade than a street's, so either the
     // bridge fits or the reason names the ramp. A one-way has the street's limits.
-    const avenue = planUpgrade(net, terrainOf(SEED), { segments: [bridge], type: "avenue" });
+    const avenue = planUpgrade(net, terrainOf(SEED), withEnds(net, { segments: [bridge], type: "avenue" }));
     if (!avenue.ok) expect(avenue.reason).toMatch(/ramp|bank/);
     ok(state, upgrade("oneWay", [bridge]));
     // A bridge price uses the bridge multiplier.
-    const back = planUpgrade(net, terrainOf(SEED), { segments: [bridge], type: "street" });
+    const back = planUpgrade(net, terrainOf(SEED), withEnds(net, { segments: [bridge], type: "street" }));
     const street = typeOf("street");
     const oneWay = typeOf("oneWay");
     const length = net.segLength[bridge] ?? 0;
@@ -392,16 +396,16 @@ describe("UpgradeRoad", () => {
     // 350 m: within every type's limit since issue 47, so a street spans it.
     const long = bridgeAt(0, 350, 100);
     expect(street.bridge.maxLength).toBeGreaterThan(350);
-    expect(planUpgrade(net, terrain, { segments: [long], type: "street" }).ok).toBe(true);
+    expect(planUpgrade(net, terrain, withEnds(net, { segments: [long], type: "street" })).ok).toBe(true);
     // No bridge on the map is longer than the limits in the balance, so the
     // check is run with a street limit lowered below this bridge.
     withBridgeLimit(street, 300, () => {
-      expect(planUpgrade(net, terrain, { segments: [long], type: "street" })).toEqual({
+      expect(planUpgrade(net, terrain, withEnds(net, { segments: [long], type: "street" }))).toEqual({
         ok: false,
         reason: "Too long for a bridge: 350 m, and the street limit is 300 m",
       });
     });
-    expect(planUpgrade(net, terrain, { segments: [long], type: "street" }).ok).toBe(true);
+    expect(planUpgrade(net, terrain, withEnds(net, { segments: [long], type: "street" })).ok).toBe(true);
     // 48 m from the bank to the last dry sample: 7 m over 48 m is enough for
     // a street's grade, not an avenue's.
     const grade = 7 / 48;
@@ -411,11 +415,11 @@ describe("UpgradeRoad", () => {
       type: street.index,
       level: LEVEL_BRIDGE,
     });
-    expect(planUpgrade(net, terrain, { segments: [short], type: "avenue" })).toEqual({
+    expect(planUpgrade(net, terrain, withEnds(net, { segments: [short], type: "avenue" }))).toEqual({
       ok: false,
       reason: `The bank is too steep for the bridge: the ramp down to the deck would be a ${Math.round(grade * 100)}% grade, and the avenue limit is ${slopeLimit("avenue")}`,
     });
-    expect(planUpgrade(net, terrain, { segments: [short], type: "oneWay" }).ok).toBe(true);
+    expect(planUpgrade(net, terrain, withEnds(net, { segments: [short], type: "oneWay" })).ok).toBe(true);
   });
 
   it("sets a one-way's direction, and reverses it when upgraded to its own type", () => {
@@ -429,7 +433,7 @@ describe("UpgradeRoad", () => {
     expect([net.segA[0], net.segB[0]]).toEqual([b, a]);
     expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
     // The same type reverses it, for nothing.
-    expect(planUpgrade(net, terrainOf(SEED), { segments: [0], type: "oneWay" })).toMatchObject({ ok: true, plan: { cost: 0, reverse: [true] } });
+    expect(planUpgrade(net, terrainOf(SEED), withEnds(net, { segments: [0], type: "oneWay" }))).toMatchObject({ ok: true, plan: { cost: 0, reverse: [true] } });
     ok(state, upgrade("oneWay", [0]));
     expect([net.segA[0], net.segB[0]]).toEqual([a, b]);
     // The length and control point stay.
@@ -531,5 +535,91 @@ describe("replay fixture edit-roads", () => {
     expect(types).toContain("BulldozeRoad");
     expect(types).toContain("UpgradeRoad");
     expect(state.log).toHaveLength(fixture.log.length);
+  });
+});
+
+describe("a segment that changed after the sender picked it (issue 94)", () => {
+  /** One street from (4200, 4500) to (4500, 4500), and its segment. */
+  function street(): { state: SimState; seg: number } {
+    const state = createBareState(SEED);
+    ok(state, road([4200, 4500], [4500, 4500]));
+    const seg = liveSegments(state.roads)[0];
+    if (seg === undefined) throw new Error("no street");
+    return { state, seg };
+  }
+
+  const crossing = (playerId: string): Command => ({ ...road([4350, 4400], [4350, 4600]), playerId });
+
+  it.each([
+    ["BulldozeRoad", {}],
+    ["UpgradeRoad", { type: "avenue" }],
+  ])("refuses a %s whose segment another player's crossing split in the same tick, and changes nothing", (type, rest) => {
+    const { state, seg } = street();
+    const seen = [segmentEnds(state.roads, seg)];
+    // Player 2's crossing road is first in the queue. Both are valid when they arrive.
+    expect(submitRaw(state, crossing("p2"))).toEqual({ ok: true });
+    const edit: Command = { seq: 1, playerId: "p1", type, payload: { segments: [seg], ends: seen, types: ["street"], ...rest } };
+    expect(submitRaw(state, edit)).toEqual({ ok: true });
+    const dropped = step(state);
+    expect(dropped).toEqual([{ seq: 1, playerId: "p1", type, reason: SEGMENT_CHANGED }]);
+    // The split left the id on one piece: half the street the player saw.
+    expect(isSegment(state.roads, seg)).toBe(true);
+    expect(segmentEnds(state.roads, seg)).not.toEqual(seen[0]);
+    // Both halves of the street and both of the crossing stand, as streets, and only the crossing is logged.
+    expect(liveSegments(state.roads)).toHaveLength(4);
+    expect(liveSegments(state.roads).map((id) => state.roads.segType[id])).toEqual([0, 0, 0, 0]);
+    expect(state.log.map((e) => [e.playerId, e.type])).toEqual([
+      ["p1", "BuildRoad"],
+      ["p2", "BuildRoad"],
+    ]);
+  });
+
+  it("refuses a bulldoze whose segment id now names another road", () => {
+    const { state, seg } = street();
+    const seen = [segmentEnds(state.roads, seg)];
+    // Undo frees the street's id and its nodes' ids, and the next road takes them.
+    ok(state, command("Undo", {}));
+    ok(state, road([4200, 4700], [4500, 4700]));
+    expect(isSegment(state.roads, seg)).toBe(true);
+    const result = submitRaw(state, { seq: 99, playerId: "p1", type: "BulldozeRoad", payload: { segments: [seg], ends: seen, types: ["street"] } });
+    expect(result).toEqual({ ok: false, reason: SEGMENT_CHANGED });
+    step(state);
+    expect(isSegment(state.roads, seg)).toBe(true);
+  });
+
+  it("refuses a reversed one-way named the way it ran before", () => {
+    const state = createBareState(SEED);
+    ok(state, road([4200, 4500], [4500, 4500], "oneWay"));
+    const seg = liveSegments(state.roads)[0] ?? NaN;
+    const seen = [segmentEnds(state.roads, seg)];
+    ok(state, upgrade("oneWay", [seg]));
+    const result = submitRaw(state, { seq: 99, playerId: "p1", type: "UpgradeRoad", payload: { segments: [seg], ends: seen, types: ["oneWay"], type: "oneWay" } });
+    expect(result).toEqual({ ok: false, reason: SEGMENT_CHANGED });
+  });
+
+  it("does not reverse a one-way that a second make-it-one-way picked while it was a street", () => {
+    const { state, seg } = street();
+    const seen = { segments: [seg], ends: [segmentEnds(state.roads, seg)], types: ["street"], type: "oneWay" };
+    // Both sent before the step, as a double click or two players would.
+    expect(submitRaw(state, { seq: 1, playerId: "p1", type: "UpgradeRoad", payload: seen })).toEqual({ ok: true });
+    expect(submitRaw(state, { seq: 1, playerId: "p2", type: "UpgradeRoad", payload: seen })).toEqual({ ok: true });
+    const a = state.roads.segA[seg];
+    expect(step(state)).toEqual([{ seq: 1, playerId: "p2", type: "UpgradeRoad", reason: SEGMENT_CHANGED }]);
+    // One-way, from node A as the first asked, and not reversed by the second.
+    expect(segmentTypeId(state.roads, seg)).toBe("oneWay");
+    expect(state.roads.segA[seg]).toBe(a);
+  });
+
+  it("needs one set of ends and one type for each segment", () => {
+    const { state, seg } = street();
+    const ends = segmentEnds(state.roads, seg);
+    const need = /needs the ends of each segment/;
+    for (const payload of [{ segments: [seg] }, { segments: [seg], ends: [] }, { segments: [seg], ends: [[1, 2, 3]] }, { segments: [seg], ends: [[1, 2, 3, null]] }]) {
+      expect(planBulldoze(state.roads, payload)).toMatchObject({ ok: false, reason: expect.stringMatching(need) });
+      expect(planUpgrade(state.roads, terrainOf(SEED), { ...payload, type: "avenue" })).toMatchObject({ ok: false, reason: expect.stringMatching(need) });
+    }
+    expect(planBulldoze(state.roads, { segments: [seg], ends: [ends] })).toMatchObject({ ok: false, reason: expect.stringMatching(/needs the road type/) });
+    expect(planBulldoze(state.roads, { segments: [seg], ends: [ends], types: ["avenue"] })).toEqual({ ok: false, reason: SEGMENT_CHANGED });
+    expect(planBulldoze(state.roads, { segments: [seg], ends: [ends], types: ["street"] }).ok).toBe(true);
   });
 });

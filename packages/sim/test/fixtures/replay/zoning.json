@@ -280,10 +280,21 @@
       "payload": {
         "segments": [
           2
+        ],
+        "ends": [
+          [
+            4200,
+            4600,
+            4296,
+            4600
+          ]
+        ],
+        "types": [
+          "street"
         ]
       }
     }
   ],
   "balance": "8f742bfeb14ac307",
-  "hash": "1cd8c51b4a6912c5"
+  "hash": "944fd15952c41965"
 }

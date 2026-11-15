@@ -22,6 +22,14 @@
 // treasury arrives in M4. A command that names a segment that is not there
 // is refused whole, so a command is applied completely or not at all.
 //
+// Both name segments by id and carry where each one's ends were and its
+// road type when the player picked it (`ends` and `types`, issue 94). An id can name another road by the
+// time the command applies: another player's crossing road splits the
+// segment and leaves its id on one piece, or the road goes and its id is
+// handed to the next one built. A segment whose ends have moved, or whose
+// type has changed, refuses the whole command, so it never acts on a road
+// the player did not see.
+//
 // Checks feed command validation, so only exact arithmetic (CLAUDE.md
 // rule 6). Lint enforces it in this folder.
 
@@ -48,6 +56,42 @@ import type { Terrain } from "../terrain/terrain";
 export interface BulldozeRoadPayload {
   /** Segment ids to remove. At least one, none twice. */
   segments: number[];
+  /** Where each segment's ends were when the player picked it, in the same order (`SegmentEnds`). */
+  ends: SegmentEnds[];
+  /** Each segment's road type id when the player picked it, in the same order. */
+  types: string[];
+}
+
+/**
+ * Where a segment's ends stand, as `[ax, az, bx, bz]` in metres: node A
+ * then node B. A bulldoze or upgrade carries one per segment it names, as
+ * the sender saw the segment, and the sim refuses the command when a
+ * segment's ends are anywhere else now. An id outlives its road: a split
+ * leaves it on one piece, and a removed road's id is handed to the next
+ * one built. Node ids are reused the same way, so the check is on where
+ * the ends are, not which nodes they are.
+ */
+export type SegmentEnds = [number, number, number, number];
+
+/** Where segment `seg`'s ends are now. */
+export function segmentEnds(net: SegmentEndsNetwork, seg: number): SegmentEnds {
+  const a = net.segA[seg] ?? 0;
+  const b = net.segB[seg] ?? 0;
+  return [net.nodeX[a] ?? 0, net.nodeZ[a] ?? 0, net.nodeX[b] ?? 0, net.nodeZ[b] ?? 0];
+}
+
+/** Segment `seg`'s road type id now. */
+export function segmentTypeId(net: SegmentEndsNetwork, seg: number): string {
+  return ROAD_TYPES[net.segType[seg] ?? 0]?.id ?? "";
+}
+
+/** The rows `segmentEnds` and `segmentTypeId` read, so a read-only copy of the network can be passed. */
+export interface SegmentEndsNetwork {
+  readonly segType: ArrayLike<number>;
+  readonly segA: ArrayLike<number>;
+  readonly segB: ArrayLike<number>;
+  readonly nodeX: ArrayLike<number>;
+  readonly nodeZ: ArrayLike<number>;
 }
 
 /** A bulldoze that passed every check, ready to apply. */
@@ -68,6 +112,15 @@ export type BulldozePlanResult = { ok: true; plan: BulldozePlan } | { ok: false;
 export interface UpgradeRoadPayload {
   /** Segment ids to change. At least one, none twice. */
   segments: number[];
+  /** Where each segment's ends were when the player picked it, in the same order (`SegmentEnds`). */
+  ends: SegmentEnds[];
+  /**
+   * Each segment's road type id when the player picked it, in the same
+   * order. Upgrading a one-way to its own type reverses it, so without this
+   * a second "make it one-way" sent before the first applied would reverse
+   * the road the first made.
+   */
+  types: string[];
   /** A buildable road type id from the balance file, such as "avenue". */
   type: string;
   /**
@@ -112,6 +165,37 @@ function readSegments(command: string, value: unknown): number[] | string {
   return value as number[];
 }
 
+/** The `ends` list in a payload, one per segment, or the reason it is not one. */
+function readEnds(command: string, value: unknown, count: number): SegmentEnds[] | string {
+  const need = `${command} needs the ends of each segment it names, as [ax, az, bx, bz]`;
+  if (!Array.isArray(value) || value.length !== count) return need;
+  for (const ends of value) {
+    if (!Array.isArray(ends) || ends.length !== 4 || !ends.every((v) => Number.isFinite(v))) return need;
+  }
+  return value as SegmentEnds[];
+}
+
+/**
+ * Words for a segment whose ends are not where the sender saw them: another
+ * command, perhaps another player's, split, moved or replaced it first.
+ */
+export const SEGMENT_CHANGED = "This road changed after you picked it, so nothing was done";
+
+/** The `types` list in a payload, one per segment, or the reason it is not one. */
+function readTypes(command: string, value: unknown, count: number): string[] | string {
+  const need = `${command} needs the road type of each segment it names`;
+  if (!Array.isArray(value) || value.length !== count || !value.every((t) => typeof t === "string")) return need;
+  return value as string[];
+}
+
+/** Whether segment `seg` is still as the sender saw it: its ends where `ends` says, and of type `type`. */
+function asSeen(net: RoadNetwork, seg: number, ends: SegmentEnds, type: string): boolean {
+  const now = segmentEnds(net, seg);
+  return (
+    now[0] === ends[0] && now[1] === ends[1] && now[2] === ends[2] && now[3] === ends[3] && segmentTypeId(net, seg) === type
+  );
+}
+
 /** The road type at segment `seg`, which must be a road. */
 function typeAt(net: RoadNetwork, seg: number): RoadType {
   return ROAD_TYPES[net.segType[seg] ?? 0] as RoadType;
@@ -134,8 +218,14 @@ export function planBulldoze(net: RoadNetwork, payload: unknown): BulldozePlanRe
   if (!isRecord(payload)) return { ok: false, reason: "BulldozeRoad needs a list of segment ids" };
   const segments = readSegments("BulldozeRoad", payload["segments"]);
   if (typeof segments === "string") return { ok: false, reason: segments };
-  for (const seg of segments) {
+  const seen = readEnds("BulldozeRoad", payload["ends"], segments.length);
+  if (typeof seen === "string") return { ok: false, reason: seen };
+  const types = readTypes("BulldozeRoad", payload["types"], segments.length);
+  if (typeof types === "string") return { ok: false, reason: types };
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i] as number;
     if (!isSegment(net, seg)) return { ok: false, reason: `Segment ${seg} does not exist` };
+    if (!asSeen(net, seg, seen[i] as SegmentEnds, types[i] as string)) return { ok: false, reason: SEGMENT_CHANGED };
     if (isFixedSegment(net, seg)) return { ok: false, reason: `Segment ${seg} is fixed and cannot be bulldozed` };
   }
 
@@ -236,6 +326,10 @@ export function planUpgrade(net: RoadNetwork, terrain: Terrain, payload: unknown
   if (!isRecord(payload)) return { ok: false, reason: "UpgradeRoad needs a list of segment ids and a road type" };
   const segments = readSegments("UpgradeRoad", payload["segments"]);
   if (typeof segments === "string") return { ok: false, reason: segments };
+  const seen = readEnds("UpgradeRoad", payload["ends"], segments.length);
+  if (typeof seen === "string") return { ok: false, reason: seen };
+  const types = readTypes("UpgradeRoad", payload["types"], segments.length);
+  if (typeof types === "string") return { ok: false, reason: types };
   if (typeof payload["type"] !== "string") return { ok: false, reason: "UpgradeRoad needs a road type" };
   const id = payload["type"];
   const type = ROAD_TYPES.find((t) => t.id === id);
@@ -255,6 +349,7 @@ export function planUpgrade(net: RoadNetwork, terrain: Terrain, payload: unknown
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i] as number;
     if (!isSegment(net, seg)) return { ok: false, reason: `Segment ${seg} does not exist` };
+    if (!asSeen(net, seg, seen[i] as SegmentEnds, types[i] as string)) return { ok: false, reason: SEGMENT_CHANGED };
     if (net.segNetwork[seg] !== NETWORK_ROAD) return { ok: false, reason: `Segment ${seg} is not a road` };
     if (isFixedSegment(net, seg)) return { ok: false, reason: `Segment ${seg} is fixed and cannot be changed` };
     const old = typeAt(net, seg);

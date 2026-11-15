@@ -50,7 +50,7 @@ function setup(send?: (payload: BuildRoadGridPayload) => Promise<CommandResult>)
     world: () => (mirror.state ? { net: mirror.state.roads, terrain } : null),
     send: (payload) => {
       sent.push(payload);
-      return send ? send(payload) : mirror.sendCommand("BuildRoadGrid", payload);
+      return send ? send(payload) : mirror.sendCommandSettled("BuildRoadGrid", payload);
     },
   });
   mirror.subscribe((u) => tool.mirrorUpdated(u));
@@ -130,8 +130,10 @@ describe("the grid tool", () => {
     expect(state().gridOrigin).toBeNull();
     expect(state().gridPending).toHaveLength(1);
     await settle();
-    expect(state().gridPending[0]?.status).toBe("accepted");
+    // Queued, not built: the preview stays until the step that builds it.
+    expect(state().gridPending).toHaveLength(1);
     tick();
+    await settle();
     expect(state().gridPending).toHaveLength(0);
     const net = mirror.state?.roads;
     if (!net || !preview) throw new Error("no state");

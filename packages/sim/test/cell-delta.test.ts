@@ -13,11 +13,11 @@ import {
   recordCellChanges,
   recordRoadChanges,
   step,
-  submit,
   type Command,
   type RoadChanges,
   type SimState,
 } from "../src/index";
+import { submit } from "./seen-ends";
 import { cloneState } from "../src/state";
 
 // M2-05: cell deltas, without a host. A copy takes the road rows and the

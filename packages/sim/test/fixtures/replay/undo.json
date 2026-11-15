@@ -63,7 +63,18 @@
         "segments": [
           2
         ],
-        "type": "oneWay"
+        "type": "oneWay",
+        "ends": [
+          [
+            4200,
+            4450,
+            4300,
+            4450
+          ]
+        ],
+        "types": [
+          "street"
+        ]
       }
     },
     {
@@ -74,6 +85,17 @@
       "payload": {
         "segments": [
           7
+        ],
+        "ends": [
+          [
+            4300,
+            4450,
+            4300,
+            4550
+          ]
+        ],
+        "types": [
+          "avenue"
         ]
       }
     },
@@ -124,5 +146,5 @@
     }
   ],
   "balance": "8f742bfeb14ac307",
-  "hash": "49731ebd2ad392b0"
+  "hash": "c87cb3629b9f3351"
 }

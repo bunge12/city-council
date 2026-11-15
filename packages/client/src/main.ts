@@ -99,9 +99,12 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") void saves.save("hidden");
 });
 
-/** Sends a command and records the sim's answer for the activity log. */
+/**
+ * Sends a command and resolves once the sim has applied it, or with why it
+ * did not, and records that for the activity log.
+ */
 async function sendCommand(type: string, payload: unknown = {}): Promise<CommandResult> {
-  const result = await mirror.sendCommand(type, payload);
+  const result = await mirror.sendCommandSettled(type, payload);
   useUi.setState({ lastCommand: result.ok ? `${type}: ok` : `${type}: refused, ${result.reason}` });
   return result;
 }
@@ -236,7 +239,6 @@ const roadTool = new RoadToolController({
   world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state) } : null),
   send: (payload) => sendCommand("BuildRoad", payload),
 });
-mirror.subscribe((update) => roadTool.mirrorUpdated(update));
 
 const gridTool = new GridToolController({
   get: () => useUi.getState(),
@@ -252,7 +254,6 @@ const editTool = new EditToolController({
   world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain } : null),
   send: (type, payload) => sendCommand(type, payload),
 });
-mirror.subscribe((update) => editTool.mirrorUpdated(update));
 
 /** Counts every snapshot and delta, so the zone tool knows when what it worked out from the copy is stale. */
 let cityVersion = 0;
@@ -264,7 +265,6 @@ const zoneTool = new ZoneToolController({
   version: () => cityVersion,
   send: (payload) => sendCommand("ZoneCells", payload),
 });
-mirror.subscribe((update) => zoneTool.mirrorUpdated(update));
 // However the zone tool is left, by its button or by picking another tool, it drops its stroke.
 useUi.subscribe((now, before) => {
   if (now.tool !== before.tool) zoneTool.toolChanged(now.tool, before.tool);

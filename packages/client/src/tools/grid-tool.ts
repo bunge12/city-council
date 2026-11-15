@@ -80,7 +80,6 @@ export interface PendingGrid {
   /** Local to this page, for keys. Not a sim id. */
   id: number;
   preview: GridPreview;
-  status: "sending" | "accepted";
 }
 
 /** The grid tool's part of the UI store. */
@@ -295,7 +294,7 @@ export interface GridToolHost {
   set(patch: Partial<GridToolState & Pick<RoadToolState, "tool" | "roadNote" | "roadStart" | "roadControl" | "roadChain">>): void;
   /** The mirror's roads and the map, and its zoned cells for the snap, or null before the first snapshot. */
   world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup } | null;
-  /** Sends `BuildRoadGrid` and resolves with the sim's answer. */
+  /** Sends `BuildRoadGrid` and resolves once the sim has built it, or with why it did not. */
   send(payload: BuildRoadGridPayload): Promise<CommandResult>;
 }
 
@@ -444,10 +443,6 @@ export class GridToolController {
   /** Call on every mirror update, so the preview is checked again against the new roads. */
   mirrorUpdated(update: { kind: "snapshot" } | { kind: "delta"; steps: number; roadNodes: readonly number[]; roadSegs: readonly number[] }): void {
     if (update.kind === "snapshot" || update.roadNodes.length > 0 || update.roadSegs.length > 0) this.version++;
-    if (update.kind === "delta" && update.steps === 0) return;
-    // After a step every grid the sim accepted has been built or dropped, so its preview goes.
-    const pending = this.host.get().gridPending;
-    if (pending.some((p) => p.status === "accepted")) this.host.set({ gridPending: pending.filter((p) => p.status !== "accepted") });
   }
 
   /** The payload for the rectangle drawn now, or null when there is none or it has no size. */
@@ -484,18 +479,15 @@ export class GridToolController {
       this.host.set({ gridNote: preview.reason });
       return;
     }
-    const pending: PendingGrid = { id: this.nextId++, preview, status: "sending" };
+    const pending: PendingGrid = { id: this.nextId++, preview };
     this.turning = null;
     this.host.set({ ...NO_RECTANGLE, gridNote: null, gridPending: [...s.gridPending, pending] });
     void this.host.send(preview.payload).then((result) => this.answered(pending.id, result));
   }
 
+  /** The sim built the grid, and the copy shows it, or refused it: either way its preview goes. */
   private answered(id: number, result: CommandResult): void {
-    const pending = this.host.get().gridPending;
-    if (result.ok) {
-      this.host.set({ gridPending: pending.map((p) => (p.id === id ? { ...p, status: "accepted" } : p)) });
-      return;
-    }
-    this.host.set({ gridPending: pending.filter((p) => p.id !== id), gridNote: result.reason });
+    const pending = this.host.get().gridPending.filter((p) => p.id !== id);
+    this.host.set(result.ok ? { gridPending: pending } : { gridPending: pending, gridNote: result.reason });
   }
 }

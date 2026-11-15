@@ -1,5 +1,5 @@
 import { GROWER } from "./buildings/grower";
-import { applyPending } from "./commands";
+import { applyPending, type DroppedCommand } from "./commands";
 import type { SimState } from "./state";
 import { settleCells } from "./zoning/cell-index";
 
@@ -38,17 +38,22 @@ function timed(timer: SystemTimer | undefined, name: string, run: () => void): v
  * then, unless the game is paused, runs every system and advances exactly
  * one tick.
  *
+ * Returns the queued commands it dropped, with why, for the host to pass
+ * on to their senders. Replay has no one to tell and ignores them.
+ *
  * The host calls `step` at 10 Hz times the speed. While paused it keeps
  * calling at the 1x rate so commands, including the one that unpauses, still
  * apply. Those calls leave the tick where it is.
  */
-export function step(state: SimState, timer?: SystemTimer): void {
-  timed(timer, COMMANDS_SYSTEM, () => applyPending(state));
+export function step(state: SimState, timer?: SystemTimer): DroppedCommand[] {
+  let dropped: DroppedCommand[] = [];
+  timed(timer, COMMANDS_SYSTEM, () => void (dropped = applyPending(state)));
   // Paused or not, so a change made while paused still settles.
   timed(timer, CELLS_SYSTEM, () => settleCells(state));
-  if (state.speed === 0) return;
+  if (state.speed === 0) return dropped;
   for (const system of SYSTEMS) {
     timed(timer, system.name, () => system.run(state));
   }
   state.tick += 1;
+  return dropped;
 }

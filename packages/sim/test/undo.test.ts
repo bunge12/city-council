@@ -11,11 +11,11 @@ import {
   planUndo,
   serialize,
   step,
-  submit,
   type Command,
   type CommandResult,
   type SimState,
 } from "../src/index";
+import { submit } from "./seen-ends";
 import { cloneState } from "../src/state";
 import { applyRoadDelta, drainRoadChanges, encodeRoadDelta, recordRoadChanges } from "../src/roads/delta";
 import {

@@ -53,6 +53,8 @@ export interface HostStats {
  * `cellChunks` too.
  * `steps` is how many sim steps the delta covers: after one or more, every
  * command the host had queued before it has been applied or dropped.
+ * Listeners run before `sendCommandSettled` resolves for the commands the
+ * update settled.
  */
 export type MirrorUpdate =
   | { kind: "snapshot" }
@@ -83,7 +85,12 @@ export class SimMirror {
   /** `seq` of the next delta that lines up with the copy. */
   private deltaSeq = 0;
   private nextSeq = 1;
-  private readonly waiting = new Map<number, (result: CommandResult) => void>();
+  /** Commands sent and not yet answered, by seq: the host's answer, queued or refused. */
+  private readonly answers = new Map<number, (result: CommandResult) => void>();
+  /** Commands sent and not yet applied or refused, by seq. */
+  private readonly outcomes = new Map<number, (result: CommandResult) => void>();
+  /** Seqs of commands the host has queued and not yet applied or dropped. */
+  private readonly queued = new Set<number>();
   private readonly listeners = new Set<Listener>();
   private hostStats: HostStats = { timings: [] };
   private awaitingSnapshot = false;
@@ -114,19 +121,35 @@ export class SimMirror {
   }
 
   /**
-   * Sends a command and resolves with the sim's answer: accepted into the
-   * queue, or refused with a reason.
+   * Sends a command and resolves with the host's answer: queued, or refused
+   * with a reason. Queued is not applied: a command ahead of it in the same
+   * tick, perhaps another player's, can still make it invalid, and the step
+   * then drops it. `sendCommandSettled` waits for that.
    */
   sendCommand(type: string, payload: unknown = {}): Promise<CommandResult> {
+    return this.send(type, payload).answer;
+  }
+
+  /**
+   * Sends a command and resolves once the sim has settled it: `ok` once it
+   * was applied and the delta carrying it is in the copy, or the reason it
+   * was not. It can be refused when it arrives, or queued and then dropped
+   * at the step (issue 94). Either way the reason comes here.
+   */
+  sendCommandSettled(type: string, payload: unknown = {}): Promise<CommandResult> {
+    return this.send(type, payload).outcome;
+  }
+
+  private send(type: string, payload: unknown): { answer: Promise<CommandResult>; outcome: Promise<CommandResult> } {
     const seq = this.nextSeq++;
-    return new Promise((resolve) => {
-      this.waiting.set(seq, resolve);
-      this.transport.send({
-        v: PROTOCOL_VERSION,
-        type: "command",
-        command: { seq, playerId: this.playerId, type, payload },
-      });
+    const answer = new Promise<CommandResult>((resolve) => this.answers.set(seq, resolve));
+    const outcome = new Promise<CommandResult>((resolve) => this.outcomes.set(seq, resolve));
+    this.transport.send({
+      v: PROTOCOL_VERSION,
+      type: "command",
+      command: { seq, playerId: this.playerId, type, payload },
     });
+    return { answer, outcome };
   }
 
   /**
@@ -172,20 +195,30 @@ export class SimMirror {
     if (message.v !== PROTOCOL_VERSION) return;
     switch (message.type) {
       case "snapshot":
+        this.settleFromSnapshot(message.state);
+        this.skipSeqs(message.state);
         this.current = message.state;
         this.logFrom = message.logFrom;
         this.deltaSeq = message.deltaSeq;
         this.awaitingSnapshot = false;
         this.notify({ kind: "snapshot" });
         return;
-      case "delta":
+      case "delta": {
+        const before = this.deltaSeq;
         this.applyDelta(message);
+        // A delta the copy could not take still says which commands were dropped, and why.
+        if (this.deltaSeq === before) this.settleDropped(message);
         return;
+      }
       case "commandResult": {
         if (message.playerId !== this.playerId) return;
-        const resolve = this.waiting.get(message.seq);
-        this.waiting.delete(message.seq);
-        resolve?.(message.result);
+        const answer = this.answers.get(message.seq);
+        if (!answer) return;
+        this.answers.delete(message.seq);
+        answer(message.result);
+        // Queued is not applied: the outcome comes with the step.
+        if (message.result.ok) this.queued.add(message.seq);
+        else this.settle(message.seq, message.result);
         return;
       }
     }
@@ -248,7 +281,57 @@ export class SimMirror {
       state.logOffset += LOG_PAGE_SIZE;
     }
     this.hostStats = { timings: delta.timings };
+    // The copy now holds what these commands did, so their senders can look.
+    for (const entry of delta.log) if (entry.playerId === this.playerId) this.settle(entry.seq, { ok: true });
+    this.settleDropped(delta);
     this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs, cellChunks, buildingChunks, steps: delta.steps });
+  }
+
+  private settleDropped(delta: Extract<FromSimMessage, { type: "delta" }>): void {
+    for (const drop of delta.dropped ?? []) {
+      if (drop.playerId === this.playerId) this.settle(drop.seq, { ok: false, reason: drop.reason });
+    }
+  }
+
+  /**
+   * Moves `nextSeq` past every seq of this player's in the snapshot's log
+   * and queue. Seqs start at 1 on every page load and the player id stays
+   * the same, so without this a command queued before a reload, and kept in
+   * the save, could be taken for one sent since.
+   */
+  private skipSeqs(state: SimState): void {
+    for (const command of [...state.log, ...state.pending]) {
+      if (command.playerId === this.playerId && command.seq >= this.nextSeq) this.nextSeq = command.seq + 1;
+    }
+  }
+
+  private settle(seq: number, result: CommandResult): void {
+    const resolve = this.outcomes.get(seq);
+    if (!resolve) return;
+    this.outcomes.delete(seq);
+    this.queued.delete(seq);
+    resolve(result);
+  }
+
+  /**
+   * Settles queued commands against a snapshot, when the deltas that would
+   * have said what became of them were missed. One in the snapshot's log
+   * after the copy's was applied; one still in its queue waits for a later
+   * delta. Any other was dropped by a step whose delta went missing, and
+   * the reason went with it.
+   */
+  private settleFromSnapshot(state: SimState): void {
+    if (this.queued.size === 0) return;
+    const applied = new Set<number>();
+    state.log.forEach((entry, i) => {
+      // Entries the copy already had may carry this player's seqs from before a reload.
+      if (state.logOffset + i >= this.logFrom && entry.playerId === this.playerId) applied.add(entry.seq);
+    });
+    const pending = new Set(state.pending.filter((c) => c.playerId === this.playerId).map((c) => c.seq));
+    for (const seq of [...this.queued]) {
+      if (applied.has(seq)) this.settle(seq, { ok: true });
+      else if (!pending.has(seq)) this.settle(seq, { ok: false, reason: "This change was not made" });
+    }
   }
 
   /** Out of step with the host. Drop deltas until a snapshot resets us. */

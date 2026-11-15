@@ -228,7 +228,7 @@ describe("the controller", () => {
     expect(get().tool).toBeNull();
   });
 
-  it("sends one ZoneCells for a fill click, keeps it marked until a step, and nothing for a click that changes nothing", async () => {
+  it("sends one ZoneCells for a fill click, keeps it marked until it is applied, and nothing for a click that changes nothing", async () => {
     const { state, tool, sent, get, answer } = setup();
     tool.toggle();
     tool.setDepth(2);
@@ -238,14 +238,10 @@ describe("the controller", () => {
     tool.click(hover);
     expect(sent).toHaveLength(1);
     expect(get().zonePending).toHaveLength(1);
+    // Applied by the sim, and the delta that carries it is in the copy: the mark goes.
+    paint(state, sent);
     answer({ ok: true });
     await Promise.resolve();
-    expect(get().zonePending[0]?.status).toBe("accepted");
-    // Applied by the sim; the next step's delta carries it.
-    paint(state, sent);
-    tool.mirrorUpdated({ kind: "delta", steps: 0 });
-    expect(get().zonePending).toHaveLength(1);
-    tool.mirrorUpdated({ kind: "delta", steps: 1 });
     expect(get().zonePending).toHaveLength(0);
     // Nothing left to change: nothing is sent.
     const hash = hashState(state);

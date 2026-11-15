@@ -14,11 +14,11 @@ import {
   residentsFor,
   serialize,
   step,
-  submit,
   type BuildingRow,
   type Command,
   type SimState,
 } from "../src/index";
+import { submit } from "./seen-ends";
 import { removeBuilding } from "../src/buildings/buildings";
 import { candidateSets } from "../src/buildings/candidates";
 import { grow } from "../src/buildings/grower";

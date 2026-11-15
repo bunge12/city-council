@@ -20,19 +20,22 @@
 // roads. The sim still has the final say. Tool state lives in the UI store
 // (ui/store.ts); nothing here writes sim state.
 //
-// A sent road stays on screen as an in-flight preview until the sim answers.
-// A refusal removes it and shows the reason. An acceptance only means the
-// command is queued, so the preview stays until the next delta from a step,
-// which carries the real road. A server answers later than a worker does;
-// the same states cover both.
+// A sent road stays on screen as an in-flight preview until the sim has
+// built it or refused it. A refusal removes it and shows the reason. The sim
+// can refuse a road when the command arrives, or accept it into the queue
+// and drop it at the step, because a command ahead of it in the same tick,
+// perhaps another player's, made it invalid (issue 94). Both come back the
+// same way, with the reason. A server answers later than a worker does; the
+// same states cover both.
 //
 // In continuous mode a segment is not sent until the one before it is
 // built. The sim validates a command against the city as it is, so the next
 // segment has to see the last one to be checked against it, for the angle
 // where they meet among other things. Until then it waits as "queued", and
-// is checked again before it goes. A segment the sim refuses ends the road
-// there: the segments before it stay built and any queued after it are
-// dropped.
+// is checked again before it goes. A segment the sim refuses or drops ends
+// the road there: the segments before it stay built and any queued after it
+// are dropped, so the road never carries on from a segment that is not
+// there.
 
 import {
   LEVEL_BRIDGE,
@@ -51,7 +54,7 @@ import {
   type RoadType,
   type Terrain,
 } from "@city-council/sim";
-import type { RoadNet } from "../render/road-geometry";
+import { liveNode, type RoadNet } from "../render/road-geometry";
 import { DEFAULT_GUIDES, type GuideId, type GuideToggles } from "./config";
 import type { CellLookup } from "./cell-snap";
 import { roadEnd, snapPoint, startSource, type Snap } from "./snap";
@@ -183,10 +186,9 @@ export interface PendingRoad {
   chain: number;
   /**
    * "queued" while it waits for the segment before it in a continuous road
-   * to be built; "sending" until the sim answers; "accepted" once the sim
-   * has queued the command.
+   * to be built; "sending" until the sim has built or refused it.
    */
-  status: "queued" | "sending" | "accepted";
+  status: "queued" | "sending";
 }
 
 /** The tools: the road tool here, the grid tool in grid-tool.ts, bulldoze and upgrade in edit-tool.ts, the zone tool in zone-tool.ts, and the debug route tool in route-tool.ts. */
@@ -246,7 +248,7 @@ export interface RoadToolHost {
   set(patch: Partial<RoadToolState>): void;
   /** The mirror's roads and the map, and its zoned cells for the snap, or null before the first snapshot. */
   world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup } | null;
-  /** Sends `BuildRoad` and resolves with the sim's answer. */
+  /** Sends `BuildRoad` and resolves once the sim has built it, or with why it did not. */
   send(payload: BuildRoadPayload): Promise<CommandResult>;
 }
 
@@ -435,18 +437,21 @@ export class RoadToolController {
     void this.host.send(pending.payload).then((result) => this.answered(pending.id, result));
   }
 
+  /**
+   * The sim built the road, and the copy shows it, or refused it. Either way
+   * its preview goes. A refusal shows the reason and ends a continuous road;
+   * a build lets the road's next queued segment go.
+   */
   private answered(id: number, result: CommandResult): void {
     const pending = this.host.get().roadPending;
+    const rest = pending.filter((p) => p.id !== id);
     if (result.ok) {
-      this.host.set({ roadPending: pending.map((p) => (p.id === id ? { ...p, status: "accepted" } : p)) });
+      this.host.set({ roadPending: rest });
+      this.sendNext();
       return;
     }
     const refused = pending.find((p) => p.id === id);
-    this.stopChain(
-      pending.filter((p) => p.id !== id),
-      refused?.chain ?? 0,
-      result.reason,
-    );
+    this.stopChain(rest, refused?.chain ?? 0, result.reason);
   }
 
   /**
@@ -464,20 +469,12 @@ export class RoadToolController {
   }
 
   /**
-   * Call on every mirror update. After a step, every command the sim had
-   * accepted before it has been built, or dropped because an earlier
-   * command in the same tick made it invalid; either way its preview goes.
-   * A snapshot replaces the whole copy, so it clears them too. Then each
-   * continuous road's next queued segment, if nothing of its road is still
-   * in flight, is checked against the roads as they now are and sent.
+   * Sends each continuous road's next queued segment, if nothing of its
+   * road is still in flight, after checking it against the roads as they
+   * now are.
    */
-  mirrorUpdated(update: { kind: "snapshot" } | { kind: "delta"; steps: number }): void {
-    if (update.kind === "delta" && update.steps === 0) return;
+  private sendNext(): void {
     let pending = this.host.get().roadPending;
-    if (pending.some((p) => p.status === "accepted")) {
-      pending = pending.filter((p) => p.status !== "accepted");
-      this.host.set({ roadPending: pending });
-    }
     const world = this.host.world();
     if (!world) return;
     for (const chain of new Set(pending.map((p) => p.chain))) {
@@ -486,13 +483,17 @@ export class RoadToolController {
       const next = mine[0];
       if (!next || next.status !== "queued") continue;
       const { from, to, type, control, level } = next.payload;
-      const preview = previewRoad(world.net, world.terrain, from, to, type, control ?? null, level);
       pending = this.host.get().roadPending;
-      if (!preview.ok) {
+      // The segment before it was built, but something since, such as an
+      // undo in the same step, may have taken it away again.
+      const preview = nodeAt(world.net, from)
+        ? previewRoad(world.net, world.terrain, from, to, type, control ?? null, level)
+        : null;
+      if (!preview?.ok) {
         this.stopChain(
           pending.filter((p) => p.id !== next.id),
           chain,
-          preview.reason ?? "",
+          preview ? (preview.reason ?? "") : ROAD_GONE,
         );
         pending = this.host.get().roadPending;
         continue;
@@ -503,6 +504,17 @@ export class RoadToolController {
       this.sendPending(sending);
     }
   }
+}
+
+/** Why a continuous road stops when the segment it carries on from is gone. */
+export const ROAD_GONE = "The road this one carries on from is gone";
+
+/** Whether a live node stands exactly at `p`. */
+function nodeAt(net: RoadNet, p: BuildPoint): boolean {
+  for (let node = 0; node < net.nodeFlags.length; node++) {
+    if (liveNode(net, node) && net.nodeX[node] === p.x && net.nodeZ[node] === p.z) return true;
+  }
+  return false;
 }
 
 /**
