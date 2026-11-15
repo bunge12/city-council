@@ -88,12 +88,13 @@ export function applyBuildingDelta(state: SimState, delta: BuildingDelta): numbe
     const chunk = filedChunk(state, id);
     if (chunk !== NO_BUILDING) chunks.add(chunk);
   };
-  if (tracked) {
-    for (const id of delta.ids) {
-      note(id);
-      unfileBuilding(state, id);
-    }
-  }
+  // Where each changed building was filed, before anything catches the
+  // index up with the roads of the same delta.
+  if (tracked) for (const id of delta.ids) note(id);
+  // The rows land before the index is next asked, so catching it up with
+  // the delta's roads files every building from its new row: one filed
+  // from its old row could take another building's cells on a renumbered
+  // segment, and that one would not be filed again.
   const arrays = b as unknown as Record<BuildingKey, AnyTypedArray>;
   for (const key of BUILDING_ARRAYS) {
     const target = resized(arrays[key], Math.max(delta.limit, arrays[key].length));
@@ -104,6 +105,7 @@ export function applyBuildingDelta(state: SimState, delta: BuildingDelta): numbe
   if (delta.free) b.free = delta.free.slice();
   if (tracked && hasBuildingIndex(state)) {
     for (const id of delta.ids) {
+      unfileBuilding(state, id);
       if (id >= delta.limit || ((b.flags[id] ?? 0) & BUILDING_ALIVE) === 0) continue;
       fileBuilding(state, id);
       note(id);

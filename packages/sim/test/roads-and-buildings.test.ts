@@ -23,6 +23,17 @@ import {
   type Command,
   type Lot,
   type SimState,
+  applyBuildingDelta,
+  applyCellDelta,
+  applyRoadDelta,
+  drainBuildingDelta,
+  drainCellDelta,
+  drainRoadChanges,
+  encodeRoadDelta,
+  prepareDerived,
+  recordBuildingChanges,
+  recordCellChanges,
+  recordRoadChanges,
   replay,
 } from "../src/index";
 import { submit, withEnds } from "./seen-ends";
@@ -587,5 +598,51 @@ describe("replay fixture roads-and-buildings", () => {
 
   it("gives the same hash replayed twice", () => {
     expect(runFixture(fixture).hash).toBe(runFixture(fixture).hash);
+  });
+});
+
+describe("a client's copy", () => {
+  /** A copy of `state` that follows it by deltas, as the mirror does. */
+  function follow(state: SimState): { copy: SimState; sync: () => void } {
+    const copy = deserialize(serialize(state)).state;
+    prepareDerived(copy);
+    recordRoadChanges(state.roads);
+    recordCellChanges(state);
+    recordBuildingChanges(state);
+    // Asked about buildings, so it keeps its building index.
+    buildingIndexSets(copy);
+    const sync = () => {
+      const changes = drainRoadChanges(state.roads);
+      const roads = changes ? encodeRoadDelta(state.roads, changes) : null;
+      if (roads) expect(typeof applyRoadDelta(copy.roads, roads)).not.toBe("string");
+      const cells = drainCellDelta(state);
+      if (roads || cells) expect(typeof applyCellDelta(copy, cells, roads ? [...roads.segIds] : [])).not.toBe("string");
+      const buildings = drainBuildingDelta(state);
+      if (buildings) expect(typeof applyBuildingDelta(copy, buildings)).not.toBe("string");
+    };
+    return { copy, sync };
+  }
+
+  it("keeps its building index right through a reverse, a split and a bulldoze", () => {
+    const state = createState(SEED);
+    ok(state, road([4200, 4600], [4304, 4600], "oneWay"));
+    ok(state, road([4304, 4600], [4392, 4600], "oneWay"));
+    zone(state, "residential", 1, 0, 24, 4, "both");
+    fill(state);
+    const { copy, sync } = follow(state);
+    const check = () => {
+      sync();
+      expect(rows(copy)).toEqual(rows(state));
+      const { kept, fresh } = buildingIndexSets(copy);
+      expect(Array.from(kept.cells)).toEqual(Array.from(fresh.cells));
+      expect(kept.chunks).toEqual(fresh.chunks);
+      expect(Array.from(kept.cells)).toEqual(Array.from(buildingIndexSets(state).kept.cells));
+    };
+    ok(state, command("UpgradeRoad", { segments: [cellAt(state, 4350, 4591)?.segment as number], type: "oneWay" }));
+    check();
+    ok(state, road([4256, 4600], [4256, 4700]));
+    check();
+    ok(state, command("BulldozeRoad", { segments: [cellAt(state, 4230, 4591)?.segment as number] }));
+    check();
   });
 });
