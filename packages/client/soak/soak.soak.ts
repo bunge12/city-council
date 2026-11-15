@@ -22,8 +22,7 @@
 // The tick budget is checked per source of work: each road command type,
 // the steps that walk a slice of zoning cells, the idle steps (log paging
 // among them) and each autosave's slowest part. Each source may pass the
-// budget only a couple of times in a run, and a grid at the cap a couple
-// more (SLOW_GRIDS_KNOWN). A shared CI runner pauses a step
+// budget only a couple of times in a run. A shared CI runner pauses a step
 // now and then, for a garbage collection or another tenant, and such a
 // pause lands on a step of any source at random. A source that is slow
 // every time it runs passes the budget every time, and so fails the run,
@@ -80,16 +79,6 @@ const BUDGET_MS = 20;
  * source, and most met none.
  */
 const PAUSES_ALLOWED = 2;
-/**
- * The grids of the cycle that land at the cap over several streets of the
- * scale city. Applying one is at the budget on a CI runner: the road
- * building and the blocks, the routing graph and the spatial index kept
- * current on 30,000 segments, and laying out the zoning cells of the
- * change. The same grids each run, since the sim is deterministic, so they
- * are allowed by count on top of the pauses. More than this and grids got
- * slower. The bench holds the mean of one at the cap to the budget.
- */
-const SLOW_GRIDS_KNOWN = 2;
 /**
  * Each autosave allocates a snapshot of about 13 MB, so a collection of the
  * old generation tends to land in one of its parts rather than in a step.
@@ -402,7 +391,7 @@ test("soak: one hour of game time at 4x", () => {
   };
   const checks: BudgetCheck[] = [
     ...Object.entries(byCommand).map(([type, c]) =>
-      check(`${type} steps`, ascending(c.ms), PAUSES_ALLOWED + (type === "BuildRoadGrid" ? SLOW_GRIDS_KNOWN : 0)),
+      check(`${type} steps`, ascending(c.ms), PAUSES_ALLOWED),
     ),
     check("zoning cell settle steps", settleSorted, PAUSES_ALLOWED),
     check("idle steps", idleSorted, PAUSES_ALLOWED),
