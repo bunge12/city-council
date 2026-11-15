@@ -49,7 +49,7 @@ import { blockIndexOf, blockOnSide } from "../roads/blocks";
 import { NONE } from "../roads/network";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { lotCorners, openCellsNear } from "../zoning/cell-index";
-import { WIDEST_LOT, typesFor, type BuildingType } from "./balance";
+import { BUILDINGS_BALANCE, WIDEST_LOT, typesFor, type BuildingType } from "./balance";
 import { NO_BUILDING, lotColumns, segmentBuildings } from "./where";
 
 /** A lot a building type fits. Its first column and size, as a building row holds them. */
@@ -203,10 +203,12 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
   // free cell at the road end it: no lot crosses them.
   const reach = WIDEST_LOT - 1;
   const seen = new Set<string>([`${start.seg}/${start.side}/${start.place}`]);
-  const walk = (from: Column): { col: Column; free: number }[] => {
-    const out: { col: Column; free: number }[] = [];
-    let col: Column | null = from;
-    while (out.length < reach && (col = nextColumn(index, col)) !== null) {
+  // Each way first as far as a lot on one strip reaches, then on as far as
+  // a through-lot does, so on a strip that closes on itself the plain types
+  // see the same columns either side as they would with no through-lots.
+  const walk = (from: Column, out: { col: Column; free: number }[] = [], limit = reach): { col: Column; free: number }[] => {
+    let col: Column | null = out.length > 0 ? (out[out.length - 1] as { col: Column }).col : from;
+    while (out.length < limit && (col = nextColumn(index, col)) !== null) {
       const key = `${col.seg}/${col.side}/${col.place}`;
       if (seen.has(key)) break;
       seen.add(key);
@@ -216,10 +218,16 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
     }
     return out;
   };
-  const ahead = walk(start);
+  const plainReach = BUILDINGS_BALANCE.maxLotWidth - 1;
+  const ahead = walk(start, [], plainReach);
+  const behindWalk = walk({ ...start, dir: 1 }, [], plainReach);
+  if (reach > plainReach && types.some((t) => t.throughLot)) {
+    if (ahead.length === plainReach) walk(start, ahead);
+    if (behindWalk.length === plainReach) walk({ ...start, dir: 1 }, behindWalk);
+  }
   // Walked the other way, each column's way on along the strip is the
   // opposite of the walk's.
-  const behind = walk({ ...start, dir: 1 })
+  const behind = behindWalk
     .reverse()
     .map(({ col, free }) => ({ col: { ...col, dir: 1 - col.dir }, free }));
   const strip = [...behind, { col: start, free: freeDepth(start) }, ...ahead];
@@ -239,22 +247,29 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
     const block = blockOf(cols[0] as Column);
     return cols.every((c) => blockOf(c) === block) ? block : NONE;
   };
-  const lotBehind = (first: Column, w: number, depth: number): { first: Column; depth: number } | null => {
-    const cols = lotColumns(index, first, w);
-    const corners = lotCorners(index, first, w, depth);
-    if (!cols || !corners) return null;
-    const block = sameBlock(cols);
-    if (block === NONE) return null;
+  /**
+   * The columns that could start a lot behind one starting at strip column
+   * `s`, free `depth` deep: on the same block, free some depth of their
+   * own, with their near back corner within the gap of this column's.
+   * Found once per column and reused for every width, since a failed search
+   * on a deep strip with no partner is the slow case.
+   */
+  const partners = new Map<number, { col: Column; depth: number; near: number }[]>();
+  const partnersAt = (s: number, depth: number): { col: Column; depth: number; near: number }[] => {
+    const known = partners.get(s);
+    if (known) return known;
+    const out: { col: Column; depth: number; near: number }[] = [];
+    partners.set(s, out);
+    const first = (strip[s] as { col: Column }).col;
+    const corners = lotCorners(index, first, 1, depth);
+    const block = blockOf(first);
+    if (!corners || block === NONE) return out;
     const nx = corners[2] ?? 0;
     const nz = corners[3] ?? 0;
-    const fx = corners[4] ?? 0;
-    const fz = corners[5] ?? 0;
     const tried = new Set<string>();
-    let best: { first: Column; depth: number; worst: number } | null = null;
     // The lot behind's first column has its back corner within the gap of
-    // this lot's near back corner, so its back cell has a corner within the
-    // gap plus two cells of it.
-    for (const key of openCellsNear(index, nx, nz, ZONING_BALANCE.throughLotMaxGap + 2 * ZONING_BALANCE.cellSize)) {
+    // this column's near back corner, and that corner is its back cell's.
+    for (const key of openCellsNear(index, nx, nz, ZONING_BALANCE.throughLotMaxGap)) {
       const seg = Math.floor(key / CELL_KEY_STRIDE);
       const { side, place } = fromLocal(key - seg * CELL_KEY_STRIDE);
       if (seg === first.seg && side === first.side) continue;
@@ -263,17 +278,39 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
         const name = `${seg}/${side}/${place}/${dir}`;
         if (tried.has(name)) continue;
         tried.add(name);
+        if (blockOf(col) !== block) continue;
         const d = freeDepth(col);
         if (d === 0) continue;
-        const backCols = lotColumns(index, col, w);
-        const back = lotCorners(index, col, w, d);
-        if (!backCols || !back || !backCols.every((c) => freeDepth(c) === d) || sameBlock(backCols) !== block) continue;
+        const back = lotCorners(index, col, 1, d);
+        if (!back) continue;
         const near = squared((back[2] ?? 0) - nx, (back[3] ?? 0) - nz);
-        const far = squared((back[4] ?? 0) - fx, (back[5] ?? 0) - fz);
-        if (near > gap2 || far > gap2) continue;
-        const worst = Math.max(near, far);
-        if (!best || worst < best.worst) best = { first: col, depth: d, worst };
+        if (near <= gap2) out.push({ col, depth: d, near });
       }
+    }
+    return out;
+  };
+
+  /** The lot behind `w` columns from strip column `s`, each free `depth` deep: as the header says, or null. */
+  const lotBehind = (s: number, w: number, depth: number): { first: Column; depth: number } | null => {
+    const first = (strip[s] as { col: Column }).col;
+    const options = partnersAt(s, depth);
+    if (options.length === 0) return null;
+    const cols = lotColumns(index, first, w);
+    const corners = lotCorners(index, first, w, depth);
+    if (!cols || !corners) return null;
+    const block = sameBlock(cols);
+    if (block === NONE) return null;
+    const fx = corners[4] ?? 0;
+    const fz = corners[5] ?? 0;
+    let best: { first: Column; depth: number; worst: number } | null = null;
+    for (const { col, depth: d, near } of options) {
+      const backCols = lotColumns(index, col, w);
+      const back = lotCorners(index, col, w, d);
+      if (!backCols || !back) continue;
+      const far = squared((back[4] ?? 0) - fx, (back[5] ?? 0) - fz);
+      if (far > gap2 || !backCols.every((c) => freeDepth(c) === d) || sameBlock(backCols) !== block) continue;
+      const worst = Math.max(near, far);
+      if (!best || worst < best.worst) best = { first: col, depth: d, worst };
     }
     return best ? { first: best.first, depth: best.depth } : null;
   };
@@ -294,7 +331,7 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
         for (let i = s + 1; i < s + w && even; i++) even = strip[i]?.free === d;
         if (!even) continue;
         const first = (strip[s] as { col: Column }).col;
-        const back = lotBehind(first, w, d);
+        const back = lotBehind(s, w, d);
         if (!back) continue;
         const depth = d + back.depth;
         if (depth < type.depth[0] || depth > type.depth[1]) continue;

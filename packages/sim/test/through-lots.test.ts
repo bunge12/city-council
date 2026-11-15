@@ -58,7 +58,7 @@ function command(type: string, payload: unknown, playerId = "p1"): Command {
   return { seq: ++seq, playerId, type, payload };
 }
 function ok(state: SimState, c: Command): void {
-  expect(submit(state, c), c.type).toEqual({ ok: true });
+  expect(submit(state, c), `${c.type} ${JSON.stringify(c.payload)}`).toEqual({ ok: true });
   step(state);
   expect(state.log.at(-1)?.seq, `${c.type} should apply`).toBe(c.seq);
 }
@@ -311,6 +311,26 @@ describe("a through-lot and its roads", () => {
     expect(isBuilding(state.buildings, id)).toBe(true);
     const after = buildingInfo(state, id)?.corners as number[];
     (before as number[]).forEach((v, i) => expect(after[i]).toBeCloseTo(v, 6));
+    expectSound(state);
+  });
+
+  it("stands when the back road is upgraded to a narrower type and then reversed, its back lot following both", () => {
+    const { state, south, id } = withMall();
+    const seg = () => cellAt(state, 4300, south - HALF - 6)?.segment as number;
+    const b = state.buildings;
+    const before = { side: b.backSide[id], dir: b.backDir[id] };
+    // A one-way is 8 m wide, so the south strip moves a metre south with
+    // its road's edge and the strips no longer quite meet. The building
+    // keeps its ground.
+    ok(state, command("UpgradeRoad", withEnds(state.roads, { segments: [seg()], type: "oneWay" })));
+    expect(isBuilding(b, id)).toBe(true);
+    // Making it one-way again reverses it: its cells change side and the
+    // back lot's row follows.
+    ok(state, command("UpgradeRoad", withEnds(state.roads, { segments: [seg()], type: "oneWay" })));
+    expect(isBuilding(b, id)).toBe(true);
+    expect({ side: b.backSide[id], dir: b.backDir[id] }).not.toEqual(before);
+    const zs = (buildingInfo(state, id)?.corners as number[]).filter((_, i) => i % 2 === 1);
+    expect(Math.max(...zs)).toBeCloseTo(south - 4, 6);
     expectSound(state);
   });
 
