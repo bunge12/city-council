@@ -335,7 +335,7 @@ describe("the guide toggles", () => {
       world: () => ({ net, terrain }),
       send: () => Promise.resolve({ ok: true }),
     });
-    expect(s.guides).toEqual({ angle: true, length: true, grid: false, lines: true, offset: true });
+    expect(s.guides).toEqual({ angle: true, length: true, grid: false, lines: true, offset: true, cells: true });
     // Short of the 12 cell offset from the street, so the angle guide alone catches it.
     const cursor = at(END, 3, 80);
     expect(tool.snap(cursor, { metresPerPixel: 1, free: false })?.kind).toBe("angle");
@@ -346,9 +346,9 @@ describe("the guide toggles", () => {
     tool.toggleGuide("grid");
     expect(tool.snap(cursor, { metresPerPixel: 1, free: false })?.kind).toBe("grid");
     tool.toggleGuide("length");
-    expect(s.guides).toEqual({ angle: false, length: false, grid: true, lines: true, offset: true });
+    expect(s.guides).toEqual({ angle: false, length: false, grid: true, lines: true, offset: true, cells: true });
     tool.toggleGuide("lines");
     tool.toggleGuide("offset");
-    expect(s.guides).toEqual({ angle: false, length: false, grid: true, lines: false, offset: false });
+    expect(s.guides).toEqual({ angle: false, length: false, grid: true, lines: false, offset: false, cells: true });
   });
 });

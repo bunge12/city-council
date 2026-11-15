@@ -310,6 +310,8 @@ export const SNAP_MARKS = {
     offset: 0xffa64d,
     /** Where water or steep ground cuts a street of the grid tool's preview (issue M1-21). */
     cut: 0xff5a4a,
+    /** Caught a corner or edge of zoned cells, and the cell edges it came from (issue M2-08). */
+    cell: 0xff7ad9,
   },
   opacity: 0.95,
   /** Metres above the ground, over the road preview. */

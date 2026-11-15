@@ -100,6 +100,30 @@ export const PARALLEL = {
   pastEndMetres: 48,
 } as const;
 
+/**
+ * Snapping to zoning cells (issue M2-08). Only zoned, open cells catch: an
+ * unzoned cell is not drawn outside the zone tool, and the parallel offset
+ * already lines a road up behind an unzoned strip.
+ */
+export const CELL_SNAP = {
+  /** A corner of the zoned area, or where a cell line meets it or the road, catches the cursor this near... */
+  cornerPx: 12,
+  /** ...but never further than this many metres, so most of a cell stays free when zoomed out. */
+  cornerMaxMetres: 3,
+  /** The back or end of a zoned area, or a cell line across it, catches the cursor this near... */
+  edgePx: 10,
+  /** ...but never further than this many metres: a quarter of a cell. */
+  edgeMaxMetres: 2,
+  /**
+   * A road drawn along the outside of a zoned area keeps this many metres
+   * between its edge and the cells, so rounding to the sim's build grid
+   * cannot push its surface onto them. Over twice the grid's diagonal.
+   */
+  clearance: 0.25,
+  /** Zoomed out past this, metres a pixel, a cell is a few pixels across and the source is off. */
+  maxMetresPerPixel: 1,
+} as const;
+
 /** The edge-to-edge gaps the parallel offset snaps to, in cells, main first. */
 export const PARALLEL_GAP_CELLS: readonly number[] = PARALLEL.strips.map((n) => n * SNAP.zoneDepthCells);
 
@@ -110,6 +134,7 @@ export const GUIDES = [
   { id: "grid", label: "Grid", title: "Snap to the 16 m terrain grid" },
   { id: "lines", label: "Lines", title: "Snap to lines running square and in line from nearby road ends and junctions" },
   { id: "offset", label: "Offset", title: `Snap beside a road at ${PARALLEL_GAP_CELLS.join(" or ")} cells, edge to edge` },
+  { id: "cells", label: "Cells", title: "Snap to the corners and edges of zoned cells, keeping a road off the cells it runs beside" },
 ] as const;
 
 export type GuideId = (typeof GUIDES)[number]["id"];
@@ -118,7 +143,7 @@ export type GuideId = (typeof GUIDES)[number]["id"];
 export type GuideToggles = Record<GuideId, boolean>;
 
 /** Everything on but the terrain grid. */
-export const DEFAULT_GUIDES: GuideToggles = { angle: true, length: true, grid: false, lines: true, offset: true };
+export const DEFAULT_GUIDES: GuideToggles = { angle: true, length: true, grid: false, lines: true, offset: true, cells: true };
 
 /** How the key that, held, suspends every guide for a free-hand segment is written. The camera controls track it. */
 export const FREE_HAND_KEY_LABEL = "Alt";
