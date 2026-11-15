@@ -153,7 +153,8 @@ describe("spatial index on a random network of 5,000 segments", () => {
   const qs = queries(7, 2000);
 
   it("puts every live node in one cell and every segment in at least one", () => {
-    expect(index.cellsPerSide).toBe(24);
+    // 125 m cells over the 12 km map.
+    expect(index.cellsPerSide).toBe(96);
     const nodeHits = new Map<number, number>();
     for (const cell of index.nodeCells) for (const id of cell) nodeHits.set(id, (nodeHits.get(id) ?? 0) + 1);
     const segs = new Set(index.segCells.flat());
@@ -239,7 +240,8 @@ describe("spatial index kept current", () => {
     expect(nearestNode(index, 905, 100, 10)?.node).toBe(b);
     const ab = addSegment(net, a, b, { type: 0 });
     expect(segmentsInBox(index, 400, 50, 600, 150)).toEqual([ab]);
-    expect(index.segCells.filter((cell) => cell.includes(ab))).toHaveLength(2);
+    // From x = 100 to 900 it touches the 125 m cells 0 to 7 of its row.
+    expect(index.segCells.filter((cell) => cell.includes(ab))).toHaveLength(8);
     removeSegment(net, ab);
     expect(segmentsInBox(index, 400, 50, 600, 150)).toEqual([]);
     expect(index.segCells.flat()).toEqual([]);
