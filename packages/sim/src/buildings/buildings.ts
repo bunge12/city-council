@@ -10,6 +10,14 @@
 // (zoning/cell-index.ts, `nextColumn`), so the row does not list its
 // cells. Which building stands on each cell is derived (where.ts).
 //
+// A through-lot (M2-14) joins that lot to a second one on the strip behind
+// it, which fronts the road on the far side of the block. The row names the
+// second lot the same way, by its first column, which stands across the
+// block from the first lot's first column and runs the same way on the
+// ground. `depth` is the whole lot's, and `backDepth` how many of those
+// cells are on the back strip; 0 for a lot on one strip, whose back fields
+// are all 0.
+//
 // Only this module and its callers in the sim add or remove buildings. The
 // grower (grower.ts, issue 10) adds them. `BulldozeBuilding` (bulldoze.ts)
 // removes the ones a player names, and the upkeep after a change of roads
@@ -22,7 +30,8 @@ import { CELL_LEFT, CELL_RIGHT, placesAlong } from "../zoning/cells";
 import { BUILDING_TYPES } from "./balance";
 import { noteColumns } from "./candidates";
 import { noteBuildingChanged } from "./changes";
-import { fileBuilding, lotColumns, lotProblem, unfileBuilding } from "./where";
+import { ZONING_BALANCE } from "../zoning/balance";
+import { fileBuilding, lotColumns, lotProblem, lotShapeOf, unfileBuilding } from "./where";
 
 /** Set in `flags` for a live building. */
 export const BUILDING_ALIVE = 1;
@@ -41,8 +50,18 @@ export interface BuildingState {
   dir: Uint8Array;
   /** Columns along the road. */
   width: Uint8Array;
-  /** Cells back from the road. */
+  /** Cells back from the road, both strips together on a through-lot. */
   depth: Uint8Array;
+  /** On a through-lot, the segment of the back lot's first column (M2-14). 0 otherwise. */
+  backSeg: Int32Array;
+  /** On a through-lot, the back lot's first column's side. */
+  backSide: Uint8Array;
+  /** On a through-lot, the back lot's first column's place along its segment. */
+  backPlace: Int32Array;
+  /** On a through-lot, which way the back lot runs from its first column, as `dir`. */
+  backDir: Uint8Array;
+  /** On a through-lot, how many of `depth`'s cells are on the back strip, from its road. 0 for a lot on one strip. */
+  backDepth: Uint8Array;
   /** The zone it was built under, as a cell stores it. A rezone does not change it. */
   zone: Uint8Array;
   /** The density it was built under. */
@@ -68,6 +87,11 @@ export const BUILDING_ARRAYS = [
   "dir",
   "width",
   "depth",
+  "backSeg",
+  "backSide",
+  "backPlace",
+  "backDir",
+  "backDepth",
   "zone",
   "density",
   "type",
@@ -86,6 +110,11 @@ const ARRAY_TYPES: Readonly<Record<keyof BuildingState, new (n: number) => AnyTy
   dir: Uint8Array,
   width: Uint8Array,
   depth: Uint8Array,
+  backSeg: Int32Array,
+  backSide: Uint8Array,
+  backPlace: Int32Array,
+  backDir: Uint8Array,
+  backDepth: Uint8Array,
   zone: Uint8Array,
   density: Uint8Array,
   type: Uint16Array,
@@ -105,6 +134,11 @@ export function createBuildings(): BuildingState {
     dir: new Uint8Array(0),
     width: new Uint8Array(0),
     depth: new Uint8Array(0),
+    backSeg: new Int32Array(0),
+    backSide: new Uint8Array(0),
+    backPlace: new Int32Array(0),
+    backDir: new Uint8Array(0),
+    backDepth: new Uint8Array(0),
     zone: new Uint8Array(0),
     density: new Uint8Array(0),
     type: new Uint16Array(0),
@@ -138,7 +172,14 @@ export interface NewBuilding {
   firstPlace: number;
   dir: number;
   width: number;
+  /** The whole lot's depth, both strips together on a through-lot. */
   depth: number;
+  /** The back lot of a through-lot, as the row's back fields hold it; all 0 for a lot on one strip. */
+  backSeg: number;
+  backSide: number;
+  backPlace: number;
+  backDir: number;
+  backDepth: number;
   /** Its place in `BUILDING_TYPES`. The zone and density come from the type. */
   type: number;
   residents: number;
@@ -164,6 +205,11 @@ export function readBuilding(b: BuildingState, id: number): BuildingRow {
     dir: b.dir[id] ?? 0,
     width: b.width[id] ?? 0,
     depth: b.depth[id] ?? 0,
+    backSeg: b.backSeg[id] ?? 0,
+    backSide: b.backSide[id] ?? 0,
+    backPlace: b.backPlace[id] ?? 0,
+    backDir: b.backDir[id] ?? 0,
+    backDepth: b.backDepth[id] ?? 0,
     zone: b.zone[id] ?? 0,
     density: b.density[id] ?? 0,
     type: b.type[id] ?? 0,
@@ -193,8 +239,10 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   if (!Number.isSafeInteger(spec.residents) || spec.residents < 0 || !Number.isInteger(spec.variant) || spec.variant < 0 || spec.variant > 255) {
     throw new RangeError("bad residents or variant");
   }
-  const first = { seg: spec.firstSeg, side: spec.firstSide, place: spec.firstPlace, dir: spec.dir };
-  const problem = lotProblem(state, first, spec.width, spec.depth, type.zoneNumber, type.density);
+  const shape = lotShapeOf(spec);
+  const shapeProblem = lotShapeProblem(state, spec, type.throughLot === true);
+  if (shapeProblem) throw new RangeError(shapeProblem);
+  const problem = lotProblem(state, shape, type.zoneNumber, type.density);
   if (problem) throw new RangeError(`no ${type.id} can stand there: ${problem}`);
   const b = state.buildings;
   let id: number;
@@ -213,6 +261,11 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   b.dir[id] = spec.dir;
   b.width[id] = spec.width;
   b.depth[id] = spec.depth;
+  b.backSeg[id] = spec.backSeg;
+  b.backSide[id] = spec.backSide;
+  b.backPlace[id] = spec.backPlace;
+  b.backDir[id] = spec.backDir;
+  b.backDepth[id] = spec.backDepth;
   b.zone[id] = type.zoneNumber;
   b.density[id] = type.density;
   b.type[id] = spec.type;
@@ -221,7 +274,8 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   b.builtAt[id] = state.tick;
   noteBuildingChanged(b, id);
   fileBuilding(state, id);
-  noteLotFronts(state, first, spec.width);
+  noteLotFronts(state, shape.first, spec.width);
+  if (shape.back) noteLotFronts(state, shape.back.first, spec.width);
   return id;
 }
 
@@ -229,6 +283,27 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
 function noteLotFronts(state: SimState, first: Column, width: number): void {
   const cols = lotColumns(syncCells(state), first, width);
   if (cols) noteColumns(state, cols);
+}
+
+/**
+ * Why a row's back fields do not fit its kind of lot, or null: all 0 on a
+ * lot on one strip, and on a through-lot a back column on a segment with
+ * cells and at least one cell on each strip, none deeper than a strip.
+ */
+function lotShapeProblem(state: SimState, spec: NewBuilding, through: boolean): string | null {
+  const DEPTH = ZONING_BALANCE.zoneDepthCells;
+  if (!through) {
+    return spec.backSeg === 0 && spec.backSide === 0 && spec.backPlace === 0 && spec.backDir === 0 && spec.backDepth === 0
+      ? null
+      : "a lot on one strip has no back lot";
+  }
+  if (!isSegment(state.roads, spec.backSeg) || spec.backPlace < 0 || spec.backPlace >= placesAlong(state.roads, spec.backSeg)) {
+    return `segment ${spec.backSeg} has no place ${spec.backPlace}`;
+  }
+  if ((spec.backSide !== CELL_LEFT && spec.backSide !== CELL_RIGHT) || (spec.backDir !== 0 && spec.backDir !== 1)) return "bad back side or direction";
+  const front = spec.depth - spec.backDepth;
+  if (spec.backDepth < 1 || spec.backDepth > DEPTH || front < 1 || front > DEPTH) return "a through-lot needs one to a strip's depth of cells on each strip";
+  return null;
 }
 
 /** Removes building `id`: its row becomes zeros and its id goes on the free list. Internal, like `addBuilding`. */
@@ -289,6 +364,18 @@ export function checkBuildings(value: unknown, net: RoadNetwork, tick: number): 
     const place = b.firstPlace[id] ?? 0;
     if (place < 0 || place >= placesAlong(net, seg)) return `building ${id} starts at a place its segment does not have`;
     if ((b.firstSide[id] ?? 0) > CELL_RIGHT || (b.dir[id] ?? 0) > 1) return `building ${id} has a bad side or direction`;
+    const backDepth = b.backDepth[id] ?? 0;
+    if (type.throughLot !== true) {
+      if (backDepth !== 0 || b.backSeg[id] !== 0 || b.backSide[id] !== 0 || b.backPlace[id] !== 0 || b.backDir[id] !== 0) return `building ${id} has a back lot its type does not take`;
+    } else {
+      const DEPTH = ZONING_BALANCE.zoneDepthCells;
+      if (backDepth < 1 || backDepth > DEPTH || depth - backDepth < 1 || depth - backDepth > DEPTH) return `building ${id}'s through-lot does not split across two strips`;
+      const back = b.backSeg[id] ?? 0;
+      if (back >= segs || !isSegment(net, back)) return `building ${id}'s back lot is on a segment that is not there`;
+      const backPlace = b.backPlace[id] ?? 0;
+      if (backPlace < 0 || backPlace >= placesAlong(net, back)) return `building ${id}'s back lot starts at a place its segment does not have`;
+      if ((b.backSide[id] ?? 0) > CELL_RIGHT || (b.backDir[id] ?? 0) > 1) return `building ${id}'s back lot has a bad side or direction`;
+    }
     const built = b.builtAt[id] ?? 0;
     if (!Number.isSafeInteger(built) || built < 0 || built > tick) return `building ${id} was built on a bad tick`;
     if ((b.residents[id] ?? 0) < 0) return `building ${id} has fewer than no residents`;

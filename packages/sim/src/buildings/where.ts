@@ -27,9 +27,14 @@
 // settle, with any building on a segment where a cell stopped being open.
 // A client's copy (`CellIndex.follows`) only files: its rows come from the
 // sim.
+//
+// A through-lot (M2-14) is two lots, one on each of two back-to-back
+// strips, and stands while both do. Each is filed on its own strip's cells
+// and followed across a change of roads from its own first column, so a
+// building whose back road goes is lost like one whose front road goes.
 
 import { BUILDING_ALIVE, BUILDING_ARRAYS, type BuildingState } from "./buildings";
-import { segmentsNear } from "./candidates";
+import { noteColumns, segmentsNear } from "./candidates";
 import { noteBuildingChanged } from "./changes";
 import type { SimState } from "../state";
 import {
@@ -62,7 +67,7 @@ interface BuildingIndex {
   chunk: number[];
   /** Building ids by chunk. */
   byChunk: Map<number, Set<number>>;
-  /** By building id: the depth it was filed with, then the segment and front cell of each column it holds. */
+  /** By building id: the segment, front cell and depth filed of each column it holds, three numbers a column. */
   filed: (number[] | null)[];
   /**
    * Buildings to check once the cells settle: filed again since the last
@@ -90,38 +95,130 @@ export function lotColumns(index: CellIndex, first: Column, width: number): Colu
   return cols;
 }
 
+/** The column whose front cell is at `local` in segment `seg`'s run. */
+function columnOfFront(seg: number, local: number): Column {
+  const rest = local / DEPTH;
+  return { seg, side: rest & 1, place: rest >> 1, dir: 0 };
+}
+
 /** The first column of building `id` as its row names it. */
 function firstColumnOf(b: BuildingState, id: number): Column {
   return { seg: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0, dir: b.dir[id] ?? 0 };
+}
+
+/** The back lot's first column of building `id` as its row names it. Only for a through-lot. */
+function backColumnOf(b: BuildingState, id: number): Column {
+  return { seg: b.backSeg[id] ?? 0, side: b.backSide[id] ?? 0, place: b.backPlace[id] ?? 0, dir: b.backDir[id] ?? 0 };
+}
+
+/**
+ * A lot as the finder and the index walk it: `width` columns from `first`,
+ * `depth` cells back, and on a through-lot the back lot, `width` columns
+ * from its own first column on the strip behind, `back.depth` cells back
+ * from its road.
+ */
+export interface LotShape {
+  first: Column;
+  width: number;
+  /** Cells on the first strip. */
+  depth: number;
+  back: { first: Column; depth: number } | null;
+}
+
+/** The fields a row or a new building names its lot by. */
+interface LotFields {
+  firstSeg: number;
+  firstSide: number;
+  firstPlace: number;
+  dir: number;
+  width: number;
+  depth: number;
+  backSeg: number;
+  backSide: number;
+  backPlace: number;
+  backDir: number;
+  backDepth: number;
+}
+
+/** The lot `spec` names. */
+export function lotShapeOf(spec: LotFields): LotShape {
+  return {
+    first: { seg: spec.firstSeg, side: spec.firstSide, place: spec.firstPlace, dir: spec.dir },
+    width: spec.width,
+    depth: spec.depth - spec.backDepth,
+    back: spec.backDepth > 0 ? { first: { seg: spec.backSeg, side: spec.backSide, place: spec.backPlace, dir: spec.backDir }, depth: spec.backDepth } : null,
+  };
+}
+
+/** The lot building `id`'s row names. */
+function shapeOfBuilding(b: BuildingState, id: number): LotShape {
+  const total = b.depth[id] ?? 0;
+  const backDepth = b.backDepth[id] ?? 0;
+  return {
+    first: firstColumnOf(b, id),
+    width: b.width[id] ?? 0,
+    depth: total - backDepth,
+    back: backDepth > 0 ? { first: backColumnOf(b, id), depth: backDepth } : null,
+  };
+}
+
+/** Each part of a lot, front then back, as its columns and depth; or null if the strips do not hold it. */
+function lotParts(index: CellIndex, shape: LotShape): { cols: Column[]; depth: number }[] | null {
+  const front = lotColumns(index, shape.first, shape.width);
+  if (!front) return null;
+  const parts = [{ cols: front, depth: shape.depth }];
+  if (shape.back) {
+    const back = lotColumns(index, shape.back.first, shape.width);
+    if (!back) return null;
+    parts.push({ cols: back, depth: shape.back.depth });
+  }
+  return parts;
+}
+
+/**
+ * The corners of a lot's ground as `lotCorners` gives them: at the road and
+ * at the back of the first column's near edge, then at the back and at the
+ * road of the last column's far edge. On a through-lot the back is the far
+ * road's edge, so the four corners hold both strips. Null if the strips do
+ * not hold the lot.
+ */
+export function lotShapeCorners(index: CellIndex, shape: LotShape): number[] | null {
+  const front = lotCorners(index, shape.first, shape.width, shape.depth);
+  if (!front || !shape.back) return front;
+  const back = lotCorners(index, shape.back.first, shape.width, shape.back.depth);
+  if (!back) return null;
+  // The back lot's first column stands across the block from the front's,
+  // so its near edge is at the same end.
+  return [front[0] ?? 0, front[1] ?? 0, back[0] ?? 0, back[1] ?? 0, back[6] ?? 0, back[7] ?? 0, front[6] ?? 0, front[7] ?? 0];
 }
 
 const isLive = (b: BuildingState, id: number): boolean => ((b.flags[id] ?? 0) & BUILDING_ALIVE) !== 0;
 
 /** Files building `id` on its lot's cells. Returns false, filing nothing, if the strip does not hold the lot. */
 function file(bi: BuildingIndex, b: BuildingState, id: number): boolean {
-  const first = firstColumnOf(b, id);
-  const width = b.width[id] ?? 0;
-  const depth = b.depth[id] ?? 0;
+  const shape = shapeOfBuilding(b, id);
   const index = bi.cellIndex;
   bi.chunk[id] = NO_BUILDING;
-  const cols = lotColumns(index, first, width);
-  if (!cols) {
+  const parts = lotParts(index, shape);
+  if (!parts) {
     bi.filed[id] = null;
     return false;
   }
-  const rec = [depth];
-  for (const col of cols) {
-    const start = localIndex(col.side, col.place, 0);
-    let cells = bi.segCells[col.seg];
-    if (!cells) {
-      cells = new Int32Array(index.segs[col.seg]?.status?.length ?? 0).fill(NO_BUILDING);
-      bi.segCells[col.seg] = cells;
+  const rec: number[] = [];
+  for (const { cols, depth } of parts) {
+    for (const col of cols) {
+      const start = localIndex(col.side, col.place, 0);
+      let cells = bi.segCells[col.seg];
+      if (!cells) {
+        cells = new Int32Array(index.segs[col.seg]?.status?.length ?? 0).fill(NO_BUILDING);
+        bi.segCells[col.seg] = cells;
+      }
+      for (let d = 0; d < depth && d < DEPTH; d++) if (cells[start + d] === NO_BUILDING) cells[start + d] = id;
+      rec.push(col.seg, start, depth);
     }
-    for (let d = 0; d < depth && d < DEPTH; d++) if (cells[start + d] === NO_BUILDING) cells[start + d] = id;
-    rec.push(col.seg, start);
   }
   bi.filed[id] = rec;
-  const corners = lotCorners(index, first, width, depth);
+  const corners = lotShapeCorners(index, shape);
   if (!corners) return true;
   const x = ((corners[0] ?? 0) + (corners[2] ?? 0) + (corners[4] ?? 0) + (corners[6] ?? 0)) / 4;
   const z = ((corners[1] ?? 0) + (corners[3] ?? 0) + (corners[5] ?? 0) + (corners[7] ?? 0)) / 4;
@@ -142,10 +239,10 @@ function unfile(bi: BuildingIndex, id: number): number[] {
   const rec = bi.filed[id];
   const fronts: number[] = [];
   if (rec) {
-    const depth = rec[0] ?? 0;
-    for (let i = 1; i < rec.length; i += 2) {
+    for (let i = 0; i < rec.length; i += 3) {
       const seg = rec[i] ?? 0;
       const start = rec[i + 1] ?? 0;
+      const depth = rec[i + 2] ?? 0;
       fronts.push(seg, start);
       const cells = bi.segCells[seg];
       if (!cells) continue;
@@ -197,27 +294,48 @@ function catchUp(state: SimState, bi: BuildingIndex): void {
   for (const node of watch.nodes) segmentsNear(index, state.roads, node, near);
   for (const seg of near) collect(bi, seg, affected);
   const ids = [...affected].sort((p, q) => p - q);
-  for (const id of ids) unfile(bi, id);
+  // The columns each held, for the grower's candidates: a through-lot whose
+  // back road went held columns on a road that did not change, which the
+  // candidates would not otherwise look at again.
+  const held: Column[] = [];
+  for (const id of ids) {
+    const fronts = unfile(bi, id);
+    for (let i = 0; i < fronts.length; i += 2) held.push(columnOfFront(fronts[i] ?? 0, fronts[i + 1] ?? 0));
+  }
+  noteColumns(state, held);
   bi.segCells.length = index.segs.length;
   for (let seg = 0; seg < bi.segCells.length; seg++) bi.segCells[seg] ??= null;
   for (const seg of watch.relaid.keys()) if (seg < bi.segCells.length) bi.segCells[seg] = null;
   if (!index.follows) {
     const move = columnMover(index, watch.relaid.keys());
-    for (const id of ids) {
-      const seg = b.firstSeg[id] ?? 0;
-      if (!isLive(b, id) || !watch.relaid.has(seg)) continue;
-      const old = watch.relaid.get(seg) ?? null;
-      const col = old ? move(old, firstColumnOf(b, id)) : null;
-      if (!col) {
-        bi.lost.add(id);
-        continue;
-      }
-      if (col.seg === seg && col.side === b.firstSide[id] && col.place === b.firstPlace[id] && col.dir === b.dir[id]) continue;
-      b.firstSeg[id] = col.seg;
-      b.firstSide[id] = col.side;
-      b.firstPlace[id] = col.place;
-      b.dir[id] = col.dir;
+    /** Moves one of a row's first columns onto its ground; false if the ground has no segment any more. */
+    const follow = (id: number, col: Column, set: (to: Column) => void): boolean => {
+      if (!watch.relaid.has(col.seg)) return true;
+      const old = watch.relaid.get(col.seg) ?? null;
+      const to = old ? move(old, col) : null;
+      if (!to) return false;
+      if (to.seg === col.seg && to.side === col.side && to.place === col.place && to.dir === col.dir) return true;
+      set(to);
       noteBuildingChanged(b, id);
+      return true;
+    };
+    for (const id of ids) {
+      if (!isLive(b, id)) continue;
+      const kept = follow(id, firstColumnOf(b, id), (to) => {
+        b.firstSeg[id] = to.seg;
+        b.firstSide[id] = to.side;
+        b.firstPlace[id] = to.place;
+        b.dir[id] = to.dir;
+      });
+      const backKept =
+        (b.backDepth[id] ?? 0) === 0 ||
+        follow(id, backColumnOf(b, id), (to) => {
+          b.backSeg[id] = to.seg;
+          b.backSide[id] = to.side;
+          b.backPlace[id] = to.place;
+          b.backDir[id] = to.dir;
+        });
+      if (!kept || !backKept) bi.lost.add(id);
     }
   }
   for (const id of ids) {
@@ -264,12 +382,12 @@ export function prepareBuildingIndex(state: SimState): void {
  * buildings. `addBuilding` checks this, so two lots never overlap and the
  * index gives the same answer kept current or built afresh.
  */
-export function lotProblem(state: SimState, first: Column, width: number, depth: number, zone: number, density: number): string | null {
+export function lotProblem(state: SimState, shape: LotShape, zone: number, density: number): string | null {
   const { bi, cellIndex } = indexOf(state);
-  const cols = lotColumns(cellIndex, first, width);
-  if (!cols) return "the strip ends before the lot does";
+  const parts = lotParts(cellIndex, shape);
+  if (!parts) return "the strip ends before the lot does";
   const cells = state.cells;
-  for (const col of cols) {
+  for (const { cols, depth } of parts) for (const col of cols) {
     const local = localIndex(col.side, col.place, 0);
     const start = (cells.offset[col.seg] ?? 0) + local;
     const held = bi.segCells[col.seg];
@@ -292,10 +410,9 @@ export function lotStands(state: SimState, id: number): boolean {
 }
 
 function stands(cellIndex: CellIndex, b: BuildingState, id: number): boolean {
-  const cols = lotColumns(cellIndex, firstColumnOf(b, id), b.width[id] ?? 0);
-  if (!cols) return false;
-  const depth = b.depth[id] ?? 0;
-  for (const col of cols) for (let d = 0; d < depth; d++) if (columnStatus(cellIndex, col, d) !== CELL_OPEN) return false;
+  const parts = lotParts(cellIndex, shapeOfBuilding(b, id));
+  if (!parts) return false;
+  for (const { cols, depth } of parts) for (const col of cols) for (let d = 0; d < depth; d++) if (columnStatus(cellIndex, col, d) !== CELL_OPEN) return false;
   return true;
 }
 
@@ -323,11 +440,7 @@ export function unfileBuilding(state: SimState, id: number): Column[] {
   bi.lost.delete(id);
   const fronts = unfile(bi, id);
   const cols: Column[] = [];
-  for (let i = 0; i < fronts.length; i += 2) {
-    const local = fronts[i + 1] ?? 0;
-    const rest = local / DEPTH;
-    cols.push({ seg: fronts[i] ?? 0, side: rest & 1, place: rest >> 1, dir: 0 });
-  }
+  for (let i = 0; i < fronts.length; i += 2) cols.push(columnOfFront(fronts[i] ?? 0, fronts[i + 1] ?? 0));
   return cols;
 }
 
@@ -455,7 +568,14 @@ export interface BuildingInfo {
   firstPlace: number;
   dir: number;
   width: number;
+  /** The whole lot's depth, both strips together on a through-lot. */
   depth: number;
+  backSeg: number;
+  backSide: number;
+  backPlace: number;
+  backDir: number;
+  /** Cells of `depth` on the back strip of a through-lot; 0 for a lot on one strip. */
+  backDepth: number;
   zone: number;
   density: number;
   type: number;
@@ -465,7 +585,9 @@ export interface BuildingInfo {
   /**
    * The lot's corners as x0, z0, ..., x3, z3: at the road and at the back of
    * its first column's near edge, then at the back and at the road of its
-   * last column's far edge. Null if the lot's cells are not there.
+   * last column's far edge. On a through-lot the back is the far road's
+   * edge, so the corners hold both strips. Null if the lot's cells are not
+   * there.
    */
   corners: number[] | null;
   /** The 500 m chunk its lot's centre is in, or NO_BUILDING. */
@@ -481,5 +603,5 @@ export function buildingInfo(state: SimState, id: number): BuildingInfo | null {
     BuildingInfo,
     "id" | "corners" | "chunk"
   >;
-  return { id, ...row, corners: lotCorners(cellIndex, firstColumnOf(b, id), row.width, row.depth), chunk: bi.chunk[id] ?? NO_BUILDING };
+  return { id, ...row, corners: lotShapeCorners(cellIndex, shapeOfBuilding(b, id)), chunk: bi.chunk[id] ?? NO_BUILDING };
 }

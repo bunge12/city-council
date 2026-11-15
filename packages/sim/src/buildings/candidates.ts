@@ -20,11 +20,11 @@
 //   changed (`CellIndex.watch`, zoning/cell-index.ts).
 // A building's lot can run on past a segment's end, so a change of roads
 // also looks again at the segments a lot could reach from those nodes: the
-// ones at each node, and on through any segment shorter than the widest
-// lot, up to that many segments away. A lot that no longer fits its roads
+// ones at each node, and on through shorter segments while the places
+// passed are fewer than the widest lot (`segmentsNear`). A lot that no longer fits its roads
 // stands on no cells (where.ts), and those cells come back as candidates.
 
-import { BUILDINGS_BALANCE } from "./balance";
+import { WIDEST_LOT } from "./balance";
 import type { BuildingState } from "./buildings";
 import { NONE, isNode, nextSegmentAt, type RoadNetwork } from "../roads/network";
 import type { SimState } from "../state";
@@ -160,26 +160,32 @@ function refreshColumn(c: Candidates, state: SimState, onCell: OnCell, seg: numb
 
 /**
  * Adds to `out` every segment a lot could reach from `node`, as the header
- * says: the segments at the node, and on through any shorter than the
- * widest lot, up to that many segments away. The building index
- * (where.ts) looks again at the same ones.
+ * says: the segments at the node, and on through a segment to the node at
+ * its far end while the places passed on the way leave room for a lot that
+ * reaches back to `node`. A lot `WIDEST_LOT` columns wide that holds a
+ * column of a segment past others covers every place of those others, so
+ * the walk stops once the places it has passed reach that width. A
+ * segment with no cells passes none, and the walk takes at most that many
+ * segments in a row. The building index (where.ts) looks again at the
+ * same ones.
  */
 export function segmentsNear(index: CellIndex, net: RoadNetwork, node: number, out: Set<number>): void {
-  const reach = BUILDINGS_BALANCE.maxLotWidth;
-  let ring = [node];
-  const seen = new Set<number>(ring);
+  const reach = WIDEST_LOT;
+  // The fewest places passed to reach each node so far.
+  const best = new Map<number, number>([[node, 0]]);
+  let ring: [number, number][] = [[node, 0]];
   for (let hop = 0; hop < reach && ring.length > 0; hop++) {
-    const next: number[] = [];
-    for (const n of ring) {
-      if (!isNode(net, n)) continue;
+    const next: [number, number][] = [];
+    for (const [n, passed] of ring) {
+      if (!isNode(net, n) || (best.get(n) ?? 0) < passed) continue;
       for (let seg = net.nodeFirstSeg[n] ?? NONE; seg !== NONE; seg = nextSegmentAt(net, seg, n)) {
         out.add(seg);
-        if ((index.segs[seg]?.places ?? 0) >= reach) continue;
+        const through = passed + (index.segs[seg]?.places ?? 0);
+        if (through >= reach) continue;
         const other = net.segA[seg] === n ? (net.segB[seg] ?? NONE) : (net.segA[seg] ?? NONE);
-        if (!seen.has(other)) {
-          seen.add(other);
-          next.push(other);
-        }
+        if ((best.get(other) ?? Infinity) <= through) continue;
+        best.set(other, through);
+        next.push([other, through]);
       }
     }
     ring = next;

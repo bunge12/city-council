@@ -1,0 +1,146 @@
+{
+  "description": "Through-lots on seed 2026. p1 builds a block between two streets twelve cells apart, closed by a street down each end, and zones both long strips C3. Growth puts through-lots across the block. On day 2 p2 runs a street south off the south street, outside the block, which splits it under the back lots and leaves them standing. On day 4 p2 bulldozes the piece of the south street under x 4300, which takes the through-lots on it, and undoes that on day 6. The front strip they stood on grows lots of its own. Ten game days.",
+  "seed": 2026,
+  "untilTick": 1000,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4600
+        },
+        "to": {
+          "x": 4400,
+          "z": 4600
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4706
+        },
+        "to": {
+          "x": 4400,
+          "z": 4706
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 3,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4600
+        },
+        "to": {
+          "x": 4200,
+          "z": 4706
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 4,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4400,
+          "z": 4600
+        },
+        "to": {
+          "x": 4400,
+          "z": 4706
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 5,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "commercial",
+        "density": 3,
+        "rects": [
+          {
+            "from": {
+              "x": 4212,
+              "z": 4653
+            },
+            "to": {
+              "x": 4388,
+              "z": 4653
+            },
+            "width": 92
+          }
+        ]
+      }
+    },
+    {
+      "tick": 200,
+      "seq": 6,
+      "playerId": "p2",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4300,
+          "z": 4706
+        },
+        "to": {
+          "x": 4300,
+          "z": 4806
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 400,
+      "seq": 7,
+      "playerId": "p2",
+      "type": "BulldozeRoad",
+      "payload": {
+        "segments": [
+          6
+        ],
+        "ends": [
+          [
+            4300,
+            4706,
+            4400,
+            4706
+          ]
+        ],
+        "types": [
+          "street"
+        ]
+      }
+    },
+    {
+      "tick": 600,
+      "seq": 8,
+      "playerId": "p2",
+      "type": "Undo",
+      "payload": {}
+    }
+  ],
+  "balance": "33cc634c4020df83",
+  "hash": "6a2ee36b08178f90"
+}

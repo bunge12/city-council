@@ -53,7 +53,34 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 11 adds the buildings, none of them (M2-09). Nothing could grow
   // before them.
   10: (old) => ({ ...old, version: 11, buildings: createBuildings() }),
+  // Version 12 gives each building the back lot of a through-lot (M2-14).
+  // No building before it had one, so every back field is 0.
+  11: (old) => ({ ...old, version: 12, buildings: withBackLots(old["buildings"]) }),
 };
+
+/** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */
+function withBackLots(old: unknown): unknown {
+  if (typeof old !== "object" || old === null) return old;
+  const b = old as Record<string, unknown>;
+  const flags = b["flags"];
+  const n = flags instanceof Uint8Array ? flags.length : 0;
+  const back: Record<string, unknown> = {
+    backSeg: new Int32Array(n),
+    backSide: new Uint8Array(n),
+    backPlace: new Int32Array(n),
+    backDir: new Uint8Array(n),
+    backDepth: new Uint8Array(n),
+  };
+  // In the order a new city's buildings have their fields: the back lot
+  // after `depth`.
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(b)) {
+    out[key] = value;
+    if (key === "depth") Object.assign(out, back);
+  }
+  if (!("depth" in b)) Object.assign(out, back);
+  return out;
+}
 
 /**
  * The state with a cell anchor on every segment, live or in the undo

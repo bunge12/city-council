@@ -1643,6 +1643,39 @@ export function forOpenCellsInBox(
   }
 }
 
+/**
+ * The keys, `segment * CELL_KEY_STRIDE + place in its run`, of every open
+ * cell with a corner within `radius` metres of point (x, z), ascending. Does
+ * not bring the index up to date: the caller has called `syncCells`. For the
+ * lot finder's through-lots (buildings/lots.ts).
+ */
+export function openCellsNear(index: CellIndex, x: number, z: number, radius: number): number[] {
+  const box = Float64Array.of(x - radius, z - radius, x + radius, z + radius);
+  const found = new Set<number>();
+  const q = quadW;
+  const r2 = radius * radius;
+  const list = index.openBuckets;
+  forBuckets(index, box, (bucket) => {
+    for (let e = list.heads[bucket] ?? -1; e >= 0; e = list.next[e] ?? -1) {
+      const key = list.keys[e] ?? 0;
+      if (found.has(key)) continue;
+      const seg = segOfKey(key);
+      const s = index.segs[seg];
+      if (!s) continue;
+      cellQuad(s, key - seg * KEY_STRIDE, q);
+      for (let c = 0; c < 8; c += 2) {
+        const dx = (q[c] ?? 0) - x;
+        const dz = (q[c + 1] ?? 0) - z;
+        if (dx * dx + dz * dz <= r2) {
+          found.add(key);
+          break;
+        }
+      }
+    }
+  });
+  return [...found].sort((p, r) => p - r);
+}
+
 /** The chunk a point is in, as `cj * CHUNKS_PER_SIDE + ci`, off-map points in the nearest edge chunk. */
 export function chunkAt(x: number, z: number): number {
   const clamp = (v: number) => {

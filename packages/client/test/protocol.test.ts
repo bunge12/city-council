@@ -558,7 +558,7 @@ describe("snapshot transfer", () => {
     const cellBuffers = [state.cells.offset.buffer, state.cells.zone.buffer, state.cells.density.buffer];
     const buildingBuffers = Object.values(state.buildings).map((value) => value.buffer);
     expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers, ...buildingBuffers]);
-    expect(buildingBuffers).toHaveLength(14);
+    expect(buildingBuffers).toHaveLength(19);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });
 });

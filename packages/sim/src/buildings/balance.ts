@@ -23,12 +23,16 @@ export interface BuildingTypeBalance {
   proposal?: boolean;
   /** True to draw residents per building between low and high; otherwise they scale with lot area (M2-10). */
   drawResidents?: boolean;
+  /** True for a type that stands on a through-lot, two back-to-back strips joined (M2-14). Its depth is more than the zoning depth. */
+  throughLot?: boolean;
 }
 
 /** The buildings balance file. */
 export interface BuildingsBalance {
   /** The widest lot along a road, in cells. The deepest is `zoneDepthCells`. */
   maxLotWidth: number;
+  /** The widest through-lot along its roads, in cells (M2-14). The deepest is twice `zoneDepthCells`. */
+  maxThroughLotWidth: number;
   /** Buildings the grower adds across the city each game day (M2-10). A whole number. */
   growthPerDay: number;
   /** Free cells the grower draws for one building before it gives that building up. */
@@ -47,7 +51,7 @@ export interface BuildingType extends BuildingTypeBalance {
 }
 
 const FIELDS = ["id", "name", "zone", "density", "width", "depth", "residents"] as const;
-const KNOWN = new Set<string>([...FIELDS, "proposal", "drawResidents"]);
+const KNOWN = new Set<string>([...FIELDS, "proposal", "drawResidents", "throughLot"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -76,6 +80,10 @@ export function checkBuildingsBalance(data: unknown): string[] {
   const widthOk = Number.isSafeInteger(maxWidth) && (maxWidth as number) >= 1;
   if (!widthOk) errors.push("maxLotWidth must be a whole number of at least 1");
   const widest = widthOk ? (maxWidth as number) : 0;
+  const maxThrough = data["maxThroughLotWidth"];
+  const throughOk = Number.isSafeInteger(maxThrough) && (maxThrough as number) >= 1;
+  if (!throughOk) errors.push("maxThroughLotWidth must be a whole number of at least 1");
+  const widestThrough = throughOk ? (maxThrough as number) : 0;
   const perDay = data["growthPerDay"];
   if (!Number.isSafeInteger(perDay) || (perDay as number) < 0) errors.push("growthPerDay must be a whole number of at least 0");
   const tries = data["growthTries"];
@@ -99,7 +107,7 @@ export function checkBuildingsBalance(data: unknown): string[] {
     }
     for (const field of FIELDS) if (!(field in type)) errors.push(`${where}.${field} is missing`);
     for (const key of Object.keys(type)) if (!KNOWN.has(key) && !key.startsWith("_")) errors.push(`${where} has an unknown field "${key}"`);
-    const { id, name, zone, density, width, depth, residents, proposal, drawResidents } = type;
+    const { id, name, zone, density, width, depth, residents, proposal, drawResidents, throughLot } = type;
     if (!isText(id)) errors.push(`${where}.id must be text`);
     else if (ids.has(id)) errors.push(`${where}.id "${id}" appears twice`);
     else ids.add(id);
@@ -108,10 +116,20 @@ export function checkBuildingsBalance(data: unknown): string[] {
     if ("zone" in type && !zoneOk) errors.push(`${where}.zone ${JSON.stringify(zone)} is not a zone in zoning.json`);
     const densityOk = ZONING_BALANCE.densities.some((d) => d.level === density);
     if ("density" in type && !densityOk) errors.push(`${where}.density ${JSON.stringify(density)} is not a density in zoning.json`);
-    const widthRange = isRange(width, 1, widest);
-    if ("width" in type && !widthRange) errors.push(`${where}.width must be [low, high] cells, from 1 to maxLotWidth`);
-    const depthRange = isRange(depth, 1, deepest);
-    if ("depth" in type && !depthRange) errors.push(`${where}.depth must be [low, high] cells, from 1 to the zoning depth`);
+    if (throughLot !== undefined && typeof throughLot !== "boolean") errors.push(`${where}.throughLot must be true or false`);
+    // A through-lot is deeper than one strip and a lot on one strip is not,
+    // so a lot's depth says which it is.
+    const through = throughLot === true;
+    const widthRange = isRange(width, 1, through ? widestThrough : widest);
+    if ("width" in type && !widthRange) errors.push(`${where}.width must be [low, high] cells, from 1 to ${through ? "maxThroughLotWidth" : "maxLotWidth"}`);
+    const depthRange = isRange(depth, through ? deepest + 1 : 1, through ? 2 * deepest : deepest);
+    if ("depth" in type && !depthRange) {
+      errors.push(
+        through
+          ? `${where}.depth must be [low, high] cells, from one more than the zoning depth to twice it`
+          : `${where}.depth must be [low, high] cells, from 1 to the zoning depth`,
+      );
+    }
     if ("residents" in type && !isRange(residents, 0, Number.MAX_SAFE_INTEGER)) errors.push(`${where}.residents must be [low, high], whole numbers`);
     if (proposal !== undefined && typeof proposal !== "boolean") errors.push(`${where}.proposal must be true or false`);
     if (drawResidents !== undefined && typeof drawResidents !== "boolean") errors.push(`${where}.drawResidents must be true or false`);
@@ -152,3 +170,6 @@ export const BUILDING_TYPES: readonly BuildingType[] = BUILDINGS_BALANCE.types.m
 export function typesFor(zone: number, density: number): BuildingType[] {
   return BUILDING_TYPES.filter((t) => t.zoneNumber === zone && t.density === density);
 }
+
+/** The widest lot of any kind, in cells: how far along a strip the lot finder looks. */
+export const WIDEST_LOT = Math.max(BUILDINGS_BALANCE.maxLotWidth, ...BUILDING_TYPES.map((t) => t.width[1]));
