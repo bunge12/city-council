@@ -1,5 +1,5 @@
-// A fixture city with every building type (issue M2-12), built in Node with
-// the sim and handed to the page as a city file.
+// A fixture city with every building type on a lot on one strip (issue
+// M2-12), built in Node with the sim and handed to the page as a city file.
 //
 // It is the zoned road fixture (cell-fixtures.ts), with buildings added
 // straight into state the way the grower adds them: each zoned side of a
@@ -61,12 +61,15 @@ export function buildEverySide(state: SimState): number[] {
         const area = (t: (typeof types)[number]) => t.width[1] * t.depth[1];
         const order = [...types].sort((a, b) => (counts[a.index] ?? 0) - (counts[b.index] ?? 0) || area(b) - area(a));
         done: for (const type of order) {
+          // A through-lot needs a second strip behind this one; through-lots.spec.ts draws those.
+          if (type.throughLot) continue;
           for (let w = type.width[1]; w >= type.width[0]; w--) {
             for (let dep = type.depth[1]; dep >= type.depth[0]; dep--) {
-              const first = { seg, side, place, dir: 0 };
-              if (lotProblem(state, first, w, dep, type.zoneNumber, type.density) !== null) continue;
+              const shape = { first: { seg, side, place, dir: 0 }, width: w, depth: dep, back: null };
+              if (lotProblem(state, shape, type.zoneNumber, type.density) !== null) continue;
               const residents = type.residents[0];
-              addBuilding(state, { firstSeg: seg, firstSide: side, firstPlace: place, dir: 0, width: w, depth: dep, type: type.index, residents, variant: variant++ % 256 });
+              const lot = { firstSeg: seg, firstSide: side, firstPlace: place, dir: 0, width: w, depth: dep, backSeg: 0, backSide: 0, backPlace: 0, backDir: 0, backDepth: 0 };
+              addBuilding(state, { ...lot, type: type.index, residents, variant: variant++ % 256 });
               counts[type.index] = (counts[type.index] ?? 0) + 1;
               break done;
             }
