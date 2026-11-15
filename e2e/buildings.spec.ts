@@ -143,13 +143,14 @@ for (const preset of ["balanced", "low"] as const) {
       testInfo.annotations.push({ type: "backend", description: backend });
       await expect.poll(() => page.evaluate(() => document.body.dataset["presetSettled"])).toBe("true");
       await buildingsDrawn(page, fixture.buildings);
-      const s = await stats(page);
-      expect(s.buildings).toBe(fixture.buildings);
-      // A snapshot rebuilds every chunk and writes every building once.
-      expect(s.totalWrites).toBe(fixture.buildings);
+      expect((await stats(page)).buildings).toBe(fixture.buildings);
       await setPose(page, STREET.position, STREET.target);
       await settle(page);
       await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
+      // Every chunk of the fixture is near the camera, so drawn in full (issue
+      // M2-13): every building written once, when its chunk was first drawn so.
+      await page.waitForFunction(() => document.body.dataset["buildingsSettled"] === "true");
+      expect((await stats(page)).totalWrites).toBe(fixture.buildings);
       const shot = await canvasShot(page);
       await attach(testInfo, `street band, ${preset}, ${backend}`, shot);
       // One baseline per preset, shared by both backends: they must draw the same picture.
@@ -207,6 +208,9 @@ test("a building the grower adds writes one instance and rebuilds no chunk", asy
   await openCity(page, "?webgl&preset=low&debug", "Zoned", bytes);
   await expect.poll(async () => (await stats(page)).pending).toBe(0);
   expect((await stats(page)).buildings).toBe(0);
+  // In the street band over the fixture, where buildings are drawn in full (issue M2-13).
+  await setPose(page, STREET.position, STREET.target);
+  await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 4 }))).toEqual({ ok: true });
   // One building a game day: a day is 100 ticks, 2.5 s at 4x.
   await expect.poll(async () => (await stats(page)).buildings, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);

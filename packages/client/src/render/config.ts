@@ -377,7 +377,7 @@ export const VISUAL_FEATURES = {
   trees: "low",
   /** Grass tufts near the camera. */
   grass: "low",
-  /** Buildings as instanced meshes from the theme's generators, in every band until issue M2-13 adds the far ones. */
+  /** Buildings as instanced meshes from the theme's generators near the camera, boxes further out and flat blocks in the city band (issue M2-13). */
   buildings: "low",
   /** One fixed sun, lighting terrain, roads and trees from one side. */
   sunLight: "low",
@@ -491,13 +491,27 @@ export const CELLS = {
 } as const;
 
 /**
- * Buildings on screen (issue M2-12). `buildBudgetMs` is how long a frame may
- * spend reading chunks of buildings from the mirror and writing their
- * instances, so a snapshot of a big city fills in over frames, nearest the
- * camera first. At least one chunk is read a frame.
+ * Buildings on screen (issues M2-12 and M2-13). `buildBudgetMs` is how long
+ * a frame may spend reading chunks of buildings from the mirror, writing
+ * their instances and building their merged meshes, so a snapshot of a big
+ * city fills in over frames, nearest the camera first. At least one chunk
+ * is read, and one chunk's form built, a frame.
+ *
+ * Levels of detail (render/building-lod.ts, PRD "Zoom bands"): in the
+ * street band a chunk whose nearest point is within `fullRadius` metres of
+ * the camera, across the ground, draws its buildings in full, and one that
+ * was near stays near until `fullRadius + fullHysteresis`. Every other
+ * chunk draws boxes, and the city band flat blocks. A chunk changing form
+ * fades over `fadeSeconds`. The flat blocks are lifted in the shader by
+ * `flatLift`, as the zoning cells are by `CELLS.lift` but a little higher,
+ * so a block lies over the cells and the terrain at every distance.
  */
 export const BUILDINGS = {
   buildBudgetMs: 4,
+  fullRadius: 600,
+  fullHysteresis: 150,
+  fadeSeconds: 0.35,
+  flatLift: { base: 0.4, perMetre: 0.0012 },
 } as const;
 
 /**

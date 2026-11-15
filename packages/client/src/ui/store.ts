@@ -83,6 +83,8 @@ export interface ViewReadout {
   /** Buildings drawn, and what the last change of buildings wrote. */
   buildings: string;
   buildingUpdates: string;
+  /** What each level of detail drew in the last frame: buildings and meshes, each mesh one draw call (issue M2-13). */
+  buildingForms: string;
 }
 
 export const useViewReadout = create<ViewReadout>(() => ({
@@ -100,6 +102,7 @@ export const useViewReadout = create<ViewReadout>(() => ({
   cellRebuilds: "-",
   buildings: "-",
   buildingUpdates: "-",
+  buildingForms: "-",
 }));
 
 /**

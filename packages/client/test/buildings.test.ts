@@ -7,7 +7,7 @@ import { createBuildingLayer, type BuildingSource } from "../src/render/building
 import { placeLot } from "../src/render/building-place";
 import { hashId, tintFor } from "../src/render/building-tint";
 import { MASK_SIDE, MASK_TREES } from "../src/render/road-geometry";
-import { ROADS } from "../src/render/config";
+import { BUILDINGS, CELLS, ROADS } from "../src/render/config";
 import { FACADE, SURFACE } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
 import { BASE_DEPTH } from "../src/theme/north-american/generators";
@@ -191,10 +191,13 @@ function fakeSource() {
   return { source, rows, put };
 }
 
-/** Runs the layer's frame work until nothing waits. */
-function settle(layer: ReturnType<typeof createBuildingLayer>): void {
-  layer.update({ x: 0, z: 0 }, 1000);
-  for (let k = 0; k < 1000 && layer.stats().pending > 0; k++) layer.update({ x: 0, z: 0 }, 1000);
+/**
+ * Runs the layer's frame work until nothing waits, with the camera over
+ * (4000, 4000) in the street band, so the chunks there are drawn in full.
+ */
+function settle(layer: ReturnType<typeof createBuildingLayer>, camera = { x: 4000, z: 4000 }): void {
+  layer.update(camera, 1000);
+  for (let k = 0; k < 1000 && (layer.stats().pending > 0 || layer.stats().waiting > 0); k++) layer.update(camera, 1000);
 }
 
 describe("the building layer", () => {
@@ -208,7 +211,9 @@ describe("the building layer", () => {
     const s = layer.stats();
     expect(s.buildings).toBe(10);
     expect(s.models).toBe(2);
-    expect(s.lastWrites).toBe(10);
+    // Near the camera: every building has an instance, written once when its chunk was first drawn in full.
+    expect(s.totalWrites).toBe(10);
+    expect(s.forms.full).toMatchObject({ buildings: 10, meshes: 2 });
     expect(s.lastRebuilt).toBe(CHUNKS_PER_SIDE * CHUNKS_PER_SIDE);
     layer.dispose();
   });
@@ -258,7 +263,8 @@ describe("the building layer", () => {
     for (let id = 0; id < 40; id++) put(id, 1000 + (id % 20) * 16, 1000 + Math.floor(id / 20) * 48);
     const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
     layer.reset();
-    settle(layer);
+    settle(layer, { x: 1000, z: 1000 });
+    expect(layer.stats().forms.full.buildings).toBe(40);
     expect(layer.stats().buildings).toBe(40);
     expect(layer.stats().models).toBe(1);
     for (let id = 0; id < 40; id++) expect(layer.tintOf(id)).not.toBeNull();
@@ -298,6 +304,133 @@ describe("the building layer", () => {
     const at = (x: number, z: number) => mask?.[Math.floor((z - cj * CHUNK_SIZE) / ROADS.maskCell) * MASK_SIDE + Math.floor((x - ci * CHUNK_SIZE) / ROADS.maskCell)] ?? 0;
     expect(at(4010, 4010) & MASK_TREES).toBe(MASK_TREES);
     expect(at(4030, 4010)).toBe(0);
+    layer.dispose();
+  });
+});
+
+describe("the building layer's levels of detail (issue M2-13)", () => {
+  const near = { x: 4000, z: 4000 };
+  const run = (layer: ReturnType<typeof createBuildingLayer>, camera: { x: number; z: number }, band: "street" | "district" | "city", frames = 50, seconds = 1) => {
+    for (let k = 0; k < frames; k++) layer.update(camera, 1000, { band, seconds });
+  };
+
+  it("draws chunks near the camera in full and the rest as boxes in the street band, boxes in the district band and blocks in the city band", () => {
+    const { source, put } = fakeSource();
+    const here = put(1, 4004, 4004);
+    const far = put(2, 9004, 9004);
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "street");
+    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["full", "box"]);
+    expect(layer.stats().forms).toMatchObject({ full: { buildings: 1, meshes: 1 }, box: { buildings: 1, meshes: 1 }, flat: { buildings: 0, meshes: 0 } });
+    run(layer, near, "district");
+    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["box", "box"]);
+    run(layer, near, "city");
+    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["flat", "flat"]);
+    expect(layer.stats().forms).toMatchObject({ full: { buildings: 0, meshes: 0 }, box: { meshes: 0 }, flat: { buildings: 2, meshes: 2 } });
+    layer.dispose();
+  });
+
+  it("frees instances filled for a fade that never started, once the camera leaves", () => {
+    const { source, put } = fakeSource();
+    const here = put(1, 4004, 4004);
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "city", 5, 0.016);
+    // Half way from blocks to boxes, the camera drops into the street band: the chunk is filled, but the fade under way goes on.
+    run(layer, near, "district", 3, 0.016);
+    run(layer, near, "street", 1, 0.016);
+    expect(layer.formOf(here)).toBe("flat");
+    // Then back out before the full form could fade in: its instances go.
+    run(layer, near, "district", 60, 0.016);
+    expect(layer.formOf(here)).toBe("box");
+    expect(layer.stats().forms.full).toEqual({ chunks: 0, buildings: 0, meshes: 0 });
+    layer.dispose();
+  });
+
+  it("frees a chunk's instances once it leaves the camera, and draws them again when it comes back", () => {
+    const { source, put } = fakeSource();
+    for (let id = 0; id < 20; id++) put(id, 4004 + (id % 10) * 16, 4004 + Math.floor(id / 10) * 48);
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "street");
+    expect(layer.stats().forms.full.buildings).toBe(20);
+    run(layer, { x: 9000, z: 9000 }, "street");
+    expect(layer.stats().forms.full).toEqual({ chunks: 0, buildings: 0, meshes: 0 });
+    // The colours and the box stay: only the full form is freed.
+    expect(layer.tintOf(3)).not.toBeNull();
+    expect(layer.stats().forms.box.buildings).toBe(20);
+    run(layer, near, "street");
+    expect(layer.stats().forms.full.buildings).toBe(20);
+    layer.dispose();
+  });
+
+  it("fades from one form to the next over the fade time, showing the old one until the new one is built", () => {
+    const { source, put } = fakeSource();
+    const here = put(1, 4004, 4004);
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "street", 5, 0.016);
+    expect(layer.formOf(here)).toBe("full");
+    // One frame into the district band: still full, fading to boxes.
+    run(layer, near, "district", 1, 0.016);
+    expect(layer.formOf(here)).toBe("full");
+    expect(layer.stats().fading).toBe(1);
+    expect(layer.stats().forms.full.buildings).toBe(1);
+    expect(layer.stats().forms.box.buildings).toBe(1);
+    // Past the fade time, boxes alone.
+    run(layer, near, "district", Math.ceil(BUILDINGS.fadeSeconds / 0.016) + 1, 0.016);
+    expect(layer.formOf(here)).toBe("box");
+    expect(layer.stats().fading).toBe(0);
+    expect(layer.stats().forms.full.buildings).toBe(0);
+    layer.dispose();
+  });
+
+  it("builds a chunk's merged meshes again only when a building in it changes", () => {
+    const { source, rows, put } = fakeSource();
+    const a = put(1, 4004, 4004);
+    const b = put(2, 9004, 9004);
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "district");
+    const built = layer.stats().totalMerged;
+    // Both forms of both chunks, built once: the boxes shown and the blocks ahead of a zoom out.
+    expect(built).toBe(4);
+    // Moving the camera and changing band builds nothing again.
+    run(layer, { x: 9000, z: 9000 }, "city");
+    run(layer, near, "district");
+    expect(layer.stats().totalMerged).toBe(built);
+    // A building gone from one chunk and one come to another: that chunk's
+    // boxes and blocks are built again, and the emptied chunk's meshes are
+    // dropped. Nothing is built again when the band changes after.
+    rows.delete(2);
+    put(3, 4040, 4004);
+    layer.apply([a, b]);
+    run(layer, near, "district");
+    expect(layer.formOf(b)).toBeNull();
+    expect(layer.stats().totalMerged).toBe(built + 2);
+    run(layer, near, "city");
+    expect(layer.stats().totalMerged).toBe(built + 2);
+    layer.dispose();
+  });
+
+  it("colours a flat block by its zone and density, as the zoning overlay does", () => {
+    const { source, put } = fakeSource();
+    const tower = BUILDING_TYPES.findIndex((t) => t.id === "high-tower");
+    put(1, 4004, 4004, 0, tower);
+    const scene = new Scene();
+    const layer = createBuildingLayer(scene, source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "city");
+    let colour: number[] = [];
+    scene.traverse((o) => {
+      if (o.name.startsWith("building blocks ")) {
+        const c = (o as unknown as { geometry: { getAttribute(n: string): { array: ArrayLike<number> } } }).geometry.getAttribute("mergedColour").array;
+        colour = [c[0] ?? 0, c[1] ?? 0, c[2] ?? 0];
+      }
+    });
+    const hex = CELLS.zones["residential"]?.[2] ?? 0;
+    expect(colour).toEqual([(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff]);
     layer.dispose();
   });
 });

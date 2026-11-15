@@ -9,7 +9,9 @@
 import {
   BufferAttribute,
   BufferGeometry,
+  Frustum,
   LOD,
+  Matrix4,
   Mesh,
   MeshLambertNodeMaterial,
   PerspectiveCamera,
@@ -89,6 +91,8 @@ export interface View {
    * mirror. Set it before `showTerrain`.
    */
   setBuildingSource(source: BuildingSource): void;
+  /** The chunk's buildings' form shown whole, or null. For tests. */
+  buildingForm(chunk: number): "full" | "box" | "flat" | null;
   /** Draws every building again, as after a snapshot, over the next frames. */
   showBuildings(): void;
   /**
@@ -265,6 +269,8 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
 
   const before: ((seconds: number) => void)[] = [];
   const listeners: ((stats: FrameStats) => void)[] = [];
+  const frustum = new Frustum();
+  const viewProjection = new Matrix4();
   const gaps = new Float64Array(FRAME_TIME_WINDOW);
   let gapCount = 0;
   let gapSum = 0;
@@ -273,7 +279,10 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     const seconds = last >= 0 ? (time - last) / 1000 : 0;
     for (const b of before) b(seconds);
     terrainRoot?.decor.update(camera.position);
-    terrainRoot?.buildings?.update(camera.position, BUILDINGS.buildBudgetMs);
+    camera.updateMatrixWorld();
+    viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(viewProjection, camera.coordinateSystem);
+    terrainRoot?.buildings?.update(camera.position, BUILDINGS.buildBudgetMs, { band, seconds, frustum });
     // Cells under a lot that reaches over a chunk line are in a chunk the delta did not name.
     const lots = terrainRoot?.buildings?.takeLotChunks() ?? [];
     if (lots.length > 0) {
@@ -363,6 +372,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       if (roadChunks.length > 0 || changed.length === 0) layer.applyIds(ids);
     },
     buildingStats: () => terrainRoot?.buildings?.stats() ?? null,
+    buildingForm: (chunk) => terrainRoot?.buildings?.formOf(chunk) ?? null,
     buildingTint: (id) => terrainRoot?.buildings?.tintOf(id) ?? null,
     setPreset: (preset) => lighting.setPreset(preset),
     lighting: () => lighting.report(),
