@@ -377,6 +377,8 @@ export const VISUAL_FEATURES = {
   trees: "low",
   /** Grass tufts near the camera. */
   grass: "low",
+  /** Buildings as instanced meshes from the theme's generators, in every band until issue M2-13 adds the far ones. */
+  buildings: "low",
   /** One fixed sun, lighting terrain, roads and trees from one side. */
   sunLight: "low",
   /** Sky light from above and earth light from below, in place of one flat fill. */
@@ -486,6 +488,16 @@ export const CELLS = {
    * as turning the overlay on over a whole city, is spread over frames.
    */
   buildBudgetMs: 6,
+} as const;
+
+/**
+ * Buildings on screen (issue M2-12). `buildBudgetMs` is how long a frame may
+ * spend reading chunks of buildings from the mirror and writing their
+ * instances, so a snapshot of a big city fills in over frames, nearest the
+ * camera first. At least one chunk is read a frame.
+ */
+export const BUILDINGS = {
+  buildBudgetMs: 4,
 } as const;
 
 /**

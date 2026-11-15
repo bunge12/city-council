@@ -8,6 +8,7 @@ import {
   buildingInfo,
   buildingsInChunk,
   cellAt,
+  cellBuildings,
   cellShapesInChunk,
   cellsInChunk,
   type BuildingInfo,
@@ -171,6 +172,15 @@ export class SimMirror {
     const state = this.current;
     if (!state) return [];
     return buildingsInChunk(state, chunk).flatMap((id) => buildingInfo(state, id) ?? []);
+  }
+
+  /**
+   * By slot in `state.cells.zone`, the building standing on each cell, or
+   * -1 (`NO_BUILDING`). Worked out by the sim's own code from the copy.
+   * Read only. Null until the first snapshot.
+   */
+  cellBuildings(): Int32Array | null {
+    return this.current ? cellBuildings(this.current) : null;
   }
 
   /**

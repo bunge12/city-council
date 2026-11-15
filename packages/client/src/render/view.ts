@@ -1,6 +1,7 @@
 // The renderer: three.js WebGPURenderer with the WebGL 2 backend as the
 // fallback, a fixed-daylight scene, the chunked terrain, the water plane,
-// the roads and the decorative trees and grass.
+// the roads, the decorative trees and grass, the zoning overlay and the
+// buildings.
 //
 // The render loop runs on the browser's frame clock and never waits on the
 // sim. It reads the mirror; it does not drive the sim.
@@ -19,13 +20,15 @@ import {
   WebGPURenderer,
 } from "three/webgpu";
 import { heightAt, mapSize, type Terrain } from "@city-council/sim";
-import { CELLS, FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, TERRAIN_LODS } from "./config";
+import { BUILDINGS, CELLS, FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, TERRAIN_LODS } from "./config";
 import type { ZoomBand } from "../camera/zoom-band";
+import { createBuildingLayer, type BuildingLayer, type BuildingSource, type BuildingStats } from "./building-meshes";
 import { createCellLayer, type CellLayer, type CellSource, type CellStats } from "./cell-meshes";
 import { createDecorLayer, type DecorLayer } from "./decor-meshes";
 import { createLighting, skyColour, type LightingReport } from "./lighting";
 import type { Preset } from "./presets";
 import { neighbourhood, type RoadNet } from "./road-geometry";
+import { NORTH_AMERICAN } from "../theme/north-american";
 import { createRoadLayer, type RoadLayer, type RoadStats } from "./road-meshes";
 import { buildChunk, chunkCentre, chunksPerSide } from "./terrain-chunks";
 import { SURFACE_HEIGHT_ATTRIBUTE, createTerrainMaterial } from "./terrain-material";
@@ -81,6 +84,22 @@ export interface View {
   /** Redraws the cells of the chunks a delta changed, over the next frames. */
   updateCells(chunks: readonly number[]): void;
   cellStats(): CellStats | null;
+  /**
+   * The buildings (issue M2-12). `source` is where they are read from, the
+   * mirror. Set it before `showTerrain`.
+   */
+  setBuildingSource(source: BuildingSource): void;
+  /** Draws every building again, as after a snapshot, over the next frames. */
+  showBuildings(): void;
+  /**
+   * Brings the buildings in line with a delta: every building in the chunks
+   * whose roads changed is placed again, and in `changed` only the
+   * buildings that came or went are written.
+   */
+  updateBuildings(roadChunks: readonly number[], changed: readonly number[]): void;
+  buildingStats(): BuildingStats | null;
+  /** The colours building `id` is drawn in, as sRGB hex, or null. For tests. */
+  buildingTint(id: number): { wall: number; roof: number; trim: number } | null;
   /** Switches the lighting to a graphics preset once its shaders are compiled. */
   setPreset(preset: Preset): Promise<void>;
   /** The lighting on screen: its preset and its shadows. */
@@ -91,6 +110,15 @@ export interface View {
    * See PRESET_BENCHMARK.
    */
   benchmark(): Promise<number>;
+}
+
+/** Two decoration masks as one: a cell either masks is masked. */
+function joinMasks(a: Uint8Array | null, b: Uint8Array | null): Uint8Array | null {
+  if (!a) return b;
+  if (!b) return a;
+  const out = new Uint8Array(a.length);
+  for (let k = 0; k < a.length; k++) out[k] = (a[k] ?? 0) | (b[k] ?? 0);
+  return out;
 }
 
 /** True when the page asks for the WebGL 2 backend with `?webgl`. */
@@ -119,10 +147,19 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   // scene is lit as Low, so the first frame needs no shadow shaders.
   const lighting = createLighting(renderer, scene);
 
-  let terrainRoot: { terrain: Terrain; lods: LOD[]; decor: DecorLayer; roads: RoadLayer; cells: CellLayer | null; dispose: () => void } | null = null;
+  let terrainRoot: {
+    terrain: Terrain;
+    lods: LOD[];
+    decor: DecorLayer;
+    roads: RoadLayer;
+    cells: CellLayer | null;
+    buildings: BuildingLayer | null;
+    dispose: () => void;
+  } | null = null;
   let band: ZoomBand = "city";
   let height = Infinity;
   let cellSource: CellSource | null = null;
+  let buildingSource: BuildingSource | null = null;
   let cellsVisible = false;
 
   function showTerrain(terrain: Terrain): void {
@@ -178,10 +215,14 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
 
     const roads = createRoadLayer(terrain, scene);
     roads.setBand(band, height);
-    const decor = createDecorLayer(terrain, scene, (chunk) => roads.decorMask(chunk));
+    // Trees and grass keep off roads and off the lots of buildings drawn.
+    let buildingsLayer: BuildingLayer | null = null;
+    const decor = createDecorLayer(terrain, scene, (chunk) => joinMasks(roads.decorMask(chunk), buildingsLayer?.lotMask(chunk) ?? null));
     const cells = cellSource ? createCellLayer(scene, cellSource, (x, z) => heightAt(terrain, x, z)) : null;
     cells?.setBand(band);
     cells?.setVisible(cellsVisible);
+    const buildings = buildingSource ? createBuildingLayer(scene, buildingSource, NORTH_AMERICAN, (x, z) => heightAt(terrain, x, z)) : null;
+    buildingsLayer = buildings;
 
     terrainRoot = {
       terrain,
@@ -189,7 +230,9 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       decor,
       roads,
       cells,
+      buildings,
       dispose() {
+        buildings?.dispose();
         cells?.dispose();
         decor.dispose();
         roads.dispose();
@@ -227,6 +270,13 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     const seconds = last >= 0 ? (time - last) / 1000 : 0;
     for (const b of before) b(seconds);
     terrainRoot?.decor.update(camera.position);
+    terrainRoot?.buildings?.update(camera.position, BUILDINGS.buildBudgetMs);
+    // Cells under a lot that reaches over a chunk line are in a chunk the delta did not name.
+    const lots = terrainRoot?.buildings?.takeLotChunks() ?? [];
+    if (lots.length > 0) {
+      terrainRoot?.cells?.apply(lots);
+      terrainRoot?.decor.refresh(lots);
+    }
     terrainRoot?.cells?.update(camera.position, CELLS.buildBudgetMs);
     const shown = terrainRoot?.terrain;
     lighting.update(camera, shown ? (x, z) => heightAt(shown, x, z) : null);
@@ -296,6 +346,19 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     showCells: () => terrainRoot?.cells?.reset(),
     updateCells: (chunks) => terrainRoot?.cells?.apply(chunks),
     cellStats: () => terrainRoot?.cells?.stats() ?? null,
+    setBuildingSource(source) {
+      buildingSource = source;
+    },
+    showBuildings: () => terrainRoot?.buildings?.reset(),
+    updateBuildings(roadChunks, changed) {
+      const layer = terrainRoot?.buildings;
+      if (!layer) return;
+      layer.rebuild(roadChunks);
+      // A lot whose centre is over a chunk line from a changed road can lose its building to it.
+      layer.apply([...new Set([...changed, ...roadChunks.flatMap(neighbourhood)])]);
+    },
+    buildingStats: () => terrainRoot?.buildings?.stats() ?? null,
+    buildingTint: (id) => terrainRoot?.buildings?.tintOf(id) ?? null,
     setPreset: (preset) => lighting.setPreset(preset),
     lighting: () => lighting.report(),
     async benchmark() {

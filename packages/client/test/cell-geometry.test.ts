@@ -28,6 +28,15 @@ function twoCells(): ChunkCellShapes {
 }
 
 describe("cell chunk geometry", () => {
+  it("draws no cell a building stands on (issue M2-12)", () => {
+    const g = buildCellChunk(twoCells(), [1, 1, 1], [2, 2, 2], flat, Int32Array.of(-1, 7, -1));
+    expect(g.zoned).toBe(1);
+    expect(g.unzoned).toBe(0);
+    expect(g.positions).toHaveLength(4 * 3);
+    // The cell left is the first one, at slot 0.
+    expect(Array.from(g.positions.subarray(0, 3))).toEqual([0, 10, 0]);
+  });
+
   it("draws each open cell as a quad on the ground, and no blocked cell", () => {
     const g = buildCellChunk(twoCells(), [1, 0, 1], [2, 0, 2], (x, z) => x + z);
     expect(g.zoned).toBe(1);

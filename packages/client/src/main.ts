@@ -526,7 +526,29 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   view.setCellSource({
     shapes: (chunk) => mirror.cellShapesInChunk(chunk),
     cells: () => mirror.state?.cells ?? null,
+    built: () => mirror.cellBuildings(),
   });
+  // Buildings come from the mirror alone too: a snapshot draws them all,
+  // nearest the camera first, and a delta the chunks it changed.
+  view.setBuildingSource({ buildingsInChunk: (chunk) => mirror.buildingsInChunk(chunk) });
+  const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const buildingReadout = () => {
+    const b = view.buildingStats();
+    document.body.dataset["buildingsPending"] = String(b?.pending ?? 0);
+    document.body.dataset["buildingsDrawn"] = String(b?.buildings ?? 0);
+    if (!b || b.totalWrites === 0) return;
+    setViewReadout({
+      buildings: `${b.buildings} in ${b.models} models`,
+      buildingUpdates: `${count(b.lastWrites, "instance")} and ${count(b.lastRebuilt, "chunk")} rebuilt last, ${count(b.totalWrites, "instance")} in all, ${b.lastBuildMs.toFixed(1)} ms`,
+    });
+  };
+  const showBuildings = (update: MirrorUpdate) => {
+    if (update.kind === "snapshot") view.showBuildings();
+    else if (update.roadChunks.length > 0 || update.cellChunks.length > 0 || update.buildingChunks.length > 0) {
+      view.updateBuildings(update.roadChunks, [...new Set([...update.cellChunks, ...update.buildingChunks])]);
+    }
+  };
+  view.onFrame(buildingReadout);
   const cellReadout = () => {
     const cells = view.cellStats();
     document.body.dataset["zoningOverlay"] = String(cells?.visible ?? false);
@@ -539,7 +561,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   };
   const showCells = (update: MirrorUpdate) => {
     if (update.kind === "snapshot") view.showCells();
-    else if (update.cellChunks.length > 0) view.updateCells(update.cellChunks);
+    // Cells a building came onto or left are drawn again, without it or with it.
+    else if (update.cellChunks.length > 0 || update.buildingChunks.length > 0) view.updateCells([...new Set([...update.cellChunks, ...update.buildingChunks])]);
   };
   // Chunks are built over frames, so the readout follows the frames.
   view.onFrame(cellReadout);
@@ -554,11 +577,13 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     showMap();
     showRoads(update);
     showCells(update);
+    showBuildings(update);
   });
   showMap();
   if (mirror.state) {
     showRoads({ kind: "snapshot" });
     showCells({ kind: "snapshot" });
+    showBuildings({ kind: "snapshot" });
   }
   setCellsVisible(useUi.getState().tool === "zone");
   return view;
