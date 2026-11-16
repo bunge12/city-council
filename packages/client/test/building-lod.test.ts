@@ -68,23 +68,13 @@ describe("the fade between forms", () => {
 
 describe("simplified models", () => {
   it("drop the small parts and the paving, and keep the building's own shape", () => {
-    // A tower on a podium with a plant room and a mast, and paving: none of it is a plain box.
+    // A tower on a podium with a plant room and a mast: two masses, not one box round both.
     const full = tower({ w: 40, d: 40 }, { podium: 3, shops: true, floors: 26, share: 0.6, curtain: true, spacing: 3, storey: 3.2, crown: "mast" });
     const simple = simplify(full, BUILDINGS.simplify);
-    expect(simple.surfaces.length).toBeLessThan(full.surfaces.length);
     expect(simple.surfaces.length).toBeGreaterThan(0);
-    // The mast is gone: nothing reaches above the plant room, and the tower is still as tall as it was.
-    const top = (m: typeof full, skip = false) => {
-      let y = -Infinity;
-      for (let v = 0; v < m.surfaces.length; v++) {
-        // Masts are the only thin trim; leave them out of the full model's height.
-        if (skip && Math.abs(m.positions[v * 3] ?? 0) < 0.5 && Math.abs((m.positions[v * 3 + 2] ?? 0) - 0) < 40 && (m.positions[v * 3 + 1] ?? 0) > 95) continue;
-        y = Math.max(y, m.positions[v * 3 + 1] ?? 0);
-      }
-      return y;
-    };
-    expect(top(simple)).toBeLessThan(top(full));
-    expect(top(simple)).toBeGreaterThan(90);
+    // The mast stays, thin as it is: it is the skyline. The tower is as tall as it was.
+    const top = (m: typeof full) => Math.max(...m.positions.filter((_, k) => k % 3 === 1));
+    expect(top(simple)).toBe(top(full));
     // The tower is narrower than the podium: the simplified model is two masses, not one box round both.
     const widthAt = (m: typeof full, y: number) => {
       let w = 0;
@@ -95,6 +85,14 @@ describe("simplified models", () => {
     expect([...simple.surfaces]).not.toContain(SURFACE.paving);
     // Its triangles use only its own vertices.
     for (const i of simple.indices) expect(i).toBeLessThan(simple.surfaces.length);
+  });
+
+  it("drop a porch's posts and floor but keep the house and its roof", () => {
+    const full = NORTH_AMERICAN.model("single-family-home", 0, 2, NORTH_AMERICAN.modelDepth("single-family-home"));
+    const simple = simplify(full, BUILDINGS.simplify);
+    expect(simple.surfaces.length).toBeLessThan(full.surfaces.length);
+    expect([...simple.surfaces]).toContain(SURFACE.roof);
+    expect([...simple.surfaces]).toContain(SURFACE.wall);
   });
 
   it("leave a model with no parts as it is", () => {
