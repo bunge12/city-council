@@ -2,7 +2,9 @@
 // one set per terrain chunk, built the first time a chunk comes near the
 // camera and hidden again when it is far. Placement comes from decor.ts.
 // Nothing stands where a road is: the road layer gives each chunk a mask,
-// and a chunk whose mask changes is built again.
+// and a chunk whose mask changes is built again. Its old decoration stays
+// on screen until the new one replaces it in the same update, so a
+// building arriving on a lot does not blink the chunk's trees (issue 141).
 
 import {
   BufferAttribute,
@@ -124,9 +126,10 @@ export interface DecorLayer {
   /** Instances drawn last update: trees and grass tufts. */
   counts(): { trees: number; grass: number };
   /**
-   * Checks the road mask of each of `chunks` again and drops any built
-   * decoration whose mask changed, so the next update builds it anew.
-   * Returns the chunks dropped.
+   * Checks the road mask of each of `chunks` again and marks any built
+   * decoration whose mask changed, so the next update builds it anew. A
+   * chunk in range keeps drawing its old decoration until then; one out of
+   * range is dropped now. Returns the chunks marked or dropped.
    */
   refresh(chunks: Iterable<number>): number[];
   dispose(): void;
@@ -140,6 +143,8 @@ interface ChunkSlot {
   grassCount: number;
   /** Fingerprint of the road mask the decoration was built with. */
   maskKey: string;
+  /** Whether the mask changed since the decoration was built: it is drawn until it is built again. */
+  stale: boolean;
 }
 
 /** A short fingerprint of a mask, to tell whether it changed. */
@@ -189,6 +194,7 @@ export function createDecorLayer(
         treeCount: 0,
         grassCount: 0,
         maskKey: "",
+        stale: false,
       });
     }
   }
@@ -237,6 +243,7 @@ export function createDecorLayer(
       grass: withoutDropped(placed.grass, off(MASK_GRASS)),
     };
     slot.maskKey = maskKey(mask);
+    slot.stale = false;
     const trees = new Group();
     const grass = new Group();
     for (const m of [instanced("broadleaf", decor.broadleaf, 1), instanced("conifer", decor.conifer, 1)]) {
@@ -265,6 +272,7 @@ export function createDecorLayer(
     }
     slot.trees = null;
     slot.grass = null;
+    slot.stale = false;
   }
 
   return {
@@ -272,10 +280,23 @@ export function createDecorLayer(
       const start = performance.now();
       let built = false;
       const next = { trees: 0, grass: 0 };
+      const canBuild = () => !built || performance.now() - start < BUILD_MS_PER_FRAME;
+      // Chunks whose mask changed first: they are on screen with decoration
+      // that may stand on a new road or lot. The old meshes go only once the
+      // new ones are built, so the chunk is never drawn bare.
+      slots.forEach((slot, index) => {
+        if (!slot.stale) return;
+        if (eye.distanceTo(slot.centre) >= DECOR.trees.drawDistance) drop(slot);
+        else if (canBuild()) {
+          drop(slot);
+          build(slot, index);
+          built = true;
+        }
+      });
       slots.forEach((slot, index) => {
         const distance = eye.distanceTo(slot.centre);
         const wantTrees = distance < DECOR.trees.drawDistance;
-        if (wantTrees && !slot.trees && (!built || performance.now() - start < BUILD_MS_PER_FRAME)) {
+        if (wantTrees && !slot.trees && canBuild()) {
           build(slot, index);
           built = true;
         }
@@ -294,7 +315,9 @@ export function createDecorLayer(
         const slot = slots[c];
         if (!slot?.trees) continue;
         if (maskKey(roadMask(c)) === slot.maskKey) continue;
-        drop(slot);
+        // Out of sight, nothing blinks: it is built again when it comes back in range.
+        if (slot.trees.visible) slot.stale = true;
+        else drop(slot);
         dropped.push(c);
       }
       return dropped;
