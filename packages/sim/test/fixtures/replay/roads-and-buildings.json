@@ -2,8 +2,8 @@
   "description": "Roads and buildings on seed 2026. p1 builds a street and zones R1 four deep along its north side; p2 zones C1 three deep along its south side. After twelve days of growth p2 runs a street south from x 4296, which splits the first street under the houses across it and clears the shops in its way. p1 clears its lowest-numbered house with BulldozeBuilding, named on the piece the split moved it to, then runs a street north from x 4248 through its houses. p2 bulldozes its street, and undoes that three days later, which clears what grew on the ground meanwhile. Twenty-four game days.",
   "seed": 2026,
   "untilTick": 2400,
-  "balance": "33cc634c4020df83",
-  "hash": "fc604bf92f62cd17",
+  "balance": "5fe641d3f2f36eb1",
+  "hash": "46bb2e7931c8b8cb",
   "log": [
     {
       "tick": 0,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { syncCells } from "../src/zoning/cell-index";
 import {
+  createGrowth,
   LEVEL_BRIDGE,
   ROAD_TYPES,
   UNDO_STEPS,
@@ -81,8 +82,8 @@ function refusal(state: SimState, c: Command): string {
 
 /** The state hash leaving out the log and the undo history, and the tick, which every step moves. */
 function cityHash(state: SimState): string {
-  // The tick a change of cells settles by is a deadline, like the tick, not part of the city.
-  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0 });
+  // The tick a change of cells settles by is a deadline, like the tick, not part of the city, and so is the grower's plan.
+  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0, growth: createGrowth() });
 }
 
 function findNode(net: RoadNetwork, x: number, z: number): number {

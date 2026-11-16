@@ -57,6 +57,8 @@ function pair() {
     copy.tick = sim.tick;
     copy.log = sim.log.slice();
     copy.undo = sim.undo;
+    // The grower's plan travels in every delta, as the generator does.
+    copy.growth = { ...sim.growth };
     return cells;
   };
   return { sim, copy, run, send };

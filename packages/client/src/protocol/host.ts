@@ -303,6 +303,7 @@ export class SimHost {
       ...(undo ? { undo } : {}),
       ...(dropped.length > 0 ? { dropped } : {}),
       rng: this.state.rng.slice(),
+      growth: { ...this.state.growth },
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };
