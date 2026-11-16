@@ -21,7 +21,6 @@ interface BuildingStats {
   pending: number;
   lastWrites: number;
   totalWrites: number;
-  totalWritesByForm: { full: number; simple: number };
   lastRebuilt: number;
   totalRebuilt: number;
 }
@@ -150,11 +149,9 @@ for (const preset of ["balanced", "low"] as const) {
       await settle(page);
       await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
       // Every chunk of the fixture is near the camera, so drawn in full (issue
-      // M2-13): every building written once in full, when its chunk was first
-      // drawn so. The city opens in the district band, so each was written in
-      // the simple form before that, which this does not count.
+      // M2-13): every building written once, when its chunk was first drawn so.
       await page.waitForFunction(() => document.body.dataset["buildingsSettled"] === "true");
-      expect((await stats(page)).totalWritesByForm.full).toBe(fixture.buildings);
+      expect((await stats(page)).totalWrites).toBe(fixture.buildings);
       const shot = await canvasShot(page);
       await attach(testInfo, `street band, ${preset}, ${backend}`, shot);
       // One baseline per preset, shared by both backends: they must draw the same picture.

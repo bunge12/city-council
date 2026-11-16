@@ -4,8 +4,9 @@ import { canvasShot, chunkAt, openCity, setPose, settle, stats, type Form, type 
 import { groundAt } from "./road-fixtures";
 
 // Issue M2-13: buildings across the zoom bands. Full models near the camera
-// in the street band, simplified models merged per chunk further out and in the
-// district band, and flat blocks coloured by zone in the city band. The
+// in the street band, simplified models merged per chunk within 2 km in the
+// street and district bands and boxes beyond, and flat blocks coloured by zone
+// in the city band. The
 // fixture city with every building type: the same district in all three
 // bands, screenshotted, at Balanced and at Low. The scale city's numbers
 // are in building-lod-scale.spec.ts and building-lod-memory.spec.ts.
@@ -40,7 +41,7 @@ test.describe("the fixture city", () => {
         const s = await stats(page);
         expect(s.buildings).toBe(fixture.buildings);
         // Each band draws its own form and none of the others.
-        for (const other of ["full", "simple", "flat"] as const) {
+        for (const other of ["full", "simple", "box", "flat"] as const) {
           if (other === form) expect(s.forms[other].buildings, `${band}: ${other}`).toBeGreaterThan(0);
           else if (other !== "simple" || band !== "street") expect(s.forms[other].meshes, `${band}: ${other}`).toBe(0);
         }
@@ -48,7 +49,7 @@ test.describe("the fixture city", () => {
         if (band === "street") {
           await page.getByRole("region", { name: "Debug panel" }).screenshot({ path: testInfo.outputPath("debug-panel.png") });
           await testInfo.attach(`debug panel, ${band} band`, { path: testInfo.outputPath("debug-panel.png"), contentType: "image/png" });
-          await expect(page.locator("#building-forms")).toHaveText(/^full \d+ in \d+ meshes, simple \d+ in \d+ mesh(es)?, blocks 0 in 0 meshes$/);
+          await expect(page.locator("#building-forms")).toHaveText(/^full \d+ in \d+ meshes, simple \d+ in \d+ mesh(es)?, boxes 0 in 0 meshes, blocks 0 in 0 meshes$/);
         }
       }
     });

@@ -4,10 +4,10 @@
 // - full: one instanced mesh per model, with the building's tint as data on
 //   its instance. Only for chunks near the camera in the street band. A
 //   chunk that leaves frees its instances.
-// - simple: the same, from each model without its small parts and paving
-//   (theme/model.ts, `simplify`): one instanced mesh per simplified model,
-//   with the same material, tints and window pattern. Every other chunk in
-//   the street band, and every chunk in the district band.
+// - simple: each building's model without its small parts and paving,
+//   merged into one mesh per chunk and drawn with the full models' window
+//   patterns and colours. Every other chunk in the street band, and every
+//   chunk in the district band.
 // - flat: a flat block on the ground per building, coloured by its zone and
 //   density, one mesh per chunk. The city band.
 // A chunk changing form fades from one to the next, dithered, so nothing
@@ -16,8 +16,8 @@
 // A model is one of a type's generator variants at one lot width, built by
 // the theme (theme/). The sim's variant number picks the variant and the
 // building's id picks its wall, roof and trim colours (building-tint.ts), so
-// neither depends on this page. A model, and its simplified copy, is built
-// the first time a building needs it. A lot deeper or
+// neither depends on this page. A model is built the first time a building
+// needs it, since its simplified copy is what the simple form draws. A lot deeper or
 // shallower than the model's, or bent on a curve, stretches the model back
 // from the road; the shader takes the stretch out of the window pattern, so
 // windows keep their rhythm.
@@ -28,7 +28,7 @@
 // frame stalls. Reading a chunk for a delta that only added or removed
 // buildings places only those buildings: adding one in a full chunk touches
 // one instance. A chunk whose roads changed is placed again whole, since its
-// lots may have moved. A chunk's flat mesh is built again only when a
+// lots may have moved. A chunk's merged meshes are built again only when a
 // building in it changed, and only once the form is drawn.
 //
 // The renderer reads the mirror; it never writes it.
@@ -64,7 +64,9 @@ import {
   fadeOf,
   formFor,
   isNear,
+  mergeBoxes,
   mergeFlats,
+  mergeModels,
   modelExtent,
   stepFade,
   type BuildingForm,
@@ -96,7 +98,7 @@ export interface FormStats {
 export interface BuildingStats {
   /** Buildings the layer knows, in whatever form. */
   buildings: number;
-  /** Models built. Each is an instanced mesh per form, full and simple, while a building drawn in that form uses it. */
+  /** Models built. Each is one instanced mesh while a building near the camera uses it. */
   models: number;
   /** Chunks waiting to be read. */
   pending: number;
@@ -110,17 +112,15 @@ export interface BuildingStats {
    */
   lastWrites: number;
   totalWrites: number;
-  /** `totalWrites` split by the form the instance is in. */
-  totalWritesByForm: Record<Level, number>;
   lastRebuilt: number;
   totalRebuilt: number;
   lastBuildMs: number;
-  /** Merged flat meshes built in the last frame that built any, and in all. */
+  /** Merged meshes, simple buildings and flat blocks, built in the last frame that built any, and in all. */
   lastMerged: number;
   totalMerged: number;
-  /** Bytes of vertices and indices the flat meshes hold now. The instanced forms hold only their models and 88 bytes an instance. */
-  mergedBytes: number;
-  /** What each form drew in the last frame. Flat blocks count only meshes in the camera's view; the instanced forms count every instance they hold, since an instanced mesh is not culled. */
+  /** Bytes of geometry the merged meshes held now, by form: vertices and indices, which the GPU holds a copy of too. */
+  mergedBytes: Record<Merged, number>;
+  /** What each form drew in the last frame, counting only meshes in the camera's view. */
   forms: Record<BuildingForm, FormStats>;
   /** Chunks fading from one form to another, and chunks waiting for the form they want to be built. */
   fading: number;
@@ -217,6 +217,28 @@ function kept(fade: Node<"float">) {
 }
 
 /**
+ * A wall's colour with its pattern drawn on: `kind` is the vertex's
+ * `FACADE`, `along` where it is along the wall in windows with the lot's
+ * stretch taken out, and `up` how high in floors. Loading and garage doors
+ * are a darker shade of the wall; every other opening is glass.
+ */
+function patterned(colour: Node<"vec3">, glass: Node<"vec3">, kind: Node<"float">, along: Node<"float">, up: Node<"float">) {
+  const u = fract(along.add(0.5));
+  const v = fract(up);
+  const pane = select(
+    kind.lessThan(0.5),
+    0,
+    select(
+      kind.lessThan(1.5),
+      inside(u, v, 0.27, 0.73, 0.32, 0.8),
+      select(kind.lessThan(2.5), inside(u, v, 0.05, 0.95, 0.06, 0.78), select(kind.lessThan(3.5), inside(u, v, 0.05, 0.95, 0.05, 0.95), inside(u, v, 0.1, 0.9, 0, 0.82))),
+    ),
+  );
+  const opening = select(kind.greaterThan(3.5), colour.mul(0.6), glass);
+  return mix(colour, opening, pane);
+}
+
+/**
  * The buildings' material: lit like the terrain and the trees, so it takes
  * the preset's sun, fill and shadows (lighting.ts). Each surface takes its
  * colour from the instance's tints or the theme, and walls draw their
@@ -239,22 +261,8 @@ function buildingMaterial(theme: Theme): MeshLambertNodeMaterial {
   const trim = varying(unpack(tint.z));
   const colour = select(surface.lessThan(0.5), wall, select(surface.lessThan(1.5), roof, select(surface.lessThan(2.5), trim, select(surface.lessThan(3.5), glass, pave))));
   // Windows along the wall, in the lot's metres: the stretch of this instance along the wall's axis is taken out.
-  const kind = facade.w;
   const along = facade.x.mul(select(facade.z.lessThan(0.5), stretch.x, stretch.y));
-  const u = fract(along.add(0.5));
-  const v = fract(facade.y);
-  const pane = select(
-    kind.lessThan(0.5),
-    0,
-    select(
-      kind.lessThan(1.5),
-      inside(u, v, 0.27, 0.73, 0.32, 0.8),
-      select(kind.lessThan(2.5), inside(u, v, 0.05, 0.95, 0.06, 0.78), select(kind.lessThan(3.5), inside(u, v, 0.05, 0.95, 0.05, 0.95), inside(u, v, 0.1, 0.9, 0, 0.82))),
-    ),
-  );
-  // Loading and garage doors are a darker shade of the wall; every other opening is glass.
-  const opening = select(kind.greaterThan(3.5), wall.mul(0.6), glass);
-  m.colorNode = mix(colour, opening, pane);
+  m.colorNode = patterned(colour, glass, facade.w, along, facade.y);
   // A mask and not an opacity: three.js reads it in the shadow pass too, so a fading form's shadow fades with it.
   m.maskNode = kept(fade).greaterThan(0.5);
   return m;
@@ -266,6 +274,22 @@ function objectFade() {
     const f = (object as Object3D | null)?.userData["fade"];
     return typeof f === "number" ? f : 1;
   });
+}
+
+/**
+ * The simple form's material: lit as the full models are, each vertex in
+ * its surface's colour, with the same window pattern drawn from where it is
+ * on its facade (building-lod.ts, `mergeModels`).
+ */
+function simpleMaterial(theme: Theme): MeshLambertNodeMaterial {
+  const m = new MeshLambertNodeMaterial();
+  m.name = "simple buildings";
+  const fill = attribute<"vec4">("mergedColour", "vec4");
+  const facade = attribute<"vec2">("mergedFacade", "vec2");
+  const colour = sRGBTransferEOTF(fill.rgb) as unknown as typeof fill.rgb;
+  m.colorNode = patterned(colour, linear(theme.fixed.glass), fill.a.mul(255), facade.x, facade.y);
+  m.maskNode = kept(objectFade()).greaterThan(0.5);
+  return m;
 }
 
 /**
@@ -288,14 +312,13 @@ function flatMaterial(): MeshBasicNodeMaterial {
   return m;
 }
 
-/** The two instanced forms. */
-type Level = "full" | "simple";
-const LEVELS: readonly Level[] = ["full", "simple"];
-
-/** One form of a model: its geometry and the instanced mesh drawing the buildings in that form. */
-interface Instances {
+/** A model's geometry, its simplified copy and its extent, and the instanced mesh drawing the buildings near the camera that use it. */
+interface Model {
+  key: string;
   arrays: ModelArrays;
-  /** Null while no building drawn in this form uses the model. */
+  simple: ModelArrays;
+  extent: Extent;
+  /** Null while no building near the camera uses the model. */
   mesh: InstancedMesh | null;
   tints: InstancedBufferAttribute | null;
   scales: InstancedBufferAttribute | null;
@@ -305,19 +328,12 @@ interface Instances {
   count: number;
 }
 
-/** A model: its full and simplified forms, and its box, which the flat form draws the footprint of. */
-interface Model {
-  key: string;
-  extent: Extent;
-  levels: Record<Level, Instances>;
-}
-
 /** A building the layer knows. */
 interface Placed {
   id: number;
   model: Model;
-  /** Its instance in each of `model`'s meshes, or -1 while its chunk is not drawn in that form. */
-  slots: Record<Level, number>;
+  /** Its instance in `model`'s mesh, or -1 while its chunk is not drawn in full. */
+  slot: number;
   chunk: number;
   /** What the building is: its model and the row fields that decide where and how it is drawn. */
   sig: string;
@@ -338,16 +354,23 @@ interface Placed {
 interface Chunk {
   ids: Set<number>;
   fade: ChunkFade;
+  /** Whether it is held within the full form's reach, and within the simple form's. */
   near: boolean;
-  /** Whether every building in it has an instance in each instanced form. */
-  on: Record<Level, boolean>;
-  /** The fade number each form's instances were last written with. */
-  fades: Record<Level, number>;
-  flat: Mesh | null;
-  /** Whether the flat form has been built, and whether a building changed since. */
-  flatBuilt: boolean;
-  flatStale: boolean;
+  mid: boolean;
+  /** Whether every building in it has an instance. */
+  full: boolean;
+  /** The fade number its instances were last written with. */
+  fullFade: number;
+  /** Each merged form's mesh, whether it has been built, and whether a building changed since. */
+  mesh: Record<Merged, Mesh | null>;
+  built: Record<Merged, boolean>;
+  stale: Record<Merged, boolean>;
 }
+
+/** The forms drawn as one mesh per chunk. */
+type Merged = "simple" | "box" | "flat";
+const MERGED: readonly Merged[] = ["simple", "box", "flat"];
+const MERGED_NAMES: Record<Merged, string> = { simple: "simple buildings", box: "building boxes", flat: "building blocks" };
 
 function sameCorners(a: readonly number[], b: ArrayLike<number>): boolean {
   if (a.length !== b.length) return false;
@@ -392,7 +415,7 @@ function flatColour(type: number): number {
 }
 
 function zeroStats(): Record<BuildingForm, FormStats> {
-  return { full: { chunks: 0, buildings: 0, meshes: 0 }, simple: { chunks: 0, buildings: 0, meshes: 0 }, flat: { chunks: 0, buildings: 0, meshes: 0 } };
+  return { full: { chunks: 0, buildings: 0, meshes: 0 }, simple: { chunks: 0, buildings: 0, meshes: 0 }, box: { chunks: 0, buildings: 0, meshes: 0 }, flat: { chunks: 0, buildings: 0, meshes: 0 } };
 }
 
 export function createBuildingLayer(parent: Object3D, source: BuildingSource, theme: Theme, height: (x: number, z: number) => number): BuildingLayer {
@@ -400,6 +423,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   root.name = "buildings";
   parent.add(root);
   const material = buildingMaterial(theme);
+  const simples = simpleMaterial(theme);
   const flats = flatMaterial();
   const models = new Map<string, Model>();
   const placed = new Map<number, Placed>();
@@ -417,32 +441,30 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     pending: 0,
     lastWrites: 0,
     totalWrites: 0,
-    totalWritesByForm: { full: 0, simple: 0 },
     lastRebuilt: 0,
     totalRebuilt: 0,
     lastBuildMs: 0,
     lastMerged: 0,
     totalMerged: 0,
-    mergedBytes: 0,
+    mergedBytes: { simple: 0, box: 0, flat: 0 },
     forms: zeroStats(),
     fading: 0,
     waiting: 0,
   };
   /** Instances written since the layer was made, and by the reads since chunks started waiting. */
   let writes = 0;
-  const writesByForm: Record<Level, number> = { full: 0, simple: 0 };
   let batchWrites = 0;
   let batchRebuilt = 0;
   let batchMs = 0;
   let merged = 0;
-  let mergedBytes = 0;
+  const mergedBytes: Record<Merged, number> = { simple: 0, box: 0, flat: 0 };
 
   // Stand-ins drawn from the first frame: a single triangle of each
-  // material, scaled to nothing. Every model, full or simple, shares one
-  // material and its attributes, and every flat chunk the other, so the
-  // shaders all buildings need are compiled with the first frame, and again
-  // by the lighting before a switch to shadows (lighting.ts), not on the
-  // frame the first building or block arrives.
+  // material, scaled to nothing. Every model shares one material and its
+  // attributes, and every merged chunk one of the other two, so the shaders
+  // all buildings need are compiled with the first frame, and again by the
+  // lighting before a switch to shadows (lighting.ts), not on the frame the
+  // first building or merged chunk arrives.
   const warmArrays: ModelArrays = {
     positions: new Float32Array(9),
     normals: Float32Array.of(0, 1, 0, 0, 1, 0, 0, 1, 0),
@@ -454,10 +476,21 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   warm.mesh.setMatrixAt(0, new Matrix4().makeScale(0, 0, 0));
   warm.mesh.count = 1;
   root.add(warm.mesh);
-  const warmMerged: MergedArrays = { positions: new Float32Array(9), colours: new Uint8Array(12), indices: Uint32Array.of(0, 1, 2), centre: [0, 0, 0], radius: 0 };
-  const warmFlat = mergedMesh("warm-up blocks", warmMerged);
-  warmFlat.frustumCulled = false;
-  root.add(warmFlat);
+  const warmMerged: MergedArrays = {
+    positions: new Float32Array(9),
+    normals: Int8Array.of(0, 127, 0, 0, 0, 127, 0, 0, 0, 127, 0, 0),
+    colours: new Uint8Array(12),
+    facades: new Float32Array(6),
+    indices: Uint16Array.of(0, 1, 2),
+    centre: [0, 0, 0],
+    radius: 0,
+  };
+  const warmSimple = mergedMesh("warm-up simple buildings", warmMerged, "simple");
+  const warmFlat = mergedMesh("warm-up blocks", { ...warmMerged, normals: null, facades: null }, "flat");
+  for (const m of [warmSimple, warmFlat]) {
+    m.frustumCulled = false;
+    root.add(m);
+  }
 
   const matrix = new Matrix4();
   const position = new Vector3();
@@ -497,26 +530,30 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     return { mesh, tints, scales, fades };
   }
 
-  function mergedMesh(name: string, a: MergedArrays): Mesh {
+  function mergedMesh(name: string, a: MergedArrays, form: Merged): Mesh {
     const g = new BufferGeometry();
     g.setAttribute("position", new BufferAttribute(a.positions, 3));
+    if (a.normals) g.setAttribute("normal", new BufferAttribute(a.normals, 4, true));
     g.setAttribute("mergedColour", new BufferAttribute(a.colours, 4, true));
+    if (a.facades) g.setAttribute("mergedFacade", new BufferAttribute(a.facades, 2));
     g.setIndex(new BufferAttribute(a.indices, 1));
     // The flat form is lifted in the shader: the sphere allows for it.
-    g.boundingSphere = new Sphere(new Vector3(...a.centre), a.radius + 40);
-    const mesh = new Mesh(g, flats);
+    g.boundingSphere = new Sphere(new Vector3(...a.centre), a.radius + (form === "flat" ? 40 : 0));
+    // Simple buildings and boxes share one vertex format and one material.
+    const mesh = new Mesh(g, form === "flat" ? flats : simples);
     mesh.name = name;
     mesh.matrixAutoUpdate = false;
     mesh.userData["fade"] = 1;
-    // Nothing in the city band casts a shadow. Over the cells, which draw at 1.5, and under the roads at 2.
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    mesh.renderOrder = 1.6;
+    if (form !== "flat") {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    } else {
+      // Nothing in the city band casts a shadow. Over the cells, which draw at 1.5, and under the roads at 2.
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.renderOrder = 1.6;
+    }
     return mesh;
-  }
-
-  function instances(arrays: ModelArrays): Instances {
-    return { arrays, mesh: null, tints: null, scales: null, fades: null, ids: new Int32Array(0), count: 0 };
   }
 
   function modelFor(info: BuildingInfo): Model {
@@ -527,15 +564,15 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     let m = models.get(key);
     if (m) return m;
     const arrays = theme.model(typeId, model, info.width, theme.modelDepth(typeId));
-    m = { key, extent: modelExtent(arrays.positions, arrays.surfaces, SURFACE.paving), levels: { full: instances(arrays), simple: instances(simplify(arrays, BUILDINGS.simplify)) } };
+    m = { key, arrays, simple: simplify(arrays, BUILDINGS.simplify), extent: modelExtent(arrays.positions, arrays.surfaces, SURFACE.paving), mesh: null, tints: null, scales: null, fades: null, ids: new Int32Array(0), count: 0 };
     models.set(key, m);
     return m;
   }
 
-  /** Makes a form's mesh of a model, or doubles its room for instances: a new mesh with the old one's instances copied over. */
-  function grow(key: string, level: Level, m: Instances): void {
+  /** Makes a model's mesh, or doubles its room for instances: a new mesh with the old one's instances copied over. */
+  function grow(m: Model): void {
     const capacity = Math.max(FIRST_CAPACITY, m.ids.length * 2);
-    const next = meshFor(level === "full" ? key : `${key} simple`, m.arrays, capacity);
+    const next = meshFor(m.key, m.arrays, capacity);
     const ids = new Int32Array(capacity).fill(-1);
     if (m.mesh && m.tints && m.scales && m.fades) {
       next.mesh.instanceMatrix.array.set(m.mesh.instanceMatrix.array);
@@ -556,8 +593,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     m.ids = ids;
   }
 
-  /** Frees a form's mesh of a model once no building drawn in that form uses it. The model's arrays are kept. */
-  function shrink(m: Instances): void {
+  /** Frees a model's mesh once no building near the camera uses it. The model's arrays are kept. */
+  function shrink(m: Model): void {
     if (m.count > 0 || !m.mesh) return;
     m.mesh.removeFromParent();
     m.mesh.geometry.dispose();
@@ -586,92 +623,96 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     a.addUpdateRange(start, count);
   }
 
-  function touched(m: Instances, level: Level, slot: number): void {
+  function touched(m: Model, slot: number): void {
     if (!m.mesh || !m.tints || !m.scales || !m.fades) return;
     dirtyRange(m.mesh.instanceMatrix, slot * 16, 16);
     dirtyRange(m.tints, slot * 3, 3);
     dirtyRange(m.scales, slot * 2, 2);
     dirtyRange(m.fades, slot, 1);
     writes++;
-    writesByForm[level]++;
   }
 
-  /** Writes a building's instance in one form: the same matrix, tints and stretch in both, so the forms stand in the same place. */
-  function write(p: Placed, level: Level): void {
-    const m = p.model.levels[level];
-    const slot = p.slots[level];
-    if (!m.mesh || !m.tints || !m.scales || !m.fades || slot < 0) return;
+  function write(p: Placed): void {
+    const m = p.model;
+    if (!m.mesh || !m.tints || !m.scales || !m.fades || p.slot < 0) return;
     position.set(p.place.x, p.place.y, p.place.z);
     turn.setFromAxisAngle(up, p.place.angle);
     size.set(p.sx, 1, p.sz);
     matrix.compose(position, turn, size);
-    m.mesh.setMatrixAt(slot, matrix);
-    m.tints.setXYZ(slot, packed(p.tint.wall), packed(p.tint.roof), packed(p.tint.trim));
-    m.scales.setXY(slot, p.sx, p.sz);
-    m.fades.setX(slot, chunkAt(p.chunk).fades[level]);
-    touched(m, level, slot);
+    m.mesh.setMatrixAt(p.slot, matrix);
+    m.tints.setXYZ(p.slot, packed(p.tint.wall), packed(p.tint.roof), packed(p.tint.trim));
+    m.scales.setXY(p.slot, p.sx, p.sz);
+    m.fades.setX(p.slot, chunkAt(p.chunk).fullFade);
+    touched(m, p.slot);
   }
 
-  /** Gives a building an instance in its model's mesh for one form. */
-  function addInstance(p: Placed, level: Level): void {
-    const m = p.model.levels[level];
-    if (!m.mesh || m.count === m.ids.length) grow(p.model.key, level, m);
-    const slot = m.count++;
-    p.slots[level] = slot;
+  /** Gives a building an instance in its model's mesh. */
+  function addInstance(p: Placed): void {
+    const m = p.model;
+    if (!m.mesh || m.count === m.ids.length) grow(m);
+    p.slot = m.count++;
     if (m.mesh) m.mesh.count = m.count;
-    m.ids[slot] = p.id;
-    write(p, level);
+    m.ids[p.slot] = p.id;
+    write(p);
   }
 
-  /** Takes a building's instance in one form away: the last instance moves into the gap. */
-  function removeInstance(p: Placed, level: Level): void {
-    const m = p.model.levels[level];
-    const slot = p.slots[level];
-    if (slot < 0 || !m.mesh || !m.tints || !m.scales || !m.fades) {
-      p.slots[level] = -1;
+  /** Takes a building's instance away: the last instance moves into the gap. */
+  function removeInstance(p: Placed): void {
+    const m = p.model;
+    if (p.slot < 0 || !m.mesh || !m.tints || !m.scales || !m.fades) {
+      p.slot = -1;
       return;
     }
     const last = m.count - 1;
-    if (slot !== last) {
+    if (p.slot !== last) {
       const moved = m.ids[last] ?? -1;
-      m.mesh.instanceMatrix.array.copyWithin(slot * 16, last * 16, last * 16 + 16);
-      m.tints.array.copyWithin(slot * 3, last * 3, last * 3 + 3);
-      m.scales.array.copyWithin(slot * 2, last * 2, last * 2 + 2);
-      m.fades.array.copyWithin(slot, last, last + 1);
-      m.ids[slot] = moved;
+      m.mesh.instanceMatrix.array.copyWithin(p.slot * 16, last * 16, last * 16 + 16);
+      m.tints.array.copyWithin(p.slot * 3, last * 3, last * 3 + 3);
+      m.scales.array.copyWithin(p.slot * 2, last * 2, last * 2 + 2);
+      m.fades.array.copyWithin(p.slot, last, last + 1);
+      m.ids[p.slot] = moved;
       const other = placed.get(moved);
-      if (other) other.slots[level] = slot;
-      touched(m, level, slot);
+      if (other) other.slot = p.slot;
+      touched(m, p.slot);
     }
     m.ids[last] = -1;
     m.count = last;
     m.mesh.count = last;
-    p.slots[level] = -1;
+    p.slot = -1;
     shrink(m);
   }
 
   function chunkAt(c: number): Chunk {
     let ch = chunks.get(c);
     if (!ch) {
-      ch = { ids: new Set(), fade: { shown: null, next: null, t: 0 }, near: false, on: { full: false, simple: false }, fades: { full: 0, simple: 0 }, flat: null, flatBuilt: false, flatStale: false };
+      ch = {
+        ids: new Set(),
+        fade: { shown: null, next: null, t: 0 },
+        near: false,
+        mid: false,
+        full: false,
+        fullFade: 0,
+        mesh: { simple: null, box: null, flat: null },
+        built: { simple: false, box: false, flat: false },
+        stale: { simple: false, box: false, flat: false },
+      };
       chunks.set(c, ch);
     }
     return ch;
   }
 
-  /** A building in chunk `c` came, went or moved: its flat form is out of date. */
+  /** A building in chunk `c` came, went or moved: its merged forms are out of date. */
   function staleChunk(c: number): void {
-    chunkAt(c).flatStale = true;
+    const ch = chunkAt(c);
+    for (const form of MERGED) ch.stale[form] = true;
   }
 
-  /** Brings a building's instances in line with its chunk: one in each form the chunk has filled, none in the others. */
+  /** Brings a building's instance in line with its chunk: one while the chunk is drawn in full, none otherwise. */
   function syncInstance(p: Placed): void {
-    for (const level of LEVELS) {
-      const want = chunkAt(p.chunk).on[level];
-      if (p.slots[level] >= 0 && !want) removeInstance(p, level);
-      if (want && p.slots[level] < 0) addInstance(p, level);
-      else if (want) write(p, level);
-    }
+    const want = chunkAt(p.chunk).full;
+    if (p.slot >= 0 && !want) removeInstance(p);
+    if (want && p.slot < 0) addInstance(p);
+    else if (want) write(p);
   }
 
   /** Files a lot by its corners' chunks, and notes them for the overlay and the decoration. */
@@ -694,7 +735,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   function remove(id: number): void {
     const p = placed.get(id);
     if (!p) return;
-    for (const level of LEVELS) removeInstance(p, level);
+    removeInstance(p);
     chunkAt(p.chunk).ids.delete(id);
     staleChunk(p.chunk);
     unfileLot(id, p.lotChunks);
@@ -713,7 +754,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     const corners = info.corners ? [...info.corners] : [];
     const lots = cornerChunks(corners);
     fileLot(info.id, lots);
-    const p: Placed = { id: info.id, model, slots: { full: -1, simple: -1 }, chunk, sig, lotChunks: lots, corners, tint, place, ...placeInfo(info, place), flat: flatColour(info.type) };
+    const p: Placed = { id: info.id, model, slot: -1, chunk, sig, lotChunks: lots, corners, tint, place, ...placeInfo(info, place), flat: flatColour(info.type) };
     placed.set(info.id, p);
     chunkAt(chunk).ids.add(info.id);
     staleChunk(chunk);
@@ -768,88 +809,114 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     for (const id of ch.ids) {
       const p = placed.get(id);
       if (!p) continue;
-      items.push({ extent: p.model.extent, x: p.place.x, y: p.place.y, z: p.place.z, angle: p.place.angle, sx: p.sx, sz: p.sz, flat: p.flat });
+      items.push({
+        model: p.model.simple,
+        extent: p.model.extent,
+        x: p.place.x,
+        y: p.place.y,
+        z: p.place.z,
+        angle: p.place.angle,
+        sx: p.sx,
+        sz: p.sz,
+        wall: p.tint.wall,
+        roof: p.tint.roof,
+        trim: p.tint.trim,
+        flat: p.flat,
+      });
     }
     return items;
   }
 
-  function dropFlat(ch: Chunk): void {
-    const mesh = ch.flat;
+  /** Frees a chunk's merged mesh for `form`: it is built again before it is drawn. */
+  function dropMerged(ch: Chunk, form: Merged): void {
+    ch.built[form] = false;
+    const mesh = ch.mesh[form];
     if (!mesh) return;
-    mergedBytes -= Number(mesh.userData["bytes"] ?? 0);
+    mergedBytes[form] -= Number(mesh.userData["bytes"] ?? 0);
     mesh.removeFromParent();
     mesh.geometry.dispose();
-    ch.flat = null;
+    ch.mesh[form] = null;
   }
 
-  /** Builds a chunk's flat mesh from its buildings as they are now. */
-  function buildFlat(c: number, ch: Chunk): void {
-    dropFlat(ch);
+  /** Builds a chunk's merged mesh for `form` from its buildings as they are now. */
+  function buildMerged(c: number, ch: Chunk, form: Merged): void {
+    dropMerged(ch, form);
     const items = itemsOf(ch);
     if (items.length > 0) {
       const ci = c % CHUNKS_PER_SIDE;
       const cj = (c - ci) / CHUNKS_PER_SIDE;
-      const arrays = mergeFlats(items);
-      const mesh = mergedMesh(`building blocks ${ci},${cj}`, arrays);
-      mesh.visible = draws(ch.fade, "flat");
-      mesh.userData["fade"] = fadeOf(ch.fade, "flat");
-      mesh.userData["bytes"] = arrays.positions.byteLength + arrays.colours.byteLength + arrays.indices.byteLength;
-      mergedBytes += Number(mesh.userData["bytes"]);
+      const arrays = form === "simple" ? mergeModels(items, theme.fixed) : form === "box" ? mergeBoxes(items) : mergeFlats(items);
+      const mesh = mergedMesh(`${MERGED_NAMES[form]} ${ci},${cj}`, arrays, form);
+      const bytes = arrays.positions.byteLength + (arrays.normals?.byteLength ?? 0) + arrays.colours.byteLength + (arrays.facades?.byteLength ?? 0) + arrays.indices.byteLength;
+      mesh.userData["bytes"] = bytes;
+      mergedBytes[form] += bytes;
+      mesh.visible = draws(ch.fade, form);
+      mesh.userData["fade"] = fadeOf(ch.fade, form);
       root.add(mesh);
-      ch.flat = mesh;
+      ch.mesh[form] = mesh;
     }
-    ch.flatBuilt = true;
-    ch.flatStale = false;
+    ch.built[form] = true;
+    ch.stale[form] = false;
     merged++;
   }
 
-  /** Gives every building in a chunk an instance in one form, so it can be drawn in it. */
-  function fill(ch: Chunk, level: Level): void {
-    ch.on[level] = true;
+  /**
+   * Whether a chunk keeps a merged form it is not drawing: the simple form
+   * only within its reach, boxes only beyond it, so the simple form's
+   * memory grows with the radius and not the city. Flat blocks are kept
+   * everywhere; they are small.
+   */
+  function keeps(ch: Chunk, form: Merged): boolean {
+    if (form === "simple") return ch.mid;
+    if (form === "box") return !ch.mid;
+    return true;
+  }
+
+  /** Gives every building in a chunk an instance, so it can be drawn in full. */
+  function fill(ch: Chunk): void {
+    ch.full = true;
     for (const id of ch.ids) {
       const p = placed.get(id);
-      if (p && p.slots[level] < 0) addInstance(p, level);
+      if (p && p.slot < 0) addInstance(p);
     }
   }
 
-  /** Takes every instance of a chunk in one form away: that form is freed. */
-  function free(ch: Chunk, level: Level): void {
-    ch.on[level] = false;
+  /** Takes every instance of a chunk away: its full form is freed. */
+  function free(ch: Chunk): void {
+    ch.full = false;
     for (const id of ch.ids) {
       const p = placed.get(id);
-      if (p) removeInstance(p, level);
+      if (p) removeInstance(p);
     }
   }
 
   /**
-   * Whether a chunk can draw `form` now. An instanced form is ready once
-   * the chunk is filled. A flat form that a building changed since it was
-   * built is not ready to fade in, though one already drawn stays drawn
-   * until it is built again.
+   * Whether a chunk can draw `form` now. A merged form that a building
+   * changed since it was built is not ready to fade in, though one already
+   * drawn stays drawn until it is built again.
    */
   function ready(ch: Chunk, form: BuildingForm): boolean {
-    if (form !== "flat") return ch.on[form];
-    return ch.flatBuilt && (!ch.flatStale || draws(ch.fade, "flat"));
+    if (form === "full") return ch.full;
+    return ch.built[form] && (!ch.stale[form] || draws(ch.fade, form));
   }
 
-  /** Writes a chunk's fade into its flat mesh and, when it changed, into its instances. */
+  /** Writes a chunk's fade into its merged meshes and, when it changed, into its instances. */
   function showFade(ch: Chunk): void {
-    if (ch.flat) {
-      ch.flat.visible = draws(ch.fade, "flat");
-      ch.flat.userData["fade"] = fadeOf(ch.fade, "flat");
+    for (const form of MERGED) {
+      const mesh = ch.mesh[form];
+      if (!mesh) continue;
+      mesh.visible = draws(ch.fade, form);
+      mesh.userData["fade"] = fadeOf(ch.fade, form);
     }
-    for (const level of LEVELS) {
-      const f = fadeOf(ch.fade, level);
-      if (f === ch.fades[level]) continue;
-      ch.fades[level] = f;
-      for (const id of ch.ids) {
-        const p = placed.get(id);
-        const m = p?.model.levels[level];
-        const slot = p?.slots[level] ?? -1;
-        if (!m?.fades || slot < 0) continue;
-        m.fades.setX(slot, f);
-        dirtyRange(m.fades, slot, 1);
-      }
+    const f = fadeOf(ch.fade, "full");
+    if (f === ch.fullFade) return;
+    ch.fullFade = f;
+    for (const id of ch.ids) {
+      const p = placed.get(id);
+      const m = p?.model;
+      if (!p || !m?.fades || p.slot < 0) continue;
+      m.fades.setX(p.slot, f);
+      dirtyRange(m.fades, p.slot, 1);
     }
   }
 
@@ -859,43 +926,50 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     for (const [c, ch] of chunks) {
       if (ch.ids.size === 0) {
         // Every building gone: nothing left to draw or fade.
-        for (const level of LEVELS) free(ch, level);
-        dropFlat(ch);
+        free(ch);
+        for (const form of MERGED) dropMerged(ch, form);
         chunks.delete(c);
         continue;
       }
       ch.near = isNear(c, camera.x, camera.z, ch.near, BUILDINGS.fullRadius, BUILDINGS.fullHysteresis);
-      const want = formFor(view.band, ch.near);
+      ch.mid = isNear(c, camera.x, camera.z, ch.mid, BUILDINGS.simpleRadius, BUILDINGS.simpleHysteresis);
+      const want = formFor(view.band, ch.near, ch.mid);
       const d = chunkDistance(c, camera.x, camera.z);
-      if (!ready(ch, want) || (want === "flat" && ch.flatStale)) needs.push({ c, ch, d, form: want });
+      if (!ready(ch, want)) needs.push({ c, ch, d, form: want });
+      else if (want !== "full" && ch.stale[want]) needs.push({ c, ch, d, form: want });
     }
     needs.sort((a, b) => a.d - b.d || a.c - b.c);
     let done = 0;
     for (const n of needs) {
       if (done > 0 && performance.now() - start >= budgetMs) break;
-      if (n.form === "flat") buildFlat(n.c, n.ch);
-      else fill(n.ch, n.form);
+      if (n.form === "full") fill(n.ch);
+      else buildMerged(n.c, n.ch, n.form);
       done++;
     }
     let fading = 0;
     let waiting = 0;
     for (const ch of chunks.values()) {
-      const want = formFor(view.band, ch.near);
+      const want = formFor(view.band, ch.near, ch.mid);
       const { released } = stepFade(ch.fade, want, (form) => ready(ch, form), view.seconds, BUILDINGS.fadeSeconds);
-      // A form no longer drawn frees its instances, and so does one filled for a fade that never started, because another was under way and then the camera left.
-      for (const level of LEVELS) if (ch.on[level] && !draws(ch.fade, level) && (released === level || want !== level)) free(ch, level);
+      // A chunk filled for a fade that never started, because another was under way and then the camera left, is freed too.
+      if (ch.full && !draws(ch.fade, "full") && (released === "full" || want !== "full")) free(ch);
+      // A merged form the chunk no longer keeps is freed once it is not drawn.
+      for (const form of MERGED) if (ch.built[form] && !keeps(ch, form) && !draws(ch.fade, form)) dropMerged(ch, form);
       showFade(ch);
       if (ch.fade.next !== null) fading++;
       else if (ch.fade.shown !== want) waiting++;
     }
-    // With time left, the flat forms not drawn are built ahead, or again if a building changed, nearest first, so a zoom out finds them ready.
+    // With time left, the merged forms a chunk keeps but does not draw are built ahead, or again if a building changed, nearest first, so a zoom finds them ready.
     if (performance.now() - start < budgetMs) {
-      const ahead: { c: number; ch: Chunk; d: number }[] = [];
-      for (const [c, ch] of chunks) if (!ch.flatBuilt || ch.flatStale) ahead.push({ c, ch, d: chunkDistance(c, camera.x, camera.z) });
-      ahead.sort((a, b) => a.d - b.d || a.c - b.c);
+      const ahead: { c: number; ch: Chunk; d: number; form: Merged }[] = [];
+      for (const [c, ch] of chunks) {
+        const d = chunkDistance(c, camera.x, camera.z);
+        for (const form of MERGED) if (keeps(ch, form) && (!ch.built[form] || ch.stale[form])) ahead.push({ c, ch, d, form });
+      }
+      ahead.sort((a, b) => a.d - b.d || a.c - b.c || (a.form < b.form ? -1 : 1));
       for (const a of ahead) {
         if (performance.now() - start >= budgetMs) break;
-        buildFlat(a.c, a.ch);
+        buildMerged(a.c, a.ch, a.form);
       }
     }
     stats = { ...stats, fading, waiting };
@@ -905,22 +979,21 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   function count(frustum: Frustum | undefined): Record<BuildingForm, FormStats> {
     const out = zeroStats();
     for (const m of models.values()) {
-      for (const level of LEVELS) {
-        const inst = m.levels[level];
-        if (!inst.mesh || inst.count === 0) continue;
-        out[level].meshes++;
-        out[level].buildings += inst.count;
-      }
+      if (!m.mesh || m.count === 0) continue;
+      out.full.meshes++;
+      out.full.buildings += m.count;
     }
     for (const ch of chunks.values()) {
-      for (const level of LEVELS) if (draws(ch.fade, level)) out[level].chunks++;
-      const mesh = ch.flat;
-      if (!mesh?.visible) continue;
-      const bs = mesh.geometry.boundingSphere;
-      if (frustum && bs && !frustum.intersectsSphere(sphere.copy(bs))) continue;
-      out.flat.chunks++;
-      out.flat.meshes++;
-      out.flat.buildings += ch.ids.size;
+      if (draws(ch.fade, "full")) out.full.chunks++;
+      for (const form of MERGED) {
+        const mesh = ch.mesh[form];
+        if (!mesh?.visible) continue;
+        const bs = mesh.geometry.boundingSphere;
+        if (frustum && bs && !frustum.intersectsSphere(sphere.copy(bs))) continue;
+        out[form].chunks++;
+        out[form].meshes++;
+        out[form].buildings += ch.ids.size;
+      }
     }
     return out;
   }
@@ -982,10 +1055,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         models: models.size,
         pending: dirty.size,
         totalWrites: writes,
-        totalWritesByForm: { ...writesByForm },
         lastMerged: merged > mergedBefore ? merged - mergedBefore : stats.lastMerged,
         totalMerged: merged,
-        mergedBytes,
+        mergedBytes: { ...mergedBytes },
         forms: count(view.frustum),
       };
       if (dirty.size === 0 && wasDirty) {
@@ -1030,18 +1102,20 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     formOf: (chunk) => chunks.get(chunk)?.fade.shown ?? null,
     stats: () => stats,
     dispose() {
-      warm.mesh.geometry.dispose();
-      warm.mesh.dispose();
-      warmFlat.geometry.dispose();
-      for (const m of models.values()) {
-        for (const level of LEVELS) {
-          m.levels[level].mesh?.geometry.dispose();
-          m.levels[level].mesh?.dispose();
-        }
+      for (const m of [warm.mesh, warmSimple, warmFlat]) {
+        m.geometry.dispose();
+        if (m instanceof InstancedMesh) m.dispose();
       }
-      for (const ch of chunks.values()) dropFlat(ch);
+      for (const m of models.values()) {
+        m.mesh?.geometry.dispose();
+        m.mesh?.dispose();
+      }
+      for (const ch of chunks.values()) {
+        for (const form of MERGED) dropMerged(ch, form);
+      }
       root.removeFromParent();
       material.dispose();
+      simples.dispose();
       flats.dispose();
     },
   };

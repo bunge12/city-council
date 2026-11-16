@@ -49,8 +49,9 @@ test("frame time, draw calls and memory in each band, at Low and at Balanced", a
         const s = view.buildingStats();
         return { draws: view.renderer.info.render.drawCalls, triangles: view.renderer.info.render.triangles, forms: s?.forms, mergedBytes: s?.mergedBytes };
       });
-      // The heap leaves out typed-array storage, so the flat meshes' geometry is reported on its own.
-      bands[band] = { frameMs, drawCalls: info.draws, triangles: info.triangles, forms: info.forms, memoryMb: { ...(await memory(page)), flatMb: mb(info.mergedBytes ?? 0) } };
+      // The heap leaves out typed-array storage, so the merged meshes' geometry is reported on its own.
+      const merged = { simpleMb: mb(info.mergedBytes?.simple ?? 0), boxMb: mb(info.mergedBytes?.box ?? 0), flatMb: mb(info.mergedBytes?.flat ?? 0) };
+      bands[band] = { frameMs, drawCalls: info.draws, triangles: info.triangles, forms: info.forms, memoryMb: { ...(await memory(page)), merged } };
       await canvasShot(page, testInfo, `scale city with buildings, ${band} band, ${preset}`);
     }
     report[preset] = bands;
@@ -60,14 +61,15 @@ test("frame time, draw calls and memory in each band, at Low and at Balanced", a
   writeFileSync("test-results/building-lod-report.json", `${JSON.stringify(report, null, 2)}\n`);
   await testInfo.attach("building LOD report", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
   for (const preset of ["low", "balanced"] as const) {
-    const bands = report[preset] as Record<string, { frameMs: number; forms: Record<Form, FormStats>; memoryMb: { pageMb: number; workerMb: number | null; flatMb: number } }>;
+    const bands = report[preset] as Record<string, { frameMs: number; forms: Record<Form, FormStats>; memoryMb: { pageMb: number; workerMb: number | null; merged: { simpleMb: number; boxMb: number; flatMb: number } } }>;
     // The far bands draw no building in full, and the city band one cheap mesh per chunk at most.
     expect(bands["district"]?.forms.full.buildings).toBe(0);
     expect(bands["city"]?.forms.full.buildings).toBe(0);
     expect(bands["city"]?.forms.simple.meshes).toBe(0);
+    expect(bands["city"]?.forms.box.meshes).toBe(0);
     expect(bands["city"]?.forms.flat.meshes).toBeLessThanOrEqual(CHUNKS_PER_SIDE * CHUNKS_PER_SIDE);
     // The PRD budgets 500 MB for the tab at full size.
     const m = bands["city"]?.memoryMb;
-    expect((m?.pageMb ?? 0) + (m?.workerMb ?? 0) + (m?.flatMb ?? 0)).toBeLessThan(500);
+    expect((m?.pageMb ?? 0) + (m?.workerMb ?? 0) + (m?.merged.simpleMb ?? 0) + (m?.merged.boxMb ?? 0) + (m?.merged.flatMb ?? 0)).toBeLessThan(500);
   }
 });

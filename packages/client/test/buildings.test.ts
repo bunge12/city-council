@@ -319,20 +319,41 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     for (let k = 0; k < frames; k++) layer.update(camera, 1000, { band, seconds });
   };
 
-  it("draws chunks near the camera in full and the rest simplified in the street band, simplified in the district band and blocks in the city band", () => {
+  it("draws chunks near the camera in full, simplified within the simple form's reach and boxes beyond, and blocks in the city band", () => {
     const { source, put } = fakeSource();
     const here = put(1, 4004, 4004);
-    const far = put(2, 9004, 9004);
+    const mid = put(2, 5004, 4004);
+    const far = put(3, 9004, 9004);
     const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
     layer.reset();
     run(layer, near, "street");
-    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["full", "simple"]);
-    expect(layer.stats().forms).toMatchObject({ full: { buildings: 1, meshes: 1 }, simple: { buildings: 1, meshes: 1 }, flat: { buildings: 0, meshes: 0 } });
+    expect([layer.formOf(here), layer.formOf(mid), layer.formOf(far)]).toEqual(["full", "simple", "box"]);
+    expect(layer.stats().forms).toMatchObject({ full: { buildings: 1, meshes: 1 }, simple: { buildings: 1, meshes: 1 }, box: { buildings: 1, meshes: 1 }, flat: { buildings: 0, meshes: 0 } });
     run(layer, near, "district");
-    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["simple", "simple"]);
+    expect([layer.formOf(here), layer.formOf(mid), layer.formOf(far)]).toEqual(["simple", "simple", "box"]);
     run(layer, near, "city");
-    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["flat", "flat"]);
-    expect(layer.stats().forms).toMatchObject({ full: { buildings: 0, meshes: 0 }, simple: { meshes: 0 }, flat: { buildings: 2, meshes: 2 } });
+    expect([layer.formOf(here), layer.formOf(mid), layer.formOf(far)]).toEqual(["flat", "flat", "flat"]);
+    expect(layer.stats().forms).toMatchObject({ full: { buildings: 0, meshes: 0 }, simple: { meshes: 0 }, box: { meshes: 0 }, flat: { buildings: 3, meshes: 3 } });
+    layer.dispose();
+  });
+
+  it("frees a chunk's simplified buildings once it leaves the simple form's reach, so their memory follows the camera", () => {
+    const { source, put } = fakeSource();
+    const here = put(1, 4004, 4004);
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "district");
+    expect(layer.formOf(here)).toBe("simple");
+    expect(layer.stats().mergedBytes.simple).toBeGreaterThan(0);
+    // Far away the chunk draws boxes, and its simplified buildings are freed once they have faded out.
+    run(layer, { x: 9000, z: 9000 }, "district");
+    expect(layer.formOf(here)).toBe("box");
+    expect(layer.stats().mergedBytes.simple).toBe(0);
+    expect(layer.stats().mergedBytes.box).toBeGreaterThan(0);
+    // Back again: built again and drawn, and the boxes freed.
+    run(layer, near, "district");
+    expect(layer.formOf(here)).toBe("simple");
+    expect(layer.stats().mergedBytes.box).toBe(0);
     layer.dispose();
   });
 
@@ -362,9 +383,9 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     expect(layer.stats().forms.full.buildings).toBe(20);
     run(layer, { x: 9000, z: 9000 }, "street");
     expect(layer.stats().forms.full).toEqual({ chunks: 0, buildings: 0, meshes: 0 });
-    // The colours and the simple form stay: only the full form is freed.
+    // The colours stay and the chunk, now far, draws boxes: only the full form is freed.
     expect(layer.tintOf(3)).not.toBeNull();
-    expect(layer.stats().forms.simple.buildings).toBe(20);
+    expect(layer.stats().forms.box.buildings).toBe(20);
     run(layer, near, "street");
     expect(layer.stats().forms.full.buildings).toBe(20);
     layer.dispose();
@@ -391,7 +412,7 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     layer.dispose();
   });
 
-  it("builds a chunk's flat mesh again only when a building in it changes", () => {
+  it("builds a chunk's merged meshes again only when a building in it changes", () => {
     const { source, rows, put } = fakeSource();
     const a = put(1, 4004, 4004);
     const b = put(2, 9004, 9004);
@@ -399,92 +420,23 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     layer.reset();
     run(layer, near, "district");
     const built = layer.stats().totalMerged;
-    // The blocks of both chunks, built once, ahead of a zoom out.
-    expect(built).toBe(2);
-    // Moving the camera and changing band builds nothing again.
-    run(layer, { x: 9000, z: 9000 }, "city");
+    // Two forms of each chunk, built once: simple buildings for the near one, boxes for the far one, and the blocks of both ahead of a zoom out.
+    expect(built).toBe(4);
+    // Changing band builds nothing again.
+    run(layer, near, "city");
     run(layer, near, "district");
     expect(layer.stats().totalMerged).toBe(built);
     // A building gone from one chunk and one come to another: that chunk's
-    // blocks are built again, and the emptied chunk's are dropped. Nothing
-    // is built again when the band changes after.
+    // simple buildings and blocks are built again, and the emptied chunk's meshes are
+    // dropped. Nothing is built again when the band changes after.
     rows.delete(2);
     put(3, 4040, 4004);
     layer.apply([a, b]);
     run(layer, near, "district");
     expect(layer.formOf(b)).toBeNull();
-    expect(layer.stats().totalMerged).toBe(built + 1);
+    expect(layer.stats().totalMerged).toBe(built + 2);
     run(layer, near, "city");
-    expect(layer.stats().totalMerged).toBe(built + 1);
-    layer.dispose();
-  });
-
-  it("draws a building's simple form where its full form stands, in its colours, from the simplified model", () => {
-    const { source, put } = fakeSource();
-    // A house with a porch, whose posts and floor the simple form leaves out.
-    const home = BUILDING_TYPES.findIndex((t) => t.id === "single-family-home");
-    put(1, 4004, 4004, 0, home);
-    const scene = new Scene();
-    const layer = createBuildingLayer(scene, source, theme, () => 0);
-    layer.reset();
-    run(layer, near, "street", 5, 0.016);
-    // One frame into the fade to the district band: both forms are drawn.
-    run(layer, near, "district", 1, 0.016);
-    type Inst = { count: number; instanceMatrix: { array: Float32Array }; geometry: { getAttribute(n: string): { array: Float32Array; count: number } } };
-    const meshes = new Map<string, Inst>();
-    scene.traverse((o) => {
-      if (o.name.startsWith("buildings single-family-home/")) meshes.set(o.name.endsWith(" simple") ? "simple" : "full", o as unknown as Inst);
-    });
-    const full = meshes.get("full");
-    const simple = meshes.get("simple");
-    expect(full?.count).toBe(1);
-    expect(simple?.count).toBe(1);
-    expect([...(simple?.instanceMatrix.array ?? []).slice(0, 16)]).toEqual([...(full?.instanceMatrix.array ?? []).slice(0, 16)]);
-    expect([...(simple?.geometry.getAttribute("buildingTint").array ?? []).slice(0, 3)]).toEqual([...(full?.geometry.getAttribute("buildingTint").array ?? []).slice(0, 3)]);
-    expect([...(simple?.geometry.getAttribute("buildingScale").array ?? []).slice(0, 2)]).toEqual([...(full?.geometry.getAttribute("buildingScale").array ?? []).slice(0, 2)]);
-    // Fewer vertices than the full model, but far more than a box: it is the model's own shape.
-    const vertices = (m: Inst | undefined) => m?.geometry.getAttribute("position").count ?? 0;
-    expect(vertices(simple)).toBeLessThan(vertices(full));
-    expect(vertices(simple)).toBeGreaterThan(24);
-    layer.dispose();
-  });
-
-  it("keeps both forms' instances in step when a building of a shared model goes from the middle", () => {
-    const { source, rows, put } = fakeSource();
-    const here = put(1, 4004, 4004);
-    put(2, 4040, 4004);
-    put(3, 4076, 4004);
-    const scene = new Scene();
-    const layer = createBuildingLayer(scene, source, theme, () => 0);
-    layer.reset();
-    run(layer, near, "street", 5, 0.016);
-    // One frame into the fade: every building has an instance in both forms.
-    run(layer, near, "district", 1, 0.016);
-    type Inst = { name: string; count: number; instanceMatrix: { array: Float32Array }; geometry: { getAttribute(n: string): { array: Float32Array } } };
-    const drawn = () => {
-      const out: Record<string, string[]> = {};
-      scene.traverse((o) => {
-        if (!o.name.startsWith("buildings single-family-home/")) return;
-        const m = o as unknown as Inst;
-        const tints = m.geometry.getAttribute("buildingTint").array;
-        const list: string[] = [];
-        for (let k = 0; k < m.count; k++) list.push(`${Math.round(m.instanceMatrix.array[k * 16 + 12] ?? 0)},${Math.round(m.instanceMatrix.array[k * 16 + 14] ?? 0)}:${tints[k * 3]}`);
-        out[o.name.endsWith(" simple") ? "simple" : "full"] = list.sort();
-      });
-      return out;
-    };
-    const before = drawn();
-    expect(before["full"]).toHaveLength(3);
-    expect(before["simple"]).toEqual(before["full"]);
-    // The first building added holds slot 0 in both meshes: the last moves into its gap in each.
-    rows.delete(1);
-    layer.apply([here]);
-    run(layer, near, "district", 1, 0.016);
-    const after = drawn();
-    expect(after["simple"]).toHaveLength(2);
-    expect(after["simple"]).toEqual(after["full"]);
-    // The two left are drawn as they were, in both forms.
-    for (const e of after["simple"] ?? []) expect(before["simple"]).toContain(e);
+    expect(layer.stats().totalMerged).toBe(built + 2);
     layer.dispose();
   });
 
