@@ -40,6 +40,12 @@ function newCity(age = 0): { bytes: Buffer; tick: number; buildings: number } {
   const { state } = builtFixtureCity();
   state.tick = 1000;
   state.buildings.builtAt.fill(state.tick - age);
+  // No zoning left, so the grower builds nothing new while the city runs. A
+  // slow runner can take many game days to land a pause, and a building grown
+  // just before it would still be under construction when the test looks.
+  // Buildings stay when their cells are unzoned.
+  state.cells.zone.fill(0);
+  state.cells.density.fill(0);
   state.speed = 0;
   return { bytes: Buffer.from(serialize(state)), tick: state.tick, buildings: buildingCount(state.buildings) };
 }
@@ -139,6 +145,8 @@ test("at 4x a new building's scaffolding goes up, the building rises inside it, 
     delete window.constructionFrames;
     return f;
   });
+  // Nothing grew while it ran: every scaffold was one of the fixture's buildings.
+  expect(await dataset(page, "buildingsDrawn")).toBe(String(city.buildings));
   const ages = frames.map((f) => f.tick - city.tick);
   console.log(`frames drawn at ages ${ages.join(", ")}`);
   await testInfo.attach("frame ages", { body: JSON.stringify(ages), contentType: "application/json" });
