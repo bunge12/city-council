@@ -34,6 +34,7 @@
     "smoke.spec.ts": 1,
     "snapping.spec.ts": 153,
     "terrain.spec.ts": 6,
+    "through-lots.spec.ts": 140,
     "two-tabs.spec.ts": 126,
     "ui-shell.spec.ts": 182,
     "undo.spec.ts": 72,

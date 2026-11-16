@@ -506,9 +506,11 @@ export const CELLS = {
  * Levels of detail (render/building-lod.ts, PRD "Zoom bands"): in the
  * street band a chunk whose nearest point is within `fullRadius` metres of
  * the camera, across the ground, draws its buildings in full, and one that
- * was near stays near until `fullRadius + fullHysteresis`. Every other
- * chunk draws boxes, and the city band flat blocks. A chunk changing form
- * fades over `fadeSeconds`. The flat blocks are lifted in the shader by
+ * was near stays near until `fullRadius + fullHysteresis`. Beyond that, a
+ * chunk within `simpleRadius` draws its buildings simplified, and keeps them
+ * until `simpleRadius + simpleHysteresis`; further chunks draw boxes. The
+ * city band draws flat blocks. A chunk changing form fades over
+ * `fadeSeconds`. The flat blocks are lifted in the shader by
  * `flatLift`, as the zoning cells are by `CELLS.lift` but a little higher,
  * so a block lies over the cells and the terrain at every distance.
  */
@@ -516,8 +518,12 @@ export const BUILDINGS = {
   buildBudgetMs: 4,
   fullRadius: 600,
   fullHysteresis: 150,
+  simpleRadius: 2000,
+  simpleHysteresis: 250,
   fadeSeconds: 0.35,
   flatLift: { base: 0.4, perMetre: 0.0012 },
+  /** What the simple form leaves out of a model, in metres (theme/model.ts, `simplify`). */
+  simplify: { minSpan: 1.5, minSize: 3, keepHeight: 6 },
 } as const;
 
 /**

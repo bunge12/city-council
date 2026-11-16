@@ -145,6 +145,9 @@ test("the fixture has a through-lot on each block, each fronting two streets", (
 });
 
 test("through-lot buildings draw across their blocks", async ({ page }, testInfo) => {
+  // About 2 minutes on a fast CI runner, from three poses that each wait for
+  // decoration to settle in software WebGL: 3 minutes left no room for a slow one.
+  test.setTimeout(300_000);
   await openCity(page, "?webgl&preset=balanced");
   const stats = await page.evaluate(async () => (await window.cityCouncil.view).buildingStats());
   expect(stats?.buildings).toBe(fixture.buildings);
