@@ -59,6 +59,13 @@ describe("cell chunk geometry", () => {
     for (let v = 4; v < 8; v++) expect(rgba(v)).toEqual([...hex(CELLS.unzoned), 0]);
   });
 
+  it("hatches a zoned cell where no building type fits, and never an unzoned one (issue M2-15)", () => {
+    const g = buildCellChunk(twoCells(), [1, 0, 1], [3, 0, 3], flat, null, Uint8Array.of(1, 1, 1));
+    expect(g.marked).toBe(1);
+    expect(Array.from(g.marks)).toEqual([255, 255, 255, 255, 0, 0, 0, 0]);
+    expect(buildCellChunk(twoCells(), [1, 1, 1], [3, 3, 3], flat).marked).toBe(0);
+  });
+
   it("uses 32-bit indices only when a chunk has more vertices than 16 bits reach", () => {
     expect(buildCellChunk(twoCells(), [0, 0], [0, 0], flat).indices).toBeInstanceOf(Uint16Array);
     const n = 20_000;

@@ -8,7 +8,9 @@
 // at its corners. A vertex carries the cell's fill colour, with alpha 255
 // for a zoned cell and 0 for an unzoned one, which shows only its outline,
 // and where it is in the cell, (0, 0) to (1, 1), from which the shader draws
-// the cell's lines (cell-meshes.ts).
+// the cell's lines (cell-meshes.ts). A vertex also carries whether its
+// cell is free ground where no building type fits (issue M2-15,
+// `lotMarksInChunk`), which the shader hatches.
 
 import { CELL_OPEN, DENSITY_NONE, ZONE_NONE, ZONING_BALANCE, type ChunkCellShapes } from "@city-council/sim";
 import { CELLS } from "./config";
@@ -21,10 +23,14 @@ export interface CellArrays {
   fills: Uint8Array;
   /** u, v per vertex, 0 or 255: u along the road, v back from it. */
   corners: Uint8Array;
+  /** 255 per vertex of a cell where no building type fits, 0 elsewhere. */
+  marks: Uint8Array;
   indices: Uint16Array | Uint32Array;
   /** Cells drawn: zoned ones filled, unzoned ones as outlines. */
   zoned: number;
   unzoned: number;
+  /** Cells drawn with the hatch. */
+  marked: number;
 }
 
 /** The fill colour of zone `zone` (1-based, as `state.cells.zone` holds it) at density `density`, as sRGB hex. */
@@ -59,7 +65,9 @@ const CORNER_UV = [0, 0, 255, 0, 255, 255, 0, 255] as const;
  * The overlay mesh for one chunk's cells. `zone` and `density` are the
  * mirror's `state.cells` arrays and `height` gives the ground under a point.
  * `built`, by the same slots, is the building on each cell, or -1 for none
- * (`cellBuildings`); a cell with a building is not drawn.
+ * (`cellBuildings`); a cell with a building is not drawn. `marks`, by
+ * the same order as `shapes`, is 1 for a cell where no building type fits
+ * (`lotMarksInChunk`), drawn hatched.
  */
 export function buildCellChunk(
   shapes: ChunkCellShapes,
@@ -67,6 +75,7 @@ export function buildCellChunk(
   density: ArrayLike<number>,
   height: (x: number, z: number) => number,
   built: ArrayLike<number> | null = null,
+  marks: ArrayLike<number> | null = null,
 ): CellArrays {
   const { slots, statuses, corners } = shapes;
   const shown = (k: number) => statuses[k] === CELL_OPEN && (built === null || (built[slots[k] ?? 0] ?? -1) < 0);
@@ -75,9 +84,11 @@ export function buildCellChunk(
   const positions = new Float32Array(drawn * 12);
   const fills = new Uint8Array(drawn * 16);
   const uv = new Uint8Array(drawn * 8);
+  const hatch = new Uint8Array(drawn * 4);
   const indices = drawn * 4 > 0xffff ? new Uint32Array(drawn * 6) : new Uint16Array(drawn * 6);
   const densities = ZONING_BALANCE.densities.length;
   let zoned = 0;
+  let marked = 0;
   let n = 0;
   for (let k = 0; k < statuses.length; k++) {
     if (!shown(k)) continue;
@@ -86,6 +97,8 @@ export function buildCellChunk(
     const d = density[slot] ?? DENSITY_NONE;
     const filled = z !== ZONE_NONE && d !== DENSITY_NONE;
     if (filled) zoned++;
+    const mark = filled && (marks?.[k] ?? 0) !== 0 ? 255 : 0;
+    if (mark) marked++;
     const p = (filled ? (z - 1) * densities + d - 1 : UNZONED) * 3;
     const v0 = n * 4;
     for (let c = 0; c < 4; c++) {
@@ -101,9 +114,10 @@ export function buildCellChunk(
       fills[v * 4 + 3] = filled ? 255 : 0;
       uv[v * 2] = CORNER_UV[c * 2] ?? 0;
       uv[v * 2 + 1] = CORNER_UV[c * 2 + 1] ?? 0;
+      hatch[v] = mark;
     }
     indices.set([v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3], n * 6);
     n++;
   }
-  return { positions, fills, corners: uv, indices, zoned, unzoned: drawn - zoned };
+  return { positions, fills, corners: uv, marks: hatch, indices, zoned, unzoned: drawn - zoned, marked };
 }

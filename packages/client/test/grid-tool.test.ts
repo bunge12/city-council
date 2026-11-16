@@ -112,6 +112,57 @@ describe("gridCorners", () => {
 });
 
 describe("the grid tool", () => {
+  it("counts the buildings in the way once the drag is over, and again only for buildings near the rectangle (issue M2-15)", async () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    new SimHost(createBareState(SEED), hostEnd, () => 0);
+    const mirror = new SimMirror(client, "p1");
+    await new Promise((r) => setTimeout(r, 0));
+    let state: State = { ...INITIAL_GRID_TOOL, tool: null, roadType: "street", roadNote: null, roadStart: null, roadControl: null, roadChain: 0, guides: DEFAULT_GUIDES };
+    let counts = 0;
+    const tool = new GridToolController({
+      get: () => state,
+      set: (patch) => {
+        state = { ...state, ...patch };
+      },
+      world: () =>
+        mirror.state
+          ? {
+              net: mirror.state.roads,
+              terrain,
+              clears: () => {
+                counts++;
+                return { ids: [7], residents: 3 };
+              },
+            }
+          : null,
+      send: () => Promise.resolve({ ok: true }),
+    });
+    tool.toggle();
+    tool.dragStart({ x: 4200, z: 4500 });
+    tool.dragMove({ x: 4604, z: 4712 }, false);
+    expect(tool.preview()?.clears).toBeNull();
+    expect(counts).toBe(0);
+    tool.dragEnd();
+    expect(tool.preview()?.clears).toEqual({ ids: [7], residents: 3 });
+    expect(counts).toBe(1);
+
+    const delta = (ids: number[]) => ({ kind: "delta" as const, steps: 1, roadNodes: [], roadSegs: [], buildingIds: ids });
+    const lots: Record<number, number[]> = { 1: [9000, 9000, 9008, 9000, 9008, 9008, 9000, 9008], 2: [4300, 4600, 4308, 4600, 4308, 4608, 4300, 4608] };
+    const lotOf = (id: number) => lots[id] ?? null;
+    // A building far away, and a delta with none: nothing to count again.
+    tool.mirrorUpdated(delta([1]), lotOf);
+    tool.mirrorUpdated(delta([]), lotOf);
+    tool.preview();
+    expect(counts).toBe(1);
+    // One inside the rectangle, and one it counted that has gone.
+    tool.mirrorUpdated(delta([2]), lotOf);
+    tool.preview();
+    expect(counts).toBe(2);
+    tool.mirrorUpdated(delta([7]), lotOf);
+    tool.preview();
+    expect(counts).toBe(3);
+  });
+
   it("lays a grid square to the map on open ground, with the default block depth of twelve cells", async () => {
     const { tool, tick, settle, sent, state, mirror } = setup();
     tool.toggle();

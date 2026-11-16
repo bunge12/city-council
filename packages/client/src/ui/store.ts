@@ -4,6 +4,7 @@
 // `useSim` (hooks.ts) and change it only by sending commands.
 
 import { create } from "zustand";
+import type { BuildingInfo } from "@city-council/sim";
 import { DEFAULT_PRESET } from "../render/config";
 import type { Preset, PresetSource } from "../render/presets";
 import { INITIAL_BLOCK_OVERLAY, type BlockOverlayState } from "../tools/block-overlay";
@@ -176,6 +177,8 @@ export interface ZoneHoverReadout {
   x: number;
   y: number;
   preview: ZonePreview;
+  /** Why no building type fits on the free ground under the pointer, when the overlay marks it there (issue M2-15). */
+  lotNote?: string | null;
 }
 
 export const useZoneHover = create<{ hover: ZoneHoverReadout | null }>(() => ({ hover: null }));
@@ -183,8 +186,29 @@ export const useZoneHover = create<{ hover: ZoneHoverReadout | null }>(() => ({ 
 export function setZoneHover(hover: ZoneHoverReadout | null): void {
   const current = useZoneHover.getState().hover;
   if (current === hover) return;
-  if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview && current.lotNote === hover.lotNote) return;
   useZoneHover.setState({ hover });
+}
+
+/**
+ * The building under the pointer while no tool is on (issue M2-15): the
+ * pointer in CSS pixels over the canvas and the building, or null when
+ * there is none. Its own store, like the road readout's. The bulldozer
+ * (issue 116) shows the same readout.
+ */
+export interface BuildingHover {
+  x: number;
+  y: number;
+  building: BuildingInfo;
+}
+
+export const useBuildingHover = create<{ hover: BuildingHover | null }>(() => ({ hover: null }));
+
+export function setBuildingHover(hover: BuildingHover | null): void {
+  const current = useBuildingHover.getState().hover;
+  if (current === hover) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.building === hover.building) return;
+  useBuildingHover.setState({ hover });
 }
 
 /** A block's area label on screen: CSS pixels over the canvas. */

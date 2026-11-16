@@ -39,6 +39,13 @@ export const GRID_TOOL = {
   maxBlockCells: 100,
   /** A rectangle turned with Alt held turns in steps of this many degrees. */
   turnStepDegrees: 1,
+  /**
+   * Metres around the rectangle within which a building that comes or goes
+   * makes the preview count the buildings in the way again (issue M2-15):
+   * more than the diagonal of the largest through-lot, 12 by 12 cells of
+   * 8 m, so a lot crossing the rectangle has a corner inside this reach.
+   */
+  clearsReachMetres: 140,
 } as const;
 
 export const SNAP = {

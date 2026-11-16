@@ -6,6 +6,7 @@ import { BlockLabels } from "./BlockLabels";
 import { BuildBar } from "./BuildBar";
 import { CityMenu } from "./CityMenu";
 import { DebugPanel } from "./DebugPanel";
+import { BuildingReadout } from "./BuildingReadout";
 import { EditReadout } from "./EditReadout";
 import { ServicesContext, useServices, useSim } from "./hooks";
 import { Notes } from "./Notes";
@@ -117,6 +118,7 @@ function Shell() {
       <RoadReadout />
       <EditReadout />
       <ZoneReadout />
+      <BuildingReadout />
     </>
   );
 }

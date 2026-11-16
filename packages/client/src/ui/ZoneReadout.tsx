@@ -24,8 +24,9 @@ export function zoneTitle(preview: ZonePreview): string {
 
 /**
  * Next to the cursor while the zone tool is over cells: how many a click
- * would change and to what, or why it would change none. The count is on a
- * data attribute too, for tests.
+ * would change and to what, or why it would change none, and over ground
+ * the overlay marks, why no building fits there (issue M2-15). The count is
+ * on a data attribute too, for tests.
  */
 export function ZoneReadout() {
   const hover = useZoneHover((s) => s.hover);
@@ -39,6 +40,7 @@ export function ZoneReadout() {
       data-ok={String(preview.ok)}
       data-cells={String(preview.cells.length)}
       data-zone={preview.zone}
+      data-lot-note={hover.lotNote ?? ""}
       style={{ left: hover.x + OFFSET, top: hover.y + OFFSET }}
     >
       {preview.ok ? (
@@ -46,6 +48,11 @@ export function ZoneReadout() {
       ) : (
         <div className="reason" id="zone-reason">
           Nothing to change here
+        </div>
+      )}
+      {hover.lotNote && (
+        <div className="lot-note" id="zone-lot-note">
+          Nothing can grow here: {hover.lotNote}
         </div>
       )}
     </div>
