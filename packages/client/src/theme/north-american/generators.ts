@@ -525,4 +525,11 @@ export const GENERATORS: Readonly<Record<string, { generate: Generator; models: 
   "mixed-slab": of(tower, [T(12, 2, 0.7, { shops: true }), T(14, 2, 0.65, { shops: true, curtain: true }), T(10, 3, 0.75, { shops: true, crown: "step" })]),
   "podium-tower": of(tower, [T(16, 3, 0.6, { shops: true }), T(18, 3, 0.55, { shops: true, curtain: true }), T(14, 2, 0.65, { shops: true, crown: "step" })]),
   "tall-podium-tower": of(tower, [T(30, 4, 0.55, { shops: true, curtain: true, crown: "mast" }), T(26, 3, 0.6, { shops: true, crown: "step" }), T(34, 4, 0.5, { shops: true, curtain: true })]),
+
+  // Through-lots (M2-14): a lot across a whole block, from one road to the
+  // next, up to 96 m square. The car park or yard faces the front road.
+  "big-box-centre": of(shed, [S(10, "flat", "storefront", "front", { cover: 0.85 }), S(9, "flat", "storefront", "front", { cover: 0.8, office: true }), S(11, "gable", "storefront", "front", { cover: 0.85 })]),
+  "regional-mall": of(shed, [S(16, "flat", "storefront", "front", { cover: 0.9 }), S(14, "flat", "curtain", "front", { cover: 0.85 }), S(18, "saw", "storefront", "front", { cover: 0.9 })]),
+  "distribution-centre": of(shed, [S(13, "flat", "doors", "yard", { cover: 0.85, office: true }), S(12, "flat", "doors", "front", { cover: 0.8, office: true }), S(14, "gable", "doors", "yard", { cover: 0.8 })]),
+  "heavy-plant": of(shed, [S(18, "saw", "doors", "yard", { chimneys: 4, office: true }), S(16, "flat", "doors", "yard", { chimneys: 3, office: true }), S(20, "gable", "doors", "none", { chimneys: 5 })]),
 };

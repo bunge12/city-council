@@ -24,13 +24,33 @@
 // back than any type of its zone and density reaches says so ("too-deep"):
 // with zoning six cells deep, the back rows of R1, C1, O1 and M1 never
 // take a building.
+//
+// Through-lots (M2-14). A type marked `throughLot` stands on two lots of one
+// zone and density, back to back on one block: the cell's strip from the
+// road to the back of its free ground, and the strip behind, which fronts
+// the road on the far side of the block, likewise from its road to the
+// back. The block is the M1 block index's (roads/blocks.ts): every column
+// of both lots must face the same one. Both lots are the same number of
+// columns wide, each column free all the way to its strip's back, and the
+// two backs meet: the back corners of the cell's lot are each within
+// `throughLotMaxGap` of the matching back corner of the other. The whole
+// lot is the two together, so it is deeper than one strip. A grid's default
+// block, two strips deep between road edges, has the backs meet exactly. A
+// strip around a corner is never behind another, since its block side is
+// the same block but its back faces away. Among the lots behind that fit,
+// the finder takes the one whose corners are nearest, then the first by
+// cell key and direction.
 
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { CELL_OPEN, columnStatus, nextColumn, syncCells, type Column } from "../zoning/cell-index";
-import { ZONE_NONE, cellSlot, localIndex, type CellRef } from "../zoning/cells";
-import { BUILDINGS_BALANCE, typesFor } from "./balance";
-import { NO_BUILDING, segmentBuildings } from "./where";
+import { CELL_RIGHT, ZONE_NONE, cellSlot, fromLocal, localIndex, type CellRef } from "../zoning/cells";
+import { blockIndexOf, blockOnSide } from "../roads/blocks";
+import { NONE } from "../roads/network";
+import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
+import { lotCorners, openCellsNear } from "../zoning/cell-index";
+import { BUILDINGS_BALANCE, WIDEST_LOT, typesFor, type BuildingType } from "./balance";
+import { NO_BUILDING, lotColumns, segmentBuildings } from "./where";
 
 /** A lot a building type fits. Its first column and size, as a building row holds them. */
 export interface Lot {
@@ -42,8 +62,18 @@ export interface Lot {
   /** Which way the lot runs from its first column: 0 toward the segment's node B, 1 toward node A. */
   dir: number;
   width: number;
+  /** The whole lot's depth, both strips together on a through-lot. */
   depth: number;
+  /** The back lot of a through-lot, as a building row holds it; all 0 for a lot on one strip. */
+  backSeg: number;
+  backSide: number;
+  backPlace: number;
+  backDir: number;
+  backDepth: number;
 }
+
+/** The back fields of a lot on one strip. */
+const NO_BACK = { backSeg: 0, backSide: 0, backPlace: 0, backDir: 0, backDepth: 0 } as const;
 
 /** Why no building type fits at a cell. */
 export type LotProblem =
@@ -80,6 +110,9 @@ export type LotResult =
     };
 
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
+
+/** dx² + dz², by multiplying, which every engine rounds alike (CLAUDE.md rule 6). */
+const squared = (dx: number, dz: number): number => dx * dx + dz * dz;
 
 /** The zone and density as a player reads them, as in R3. */
 function zoneLabel(zone: number, density: number): string {
@@ -168,12 +201,14 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
   // The strip around the cell's column, in the order of its segment's
   // places, each column with the way that runs on along it. Columns with no
   // free cell at the road end it: no lot crosses them.
-  const reach = BUILDINGS_BALANCE.maxLotWidth - 1;
+  const reach = WIDEST_LOT - 1;
   const seen = new Set<string>([`${start.seg}/${start.side}/${start.place}`]);
-  const walk = (from: Column): { col: Column; free: number }[] => {
-    const out: { col: Column; free: number }[] = [];
-    let col: Column | null = from;
-    while (out.length < reach && (col = nextColumn(index, col)) !== null) {
+  // Each way first as far as a lot on one strip reaches, then on as far as
+  // a through-lot does, so on a strip that closes on itself the plain types
+  // see the same columns either side as they would with no through-lots.
+  const walk = (from: Column, out: { col: Column; free: number }[] = [], limit = reach): { col: Column; free: number }[] => {
+    let col: Column | null = out.length > 0 ? (out[out.length - 1] as { col: Column }).col : from;
+    while (out.length < limit && (col = nextColumn(index, col)) !== null) {
       const key = `${col.seg}/${col.side}/${col.place}`;
       if (seen.has(key)) break;
       seen.add(key);
@@ -183,10 +218,16 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
     }
     return out;
   };
-  const ahead = walk(start);
+  const plainReach = BUILDINGS_BALANCE.maxLotWidth - 1;
+  const ahead = walk(start, [], plainReach);
+  const behindWalk = walk({ ...start, dir: 1 }, [], plainReach);
+  if (reach > plainReach && types.some((t) => t.throughLot)) {
+    if (ahead.length === plainReach) walk(start, ahead);
+    if (behindWalk.length === plainReach) walk({ ...start, dir: 1 }, behindWalk);
+  }
   // Walked the other way, each column's way on along the strip is the
   // opposite of the walk's.
-  const behind = walk({ ...start, dir: 1 })
+  const behind = behindWalk
     .reverse()
     .map(({ col, free }) => ({ col: { ...col, dir: 1 - col.dir }, free }));
   const strip = [...behind, { col: start, free: freeDepth(start) }, ...ahead];
@@ -194,8 +235,137 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
   const own = strip[at]?.free ?? 0;
   if (own <= ref.depth) return refuse("off-road", "The ground between here and the road is not free");
 
+  /**
+   * The lot behind `w` columns from `first`, each free `depth` deep to the
+   * back of its strip: as the header says, or null.
+   */
+  const gap2 = ZONING_BALANCE.throughLotMaxGap * ZONING_BALANCE.throughLotMaxGap;
+  const blocks = blockIndexOf(state.roads);
+  const blockOf = (col: Column) => blockOnSide(blocks, col.seg, col.side === CELL_RIGHT);
+  /** The one block every column of `cols` faces, or NONE. */
+  const sameBlock = (cols: readonly Column[]): number => {
+    const block = blockOf(cols[0] as Column);
+    return cols.every((c) => blockOf(c) === block) ? block : NONE;
+  };
+  /**
+   * The columns that could start a lot behind one starting at strip column
+   * `s`, free `depth` deep: on the same block, free some depth of their
+   * own, with their near back corner within the gap of this column's.
+   * Found once per column and reused for every width, since a failed search
+   * on a deep strip with no partner is the slow case.
+   */
+  const partners = new Map<number, { col: Column; depth: number; near: number }[]>();
+  const partnersAt = (s: number, depth: number): { col: Column; depth: number; near: number }[] => {
+    const known = partners.get(s);
+    if (known) return known;
+    const out: { col: Column; depth: number; near: number }[] = [];
+    partners.set(s, out);
+    const first = (strip[s] as { col: Column }).col;
+    const corners = lotCorners(index, first, 1, depth);
+    const block = blockOf(first);
+    if (!corners || block === NONE) return out;
+    const nx = corners[2] ?? 0;
+    const nz = corners[3] ?? 0;
+    const tried = new Set<string>();
+    // The lot behind's first column has its back corner within the gap of
+    // this column's near back corner, and that corner is its back cell's.
+    for (const key of openCellsNear(index, nx, nz, ZONING_BALANCE.throughLotMaxGap)) {
+      const seg = Math.floor(key / CELL_KEY_STRIDE);
+      const { side, place } = fromLocal(key - seg * CELL_KEY_STRIDE);
+      if (seg === first.seg && side === first.side) continue;
+      for (let dir = 0; dir < 2; dir++) {
+        const col: Column = { seg, side, place, dir };
+        const name = `${seg}/${side}/${place}/${dir}`;
+        if (tried.has(name)) continue;
+        tried.add(name);
+        if (blockOf(col) !== block) continue;
+        const d = freeDepth(col);
+        if (d === 0) continue;
+        const back = lotCorners(index, col, 1, d);
+        if (!back) continue;
+        const near = squared((back[2] ?? 0) - nx, (back[3] ?? 0) - nz);
+        if (near <= gap2) out.push({ col, depth: d, near });
+      }
+    }
+    return out;
+  };
+
+  /** The lot behind `w` columns from strip column `s`, each free `depth` deep: as the header says, or null. */
+  const lotBehind = (s: number, w: number, depth: number): { first: Column; depth: number } | null => {
+    const first = (strip[s] as { col: Column }).col;
+    const options = partnersAt(s, depth);
+    if (options.length === 0) return null;
+    const cols = lotColumns(index, first, w);
+    const corners = lotCorners(index, first, w, depth);
+    if (!cols || !corners) return null;
+    const block = sameBlock(cols);
+    if (block === NONE) return null;
+    const fx = corners[4] ?? 0;
+    const fz = corners[5] ?? 0;
+    let best: { first: Column; depth: number; worst: number } | null = null;
+    for (const { col, depth: d, near } of options) {
+      const backCols = lotColumns(index, col, w);
+      const back = lotCorners(index, col, w, d);
+      if (!backCols || !back) continue;
+      const far = squared((back[4] ?? 0) - fx, (back[5] ?? 0) - fz);
+      if (far > gap2 || !backCols.every((c) => freeDepth(c) === d) || sameBlock(backCols) !== block) continue;
+      const worst = Math.max(near, far);
+      if (!best || worst < best.worst) best = { first: col, depth: d, worst };
+    }
+    return best ? { first: best.first, depth: best.depth } : null;
+  };
+
+  /**
+   * A through-lot type's largest lot holding the cell; between lots of one
+   * area the deeper, then the one whose first column comes first along the
+   * strip. Every column of its front lot is free to the same depth, the
+   * back of its strip.
+   */
+  const throughLot = (type: BuildingType): Lot | null => {
+    let best: { lot: Lot; area: number } | null = null;
+    for (let w = type.width[0]; w <= type.width[1]; w++) {
+      for (let s = Math.max(0, at - w + 1); s <= at && s + w <= strip.length; s++) {
+        const d = strip[s]?.free ?? 0;
+        if (d <= ref.depth) continue;
+        let even = true;
+        for (let i = s + 1; i < s + w && even; i++) even = strip[i]?.free === d;
+        if (!even) continue;
+        const first = (strip[s] as { col: Column }).col;
+        const back = lotBehind(s, w, d);
+        if (!back) continue;
+        const depth = d + back.depth;
+        if (depth < type.depth[0] || depth > type.depth[1]) continue;
+        const area = w * depth;
+        if (best && (area < best.area || (area === best.area && depth <= best.lot.depth))) continue;
+        best = {
+          area,
+          lot: {
+            type: type.index,
+            firstSeg: first.seg,
+            firstSide: first.side,
+            firstPlace: first.place,
+            dir: first.dir,
+            width: w,
+            depth,
+            backSeg: back.first.seg,
+            backSide: back.first.side,
+            backPlace: back.first.place,
+            backDir: back.first.dir,
+            backDepth: back.depth,
+          },
+        };
+      }
+    }
+    return best?.lot ?? null;
+  };
+
   const lots: Lot[] = [];
   for (const type of types) {
+    if (type.throughLot) {
+      const lot = throughLot(type);
+      if (lot) lots.push(lot);
+      continue;
+    }
     // The type's largest lot; between lots of one area the deeper, then
     // the one whose first column comes first along the strip.
     let best: { lot: Lot; area: number } | null = null;
@@ -209,7 +379,7 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
           for (let i = s; i < s + w && fits; i++) fits = (strip[i]?.free ?? 0) >= d;
           if (!fits) continue;
           const first = (strip[s] as { col: Column }).col;
-          best = { area, lot: { type: type.index, firstSeg: first.seg, firstSide: first.side, firstPlace: first.place, dir: first.dir, width: w, depth: d } };
+          best = { area, lot: { type: type.index, firstSeg: first.seg, firstSide: first.side, firstPlace: first.place, dir: first.dir, width: w, depth: d, ...NO_BACK } };
           break;
         }
       }
@@ -219,10 +389,12 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
   if (lots.length > 0) return { ok: true, lots, free: own };
 
   // A lot holding the cell is at least `ref.depth + 1` deep, so only the
-  // types that reach that far back count.
-  const reaching = types.filter((t) => t.depth[1] > ref.depth);
+  // types that reach that far back count. A through-lot needs a second
+  // strip, which the reasons below do not go into.
+  const plain = types.filter((t) => !t.throughLot);
+  const reaching = plain.filter((t) => t.depth[1] > ref.depth);
   if (reaching.length === 0) {
-    const deepest = Math.max(...types.map((t) => t.depth[1]));
+    const deepest = Math.max(0, ...plain.map((t) => t.depth[1]));
     return refuse("too-deep", `No ${label} building reaches ${ref.depth + 1} cells back from the road; the deepest lot is ${deepest}`);
   }
   const need = {

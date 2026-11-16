@@ -38,6 +38,8 @@ export interface ZoningBalance {
   maxRectsPerCommand: number;
   /** The longest side a `ZoneCells` rectangle may have, metres. */
   maxRectSide: number;
+  /** The widest gap, metres, between the backs of two strips a through-lot may join (M2-14). */
+  throughLotMaxGap: number;
   zones: ZoneBalance[];
   /** In level order, from 1. */
   densities: DensityBalance[];
@@ -77,6 +79,8 @@ export function checkZoningBalance(data: unknown): string[] {
   if (!Number.isSafeInteger(maxRects) || (maxRects as number) < 1) errors.push("maxRectsPerCommand must be a whole number of at least 1");
   const maxSide = data["maxRectSide"];
   if (typeof maxSide !== "number" || !Number.isFinite(maxSide) || !(maxSide > 0)) errors.push("maxRectSide must be a positive number of metres");
+  const gap = data["throughLotMaxGap"];
+  if (typeof gap !== "number" || !Number.isFinite(gap) || gap < 0) errors.push("throughLotMaxGap must be a number of metres, zero or more");
 
   const zones = data["zones"];
   if (!Array.isArray(zones) || zones.length === 0) {

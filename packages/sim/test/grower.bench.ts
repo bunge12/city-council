@@ -13,6 +13,9 @@
 // - every draw landing on a cell with no lot, so the grower tries
 //   `growthTries` cells and adds nothing: the most lot finder calls a tick
 //   can make;
+// - every cell C3, so each draw also looks across its block for a
+//   through-lot (M2-14), and the same with no two strips meeting, so every
+//   look fails;
 // - the first growing tick after the same street once tens of thousands of
 //   buildings stand. The building index (where.ts) files again only the
 //   buildings near the segments the street laid out again (M2-11), so this
@@ -175,6 +178,23 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
     }
   }
   await time(`a grower tick whose ${BUILDINGS_BALANCE.growthTries} draws all find no lot`, {});
+  expect(buildingCount(state.buildings)).toBe(0);
+
+  // Every cell C3, so each draw looks for a through-lot across its block
+  // (M2-14) as well as the lots on its own strip.
+  const c3 = ZONING_BALANCE.zones.findIndex((z) => z.id === "commercial") + 1;
+  state.cells.zone.fill(c3);
+  state.cells.density.fill(3);
+  forgetCandidates(state);
+  await time("a grower tick on a city zoned C3 throughout, each draw looking for a through-lot", { afterEach: takeBack });
+  expect(buildingCount(state.buildings)).toBe(0);
+
+  // The same with the back row of every strip C2, so every front strip is
+  // C3 five deep with a gap of a cell to the strip behind: each draw looks
+  // across its block at every width and finds no through-lot.
+  for (let slot = DEPTH - 1; slot < state.cells.zone.length; slot += DEPTH) state.cells.density[slot] = 2;
+  forgetCandidates(state);
+  await time("a grower tick on a city zoned C3 throughout with no strip meeting another", { afterEach: takeBack });
   expect(buildingCount(state.buildings)).toBe(0);
 
   // Grown out: the zoning of the first cases again, with buildings on it.

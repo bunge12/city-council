@@ -31,11 +31,11 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(11);
+    expect(SNAPSHOT_VERSION).toBe(12);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
-      version: 11,
+      version: 12,
       log: [],
       logOffset: 0,
       roads: fresh.roads,
@@ -55,7 +55,7 @@ describe("migrateState", () => {
     const fresh = createState(9);
     expect(state).toEqual({
       ...v2,
-      version: 11,
+      version: 12,
       roads: fresh.roads,
       undo: [],
       connections: fresh.connections,
@@ -70,7 +70,7 @@ describe("migrateState", () => {
   it("upgrades a version 3 state by adding an empty undo history", () => {
     const state = migrateState(older(createBareState(9), 3, "undo", "connections", "balance"));
     expect(state.undo).toEqual([]);
-    expect(state.version).toBe(11);
+    expect(state.version).toBe(12);
     expect(() => hashState(state)).not.toThrow();
   });
 
@@ -120,7 +120,7 @@ describe("migrateState", () => {
     const row = { a, b, type: 0, network: 0, level: LEVEL_BRIDGE, flags: 1, cx: 1050, cz: 1000, length: 100 };
     const undo5 = [{ playerId: "p1", entry: 0, type: "BuildRoad", ops: [{ op: "addNode", id: a, grown: true }, { op: "addSeg", id: 9, grown: true, row }] }];
     const migrated = migrateState({ ...older(state, 5, "roads", "undo"), roads: roads5, undo: undo5 });
-    expect(migrated.version).toBe(11);
+    expect(migrated.version).toBe(12);
     expect(Object.keys(migrated.roads)).toEqual(Object.keys(createRoadNetwork()));
     expect(migrated.roads).toEqual(net);
     expect(migrated.undo[0]?.ops[0]).toEqual({ op: "addNode", id: a, grown: true });
@@ -156,7 +156,7 @@ describe("migrateState", () => {
       { playerId: "p3", entry: 4, type: "UpgradeRoad", ops: [{ op: "restyle", id: lost, from: 0, to: 1, reverse: false }] },
     ];
     const migrated = migrateState({ ...older(state, 6, "undo"), undo: undo6 });
-    expect(migrated.version).toBe(11);
+    expect(migrated.version).toBe(12);
     expect(migrated.roads).toEqual(net);
     const ops = migrated.undo.map((r) => r.ops[0]);
     // Walking back from the road as it is: a to b now, so b to a before the
@@ -197,6 +197,25 @@ describe("migrateState", () => {
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
     expect(migrated.buildings.flags).toHaveLength(0);
     expect(migrated.buildings.free).toHaveLength(0);
+  });
+
+  it("upgrades a version 11 state by giving every building an empty back lot", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    for (let i = 0; i < 3 * 100; i++) step(state);
+    const b = state.buildings;
+    expect(b.flags.length).toBeGreaterThan(0);
+    // The version 11 shape: no back-lot arrays.
+    const backKeys = ["backSeg", "backSide", "backPlace", "backDir", "backDepth"];
+    const buildings11 = Object.fromEntries(Object.entries(b).filter(([key]) => !backKeys.includes(key)));
+    const migrated = migrateState({ ...older(state, 11, "buildings"), buildings: buildings11 });
+    expect(migrated).toEqual(state);
+    expect(Object.keys(migrated.buildings)).toEqual(Object.keys(b));
+    for (const key of backKeys) expect(Array.from(migrated.buildings[key as "backSeg"]).every((v) => v === 0), key).toBe(true);
+    expect(hashState(migrated)).toBe(hashState(state));
   });
 
   it("leaves a current state as it is", () => {

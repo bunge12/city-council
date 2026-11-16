@@ -131,7 +131,8 @@ const BACKENDS = [
 ] as const;
 
 test("the fixture has buildings of every type", () => {
-  expect(BUILDING_TYPES.filter((t) => !fixture.counts[t.index]).map((t) => t.id)).toEqual([]);
+  // Through-lot types (M2-14) stand across a block, and through-lots.spec.ts draws them.
+  expect(BUILDING_TYPES.filter((t) => !t.throughLot && !fixture.counts[t.index]).map((t) => t.id)).toEqual([]);
 });
 
 for (const preset of ["balanced", "low"] as const) {

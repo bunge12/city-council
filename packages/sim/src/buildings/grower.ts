@@ -17,9 +17,11 @@
 // likely, on its largest lot. So a deep R2 strip grows apartments and a
 // shallow one townhomes, as the PRD says the lot's shape decides, while a
 // long R1 strip zoned six deep, where neither type reaches the back, grows
-// houses and plexes both and not plexes alone. When the cell has no lot,
-// as on an R3 strip under 4 x 4, the grower draws again, up to
-// `growthTries` cells, then gives that building up.
+// houses and plexes both and not plexes alone. Where a through-lot fits
+// (lots.ts, M2-14), the draw is among the through-lots alone, so a big
+// building takes the block before smaller ones fill both strips. When the
+// cell has no lot, as on an R3 strip under 4 x 4, the grower draws again,
+// up to `growthTries` cells, then gives that building up.
 //
 // Residents scale with lot area between the type's low and high figure,
 // rounded half up, or for a type with `drawResidents`, the single family
@@ -64,6 +66,8 @@ export function residentsFor(rng: Uint32Array, type: BuildingType, width: number
 
 /** The lot the draw picks among the types that fit at a cell, as the header says. */
 function chooseLot(rng: Uint32Array, lots: readonly Lot[], free: number): Lot {
+  const through = lots.filter((lot) => lot.backDepth > 0);
+  if (through.length > 0) return through[nextInt(rng, through.length)] as Lot;
   const reaching = lots.filter((lot) => lot.depth === free);
   const pool = reaching.length > 0 ? reaching : lots;
   return pool[nextInt(rng, pool.length)] as Lot;

@@ -150,7 +150,8 @@ describe("building types", () => {
   it("give three or four types to every density of commercial, office, industrial and mixed, as proposals", () => {
     for (const zone of ["commercial", "office", "industrial", "mixed"]) {
       for (const density of [1, 2, 3]) {
-        const types = BUILDING_TYPES.filter((t) => t.zone === zone && t.density === density);
+        // Through-lot types (M2-14) come on top, on lots no strip holds alone.
+        const types = BUILDING_TYPES.filter((t) => t.zone === zone && t.density === density && !t.throughLot);
         expect(types.length, `${zone} ${density}`).toBeGreaterThanOrEqual(3);
         expect(types.length, `${zone} ${density}`).toBeLessThanOrEqual(4);
         expect(types.every((t) => t.proposal === true)).toBe(true);
@@ -413,6 +414,11 @@ describe("buildings in state", () => {
       dir: 0,
       width: 4,
       depth: 6,
+      backSeg: 0,
+      backSide: 0,
+      backPlace: 0,
+      backDir: 0,
+      backDepth: 0,
       zone: 1,
       density: 2,
       type: BUILDING_TYPES.findIndex((t) => t.id === "apartments"),

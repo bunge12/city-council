@@ -393,6 +393,23 @@ export function blockById(index: BlockIndex, id: number): Block | null {
   return index.blocks.get(id) ?? null;
 }
 
+/**
+ * The id of the block on one side of segment `seg`, or NONE where that side
+ * faces no block: the outside of the network, or a segment that bounds no
+ * blocks. `right` is the side on the right of travel from node A to node B
+ * with north up, as zoning cells name it (zoning/cells.ts, CELL_RIGHT). A
+ * face is walked counterclockwise from +x toward +z, so it lies to the left
+ * of each half-edge in those terms, which with z pointing south is the
+ * right on a map with north up: half-edge `2 * seg` runs from A to B with
+ * its face on that side.
+ */
+export function blockOnSide(index: BlockIndex, seg: number, right: boolean): number {
+  settle(index);
+  if (seg < 0 || seg >= index.inGraph.length || index.inGraph[seg] !== 1) return NONE;
+  const face = index.face[2 * seg + (right ? 0 : 1)] ?? NONE;
+  return index.blocks.has(face) ? face : NONE;
+}
+
 /** Whether two indexes hold the same blocks: ids, boundaries and areas. */
 export function sameBlocks(p: BlockIndex, q: BlockIndex): boolean {
   const a = listBlocks(p);
