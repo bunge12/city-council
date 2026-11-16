@@ -126,7 +126,10 @@ async function look(page: Page, position: Vec3, target: Vec3): Promise<void> {
 
 async function shoot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  const shot = await page.locator("#view").screenshot();
+  // The canvas fills the page, so the page's screenshot is the view's. A
+  // locator's waits for the canvas to hold still over animation frames,
+  // which in software WebGL take most of a second each: 15 s a shot against 6.
+  const shot = await page.screenshot();
   await page.addStyleTag({ content: "#ui { display: block !important; }" });
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, shot);
