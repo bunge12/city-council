@@ -110,6 +110,8 @@ export interface BuildingStats {
    */
   lastWrites: number;
   totalWrites: number;
+  /** `totalWrites` split by the form the instance is in. */
+  totalWritesByForm: Record<Level, number>;
   lastRebuilt: number;
   totalRebuilt: number;
   lastBuildMs: number;
@@ -415,6 +417,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     pending: 0,
     lastWrites: 0,
     totalWrites: 0,
+    totalWritesByForm: { full: 0, simple: 0 },
     lastRebuilt: 0,
     totalRebuilt: 0,
     lastBuildMs: 0,
@@ -427,6 +430,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   };
   /** Instances written since the layer was made, and by the reads since chunks started waiting. */
   let writes = 0;
+  const writesByForm: Record<Level, number> = { full: 0, simple: 0 };
   let batchWrites = 0;
   let batchRebuilt = 0;
   let batchMs = 0;
@@ -582,13 +586,14 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     a.addUpdateRange(start, count);
   }
 
-  function touched(m: Instances, slot: number): void {
+  function touched(m: Instances, level: Level, slot: number): void {
     if (!m.mesh || !m.tints || !m.scales || !m.fades) return;
     dirtyRange(m.mesh.instanceMatrix, slot * 16, 16);
     dirtyRange(m.tints, slot * 3, 3);
     dirtyRange(m.scales, slot * 2, 2);
     dirtyRange(m.fades, slot, 1);
     writes++;
+    writesByForm[level]++;
   }
 
   /** Writes a building's instance in one form: the same matrix, tints and stretch in both, so the forms stand in the same place. */
@@ -604,7 +609,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     m.tints.setXYZ(slot, packed(p.tint.wall), packed(p.tint.roof), packed(p.tint.trim));
     m.scales.setXY(slot, p.sx, p.sz);
     m.fades.setX(slot, chunkAt(p.chunk).fades[level]);
-    touched(m, slot);
+    touched(m, level, slot);
   }
 
   /** Gives a building an instance in its model's mesh for one form. */
@@ -636,7 +641,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       m.ids[slot] = moved;
       const other = placed.get(moved);
       if (other) other.slots[level] = slot;
-      touched(m, slot);
+      touched(m, level, slot);
     }
     m.ids[last] = -1;
     m.count = last;
@@ -977,6 +982,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         models: models.size,
         pending: dirty.size,
         totalWrites: writes,
+        totalWritesByForm: { ...writesByForm },
         lastMerged: merged > mergedBefore ? merged - mergedBefore : stats.lastMerged,
         totalMerged: merged,
         mergedBytes,
