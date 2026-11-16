@@ -112,6 +112,11 @@ export interface View {
   buildingFormVersion(): number;
   /** The middle of the top of building `id` as drawn, or null. */
   buildingTop(id: number): { x: number; y: number; z: number } | null;
+  /**
+   * The game tick to draw buildings at, for those under construction (issue
+   * 136). Null draws every building finished.
+   */
+  setGameTick(tick: number | null): void;
   /** The colours building `id` is drawn in, as sRGB hex, or null. For tests. */
   buildingTint(id: number): { wall: number; roof: number; trim: number } | null;
   /** Switches the lighting to a graphics preset once its shaders are compiled. */
@@ -274,6 +279,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   }
   window.addEventListener("resize", resize);
 
+  let gameTick: number | null = null;
   const before: ((seconds: number) => void)[] = [];
   const listeners: ((stats: FrameStats) => void)[] = [];
   const frustum = new Frustum();
@@ -288,7 +294,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     camera.updateMatrixWorld();
     viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     frustum.setFromProjectionMatrix(viewProjection, camera.coordinateSystem);
-    terrainRoot?.buildings?.update(camera.position, BUILDINGS.buildBudgetMs, { band, seconds, frustum });
+    terrainRoot?.buildings?.update(camera.position, BUILDINGS.buildBudgetMs, { band, seconds, frustum, ...(gameTick !== null ? { tick: gameTick } : {}) });
     // Cells under a lot that reaches over a chunk line are in a chunk the delta did not name.
     const lots = terrainRoot?.buildings?.takeLotChunks() ?? [];
     if (lots.length > 0) {
@@ -380,6 +386,9 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       if (roadChunks.length > 0 || changed.length === 0) layer.applyIds(ids);
     },
     buildingStats: () => terrainRoot?.buildings?.stats() ?? null,
+    setGameTick(tick) {
+      gameTick = tick;
+    },
     buildingForm: (chunk) => terrainRoot?.buildings?.formOf(chunk) ?? null,
     buildingTint: (id) => terrainRoot?.buildings?.tintOf(id) ?? null,
     pickBuilding: (ray, limit) => terrainRoot?.buildings?.pick(ray, limit) ?? -1,

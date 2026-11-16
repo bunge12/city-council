@@ -849,7 +849,7 @@ What this does to the game:
 - **Upkeep is a share of build cost.** Each asset's yearly upkeep is a fixed percentage of what it cost to build, tuned per type. Cheap roads laid everywhere become the suburb subsidy described above.
 - **Numbers need short forms.** The UI shows $3.2B and $480M, never a row of zeros.
 
-Construction is instant in v1, and the full price is charged at the click. Construction that takes time and is paid in stages is deferred to v2.
+Construction is instant in v1, and the full price is charged at the click. Construction that takes time and is paid in stages is deferred to v2. A new building does show a short construction animation (issue 136): scaffolding goes up, the building rises inside it, and the scaffolding comes down, over about 12 seconds of game time at 1x. It only changes how the building is drawn. The sim builds the whole building on one tick, and its residents are in it from that tick. The length and stages are client constants, not balance data.
 
 The treasury cannot go below a small overdraft. Past that, building and zoning commands fail with a clear message, and upkeep keeps running. There is no game over in v1. A broke city shrinks until it balances.
 

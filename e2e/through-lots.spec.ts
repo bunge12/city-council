@@ -14,6 +14,7 @@ import {
   type SimState,
 } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
+import { finishConstruction } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 
 // Issue M2-14: through-lots. Two blocks between three parallel streets
@@ -86,6 +87,7 @@ function throughLotCity(): Fixture {
   for (const z of [...strips, ...backs]) for (let x = WEST + 4; x < EAST; x += 8) if (buildAt(state, x, z, variant)) variant++;
   const through: number[] = [];
   state.buildings.flags.forEach((f, id) => f && (state.buildings.backDepth[id] ?? 0) > 0 && through.push(id));
+  finishConstruction(state);
   // Saved paused, so nothing grows while the test looks.
   state.speed = 0;
   return { bytes: Buffer.from(serialize(state)), state, buildings: buildingCount(state.buildings), through };

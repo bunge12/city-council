@@ -6,6 +6,7 @@
 
 import { writeFileSync } from "node:fs";
 import type { Page, TestInfo } from "@playwright/test";
+import { finishConstruction } from "./building-fixtures";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE, buildScaleCity, generateTerrain, growScaleCity, heightAt, serialize } from "../packages/sim/src/index";
 
 export type Vec3 = readonly [number, number, number];
@@ -107,6 +108,8 @@ let built: ReturnType<typeof scaleTown> | null = null;
 function scaleTown() {
   const city = buildScaleCity();
   const town = growScaleCity(city);
+  // Past the construction animation (issue 136): every building was grown on one tick.
+  finishConstruction(city.state);
   const terrain = generateTerrain(city.state.seed);
   const centre = city.grids.reduce((best, g) => (Math.hypot(g.x - 6000, g.z - 6000) < Math.hypot(best.x - 6000, best.z - 6000) ? g : best));
   const focus = { x: centre.x + 288, z: centre.z + 288 };

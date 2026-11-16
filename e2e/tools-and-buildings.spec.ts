@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { BUILDING_TYPES, cellAt, createState, generateTerrain, heightAt, serialize, syncCells, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
+import { finishConstruction } from "./building-fixtures";
 import { lotProblem } from "../packages/sim/src/buildings/where";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 
@@ -71,6 +72,7 @@ function houseCity(): { state: SimState; houses: number } {
     addBuilding(state, { ...lot, type, residents: 3, variant: p * 7 });
     houses++;
   }
+  finishConstruction(state);
   return { state, houses };
 }
 
