@@ -83,7 +83,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # A runner planned at about ten minutes takes twice that on a slow
+    # machine, and a test that fails once is run again. 35 minutes leaves
+    # room for both, and still stops a run that hangs.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -91,14 +94,21 @@ jobs:
           # One worker each, like the roads project. With two, the heavy
           # tests (two tabs drawing the whole map, the forest) starve the
           # page in the other worker on a slow runner, and its locators and
-          # screenshots time out. Six shards keep the wall time about where
-          # two workers on four had it.
-          - { id: chromium-1, files: "1/6", args: "--project chromium --workers=1" }
-          - { id: chromium-2, files: "2/6", args: "--project chromium --workers=1" }
-          - { id: chromium-3, files: "3/6", args: "--project chromium --workers=1" }
-          - { id: chromium-4, files: "4/6", args: "--project chromium --workers=1" }
-          - { id: chromium-5, files: "5/6", args: "--project chromium --workers=1" }
-          - { id: chromium-6, files: "6/6", args: "--project chromium --workers=1" }
+          # screenshots time out.
+          #
+          # Eight shards, not six (issue #152): runners on the same image are
+          # not the same speed, and on a slow one the same files took 1.5 to
+          # 2 times as long, so six ran into the job's time limit. The shard
+          # script balances on seconds measured on CI, slow runners and fast
+          # ones alike, so each runner here is planned at about ten minutes.
+          - { id: chromium-1, files: "1/8", args: "--project chromium --workers=1" }
+          - { id: chromium-2, files: "2/8", args: "--project chromium --workers=1" }
+          - { id: chromium-3, files: "3/8", args: "--project chromium --workers=1" }
+          - { id: chromium-4, files: "4/8", args: "--project chromium --workers=1" }
+          - { id: chromium-5, files: "5/8", args: "--project chromium --workers=1" }
+          - { id: chromium-6, files: "6/8", args: "--project chromium --workers=1" }
+          - { id: chromium-7, files: "7/8", args: "--project chromium --workers=1" }
+          - { id: chromium-8, files: "8/8", args: "--project chromium --workers=1" }
           # One worker: software WebGPU takes most of a runner's CPU. In CI
           # the roads project is fully parallel, so its one file is dealt
           # out test by test.

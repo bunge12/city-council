@@ -56,7 +56,9 @@ export default defineConfig({
   // close to Playwright's 30 s default when two workers share the machine.
   timeout: 60_000,
   retries: isCI ? 1 : 0,
-  reporter: isCI ? [["list"], ["html", { open: "never" }]] : "list",
+  // In CI, file-times-reporter.ts prints the runner's CPU and each spec
+  // file's seconds, for e2e/projects.json (see scripts/e2e-timings.mjs).
+  reporter: isCI ? [["list"], ["html", { open: "never" }], ["./e2e/file-times-reporter.ts"]] : "list",
   use: {
     baseURL: "http://localhost:5173",
     trace: "off",

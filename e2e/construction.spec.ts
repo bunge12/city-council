@@ -115,9 +115,9 @@ const CLOSE: { position: Vec3; target: Vec3 } = { position: [GRID.x + 10, ground
 
 // The two tests that run the city at 4x in the street band, with a canvas
 // grab of every frame, took 2.9 and 3.4 minutes on a CI runner when they
-// landed, and have since run into the file's four minutes on slower runners.
-// They get six.
-const RUN_TIMEOUT = 360_000;
+// landed. On a slower runner the first took 4.8 minutes and the second ran
+// past six twice (issue #152). They get eight.
+const RUN_TIMEOUT = 480_000;
 /**
  * How long to wait for the frame that takes the scaffolding down once the
  * tick has passed the end of construction. The page can go several seconds

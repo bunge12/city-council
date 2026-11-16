@@ -1,7 +1,7 @@
 // Prints the chromium project's spec files for one CI runner, so that every
 // runner gets about the same minutes of tests.
 //
-//   node scripts/e2e-shard.mjs 3/6
+//   node scripts/e2e-shard.mjs 3/8
 //
 // Playwright's own `--shard` deals out the same number of tests to each
 // runner, whatever they take. On CI a test that draws the 30,000 segment
@@ -57,14 +57,14 @@ function deal(total) {
 
 const arg = process.argv[2] ?? "";
 if (arg === "--list") {
-  const total = Number(process.argv[3] ?? 6);
+  const total = Number(process.argv[3] ?? 8);
   deal(total).forEach((r, i) => console.log(`${i + 1}/${total} ${Math.round(r.seconds / 6) / 10} min: ${r.files.join(" ")}`));
 } else {
   const match = /^(\d+)\/(\d+)$/.exec(arg);
   const current = Number(match?.[1]);
   const total = Number(match?.[2]);
   if (!match || current < 1 || current > total) {
-    console.error("usage: node scripts/e2e-shard.mjs <current>/<total>, for example 3/6, or --list <total>");
+    console.error("usage: node scripts/e2e-shard.mjs <current>/<total>, for example 3/8, or --list <total>");
     process.exit(1);
   }
   const { files: mine } = deal(total)[current - 1];
