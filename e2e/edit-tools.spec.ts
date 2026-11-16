@@ -325,9 +325,9 @@ test("both tools' keys are listed with the other shortcuts", async ({ page }, te
   await expect(page.locator("#upgrade-tool")).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("#upgrade-tool")).toHaveAttribute("aria-pressed", "false");
-  // The bulldozer has its own menu, so the road menu closes (issue 116).
+  // The bulldozer has its own menu, so the road menu closes and takes the upgrade button with it (issue 116).
   await expect(page.locator("#road-menu")).toHaveCount(0);
+  await expect(page.locator("#upgrade-tool")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "false");
   await attach(page, testInfo, "13 the shortcut list");
