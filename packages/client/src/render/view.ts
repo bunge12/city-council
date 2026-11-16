@@ -92,7 +92,7 @@ export interface View {
    */
   setBuildingSource(source: BuildingSource): void;
   /** The chunk's buildings' form shown whole, or null. For tests. */
-  buildingForm(chunk: number): "full" | "box" | "flat" | null;
+  buildingForm(chunk: number): "full" | "simple" | "box" | "flat" | null;
   /** Draws every building again, as after a snapshot, over the next frames. */
   showBuildings(): void;
   /**
