@@ -65,6 +65,10 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
     const day = Math.floor((old["tick"] as number) / TIME_BALANCE.ticksPerDay);
     return { ...old, version: 13, growth: { quota: 1, day, deadline: day + 1, free: 0, used: 0 } };
   },
+  // Version 14 gives every undo record the zoning it brings back (issue
+  // 111). No record before it held any: a ZoneCells left none, and a
+  // bulldozed road came back unzoned, as it still does for these.
+  13: (old) => ({ ...old, version: 14, undo: ((old["undo"] ?? []) as Record<string, unknown>[]).map((record) => ({ ...record, zones: new Int32Array(0) })) }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */

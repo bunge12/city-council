@@ -10,6 +10,7 @@ import { terrainOf } from "./terrain/cache";
 import { applyUndo, planUndo, recordUndo } from "./undo";
 import { stepCells } from "./zoning/cell-index";
 import { planZoneCells, zoneCellsIfValid } from "./zoning/zone";
+import { NO_JOURNALS, journalLostZones, journalPaint } from "./zoning/zone-undo";
 
 /**
  * A request to change the city. `payload` is plain JSON data, so a command
@@ -77,17 +78,23 @@ const SetSpeed: CommandDef = {
 };
 
 /**
- * Applies a road command with the network's journal open, and keeps what it
- * wrote as the sender's newest undo record, tied to the log entry the
- * command is about to get.
+ * Keeps a road command's journal as the sender's newest undo record, tied
+ * to the log entry the command is about to get, with the zoning of any
+ * road it took away for good. The cells are still laid out for the roads
+ * before the command: the step lays them out again after it.
  */
+function recordRoadUndo(state: SimState, command: Command, ops: NetworkOp[]): void {
+  const zones = journalLostZones(state.roads, state.cells, ops);
+  recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops, zones });
+}
+
+/** Applies a road command with the network's journal open, and keeps what it wrote (`recordRoadUndo`). */
 function undoable(state: SimState, command: Command, run: () => void): void {
   startJournal(state.roads);
   try {
     run();
   } finally {
-    const ops = endJournal(state.roads);
-    recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops });
+    recordRoadUndo(state, command, endJournal(state.roads));
   }
 }
 
@@ -145,7 +152,7 @@ const BuildRoadGrid: CommandDef = {
       if (problem !== null) reverseOps(state.roads, ops);
     }
     if (problem !== null) return gridProblemReason(result.plan, problem);
-    recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops });
+    recordRoadUndo(state, command, ops);
     return null;
   },
 };
@@ -181,7 +188,7 @@ const UpgradeRoad: CommandDef = {
 };
 
 /**
- * Takes back the sender's newest road command that has not been undone. It
+ * Takes back the sender's newest road or zoning command that has not been undone. It
  * carries no target, so the payload is ignored. See undo.ts.
  */
 const Undo: CommandDef = {
@@ -199,24 +206,38 @@ const Undo: CommandDef = {
  * Paints zone `payload.zone` at density `payload.density` on every open
  * cell whose centre lies in one of `payload.rects`, or clears them when the
  * zone is "none". Free and instant, and it leaves whatever stands on the
- * cells alone (PRD, "Rezoning"). See zoning/zone.ts. No undo record yet:
- * that is issue #111.
+ * cells alone (PRD, "Rezoning"). See zoning/zone.ts. Its undo record holds
+ * what each cell held before (zoning/zone-undo.ts).
  */
 const ZoneCells: CommandDef = {
   validate: (state, command) => {
     const result = planZoneCells(state, command.payload);
     return result.ok ? null : result.reason;
   },
-  apply: (state, command) => void zoneCellsIfValid(state, command.payload),
+  apply: (state, command) => void zoneCells(state, command),
   // Finding the cells is the whole cost, so the step does it once.
-  applyIfValid: (state, command) => zoneCellsIfValid(state, command.payload),
+  applyIfValid: (state, command) => zoneCells(state, command),
 };
+
+/** Paints as `zoneCellsIfValid` does and keeps the sender's undo record. */
+function zoneCells(state: SimState, command: Command): string | null {
+  let zones: Int32Array = NO_JOURNALS;
+  let painted = { zone: 0, density: 0 };
+  const reason = zoneCellsIfValid(state, command.payload, (slots, zone, density) => {
+    zones = journalPaint(state.roads, state.cells, slots);
+    painted = { zone, density };
+  });
+  if (reason === null) {
+    recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops: [], zones, painted });
+  }
+  return reason;
+}
 
 /**
  * Clears the buildings in `payload.buildings`, each named by its id and its
  * lot's first cell as the player saw them, and refuses the whole command if
  * any changed since. See buildings/bulldoze.ts. Free until M4. No undo
- * record yet: that is issue #111.
+ * record: the grower owns buildings, and undo never brings one back.
  */
 const BulldozeBuilding: CommandDef = {
   validate: (state, command) => {

@@ -3,26 +3,48 @@ import { BUILDINGS_BALANCE, SNAPSHOT_VERSION, TIME_BALANCE, connectionEnd, creat
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
+import { checkUndoHistory } from "../src/undo";
+import { withEnds } from "./seen-ends";
 
 /**
  * `state` as an older version: its fields minus the ones that version did
  * not have. Every version before 10 also lacks the zoning cells and the tick
- * they settle by, every version before 11 the buildings, and every version
- * before 13 the grower's plan.
+ * they settle by, every version before 11 the buildings, every version
+ * before 13 the grower's plan, and every version before 14 the zoning in
+ * its undo history.
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
   if (version < 10) gone.push("cells", "cellsReadyAt");
   if (version < 11) gone.push("buildings");
   if (version < 13) gone.push("growth");
-  const kept = Object.entries(state).filter(([key]) => !gone.includes(key));
-  return { ...Object.fromEntries(kept), version };
+  const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  // Before version 14 a ZoneCells left no undo record and no record held zoning.
+  if (version < 14 && Array.isArray(kept["undo"])) {
+    kept["undo"] = withoutZones(kept["undo"] as SimState["undo"]).map((record) => {
+      const { zones, ...rest } = record;
+      void zones;
+      return rest;
+    });
+  }
+  return { ...kept, version };
+}
+
+/** An undo history as the version 14 migration leaves it, from one of today's: no ZoneCells records, and no zoning on any other. */
+function withoutZones(undo: SimState["undo"]): SimState["undo"] {
+  return undo
+    .filter((r) => r.type !== "ZoneCells")
+    .map((record) => {
+      const { painted, ...rest } = record;
+      void painted;
+      return { ...rest, zones: new Int32Array(0) };
+    });
 }
 
 /** `state` with the grower's plan a version 12 save of it migrates to: one building on the day it was saved on. */
 function asMigrated(state: SimState): SimState {
   const day = Math.floor(state.tick / TIME_BALANCE.ticksPerDay);
-  return { ...state, growth: { quota: 1, day, deadline: day + 1, free: 0, used: 0 } };
+  return { ...state, undo: withoutZones(state.undo), growth: { quota: 1, day, deadline: day + 1, free: 0, used: 0 } };
 }
 
 /** Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000) (build-road.test.ts). */
@@ -39,11 +61,11 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(13);
+    expect(SNAPSHOT_VERSION).toBe(14);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
-      version: 13,
+      version: SNAPSHOT_VERSION,
       log: [],
       logOffset: 0,
       roads: fresh.roads,
@@ -64,7 +86,7 @@ describe("migrateState", () => {
     const fresh = createState(9);
     expect(state).toEqual({
       ...v2,
-      version: 13,
+      version: SNAPSHOT_VERSION,
       roads: fresh.roads,
       undo: [],
       connections: fresh.connections,
@@ -80,7 +102,7 @@ describe("migrateState", () => {
   it("upgrades a version 3 state by adding an empty undo history", () => {
     const state = migrateState(older(createBareState(9), 3, "undo", "connections", "balance"));
     expect(state.undo).toEqual([]);
-    expect(state.version).toBe(13);
+    expect(state.version).toBe(SNAPSHOT_VERSION);
     expect(() => hashState(state)).not.toThrow();
   });
 
@@ -130,7 +152,7 @@ describe("migrateState", () => {
     const row = { a, b, type: 0, network: 0, level: LEVEL_BRIDGE, flags: 1, cx: 1050, cz: 1000, length: 100 };
     const undo5 = [{ playerId: "p1", entry: 0, type: "BuildRoad", ops: [{ op: "addNode", id: a, grown: true }, { op: "addSeg", id: 9, grown: true, row }] }];
     const migrated = migrateState({ ...older(state, 5, "roads", "undo"), roads: roads5, undo: undo5 });
-    expect(migrated.version).toBe(13);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
     expect(Object.keys(migrated.roads)).toEqual(Object.keys(createRoadNetwork()));
     expect(migrated.roads).toEqual(net);
     expect(migrated.undo[0]?.ops[0]).toEqual({ op: "addNode", id: a, grown: true });
@@ -166,7 +188,7 @@ describe("migrateState", () => {
       { playerId: "p3", entry: 4, type: "UpgradeRoad", ops: [{ op: "restyle", id: lost, from: 0, to: 1, reverse: false }] },
     ];
     const migrated = migrateState({ ...older(state, 6, "undo"), undo: undo6 });
-    expect(migrated.version).toBe(13);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
     expect(migrated.roads).toEqual(net);
     const ops = migrated.undo.map((r) => r.ops[0]);
     // Walking back from the road as it is: a to b now, so b to a before the
@@ -237,7 +259,7 @@ describe("migrateState", () => {
     const day = TIME_BALANCE.ticksPerDay;
     while (state.tick < 2 * day + 40) step(state);
     const migrated = migrateState(older(state, 12));
-    expect(migrated.version).toBe(13);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
     expect(migrated.growth).toEqual({ quota: 1, day: 2, deadline: 3, free: 0, used: 0 });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
     const count = () => Array.from(migrated.buildings.flags).filter(Boolean).length;
@@ -251,6 +273,28 @@ describe("migrateState", () => {
     expect(migrated.growth.deadline).toBe(3 + BUILDINGS_BALANCE.fillDays);
     expect(migrated.growth.free).toBeGreaterThan(0);
     expect(() => hashState(migrated)).not.toThrow();
+  });
+
+  it("upgrades a version 13 state by giving every undo record an empty list of zone journals", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    const send = (seq: number, type: string, payload: unknown) => {
+      expect(submit(state, { seq, playerId: "p1", type, payload })).toEqual({ ok: true });
+      step(state);
+    };
+    send(1, "BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" });
+    send(2, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }] });
+    const street = state.undo[0]?.ops.find((op) => op.op === "addSeg")?.id ?? -1;
+    send(3, "BulldozeRoad", withEnds(state.roads, { segments: [street] }));
+    expect(state.undo.map((r) => [r.type, r.zones.length > 0])).toEqual([["BuildRoad", false], ["ZoneCells", true], ["BulldozeRoad", true]]);
+    const migrated = migrateState(older(state, 13));
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(migrated.undo.map((r) => [r.type, r.zones])).toEqual([["BuildRoad", new Int32Array(0)], ["BulldozeRoad", new Int32Array(0)]]);
+    expect(checkUndoHistory(migrated.undo)).toBeNull();
+    // The bulldozed street still comes back, unzoned, as a version 13 city had it.
+    expect(submit(migrated, { seq: 4, playerId: "p1", type: "Undo", payload: {} })).toEqual({ ok: true });
+    step(migrated);
+    expect(migrated.cells.zone.length).toBeGreaterThan(0);
+    expect(migrated.cells.zone.every((z) => z === 0)).toBe(true);
   });
 
   it("leaves a current state as it is", () => {

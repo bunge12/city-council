@@ -121,7 +121,7 @@ mirror.subscribe(() => {
   if (useUi.getState().undoNote !== null) useUi.setState({ undoNote: null });
 });
 
-/** Takes back this player's newest road change, and keeps the reason if the sim refuses. */
+/** Takes back this player's newest road or zoning change, and keeps the reason if the sim refuses. */
 async function undo(): Promise<CommandResult> {
   useUi.setState({ undoNote: null });
   const result = await sendCommand("Undo");

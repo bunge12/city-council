@@ -4,10 +4,12 @@ import { createState, generateTerrain, heightAt, serialize, type SimState } from
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 
 // Issue M1-14: undo. A player draws a street across one that came with the
-// city, upgrades one of its pieces and bulldozes another, then takes all
-// three back one step at a time: Ctrl+Z, the undo button and Cmd+Z. The
-// network ends exactly as the city file had it, the button goes grey, and an
-// undo with nothing left shows the sim's reason.
+// city, zones one of its pieces (issue 111), upgrades the other and
+// bulldozes the zoned one, then takes all four back one step at a time:
+// Ctrl+Z, the undo button and Cmd+Z. The bulldozed piece comes back with its
+// zoning, the zoning goes on its own undo, the network ends exactly as the
+// city file had it, the button goes grey, and an undo with nothing left
+// shows the sim's reason.
 //
 // The city is built in Node with the sim and imported as a city file. Its
 // street was built by another player id, so this player cannot undo it.
@@ -25,7 +27,11 @@ interface Net {
 }
 declare const window: {
   cityCouncil: {
-    mirror: { state: { log: { type: string; playerId: string }[]; roads: Net & Record<string, ArrayLike<number>> } | null };
+    mirror: {
+      state: { log: { type: string; playerId: string }[]; roads: Net & Record<string, ArrayLike<number>>; cells: { zone: ArrayLike<number> };
+        buildings: { flags: ArrayLike<number> };
+      } | null;
+    };
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
       project(x: number, y: number, z: number): { x: number; y: number };
@@ -103,6 +109,32 @@ async function roads(page: Page): Promise<Record<string, number[]>> {
   });
 }
 
+/** How many cells in the mirror are zoned. */
+async function zonedCount(page: Page): Promise<number> {
+  return page.evaluate(() => Array.from(window.cityCouncil.mirror.state?.cells.zone ?? []).filter((z) => z !== 0).length);
+}
+
+/** How many buildings stand in the mirror. */
+async function buildingCount(page: Page): Promise<number> {
+  return page.evaluate(() => Array.from(window.cityCouncil.mirror.state?.buildings.flags ?? []).filter((f) => f !== 0).length);
+}
+
+/** Opens the zone tool, and with it the zoning overlay, and waits for the cells to be drawn. */
+async function zoneTool(page: Page): Promise<void> {
+  await page.keyboard.press("KeyK");
+  await expect(page.locator("#zone-tool")).toHaveAttribute("aria-pressed", "true");
+  await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 60_000 });
+}
+
+/** Attaches a screenshot with the zoning overlay on, then closes the zone tool. */
+async function attachZoning(page: Page, testInfo: TestInfo, name: string): Promise<void> {
+  await zoneTool(page);
+  await away(page);
+  await attach(page, testInfo, name);
+  await page.keyboard.press("KeyK");
+  await expect(page.locator("#zone-tool")).toHaveAttribute("aria-pressed", "false");
+}
+
 async function logTypes(page: Page): Promise<string[]> {
   return page.evaluate(() => window.cityCouncil.mirror.state?.log.map((e) => e.type) ?? []);
 }
@@ -139,7 +171,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-test("builds, upgrades and bulldozes, then undoes all three one step at a time", async ({ page }, testInfo) => {
+test("builds, zones, upgrades and bulldozes, then undoes all four one step at a time", async ({ page }, testInfo) => {
   await openCity(page, startCity());
   await look(page, 4350, 4600, 260);
   await page.keyboard.press("KeyL");
@@ -168,6 +200,17 @@ test("builds, upgrades and bulldozes, then undoes all three one step at a time",
   await away(page);
   await attach(page, testInfo, "2 built a street across it");
 
+  // Zone R1 along the north side of the east piece with the zone tool's defaults.
+  await zoneTool(page);
+  await click(page, 4415, 4596);
+  await expect.poll(async () => (await logTypes(page)).length).toBe(startLog + 2);
+  await expect.poll(() => zonedCount(page)).toBeGreaterThan(0);
+  const zoned = await zonedCount(page);
+  await page.keyboard.press("KeyK");
+  // A house grows on it.
+  await expect.poll(() => buildingCount(page), { timeout: 60_000 }).toBeGreaterThan(0);
+  await attachZoning(page, testInfo, "3 zoned the east piece R1, and a house grew");
+
   // Upgrade the west piece to an avenue.
   await page.keyboard.press("KeyV");
   await page.keyboard.press("KeyX");
@@ -175,43 +218,55 @@ test("builds, upgrades and bulldozes, then undoes all three one step at a time",
   await expect.poll(async () => (await segmentNear(page, 4285, 4600)).type).toBe(1);
   const upgraded = await roads(page);
   await away(page);
-  await attach(page, testInfo, "3 upgraded the west piece to an avenue");
+  await attach(page, testInfo, "4 upgraded the west piece to an avenue");
 
-  // Bulldoze the east piece.
+  // Pause, so nothing grows while the undos are checked. Commands still apply.
+  await page.getByRole("button", { name: "Pause" }).click();
+
+  // Bulldoze the east piece, which takes its house.
   await page.keyboard.press("KeyN");
   await click(page, 4415, 4600);
   await expect.poll(async () => (await segmentNear(page, 4415, 4600)).id).toBe(-1);
   await page.keyboard.press("KeyN");
-  await away(page);
-  await attach(page, testInfo, "4 bulldozed the east piece");
-  expect((await logTypes(page)).slice(startLog)).toEqual(["BuildRoad", "UpgradeRoad", "BulldozeRoad"]);
+  await expect.poll(() => zonedCount(page)).toBe(0);
+  expect(await buildingCount(page)).toBe(0);
+  await attachZoning(page, testInfo, "5 bulldozed the east piece, its zoning and its house");
+  expect((await logTypes(page)).slice(startLog)).toEqual(["BuildRoad", "ZoneCells", "UpgradeRoad", "SetSpeed", "BulldozeRoad"]);
 
-  // Ctrl+Z brings the east piece back, under the same id.
+  // Ctrl+Z brings the east piece back, under the same id, with its zoning.
   await page.keyboard.press("Control+KeyZ");
   await expect.poll(async () => (await segmentNear(page, 4415, 4600)).id).toBe(east.id);
   expect(await roads(page)).toEqual(upgraded);
-  await away(page);
-  await attach(page, testInfo, "5 Ctrl+Z put the bulldozed piece back");
+  await expect.poll(() => zonedCount(page)).toBe(zoned);
+  // The house does not come back: the grower builds again once the game runs.
+  expect(await buildingCount(page)).toBe(0);
+  await attachZoning(page, testInfo, "6 Ctrl+Z put the bulldozed piece back with its zoning, and no house");
 
   // The button takes back the upgrade.
   await undoButton.click();
   await expect.poll(async () => (await segmentNear(page, 4285, 4600)).type).toBe(0);
   expect(await roads(page)).toEqual(built);
   await away(page);
-  await attach(page, testInfo, "6 the undo button turned the avenue back into a street");
+  await attach(page, testInfo, "7 the undo button turned the avenue back into a street");
+
+  // Ctrl+Z takes back the zoning, and leaves the roads as they are.
+  await page.keyboard.press("Control+KeyZ");
+  await expect.poll(() => zonedCount(page)).toBe(0);
+  expect(await roads(page)).toEqual(built);
+  await attachZoning(page, testInfo, "8 Ctrl+Z took back the zoning");
 
   // Cmd+Z takes back the build and rejoins the street it split.
   await page.keyboard.press("Meta+KeyZ");
   await expect.poll(async () => roads(page)).toEqual(start);
   await expect(undoButton).toBeDisabled();
-  expect((await logTypes(page)).slice(startLog)).toEqual(["BuildRoad", "UpgradeRoad", "BulldozeRoad", "Undo", "Undo", "Undo"]);
+  expect((await logTypes(page)).slice(startLog)).toEqual(["BuildRoad", "ZoneCells", "UpgradeRoad", "SetSpeed", "BulldozeRoad", "Undo", "Undo", "Undo", "Undo"]);
   await expect(page.locator("#activity-log")).toContainText("Undo");
   await away(page);
-  await attach(page, testInfo, "7 Cmd+Z took back the build, the network is as the file had it");
+  await attach(page, testInfo, "9 Cmd+Z took back the build, the network is as the file had it");
 
   // One more press, with nothing left: the sim refuses and says why.
   await page.keyboard.press("Control+KeyZ");
   await expect(note).toHaveText("Nothing to undo");
-  expect((await logTypes(page)).slice(startLog)).toHaveLength(6);
-  await attach(page, testInfo, "8 nothing left to undo, and the reason shown");
+  expect((await logTypes(page)).slice(startLog)).toHaveLength(9);
+  await attach(page, testInfo, "10 nothing left to undo, and the reason shown");
 });

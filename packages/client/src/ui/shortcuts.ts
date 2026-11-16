@@ -77,7 +77,7 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "Click a road", description: "with the zone tool's fill: zone the strip on the side the pointer is" },
   { label: "Drag over cells", description: "with the zone tool's brush: zone the cells under the pointer" },
   { label: "Right-click while brushing", description: "with the zone tool: drop the brush stroke" },
-  { label: "Ctrl Z, Cmd Z", description: "undo your last road change" },
+  { label: "Ctrl Z, Cmd Z", description: "undo your last road or zoning change" },
 ];
 
 /** The parts of a key event the shortcut handler looks at. */
