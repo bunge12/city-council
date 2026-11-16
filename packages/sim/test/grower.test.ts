@@ -6,9 +6,13 @@ import {
   SYSTEMS,
   TIME_BALANCE,
   ZONING_BALANCE,
+  createGrowth,
   createState,
+  dayOf,
   deserialize,
+  freeFrontCells,
   growthOnTick,
+  planDay,
   hashState,
   readBuilding,
   residentsFor,
@@ -93,12 +97,56 @@ function expectCandidatesCurrent(state: SimState): void {
 }
 
 describe("the growth rate", () => {
-  it("adds growthPerDay buildings a day, on ticks fixed by the tick alone", () => {
-    for (let day = 0; day < 5; day++) {
-      let n = 0;
-      for (let t = day * DAY; t < (day + 1) * DAY; t++) n += growthOnTick(t);
-      expect(n).toBe(BUILDINGS_BALANCE.growthPerDay);
+  it("spreads a day's quota over its ticks, on ticks fixed by the quota and the tick alone", () => {
+    for (const quota of [0, 1, 7, 100, 250, BUILDINGS_BALANCE.growthPerDayMax]) {
+      for (let day = 0; day < 3; day++) {
+        let n = 0;
+        let most = 0;
+        for (let t = day * DAY; t < (day + 1) * DAY; t++) {
+          n += growthOnTick(t, quota);
+          most = Math.max(most, growthOnTick(t, quota));
+        }
+        expect(n).toBe(quota);
+        expect(most).toBe(Math.ceil(quota / DAY));
+      }
     }
+  });
+
+  it("plans a day from the free front cells, to build them out by a deadline fillDays after they grew", () => {
+    const { fillDays, frontCellsPerBuilding: per, growthPerDayMin, growthPerDayMax } = BUILDINGS_BALANCE;
+    const g = createGrowth();
+    planDay(g, 0, 0);
+    expect(g).toEqual({ quota: growthPerDayMin, day: 0, deadline: fillDays, free: 0 });
+    // New zoning: a full fillDays from today, the quota rounded up.
+    planDay(g, 5, 481);
+    expect(g).toEqual({ quota: Math.ceil(481 / (per * fillDays)), day: 5, deadline: 5 + fillDays, free: 481 });
+    // Fewer cells as it builds: the same deadline, so the quota follows the days left.
+    planDay(g, 5 + fillDays - 2, 40);
+    expect(g.deadline).toBe(5 + fillDays);
+    expect(g.quota).toBe(Math.ceil(40 / (per * 2)));
+    // More zoning moves the deadline out again.
+    planDay(g, 5 + fillDays - 1, 400);
+    expect(g.deadline).toBe(4 + 2 * fillDays);
+    // Held between the min and the max.
+    planDay(g, 100, 10_000_000);
+    expect(g.quota).toBe(growthPerDayMax);
+    planDay(g, 100 + fillDays - 1, 0);
+    expect(g.quota).toBe(growthPerDayMin);
+  });
+
+  it("past its deadline, presses on while the cells still fall, and waits fillDays once they stop", () => {
+    const { fillDays, frontCellsPerBuilding: per } = BUILDINGS_BALANCE;
+    const g = createGrowth();
+    planDay(g, 0, 100);
+    planDay(g, fillDays, 30);
+    expect(g.deadline).toBe(fillDays + 1);
+    expect(g.quota).toBe(Math.ceil(30 / per));
+    planDay(g, fillDays + 1, 5);
+    expect(g.deadline).toBe(fillDays + 2);
+    // Nothing built yesterday: what is left fits no lot.
+    planDay(g, fillDays + 2, 5);
+    expect(g.deadline).toBe(2 * fillDays + 2);
+    expect(g.quota).toBe(BUILDINGS_BALANCE.growthPerDayMin);
   });
 
   it("runs in the step as its own system", () => {
@@ -219,7 +267,7 @@ describe("the grower and state", () => {
   it("waits for a change of roads to settle", () => {
     const state = street();
     zone(state, "residential", 1, 0, 24, 6);
-    while (growthOnTick(state.tick) === 0) step(state);
+    while (state.growth.day !== dayOf(state.tick) || growthOnTick(state.tick, state.growth.quota) === 0) step(state);
     state.cellsReadyAt = state.tick + 1;
     const rng = state.rng.slice();
     grow(state);
@@ -343,6 +391,61 @@ describe("the grower and state", () => {
     };
     expect(run()).toBe(run());
   });
+});
+
+describe("the pace and the frontage", () => {
+  // Seed 2026's flat square fits ten 192 m streets, two across and five down,
+  // each zoned R1 six deep on both sides.
+  const ROWS = [4450, 4562, 4674, 4786, 4898];
+  const COLS = [4120, 4408];
+  function streets(n: number): SimState {
+    const state = createState(SEED);
+    for (let i = 0; i < n; i++) {
+      const x = COLS[Math.floor(i / ROWS.length)] ?? 0;
+      const z = ROWS[i % ROWS.length] ?? 0;
+      ok(state, command("BuildRoad", { from: { x, z }, to: { x: x + 24 * CELL, z }, type: "street" }));
+      const rect = (side: number) => ({ from: { x: x + 2, z: z + side * 29 }, to: { x: x + 24 * CELL - 2, z: z + side * 29 }, width: 44 });
+      ok(state, command("ZoneCells", { zone: "residential", density: 1, rects: [rect(-1), rect(1)] }));
+    }
+    return state;
+  }
+
+  /** Game days from now until no free front cell is left, or -1 past `most` days. */
+  function daysToFill(state: SimState, most: number): number {
+    const from = state.tick;
+    while (freeFrontCells(state) > 0) {
+      if (state.tick - from > most * DAY) return -1;
+      step(state);
+    }
+    return (state.tick - from) / DAY;
+  }
+
+  it("fills one street and ten in about fillDays game days", () => {
+    const { fillDays } = BUILDINGS_BALANCE;
+    const one = streets(1);
+    const ten = streets(10);
+    expect(freeFrontCells(ten)).toBe(10 * freeFrontCells(one));
+    const oneDays = daysToFill(one, 2 * fillDays);
+    const tenDays = daysToFill(ten, 2 * fillDays);
+    for (const days of [oneDays, tenDays]) {
+      expect(days).toBeGreaterThan(0.7 * fillDays);
+      expect(days).toBeLessThan(1.2 * fillDays);
+    }
+    expect(buildings(ten).length).toBeGreaterThan(8 * buildings(one).length);
+  }, 60_000);
+
+  it("hashes the same saved and loaded mid-day, several buildings a day, as a city that never stopped", () => {
+    const straight = streets(10);
+    runDays(straight, 4);
+    const saved = deserialize(serialize(straight)).state;
+    runDays(straight, 3);
+    for (let i = 0; i < 37; i++) step(saved);
+    expect(saved.growth.quota).toBeGreaterThan(1);
+    const reloaded = deserialize(serialize(saved)).state;
+    while (reloaded.tick < straight.tick) step(reloaded);
+    expect(reloaded.growth).toEqual(straight.growth);
+    expect(hashState(reloaded)).toBe(hashState(straight));
+  }, 60_000);
 });
 
 describe("replay fixture growth", () => {

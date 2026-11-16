@@ -7,6 +7,7 @@ import {
   connectionStub,
   createState,
   findRoute,
+  createGrowth,
   hashState,
   heightAt,
   mapEdge,
@@ -225,10 +226,10 @@ describe("the player and the stubs", () => {
     const state = createState(2026);
     const [c] = placed(state);
     if (!c) throw new Error("no connection");
-    const before = hashState({ ...state, log: [], tick: 0 });
+    const before = hashState({ ...state, log: [], tick: 0, growth: createGrowth() });
     expect(build(state, { x: c.innerX, z: c.innerZ }, beyond(c, 300))).toEqual({ ok: true });
     expect(command(state, "Undo", {})).toEqual({ ok: true });
     expect(command(state, "Undo", {}).ok).toBe(false);
-    expect(hashState({ ...state, log: [], tick: 0 })).toBe(before);
+    expect(hashState({ ...state, log: [], tick: 0, growth: createGrowth() })).toBe(before);
   });
 });

@@ -33,8 +33,14 @@ export interface BuildingsBalance {
   maxLotWidth: number;
   /** The widest through-lot along its roads, in cells (M2-14). The deepest is twice `zoneDepthCells`. */
   maxThroughLotWidth: number;
-  /** Buildings the grower adds across the city each game day (M2-10). A whole number. */
-  growthPerDay: number;
+  /** Game days the grower plans to build out the free frontage in (issue 135). */
+  fillDays: number;
+  /** Front cells the grower counts one building as taking when it plans a day. */
+  frontCellsPerBuilding: number;
+  /** The fewest buildings the grower plans for a day. */
+  growthPerDayMin: number;
+  /** The most buildings the grower plans for a day, which keeps its ticks inside the budget. */
+  growthPerDayMax: number;
   /** Free cells the grower draws for one building before it gives that building up. */
   growthTries: number;
   /** The most buildings one `BulldozeBuilding` may name (M2-11). */
@@ -84,8 +90,16 @@ export function checkBuildingsBalance(data: unknown): string[] {
   const throughOk = Number.isSafeInteger(maxThrough) && (maxThrough as number) >= 1;
   if (!throughOk) errors.push("maxThroughLotWidth must be a whole number of at least 1");
   const widestThrough = throughOk ? (maxThrough as number) : 0;
-  const perDay = data["growthPerDay"];
-  if (!Number.isSafeInteger(perDay) || (perDay as number) < 0) errors.push("growthPerDay must be a whole number of at least 0");
+  for (const key of ["fillDays", "frontCellsPerBuilding"]) {
+    const v = data[key];
+    if (!Number.isSafeInteger(v) || (v as number) < 1) errors.push(`${key} must be a whole number of at least 1`);
+  }
+  const perDayMin = data["growthPerDayMin"];
+  const perDayMax = data["growthPerDayMax"];
+  const minOk = Number.isSafeInteger(perDayMin) && (perDayMin as number) >= 0;
+  if (!minOk) errors.push("growthPerDayMin must be a whole number of at least 0");
+  if (!Number.isSafeInteger(perDayMax) || (perDayMax as number) < 1) errors.push("growthPerDayMax must be a whole number of at least 1");
+  else if (minOk && (perDayMax as number) < (perDayMin as number)) errors.push("growthPerDayMax must be at least growthPerDayMin");
   const tries = data["growthTries"];
   if (!Number.isSafeInteger(tries) || (tries as number) < 1) errors.push("growthTries must be a whole number of at least 1");
   const most = data["bulldozeMaxBuildings"];

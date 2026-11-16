@@ -4,6 +4,7 @@
 // PROTOCOL_VERSION on any change to a shape.
 
 import type { BuildingDelta } from "./buildings/delta";
+import type { GrowthState } from "./buildings/growth";
 import type { Command, CommandResult, DroppedCommand } from "./commands";
 import type { LogEntry } from "./log";
 import type { RoadDelta } from "./roads/delta";
@@ -12,7 +13,7 @@ import type { UndoRecord } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 // ---- Client to sim ----
 
@@ -95,6 +96,12 @@ export interface DeltaMessage {
    * generator fell behind would hash differently from the sim.
    */
   rng: Uint32Array;
+  /**
+   * The grower's plan for the day after the last step, a copy (issue 135).
+   * Always sent, like `rng`: the grower plans each day, and a copy whose
+   * plan fell behind would hash differently from the sim.
+   */
+  growth: GrowthState;
   /** Steps the host ran since the previous delta, paused steps included. */
   steps: number;
   /** Per-system time of the most recent step, in `step` order. */

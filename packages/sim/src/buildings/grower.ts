@@ -3,11 +3,23 @@
 // included, grows as if its demand were positive; M3 puts the demand bars
 // in front of this.
 //
-// `growthPerDay` buildings a game day across the whole city, on fixed
-// ticks: tick t adds floor((t + 1) r / T) - floor(t r / T) of them, for r
-// a day over T ticks a day, so the count follows from the tick alone. A
+// The pace scales with the free frontage (issue 135), so any amount of new
+// zoning fills in about `fillDays`. On the first settled tick of each game
+// day the grower counts the free zoned front cells, F, and plans the day
+// (`planDay`). When F has grown since the last plan (new zoning, a
+// building gone), the deadline moves to today plus `fillDays`. When the
+// deadline has come and F is still falling, it moves to tomorrow, so the
+// last few cells fill at once rather than at the floor; when F has stopped
+// falling, what is left is cells no lot fits, and it moves `fillDays` on,
+// so they cost few draws. The day's quota is then F over `frontCellsPerBuilding`
+// times the days left to the deadline, rounded up and held between
+// `growthPerDayMin` and `growthPerDayMax`. The plan is in state
+// (growth.ts), since F changes during the day. Tick t of the day adds
+// floor((t + 1) r / T) - floor(t r / T) buildings, for r the quota and T
+// ticks a day, so when they land follows from state and the tick alone. A
 // tick that falls while a change of roads is still settling adds none
-// (`cellsSettled`); those buildings are not made up later.
+// (`cellsSettled`), and a day that settles late is planned then; those
+// buildings are not made up later.
 //
 // For each building the grower draws a free zoned cell by the road from
 // the generator in state (candidates.ts; M3 replaces the draw with land
@@ -35,6 +47,7 @@ import type { System } from "../step";
 import { cellsSettled, syncCells } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE, BUILDING_TYPES, type BuildingType } from "./balance";
 import { addBuilding } from "./buildings";
+import type { GrowthState } from "./growth";
 import { candidateAt, candidateCount } from "./candidates";
 import { lotOptions, type Lot } from "./lots";
 import { segmentBuildings } from "./where";
@@ -45,11 +58,28 @@ export const GROWER_SYSTEM = "grower";
 /** Variants a building may draw: the values a byte holds. */
 const VARIANTS = 256;
 
-/** How many buildings the grower adds on `tick`, from the tick alone. */
-export function growthOnTick(tick: number): number {
-  const r = BUILDINGS_BALANCE.growthPerDay;
+/** How many of a day's `quota` buildings the grower adds on `tick`. Over a day's ticks they add up to `quota`. */
+export function growthOnTick(tick: number, quota: number): number {
   const t = TIME_BALANCE.ticksPerDay;
-  return Math.floor(((tick + 1) * r) / t) - Math.floor((tick * r) / t);
+  const at = tick % t;
+  return Math.floor(((at + 1) * quota) / t) - Math.floor((at * quota) / t);
+}
+
+/** The game day `tick` falls on. */
+export function dayOf(tick: number): number {
+  return Math.floor(tick / TIME_BALANCE.ticksPerDay);
+}
+
+/** Plans day `day` from `free`, the free zoned front cells counted at its start, as the header says. */
+export function planDay(growth: GrowthState, day: number, free: number): void {
+  const b = BUILDINGS_BALANCE;
+  if (free > growth.free) growth.deadline = day + b.fillDays;
+  else if (day >= growth.deadline) growth.deadline = free < growth.free ? day + 1 : day + b.fillDays;
+  const per = b.frontCellsPerBuilding * (growth.deadline - day);
+  const want = Math.floor((free + per - 1) / per);
+  growth.quota = Math.min(b.growthPerDayMax, Math.max(b.growthPerDayMin, want));
+  growth.day = day;
+  growth.free = free;
 }
 
 /** Residents for a `type` building on a `width` x `depth` lot. Draws from `rng` only for a type with `drawResidents`. */
@@ -92,10 +122,17 @@ export function growOne(state: SimState): number {
   return -1;
 }
 
+/** The free zoned front cells: the grower's candidates. */
+export function freeFrontCells(state: SimState): number {
+  return candidateCount(state, syncCells(state), () => segmentBuildings(state));
+}
+
 /** The grower's work for one tick. */
 export function grow(state: SimState): void {
-  const due = growthOnTick(state.tick);
-  if (due === 0 || !cellsSettled(state)) return;
+  if (!cellsSettled(state)) return;
+  const day = dayOf(state.tick);
+  if (state.growth.day !== day) planDay(state.growth, day, freeFrontCells(state));
+  const due = growthOnTick(state.tick, state.growth.quota);
   for (let i = 0; i < due; i++) if (growOne(state) < 0) return;
 }
 

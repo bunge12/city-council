@@ -20,14 +20,19 @@
 //   buildings stand. The building index (where.ts) files again only the
 //   buildings near the segments the street laid out again (M2-11), so this
 //   is held to the budget like the rest;
+// - a tick at `growthPerDayMax` (issue 135), the busiest a day's quota can
+//   make one, on the mixed zoning and on C3 throughout, its mean held to
+//   the grower's share of the budget;
 // - the buildings' upkeep after a grid at the cap over the grown city, as a
 //   command pays it (buildings/upkeep.ts).
 
 import { expect, test } from "vitest";
 import {
   BUILDINGS_BALANCE,
+  TIME_BALANCE,
   ZONING_BALANCE,
   buildScaleCity,
+  dayOf,
   growthOnTick,
   planRoad,
   planRoadGrid,
@@ -46,6 +51,13 @@ import { terrainOf } from "../src/terrain/cache";
 import { syncCells } from "../src/zoning/cell-index";
 
 const TICK_BUDGET_MS = 20;
+/**
+ * The grower's share of the tick at `growthPerDayMax`: a quarter, as
+ * `settleCellsPerTick` takes, so it, a slice of cells and a command fit
+ * in one tick. Held on the mean, since a single run's worst is mostly a
+ * garbage collection landing in it; the worst is held to the whole budget.
+ */
+const GROWER_SHARE_MS = 5;
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
 const ZONES = ZONING_BALANCE.zones.length;
 
@@ -118,19 +130,35 @@ function zoneEverything(front: (zone: number, density: number) => [number, numbe
   forgetCandidates(state);
 }
 
-// A tick the grower adds a building on, with nothing settling.
-let tick = 0;
-while (growthOnTick(tick) === 0) tick++;
+// The day's quota the grower is given: 1 for the cases that time one
+// building, the cap for the cases that time the busiest tick it can have.
+let quota = 1;
+/** A tick of day 1 on which the grower adds the most buildings `quota` gives a tick. */
+function busiestTick(): number {
+  const T = TIME_BALANCE.ticksPerDay;
+  let best = T;
+  for (let t = T; t < 2 * T; t++) if (growthOnTick(t, quota) > growthOnTick(best, quota)) best = t;
+  return best;
+}
+
+/** Buildings standing before a case, so `takeBack` removes only what it added. */
+let standingBefore = new Set<number>();
+function liveIds(): Set<number> {
+  const ids = new Set<number>();
+  for (let id = 0; id < state.buildings.flags.length; id++) if (state.buildings.flags[id]) ids.add(id);
+  return ids;
+}
 
 function growOnce(): void {
+  const tick = busiestTick();
   state.tick = tick;
   state.cellsReadyAt = 0;
+  state.growth = { quota, day: dayOf(tick), deadline: dayOf(tick) + 1, free: 0 };
   grow(state);
 }
 
 function takeBack(): void {
-  const last = state.buildings.flags.length - 1;
-  if (last >= 0 && state.buildings.flags[last]) removeBuilding(state, last);
+  for (const id of liveIds()) if (!standingBefore.has(id)) removeBuilding(state, id);
 }
 
 test("the grower on the M1 scale network with every cell zoned", async ({ bench, annotate }) => {
@@ -138,7 +166,19 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   const results: Record<string, { mean: number; p99: number; max: number }> = {};
   const time = async (name: string, hooks: { beforeEach?: () => void; afterEach?: () => void }) => {
     const file = `bench-results/grower-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
-    const r = await bench(name, { writeResult: file, async: false, ...hooks }, growOnce).run(runs);
+    const r = await bench(
+      name,
+      {
+        writeResult: file,
+        async: false,
+        ...hooks,
+        beforeEach: () => {
+          standingBefore = liveIds();
+          hooks.beforeEach?.();
+        },
+      },
+      growOnce,
+    ).run(runs);
     results[name] = { mean: r.latency.mean, p99: r.latency.p99 ?? 0, max: r.latency.max };
   };
 
@@ -148,6 +188,9 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
     afterEach: takeBack,
   });
   await time("a grower tick with its candidates kept current", { afterEach: takeBack });
+  quota = BUILDINGS_BALANCE.growthPerDayMax;
+  await time(`a grower tick at growthPerDayMax, ${growthOnTick(busiestTick(), quota)} buildings`, { afterEach: takeBack });
+  quota = 1;
   const street = streetAcross();
   await time("the first grower tick after a street across a grid", {
     beforeEach: () => buildStreet(street),
@@ -187,6 +230,9 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   state.cells.density.fill(3);
   forgetCandidates(state);
   await time("a grower tick on a city zoned C3 throughout, each draw looking for a through-lot", { afterEach: takeBack });
+  quota = BUILDINGS_BALANCE.growthPerDayMax;
+  await time(`a grower tick at growthPerDayMax on a city zoned C3 throughout, ${growthOnTick(busiestTick(), quota)} buildings`, { afterEach: takeBack });
+  quota = 1;
   expect(buildingCount(state.buildings)).toBe(0);
 
   // The same with the back row of every strip C2, so every front strip is
@@ -222,7 +268,7 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
         async: false,
         beforeEach: () => {
           buildGrid(grid);
-          state.tick = tick;
+          state.tick = busiestTick();
           state.cellsReadyAt = 0;
         },
         afterEach: takeBackRoads,
@@ -237,10 +283,12 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
     city: { segments: counts.segments, cells: state.cells.zone.length, frontCells: state.cells.zone.length / DEPTH },
     ms: Object.fromEntries(Object.entries(results).map(([k, v]) => [k, { mean: round(v.mean), p99: round(v.p99), max: round(v.max) }])),
     budgetMs: TICK_BUDGET_MS,
+    growerShareMs: GROWER_SHARE_MS,
   };
   await annotate(JSON.stringify(report, null, 2), "grower");
   for (const [name, r] of Object.entries(results)) {
     if (name.includes("from scratch")) continue;
     expect(r.max, name).toBeLessThan(TICK_BUDGET_MS);
+    if (name.includes("growthPerDayMax")) expect(r.mean, name).toBeLessThan(GROWER_SHARE_MS);
   }
 }, 600_000);

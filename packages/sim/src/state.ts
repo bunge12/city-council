@@ -1,5 +1,6 @@
 import { BALANCE_STAMP } from "./balance-stamp";
 import { createBuildings, type BuildingState } from "./buildings/buildings";
+import { createGrowth, type GrowthState } from "./buildings/growth";
 import type { Command } from "./commands";
 import type { LogEntry } from "./log";
 import { seedRng } from "./rng";
@@ -13,7 +14,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 12;
+export const SNAPSHOT_VERSION = 13;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -81,6 +82,11 @@ export interface SimState {
    * building stands on each cell is derived (buildings/where.ts).
    */
   buildings: BuildingState;
+  /**
+   * The grower's plan for the day: its quota and the deadline it builds the
+   * free frontage out by (buildings/grower.ts, issue 135).
+   */
+  growth: GrowthState;
 }
 
 /**
@@ -121,6 +127,7 @@ export function createBareState(seed: number): SimState {
     cells: unzonedCells(roads),
     cellsReadyAt: 0,
     buildings: createBuildings(),
+    growth: createGrowth(),
   };
 }
 

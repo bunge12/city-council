@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SNAPSHOT_VERSION, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, type SimState } from "../src/index";
+import { BUILDINGS_BALANCE, SNAPSHOT_VERSION, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
@@ -7,14 +7,22 @@ import { terrainOf } from "../src/terrain/cache";
 /**
  * `state` as an older version: its fields minus the ones that version did
  * not have. Every version before 10 also lacks the zoning cells and the tick
- * they settle by, and every version before 11 the buildings.
+ * they settle by, every version before 11 the buildings, and every version
+ * before 13 the grower's plan.
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
   if (version < 10) gone.push("cells", "cellsReadyAt");
   if (version < 11) gone.push("buildings");
+  if (version < 13) gone.push("growth");
   const kept = Object.entries(state).filter(([key]) => !gone.includes(key));
   return { ...Object.fromEntries(kept), version };
+}
+
+/** `state` with the grower's plan a version 12 save of it migrates to: one building on the day it was saved on. */
+function asMigrated(state: SimState): SimState {
+  const day = Math.floor(state.tick / TIME_BALANCE.ticksPerDay);
+  return { ...state, growth: { quota: 1, day, deadline: day + 1, free: 0 } };
 }
 
 /** Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000) (build-road.test.ts). */
@@ -31,11 +39,11 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(12);
+    expect(SNAPSHOT_VERSION).toBe(13);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
-      version: 12,
+      version: 13,
       log: [],
       logOffset: 0,
       roads: fresh.roads,
@@ -45,6 +53,7 @@ describe("migrateState", () => {
       cells: fresh.cells,
       cellsReadyAt: 0,
       buildings: fresh.buildings,
+      growth: asMigrated(fresh).growth,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -55,7 +64,7 @@ describe("migrateState", () => {
     const fresh = createState(9);
     expect(state).toEqual({
       ...v2,
-      version: 12,
+      version: 13,
       roads: fresh.roads,
       undo: [],
       connections: fresh.connections,
@@ -63,6 +72,7 @@ describe("migrateState", () => {
       cells: fresh.cells,
       cellsReadyAt: 0,
       buildings: fresh.buildings,
+      growth: asMigrated(fresh).growth,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -70,14 +80,14 @@ describe("migrateState", () => {
   it("upgrades a version 3 state by adding an empty undo history", () => {
     const state = migrateState(older(createBareState(9), 3, "undo", "connections", "balance"));
     expect(state.undo).toEqual([]);
-    expect(state.version).toBe(12);
+    expect(state.version).toBe(13);
     expect(() => hashState(state)).not.toThrow();
   });
 
   it("upgrades a version 4 state by adding the connections a new city of its seed gets", () => {
     const state = migrateState(older(createBareState(9), 4, "connections", "balance"));
     // All but the balance stamp, which an old save does not have.
-    expect(hashState(state)).toBe(hashState({ ...createState(9), balance: "" }));
+    expect(hashState(state)).toBe(hashState({ ...asMigrated(createState(9)), balance: "" }));
   });
 
   it("keeps a version 4 city's own roads and ids, and places its connections clear of them", () => {
@@ -120,7 +130,7 @@ describe("migrateState", () => {
     const row = { a, b, type: 0, network: 0, level: LEVEL_BRIDGE, flags: 1, cx: 1050, cz: 1000, length: 100 };
     const undo5 = [{ playerId: "p1", entry: 0, type: "BuildRoad", ops: [{ op: "addNode", id: a, grown: true }, { op: "addSeg", id: 9, grown: true, row }] }];
     const migrated = migrateState({ ...older(state, 5, "roads", "undo"), roads: roads5, undo: undo5 });
-    expect(migrated.version).toBe(12);
+    expect(migrated.version).toBe(13);
     expect(Object.keys(migrated.roads)).toEqual(Object.keys(createRoadNetwork()));
     expect(migrated.roads).toEqual(net);
     expect(migrated.undo[0]?.ops[0]).toEqual({ op: "addNode", id: a, grown: true });
@@ -156,7 +166,7 @@ describe("migrateState", () => {
       { playerId: "p3", entry: 4, type: "UpgradeRoad", ops: [{ op: "restyle", id: lost, from: 0, to: 1, reverse: false }] },
     ];
     const migrated = migrateState({ ...older(state, 6, "undo"), undo: undo6 });
-    expect(migrated.version).toBe(12);
+    expect(migrated.version).toBe(13);
     expect(migrated.roads).toEqual(net);
     const ops = migrated.undo.map((r) => r.ops[0]);
     // Walking back from the road as it is: a to b now, so b to a before the
@@ -174,7 +184,7 @@ describe("migrateState", () => {
   it("upgrades a version 7 state by adding an empty balance stamp", () => {
     const state = createState(9);
     const migrated = migrateState(older(state, 7, "balance"));
-    expect(migrated).toEqual({ ...state, balance: "" });
+    expect(migrated).toEqual({ ...asMigrated(state), balance: "" });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 
@@ -184,7 +194,7 @@ describe("migrateState", () => {
     step(state);
     expect(state.cells.zone.length).toBe(24 * 2 * 6);
     const migrated = migrateState(older(state, 9));
-    expect(migrated).toEqual(state);
+    expect(migrated).toEqual(asMigrated(state));
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 
@@ -193,7 +203,7 @@ describe("migrateState", () => {
     expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
     step(state);
     const migrated = migrateState(older(state, 10));
-    expect(migrated).toEqual(state);
+    expect(migrated).toEqual(asMigrated(state));
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
     expect(migrated.buildings.flags).toHaveLength(0);
     expect(migrated.buildings.free).toHaveLength(0);
@@ -212,10 +222,35 @@ describe("migrateState", () => {
     const backKeys = ["backSeg", "backSide", "backPlace", "backDir", "backDepth"];
     const buildings11 = Object.fromEntries(Object.entries(b).filter(([key]) => !backKeys.includes(key)));
     const migrated = migrateState({ ...older(state, 11, "buildings"), buildings: buildings11 });
-    expect(migrated).toEqual(state);
+    expect(migrated).toEqual(asMigrated(state));
     expect(Object.keys(migrated.buildings)).toEqual(Object.keys(b));
     for (const key of backKeys) expect(Array.from(migrated.buildings[key as "backSeg"]).every((v) => v === 0), key).toBe(true);
-    expect(hashState(migrated)).toBe(hashState(state));
+    expect(hashState(migrated)).toBe(hashState(asMigrated(state)));
+  });
+
+  it("upgrades a version 12 state mid-day by keeping that day's one building, then planning from its free cells", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    const day = TIME_BALANCE.ticksPerDay;
+    while (state.tick < 2 * day + 40) step(state);
+    const migrated = migrateState(older(state, 12));
+    expect(migrated.version).toBe(13);
+    expect(migrated.growth).toEqual({ quota: 1, day: 2, deadline: 3, free: 0 });
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    const count = () => Array.from(migrated.buildings.flags).filter(Boolean).length;
+    const before = count();
+    // The rest of day 2 grows what a version 12 city grew: one building, on its last tick.
+    while (migrated.tick < 3 * day) step(migrated);
+    expect(count()).toBe(before + 1);
+    // Day 3 plans afresh, and its free cells, counted as new, get a full fillDays.
+    step(migrated);
+    expect(migrated.growth.day).toBe(3);
+    expect(migrated.growth.deadline).toBe(3 + BUILDINGS_BALANCE.fillDays);
+    expect(migrated.growth.free).toBeGreaterThan(0);
+    expect(() => hashState(migrated)).not.toThrow();
   });
 
   it("leaves a current state as it is", () => {
