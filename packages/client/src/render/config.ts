@@ -513,7 +513,7 @@ export const BUILDINGS = {
   fadeSeconds: 0.35,
   flatLift: { base: 0.4, perMetre: 0.0012 },
   /** What the simple form leaves out of a model, in metres (theme/model.ts, `simplify`). */
-  simplify: { minSpan: 1.5, minSize: 3 },
+  simplify: { minSpan: 1.5, minSize: 3, keepHeight: 6 },
 } as const;
 
 /**

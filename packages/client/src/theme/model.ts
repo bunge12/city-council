@@ -273,13 +273,15 @@ export interface SimplifyLimits {
   minSpan: number;
   /** A part whose largest size is under this is a small fitting. */
   minSize: number;
+  /** A part at least this tall above the ground stays whatever its other sizes, so masts and chimneys keep the skyline. */
+  keepHeight: number;
 }
 
 /**
  * A model with its small parts and its paving left out, for drawing far
  * from the camera (render/building-lod.ts). What stays is the model's own
  * geometry, so its shape, colours and window pattern are the full model's.
- * A part goes when it is all paving, or small by `limits`. A model with
+ * A part goes when it is all paving, or small by `limits` and not tall. A model with
  * no parts, or with nothing left, is returned as it is.
  */
 export function simplify(m: ModelArrays, limits: SimplifyLimits): ModelArrays {
@@ -347,6 +349,8 @@ function keepPart(m: ModelArrays, from: number, to: number, limits: SimplifyLimi
     maxZ = Math.max(maxZ, z);
   }
   if (paving || maxY <= 0) return false;
-  const sizes = [maxX - minX, maxY - Math.max(minY, 0), maxZ - minZ].sort((a, b) => a - b);
+  const height = maxY - Math.max(minY, 0);
+  if (height >= limits.keepHeight) return true;
+  const sizes = [maxX - minX, height, maxZ - minZ].sort((a, b) => a - b);
   return (sizes[1] ?? 0) >= limits.minSpan && (sizes[2] ?? 0) >= limits.minSize;
 }
