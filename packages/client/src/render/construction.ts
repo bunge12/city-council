@@ -72,20 +72,23 @@ export function scaffoldNode(tick: F, built: F) {
 
 /**
  * A rising building, in a shader. `built` is when it was built, `height` its
- * height in metres and `y` each vertex's height in its model above the
- * ground it stands on. The building is drawn `sink` metres lower than it
- * stands, so it comes up out of the ground as it rises, and whatever is
- * below the ground then is not drawn, so nothing shows through a slope or a
- * road. `keep` is false for those pixels. A finished building sinks by
- * nothing and keeps every pixel, its foundations too.
+ * height in metres above the ground it stands on, and `y` each vertex's
+ * height above the bottom of its foundations. The building is drawn `sink`
+ * metres lower than it stands, a little more than its height at first, so
+ * it comes up out of the ground as it rises. Whatever has sunk below where
+ * the bottom of its foundations stands is not drawn: `keep` is false there.
+ * The foundations reach down past the lowest ground under the lot (theme
+ * generators), so on a slope the building comes up out of the ground on
+ * every side, with the terrain hiding what is still under it. A finished
+ * building sinks by nothing and keeps every pixel.
  */
 export function rising(tick: F, built: F, height: F, y: F) {
   const r = riseNode(tick, built);
-  const sink = varying(float(1).sub(r).mul(height));
+  // 20 cm more than the height, so a flat roof is under the ground before the building starts to rise.
+  const sink = varying(float(1).sub(r).mul(float(height).add(0.2)));
   const below = varying(float(y));
   const done = varying(r).greaterThanEqual(0.999);
-  // Strictly above, by a centimetre: a flat roof at the model's top is not drawn on the ground before the building starts to rise.
-  return { sink, keep: done.or(below.greaterThan(sink.add(0.01))) };
+  return { sink, keep: done.or(below.greaterThanEqual(sink)) };
 }
 
 /**

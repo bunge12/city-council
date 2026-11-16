@@ -55,7 +55,7 @@ describe("a merged chunk under construction", () => {
   const item = (x: number, y: number, built: number): MergedItem => ({ model: simple, extent, x, y, z: 100, angle: 0.4, sx: 1, sz: 1, wall: 0, roof: 0, trim: 0, flat: 0, built, height: extent.maxY });
   const items = [item(10, 20, 5), item(40, 30, 900)];
 
-  it("gives every vertex its building's built tick and height, and its own height over its building's ground", () => {
+  it("gives every vertex its building's built tick and height, and its own height above the bottom of its building's foundations", () => {
     for (const [form, arrays] of [
       ["simple", mergeModels(items, { glass: 0, paving: 0 })],
       ["box", mergeBoxes(items)],
@@ -70,7 +70,7 @@ describe("a merged chunk under construction", () => {
         const it = items[v < half ? 0 : 1];
         expect(rise[v * 3], form).toBe(it?.built);
         expect(rise[v * 3 + 1], form).toBeCloseTo(extent.maxY, 4);
-        expect(rise[v * 3 + 2], form).toBeCloseTo((arrays.positions[v * 3 + 1] ?? 0) - (it?.y ?? 0), 3);
+        expect(rise[v * 3 + 2], form).toBeCloseTo((arrays.positions[v * 3 + 1] ?? 0) - (it?.y ?? 0) - extent.minY, 3);
       }
     }
   });

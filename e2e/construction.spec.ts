@@ -104,7 +104,7 @@ const GRID = { x: 4250, z: 4600 };
 const ground = groundAt(GRID.x, GRID.z);
 /** Low over a street of the fixture's grid, in the street band, where buildings draw in full with scaffolding. */
 /** Over the same streets in the district band, where buildings draw simplified. */
-const DISTRICT: Vec3 = [GRID.x - 120, ground + 420, GRID.z + 480];
+const DISTRICT: Vec3 = [GRID.x - 200, ground + 600, GRID.z + 650];
 const CLOSE: { position: Vec3; target: Vec3 } = { position: [GRID.x + 10, ground + 95, GRID.z + 150], target: [GRID.x + 10, ground + 4, GRID.z + 30] };
 
 test("at 4x a new building's scaffolding goes up, the building rises inside it, and the scaffolding comes down", async ({ page }, testInfo) => {

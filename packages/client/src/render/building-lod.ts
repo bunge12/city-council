@@ -189,7 +189,7 @@ export interface MergedItem {
   roof: number;
   trim: number;
   flat: number;
-  /** The tick the sim built it on, and its model's height in metres, for a building under construction (construction.ts). */
+  /** The tick the sim built it on, and its model's height in metres above the ground, for a building under construction (construction.ts). */
   built?: number;
   height?: number;
 }
@@ -430,9 +430,10 @@ function verticesOf(item: MergedItem, form: "simple" | "box" | "flat"): number {
 /**
  * The attribute a merged chunk with a building under construction rises by
  * (issue 136): per vertex of `positions`, as `form`'s merge function wrote
- * them for `items`, its building's `built` tick, its building's height and
- * its own height over the ground its building stands on. The shader sinks
- * each building into the ground by the share it has still to rise.
+ * them for `items`, its building's `built` tick, its building's height above
+ * the ground, and its own height above the bottom of its foundations. The
+ * shader sinks each building into the ground by the share it has still to
+ * rise.
  */
 export function mergedRise(items: readonly MergedItem[], positions: Float32Array, form: "simple" | "box" | "flat"): Float32Array {
   const out = new Float32Array(positions.length);
@@ -442,7 +443,7 @@ export function mergedRise(items: readonly MergedItem[], positions: Float32Array
     for (let k = 0; k < n; k++) {
       out[(v + k) * 3] = item.built ?? -1e9;
       out[(v + k) * 3 + 1] = item.height ?? 0;
-      out[(v + k) * 3 + 2] = (positions[(v + k) * 3 + 1] ?? 0) - item.y;
+      out[(v + k) * 3 + 2] = (positions[(v + k) * 3 + 1] ?? 0) - item.y - item.extent.minY;
     }
     v += n;
   }

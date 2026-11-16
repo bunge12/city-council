@@ -537,7 +537,7 @@ describe("buildings under construction (issue 136)", () => {
     layer.dispose();
   });
 
-  it("draws a merged chunk with a building under construction with the rising material, and plain again once it is finished", () => {
+  it("draws a merged chunk with a building under construction with the rising material, and builds the drawn one plain again once it is finished", () => {
     const { source, rows, put } = fakeSource();
     put(1, 4004, 4004);
     put(2, 4040, 4004);
@@ -553,8 +553,31 @@ describe("buildings under construction (issue 136)", () => {
     run(layer, "city", 1000 + CONSTRUCTION.ticks);
     expect(named(scene, "building blocks")).toEqual(["building blocks"]);
     expect(layer.stats().totalMerged).toBeGreaterThan(merged);
+    // The simple form was not drawn when its building finished: it keeps the rising material, which draws it finished, rather than be built again for nothing.
     run(layer, "district", 1000 + CONSTRUCTION.ticks + 1);
-    expect(named(scene, "simple buildings")).toEqual(["simple buildings"]);
+    expect(named(scene, "simple buildings")).toEqual(["rising simple buildings"]);
+    layer.dispose();
+  });
+});
+
+describe("the scaffolding's instances (issue 136)", () => {
+  it("moves the last building's scaffolding into the gap one leaves, with its own built tick", () => {
+    const { source, rows, put } = fakeSource();
+    const c = put(1, 4004, 4004);
+    put(2, 4040, 4004);
+    Object.assign(rows.get(1) ?? {}, { builtAt: 1000 });
+    Object.assign(rows.get(2) ?? {}, { builtAt: 1050 });
+    const scene = new Scene();
+    const layer = createBuildingLayer(scene, source, theme, () => 0);
+    layer.reset();
+    for (let k = 0; k < 20; k++) layer.update({ x: 4000, z: 4000 }, 1000, { band: "street", seconds: 1, tick: 1060 });
+    const mesh = () => scene.getObjectByName("scaffolding") as unknown as { count: number; geometry: { getAttribute(n: string): { getX(i: number): number } } };
+    expect(mesh().count).toBe(2);
+    rows.delete(1);
+    layer.apply([c]);
+    layer.update({ x: 4000, z: 4000 }, 1000, { band: "street", seconds: 1, tick: 1061 });
+    expect(mesh().count).toBe(1);
+    expect(mesh().geometry.getAttribute("scaffoldBuilt").getX(0)).toBe(1050);
     layer.dispose();
   });
 });

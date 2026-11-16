@@ -297,9 +297,9 @@ function buildingMaterial(theme: Theme, tick: Node<"float">): MeshLambertNodeMat
   const tint = attribute<"vec3">("buildingTint", "vec3");
   const stretch = attribute<"vec2">("buildingScale", "vec2");
   const fade = varying(attribute<"float">("buildingFade", "float"));
-  // When the building was built and how tall its model is, for its construction (construction.ts).
-  const built = attribute<"vec2">("buildingBuilt", "vec2");
-  const rise = rising(tick, built.x, built.y, positionGeometry.y);
+  // When the building was built, how tall its model is above the ground, and where the bottom of its foundations is, for its construction (construction.ts).
+  const built = attribute<"vec3">("buildingBuilt", "vec3");
+  const rise = rising(tick, built.x, built.y, positionGeometry.y.sub(built.z));
   const glass = linear(theme.fixed.glass);
   const pave = linear(theme.fixed.paving);
   // Unpacked per vertex: the packed number is exact there, and the same at
@@ -541,9 +541,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     building: 0,
     scaffolds: 0,
   };
-  /** Buildings under construction, checked each frame until they finish, and those drawing scaffolding. */
+  /** Buildings under construction, checked each frame until they finish. Every building drawing scaffolding is one. */
   const young = new Set<Placed>();
-  const scaffolded = new Set<Placed>();
   /** Instances written since the layer was made, and by the reads since chunks started waiting. */
   let writes = 0;
   let batchWrites = 0;
@@ -587,6 +586,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   const warmRisingSimple = mergedMesh("warm-up rising simple buildings", { ...warmMerged, rise: warmRise }, "simple");
   const warmRisingFlat = mergedMesh("warm-up rising blocks", { ...warmMerged, normals: null, facades: null, rise: warmRise }, "flat");
   const warmScaffold = scaffoldMeshFor(1);
+  warmScaffold.mesh.name = "warm-up scaffolding";
   warmScaffold.mesh.setMatrixAt(0, new Matrix4().makeScale(0, 0, 0));
   warmScaffold.mesh.count = 1;
   root.add(warmScaffold.mesh);
@@ -622,7 +622,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     const tints = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3).setUsage(DynamicDrawUsage);
     const scales = new InstancedBufferAttribute(new Float32Array(capacity * 2), 2).setUsage(DynamicDrawUsage);
     const fades = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1).setUsage(DynamicDrawUsage);
-    const builts = new InstancedBufferAttribute(new Float32Array(capacity * 2).fill(LONG_AGO), 2).setUsage(DynamicDrawUsage);
+    const builts = new InstancedBufferAttribute(new Float32Array(capacity * 3).fill(LONG_AGO), 3).setUsage(DynamicDrawUsage);
     const mesh = new InstancedMesh(geometryFor(arrays, tints, scales, fades, builts), material, capacity);
     mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     mesh.name = `buildings ${key}`;
@@ -759,7 +759,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     dirtyRange(m.tints, slot * 3, 3);
     dirtyRange(m.scales, slot * 2, 2);
     dirtyRange(m.fades, slot, 1);
-    dirtyRange(m.builts, slot * 2, 2);
+    dirtyRange(m.builts, slot * 3, 3);
     writes++;
   }
 
@@ -774,7 +774,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     m.tints.setXYZ(p.slot, packed(p.tint.wall), packed(p.tint.roof), packed(p.tint.trim));
     m.scales.setXY(p.slot, p.sx, p.sz);
     m.fades.setX(p.slot, chunkAt(p.chunk).fullFade);
-    m.builts.setXY(p.slot, p.builtAt, m.extent.maxY);
+    m.builts.setXYZ(p.slot, p.builtAt, m.extent.maxY, m.extent.minY);
     touched(m, p.slot);
     if (p.scaffold >= 0) writeScaffold(p);
   }
@@ -806,7 +806,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       m.tints.array.copyWithin(p.slot * 3, last * 3, last * 3 + 3);
       m.scales.array.copyWithin(p.slot * 2, last * 2, last * 2 + 2);
       m.fades.array.copyWithin(p.slot, last, last + 1);
-      m.builts.array.copyWithin(p.slot * 2, last * 2, last * 2 + 2);
+      m.builts.array.copyWithin(p.slot * 3, last * 3, last * 3 + 3);
       m.ids[p.slot] = moved;
       const other = placed.get(moved);
       if (other) other.slot = p.slot;
@@ -871,7 +871,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     p.scaffold = scaffolds.count++;
     scaffolds.mesh.count = scaffolds.count;
     scaffolds.ids[p.scaffold] = p.id;
-    scaffolded.add(p);
+    // Checked each frame, so the scaffolding comes away when it finishes, however the building came to be under construction.
+    young.add(p);
     writeScaffold(p);
   }
 
@@ -895,7 +896,6 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     scaffolds.count = last;
     scaffolds.mesh.count = last;
     p.scaffold = -1;
-    scaffolded.delete(p);
   }
 
   /** Lets go of buildings whose construction finished: their scaffolding comes away, and they are no longer checked. */
@@ -1191,11 +1191,12 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         chunks.delete(c);
         continue;
       }
-      // A merged mesh whose buildings have all finished is built again, plain.
+      // A drawn merged mesh whose buildings have all finished is built again, plain. One not drawn keeps
+      // the rising material, which draws them finished, until something else builds it again.
       for (const form of MERGED) {
         if (ch.rising[form] > 0 && now >= ch.rising[form]) {
           ch.rising[form] = 0;
-          ch.stale[form] = true;
+          if (draws(ch.fade, form)) ch.stale[form] = true;
         }
       }
       ch.near = isNear(c, camera.x, camera.z, ch.near, BUILDINGS.fullRadius, BUILDINGS.fullHysteresis);
