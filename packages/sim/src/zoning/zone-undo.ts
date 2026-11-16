@@ -175,19 +175,20 @@ export function journalPaint(net: RoadNetwork, cells: CellState, slots: readonly
  * The zoning a road command that has just applied to `net` would lose for
  * good, from the journal of network changes it made: every segment there
  * before it that it removed, or upgraded to a type with no cells, and that
- * no segment it added carries on the same anchor. Read with `cells` still
- * laid out for the roads before the command. An upgrade keeps a segment's
- * anchor, so it is read from the network. Segments with no zoned cell are
- * left out.
+ * no segment it added carries on the same anchor and build order, the key
+ * the cell layout carries zones by. Read with `cells` still laid out for
+ * the roads before the command. An upgrade keeps a segment's anchor and a
+ * reverse swaps its two ends, so the anchor before is read from the
+ * network and swapped back. Segments with no zoned cell are left out.
  */
 export function journalLostZones(net: RoadNetwork, cells: CellState, ops: readonly NetworkOp[]): Int32Array {
   const seen = new Set<number>();
-  const lost: { seg: number; anchor: SegmentAnchor }[] = [];
+  const lost: { seg: number; anchor: SegmentAnchor; order: number }[] = [];
   const carried = new Set<string>();
-  const curveKey = (a: SegmentAnchor) => `${a.ax},${a.az},${a.cx},${a.cz},${a.bx},${a.bz}`;
+  const curveKey = (a: SegmentAnchor, order: number) => `${order},${a.ax},${a.az},${a.cx},${a.cz},${a.bx},${a.bz}`;
   for (const op of ops) {
     if (op.op === "addSeg") {
-      carried.add(curveKey(op.row.anchor));
+      carried.add(curveKey(op.row.anchor, op.row.order));
       seen.add(op.id);
       continue;
     }
@@ -195,12 +196,16 @@ export function journalLostZones(net: RoadNetwork, cells: CellState, ops: readon
     // Only the first change to an id is to the segment there before.
     if (seen.has(op.id)) continue;
     seen.add(op.id);
-    if (op.op === "removeSeg") lost.push({ seg: op.id, anchor: op.row.anchor });
-    else if (ROAD_TYPES[op.from]?.zonable === true && ROAD_TYPES[op.to]?.zonable !== true) lost.push({ seg: op.id, anchor: readAnchor(net, op.id) });
+    if (op.op === "removeSeg") lost.push({ seg: op.id, anchor: op.row.anchor, order: op.row.order });
+    else if (ROAD_TYPES[op.from]?.zonable === true && ROAD_TYPES[op.to]?.zonable !== true) {
+      const now = readAnchor(net, op.id);
+      const anchor = op.reverse ? { ...now, tA: now.tB, tB: now.tA } : now;
+      lost.push({ seg: op.id, anchor, order: net.segOrder[op.id] ?? 0 });
+    }
   }
   const out: number[] = [];
-  for (const { seg, anchor } of lost) {
-    if (carried.has(curveKey(anchor)) || seg >= cells.offset.length - 1) continue;
+  for (const { seg, anchor, order } of lost) {
+    if (carried.has(curveKey(anchor, order)) || seg >= cells.offset.length - 1) continue;
     const start = cells.offset[seg] ?? 0;
     const count = (cells.offset[seg + 1] ?? 0) - start;
     let zoned = false;

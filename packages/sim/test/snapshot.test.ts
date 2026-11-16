@@ -548,6 +548,7 @@ describe("committed snapshots", () => {
     expect(state.undo.map((r) => [r.playerId, r.type])).toEqual(v14Fixture.undo);
     for (const record of state.undo) expect(record.zones).toEqual(new Int32Array(0));
     expect(heldIds(state.undo)).toEqual(v13Fixture.held);
+    expect(Array.from(state.connections)).toEqual(v13Fixture.connections);
     // Its undos still apply: p2's bulldoze, then p1's upgrade.
     expect(submit(state, { seq: 1, playerId: "p2", type: "Undo", payload: {} })).toEqual({ ok: true });
     expect(submit(state, { seq: 2, playerId: "p1", type: "Undo", payload: {} })).toEqual({ ok: true });
