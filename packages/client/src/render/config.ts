@@ -527,6 +527,37 @@ export const BUILDINGS = {
 } as const;
 
 /**
+ * Construction on screen (issue 136). A building younger than `ticks` of
+ * game time draws in three stages: scaffolding rises round its lot over the
+ * first `scaffoldUp` share, the building rises inside it over the middle,
+ * and the scaffolding comes down over the last `scaffoldDown` share. Game
+ * ticks, so it runs 4x faster at 4x and stops when paused. 120 ticks is 12
+ * seconds at 1x and 3 at 4x. Presentation only: the sim never reads these,
+ * so they are not balance data.
+ *
+ * Only the full form draws scaffolding. The simple form and boxes rise over
+ * the middle stage with nothing round them, and the flat blocks of the city
+ * band, which have no height, dither in over it.
+ *
+ * The scaffolding stands `margin` metres out from the building and `over`
+ * metres above its roof: poles about `poleSpacing` apart and `pole` thick,
+ * boards every `lift` metres of height and `board` deep.
+ */
+export const CONSTRUCTION = {
+  ticks: 120,
+  scaffoldUp: 0.25,
+  scaffoldDown: 0.2,
+  margin: 0.8,
+  over: 1.2,
+  poleSpacing: 2.4,
+  pole: 0.14,
+  lift: 2,
+  board: 0.22,
+  poleColour: 0x8d939a,
+  boardColour: 0xb98a4e,
+} as const;
+
+/**
  * The zone tool's marks (issue M2-07): the cells a click would change, in
  * the colour they would take, and the cells of a stroke sent and not yet
  * painted. Drawn through the terrain over the overlay, like the road

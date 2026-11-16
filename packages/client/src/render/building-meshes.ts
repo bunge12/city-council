@@ -37,7 +37,7 @@
 //
 // The renderer reads the mirror; it never writes it.
 
-import { attribute, dot, floor, fract, mix, mod, positionLocal, cameraPosition, screenCoordinate, select, sRGBTransferEOTF, step, uniform, varying, vec2, vec3, vec4 } from "three/tsl";
+import { attribute, dot, floor, fract, mix, mod, positionGeometry, positionLocal, cameraPosition, screenCoordinate, select, sRGBTransferEOTF, step, uniform, varying, vec2, vec3, vec4 } from "three/tsl";
 import {
   BufferAttribute,
   BufferGeometry,
@@ -73,6 +73,7 @@ import {
   mergeBoxes,
   mergeFlats,
   mergeModels,
+  mergedRise,
   modelExtent,
   stepFade,
   type BuildingForm,
@@ -82,8 +83,9 @@ import {
   type MergedItem,
 } from "./building-lod";
 import { MASK_GRASS, MASK_SIDE, MASK_TREES } from "./road-geometry";
-import { BUILDINGS, CELLS, ROADS } from "./config";
+import { BUILDINGS, CELLS, CONSTRUCTION, ROADS } from "./config";
 import { tintFor } from "./building-tint";
+import { LONG_AGO, finishedAt, riseNode, rising, scaffoldGeometry, scaffoldMaterial, tickUniform, underConstruction } from "./construction";
 
 /** Where the layer reads buildings from: the mirror's copy of state. */
 export interface BuildingSource {
@@ -131,6 +133,13 @@ export interface BuildingStats {
   /** Chunks fading from one form to another, and chunks waiting for the form they want to be built. */
   fading: number;
   waiting: number;
+  /**
+   * Buildings under construction the layer knows, and those of them drawing
+   * scaffolding: in full, near the camera in the street band. The
+   * scaffolding is one instanced mesh, one draw call.
+   */
+  building: number;
+  scaffolds: number;
 }
 
 /** Where the camera is, for the layer's frame work. */
@@ -140,6 +149,11 @@ export interface BuildingView {
   seconds: number;
   /** The camera's view, to count what is drawn. Without it every mesh counts. */
   frustum?: Frustum;
+  /**
+   * The game tick on screen, for buildings under construction (issue 136,
+   * construction.ts). Without it every building is drawn finished.
+   */
+  tick?: number;
 }
 
 export interface BuildingLayer {
@@ -238,8 +252,13 @@ function inside(u: Node<"float">, v: Node<"float">, u0: number, u1: number, v0: 
  * Interleaved gradient noise, so the dither has no pattern to see.
  */
 function kept(fade: Node<"float">) {
-  const d = fract(fract(dot(floor(screenCoordinate.xy), vec2(0.06711056, 0.00583715))).mul(52.9829189));
+  const d = dither();
   return select(fade.lessThan(1.5), step(d, fade.sub(1e-4)), step(fade.sub(2), d));
+}
+
+/** The pixel's dither value in [0, 1), fixed to the pixel. */
+function dither() {
+  return fract(fract(dot(floor(screenCoordinate.xy), vec2(0.06711056, 0.00583715))).mul(52.9829189));
 }
 
 /**
@@ -270,7 +289,7 @@ function patterned(colour: Node<"vec3">, glass: Node<"vec3">, kind: Node<"float"
  * colour from the instance's tints or the theme, and walls draw their
  * pattern from the vertex's place on the facade (theme/model.ts).
  */
-function buildingMaterial(theme: Theme): MeshLambertNodeMaterial {
+function buildingMaterial(theme: Theme, tick: Node<"float">): MeshLambertNodeMaterial {
   const m = new MeshLambertNodeMaterial();
   m.name = "buildings";
   const surface = attribute<"float">("buildingSurface", "float");
@@ -278,6 +297,9 @@ function buildingMaterial(theme: Theme): MeshLambertNodeMaterial {
   const tint = attribute<"vec3">("buildingTint", "vec3");
   const stretch = attribute<"vec2">("buildingScale", "vec2");
   const fade = varying(attribute<"float">("buildingFade", "float"));
+  // When the building was built and how tall its model is, for its construction (construction.ts).
+  const built = attribute<"vec2">("buildingBuilt", "vec2");
+  const rise = rising(tick, built.x, built.y, positionGeometry.y);
   const glass = linear(theme.fixed.glass);
   const pave = linear(theme.fixed.paving);
   // Unpacked per vertex: the packed number is exact there, and the same at
@@ -289,8 +311,10 @@ function buildingMaterial(theme: Theme): MeshLambertNodeMaterial {
   // Windows along the wall, in the lot's metres: the stretch of this instance along the wall's axis is taken out.
   const along = facade.x.mul(select(facade.z.lessThan(0.5), stretch.x, stretch.y));
   m.colorNode = patterned(colour, glass, facade.w, along, facade.y);
+  // After the instance's matrix, which turns about y only, so down is down.
+  m.positionNode = positionLocal.sub(vec3(0, rise.sink, 0));
   // A mask and not an opacity: three.js reads it in the shadow pass too, so a fading form's shadow fades with it.
-  m.maskNode = kept(fade).greaterThan(0.5);
+  m.maskNode = kept(fade).greaterThan(0.5).and(rise.keep);
   return m;
 }
 
@@ -307,14 +331,23 @@ function objectFade() {
  * its surface's colour, with the same window pattern drawn from where it is
  * on its facade (building-lod.ts, `mergeModels`).
  */
-function simpleMaterial(theme: Theme): MeshLambertNodeMaterial {
+function simpleMaterial(theme: Theme, tick: Node<"float"> | null): MeshLambertNodeMaterial {
   const m = new MeshLambertNodeMaterial();
-  m.name = "simple buildings";
+  m.name = tick ? "rising simple buildings" : "simple buildings";
   const fill = attribute<"vec4">("mergedColour", "vec4");
   const facade = attribute<"vec2">("mergedFacade", "vec2");
   const colour = sRGBTransferEOTF(fill.rgb) as unknown as typeof fill.rgb;
   m.colorNode = patterned(colour, linear(theme.fixed.glass), fill.a.mul(255), facade.x, facade.y);
-  m.maskNode = kept(objectFade()).greaterThan(0.5);
+  const shown = kept(objectFade()).greaterThan(0.5);
+  if (!tick) {
+    m.maskNode = shown;
+    return m;
+  }
+  // A chunk with a building under construction (issue 136): each vertex's builtAt, its building's height and its own height in its model.
+  const r = attribute<"vec3">("mergedRise", "vec3");
+  const rise = rising(tick, r.x, r.y, r.z);
+  m.positionNode = positionLocal.sub(vec3(0, rise.sink, 0));
+  m.maskNode = shown.and(rise.keep);
   return m;
 }
 
@@ -324,14 +357,16 @@ function simpleMaterial(theme: Theme): MeshLambertNodeMaterial {
  * shader as the overlay's cells are, a little higher so a block lies over
  * them.
  */
-function flatMaterial(): MeshBasicNodeMaterial {
+function flatMaterial(tick: Node<"float"> | null): MeshBasicNodeMaterial {
   const m = new MeshBasicNodeMaterial();
-  m.name = "building blocks";
+  m.name = tick ? "rising building blocks" : "building blocks";
   const fill = attribute<"vec4">("mergedColour", "vec4");
   const distance = cameraPosition.distance(positionLocal);
   m.positionNode = positionLocal.add(vec3(0, distance.mul(BUILDINGS.flatLift.perMetre).add(BUILDINGS.flatLift.base), 0));
   m.colorNode = vec4(sRGBTransferEOTF(fill.rgb) as unknown as typeof fill.rgb, 1);
-  m.maskNode = kept(objectFade()).greaterThan(0.5);
+  const shown = kept(objectFade()).greaterThan(0.5);
+  // A block has no height to rise by: one under construction dithers in over the stage its building rises in.
+  m.maskNode = tick ? shown.and(dither().lessThan(varying(riseNode(tick, attribute<"vec3">("mergedRise", "vec3").x)).sub(1e-4))) : shown;
   m.polygonOffset = true;
   m.polygonOffsetFactor = -1;
   m.polygonOffsetUnits = -1;
@@ -349,7 +384,18 @@ interface Model {
   tints: InstancedBufferAttribute | null;
   scales: InstancedBufferAttribute | null;
   fades: InstancedBufferAttribute | null;
+  builts: InstancedBufferAttribute | null;
   /** The building drawn by each instance. */
+  ids: Int32Array;
+  count: number;
+}
+
+/** The scaffolding of the buildings under construction drawn in full: one instanced mesh, and the building each instance stands round. */
+interface Scaffolds {
+  mesh: InstancedMesh;
+  sizes: InstancedBufferAttribute;
+  builts: InstancedBufferAttribute;
+  fades: InstancedBufferAttribute;
   ids: Int32Array;
   count: number;
 }
@@ -374,6 +420,10 @@ interface Placed {
   sz: number;
   /** Its zone and density's colour, for the flat form. */
   flat: number;
+  /** The tick the sim built it on. */
+  builtAt: number;
+  /** Its instance in the scaffolding's mesh, or -1. */
+  scaffold: number;
 }
 
 /** A chunk's forms. */
@@ -391,6 +441,12 @@ interface Chunk {
   mesh: Record<Merged, Mesh | null>;
   built: Record<Merged, boolean>;
   stale: Record<Merged, boolean>;
+  /**
+   * For a merged mesh built with a building under construction in it, the
+   * tick the last of them finishes on, else 0. The mesh is built again then,
+   * without the construction attribute.
+   */
+  rising: Record<Merged, number>;
 }
 
 /** The forms drawn as one mesh per chunk. */
@@ -448,9 +504,15 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   const root = new Group();
   root.name = "buildings";
   parent.add(root);
-  const material = buildingMaterial(theme);
-  const simples = simpleMaterial(theme);
-  const flats = flatMaterial();
+  /** The game tick on screen, and the uniform the construction shaders read it from (construction.ts). */
+  const tick = tickUniform();
+  let now = tick.value;
+  const material = buildingMaterial(theme, tick);
+  const simples = simpleMaterial(theme, null);
+  const risingSimples = simpleMaterial(theme, tick);
+  const flats = flatMaterial(null);
+  const risingFlats = flatMaterial(tick);
+  const scaffolding = scaffoldMaterial(tick, kept);
   const models = new Map<string, Model>();
   const placed = new Map<number, Placed>();
   /** Drawn buildings by the chunks their lots' corners are in. */
@@ -476,7 +538,12 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     forms: zeroStats(),
     fading: 0,
     waiting: 0,
+    building: 0,
+    scaffolds: 0,
   };
+  /** Buildings under construction, checked each frame until they finish, and those drawing scaffolding. */
+  const young = new Set<Placed>();
+  const scaffolded = new Set<Placed>();
   /** Instances written since the layer was made, and by the reads since chunks started waiting. */
   let writes = 0;
   let batchWrites = 0;
@@ -516,7 +583,14 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   };
   const warmSimple = mergedMesh("warm-up simple buildings", warmMerged, "simple");
   const warmFlat = mergedMesh("warm-up blocks", { ...warmMerged, normals: null, facades: null }, "flat");
-  for (const m of [warmSimple, warmFlat]) {
+  const warmRise = new Float32Array(9);
+  const warmRisingSimple = mergedMesh("warm-up rising simple buildings", { ...warmMerged, rise: warmRise }, "simple");
+  const warmRisingFlat = mergedMesh("warm-up rising blocks", { ...warmMerged, normals: null, facades: null, rise: warmRise }, "flat");
+  const warmScaffold = scaffoldMeshFor(1);
+  warmScaffold.mesh.setMatrixAt(0, new Matrix4().makeScale(0, 0, 0));
+  warmScaffold.mesh.count = 1;
+  root.add(warmScaffold.mesh);
+  for (const m of [warmSimple, warmFlat, warmRisingSimple, warmRisingFlat]) {
     m.frustumCulled = false;
     root.add(m);
   }
@@ -528,7 +602,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   const size = new Vector3();
   const sphere = new Sphere();
 
-  function geometryFor(arrays: ModelArrays, tints: InstancedBufferAttribute, scales: InstancedBufferAttribute, fades: InstancedBufferAttribute): BufferGeometry {
+  function geometryFor(arrays: ModelArrays, tints: InstancedBufferAttribute, scales: InstancedBufferAttribute, fades: InstancedBufferAttribute, builts: InstancedBufferAttribute): BufferGeometry {
     // Attributes of its own around the model's arrays, so disposing an
     // outgrown mesh's geometry frees nothing a newer one uses.
     const g = new BufferGeometry();
@@ -539,15 +613,17 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     g.setAttribute("buildingTint", tints);
     g.setAttribute("buildingScale", scales);
     g.setAttribute("buildingFade", fades);
+    g.setAttribute("buildingBuilt", builts);
     g.setIndex(new BufferAttribute(arrays.indices, 1));
     return g;
   }
 
-  function meshFor(key: string, arrays: ModelArrays, capacity: number): { mesh: InstancedMesh; tints: InstancedBufferAttribute; scales: InstancedBufferAttribute; fades: InstancedBufferAttribute } {
+  function meshFor(key: string, arrays: ModelArrays, capacity: number): { mesh: InstancedMesh; tints: InstancedBufferAttribute; scales: InstancedBufferAttribute; fades: InstancedBufferAttribute; builts: InstancedBufferAttribute } {
     const tints = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3).setUsage(DynamicDrawUsage);
     const scales = new InstancedBufferAttribute(new Float32Array(capacity * 2), 2).setUsage(DynamicDrawUsage);
     const fades = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1).setUsage(DynamicDrawUsage);
-    const mesh = new InstancedMesh(geometryFor(arrays, tints, scales, fades), material, capacity);
+    const builts = new InstancedBufferAttribute(new Float32Array(capacity * 2).fill(LONG_AGO), 2).setUsage(DynamicDrawUsage);
+    const mesh = new InstancedMesh(geometryFor(arrays, tints, scales, fades, builts), material, capacity);
     mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     mesh.name = `buildings ${key}`;
     mesh.count = 0;
@@ -556,20 +632,42 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     // The instances spread over the chunks near the camera: one bounding sphere would cull little.
     mesh.frustumCulled = false;
     mesh.matrixAutoUpdate = false;
-    return { mesh, tints, scales, fades };
+    return { mesh, tints, scales, fades, builts };
   }
 
-  function mergedMesh(name: string, a: MergedArrays, form: Merged): Mesh {
+  /** The scaffolding's mesh, with room for `capacity` buildings: one instance of the four walls each (construction.ts). */
+  function scaffoldMeshFor(capacity: number): Scaffolds {
+    const g = scaffoldGeometry();
+    const sizes = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3).setUsage(DynamicDrawUsage);
+    const builts = new InstancedBufferAttribute(new Float32Array(capacity).fill(LONG_AGO), 1).setUsage(DynamicDrawUsage);
+    const fades = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1).setUsage(DynamicDrawUsage);
+    g.setAttribute("scaffoldSize", sizes);
+    g.setAttribute("scaffoldBuilt", builts);
+    g.setAttribute("scaffoldFade", fades);
+    const mesh = new InstancedMesh(g, scaffolding, capacity);
+    mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    mesh.name = "scaffolding";
+    mesh.count = 0;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    mesh.matrixAutoUpdate = false;
+    return { mesh, sizes, builts, fades, ids: new Int32Array(capacity).fill(-1), count: 0 };
+  }
+
+  function mergedMesh(name: string, a: MergedArrays & { rise?: Float32Array | null }, form: Merged): Mesh {
     const g = new BufferGeometry();
     g.setAttribute("position", new BufferAttribute(a.positions, 3));
     if (a.normals) g.setAttribute("normal", new BufferAttribute(a.normals, 4, true));
     g.setAttribute("mergedColour", new BufferAttribute(a.colours, 4, true));
     if (a.facades) g.setAttribute("mergedFacade", new BufferAttribute(a.facades, 2));
+    if (a.rise) g.setAttribute("mergedRise", new BufferAttribute(a.rise, 3));
     g.setIndex(new BufferAttribute(a.indices, 1));
     // The flat form is lifted in the shader: the sphere allows for it.
     g.boundingSphere = new Sphere(new Vector3(...a.centre), a.radius + (form === "flat" ? 40 : 0));
     // Simple buildings and boxes share one vertex format and one material.
-    const mesh = new Mesh(g, form === "flat" ? flats : simples);
+    // A chunk with a building under construction draws with the rising materials until the last of them is finished.
+    const mesh = new Mesh(g, form === "flat" ? (a.rise ? risingFlats : flats) : a.rise ? risingSimples : simples);
     mesh.name = name;
     mesh.matrixAutoUpdate = false;
     mesh.userData["fade"] = 1;
@@ -593,7 +691,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     let m = models.get(key);
     if (m) return m;
     const arrays = theme.model(typeId, model, info.width, theme.modelDepth(typeId));
-    m = { key, arrays, simple: simplify(arrays, BUILDINGS.simplify), extent: modelExtent(arrays.positions, arrays.surfaces, SURFACE.paving), mesh: null, tints: null, scales: null, fades: null, ids: new Int32Array(0), count: 0 };
+    m = { key, arrays, simple: simplify(arrays, BUILDINGS.simplify), extent: modelExtent(arrays.positions, arrays.surfaces, SURFACE.paving), mesh: null, tints: null, scales: null, fades: null, builts: null, ids: new Int32Array(0), count: 0 };
     models.set(key, m);
     return m;
   }
@@ -603,11 +701,12 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     const capacity = Math.max(FIRST_CAPACITY, m.ids.length * 2);
     const next = meshFor(m.key, m.arrays, capacity);
     const ids = new Int32Array(capacity).fill(-1);
-    if (m.mesh && m.tints && m.scales && m.fades) {
+    if (m.mesh && m.tints && m.scales && m.fades && m.builts) {
       next.mesh.instanceMatrix.array.set(m.mesh.instanceMatrix.array);
       next.tints.array.set(m.tints.array);
       next.scales.array.set(m.scales.array);
       next.fades.array.set(m.fades.array);
+      next.builts.array.set(m.builts.array);
       ids.set(m.ids);
       m.mesh.removeFromParent();
       m.mesh.geometry.dispose();
@@ -619,6 +718,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     m.tints = next.tints;
     m.scales = next.scales;
     m.fades = next.fades;
+    m.builts = next.builts;
     m.ids = ids;
   }
 
@@ -632,6 +732,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     m.tints = null;
     m.scales = null;
     m.fades = null;
+    m.builts = null;
     m.ids = new Int32Array(0);
   }
 
@@ -653,17 +754,18 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   }
 
   function touched(m: Model, slot: number): void {
-    if (!m.mesh || !m.tints || !m.scales || !m.fades) return;
+    if (!m.mesh || !m.tints || !m.scales || !m.fades || !m.builts) return;
     dirtyRange(m.mesh.instanceMatrix, slot * 16, 16);
     dirtyRange(m.tints, slot * 3, 3);
     dirtyRange(m.scales, slot * 2, 2);
     dirtyRange(m.fades, slot, 1);
+    dirtyRange(m.builts, slot * 2, 2);
     writes++;
   }
 
   function write(p: Placed): void {
     const m = p.model;
-    if (!m.mesh || !m.tints || !m.scales || !m.fades || p.slot < 0) return;
+    if (!m.mesh || !m.tints || !m.scales || !m.fades || !m.builts || p.slot < 0) return;
     position.set(p.place.x, p.place.y, p.place.z);
     turn.setFromAxisAngle(up, p.place.angle);
     size.set(p.sx, 1, p.sz);
@@ -672,7 +774,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     m.tints.setXYZ(p.slot, packed(p.tint.wall), packed(p.tint.roof), packed(p.tint.trim));
     m.scales.setXY(p.slot, p.sx, p.sz);
     m.fades.setX(p.slot, chunkAt(p.chunk).fullFade);
+    m.builts.setXY(p.slot, p.builtAt, m.extent.maxY);
     touched(m, p.slot);
+    if (p.scaffold >= 0) writeScaffold(p);
   }
 
   /** Gives a building an instance in its model's mesh. */
@@ -683,12 +787,15 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     if (m.mesh) m.mesh.count = m.count;
     m.ids[p.slot] = p.id;
     write(p);
+    // Drawn in full while under construction: scaffolding round it.
+    if (p.scaffold < 0 && underConstruction(p.builtAt, now)) addScaffold(p);
   }
 
   /** Takes a building's instance away: the last instance moves into the gap. */
   function removeInstance(p: Placed): void {
     const m = p.model;
-    if (p.slot < 0 || !m.mesh || !m.tints || !m.scales || !m.fades) {
+    removeScaffold(p);
+    if (p.slot < 0 || !m.mesh || !m.tints || !m.scales || !m.fades || !m.builts) {
       p.slot = -1;
       return;
     }
@@ -699,6 +806,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       m.tints.array.copyWithin(p.slot * 3, last * 3, last * 3 + 3);
       m.scales.array.copyWithin(p.slot * 2, last * 2, last * 2 + 2);
       m.fades.array.copyWithin(p.slot, last, last + 1);
+      m.builts.array.copyWithin(p.slot * 2, last * 2, last * 2 + 2);
       m.ids[p.slot] = moved;
       const other = placed.get(moved);
       if (other) other.slot = p.slot;
@@ -709,6 +817,94 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     m.mesh.count = last;
     p.slot = -1;
     shrink(m);
+  }
+
+  let scaffolds = scaffoldMeshFor(FIRST_CAPACITY);
+  root.add(scaffolds.mesh);
+
+  /** Writes building `p`'s scaffolding: a box round its model, from the ground under its lot to a little over its roof. */
+  function writeScaffold(p: Placed): void {
+    const e = p.model.extent;
+    const c = Math.cos(p.place.angle);
+    const s = Math.sin(p.place.angle);
+    const cx = ((e.minX + e.maxX) / 2) * p.sx;
+    const cz = ((e.minZ + e.maxZ) / 2) * p.sz;
+    const base = Math.min(0, e.minY);
+    const w = (e.maxX - e.minX) * p.sx + 2 * CONSTRUCTION.margin;
+    const h = e.maxY - base + CONSTRUCTION.over;
+    const d = (e.maxZ - e.minZ) * p.sz + 2 * CONSTRUCTION.margin;
+    position.set(p.place.x + cx * c + cz * s, p.place.y + base, p.place.z - cx * s + cz * c);
+    turn.setFromAxisAngle(up, p.place.angle);
+    size.set(w, h, d);
+    matrix.compose(position, turn, size);
+    const k = p.scaffold;
+    scaffolds.mesh.setMatrixAt(k, matrix);
+    scaffolds.sizes.setXYZ(k, w, h, d);
+    scaffolds.builts.setX(k, p.builtAt);
+    scaffolds.fades.setX(k, chunkAt(p.chunk).fullFade);
+    touchScaffold(k);
+  }
+
+  function touchScaffold(k: number): void {
+    dirtyRange(scaffolds.mesh.instanceMatrix, k * 16, 16);
+    dirtyRange(scaffolds.sizes, k * 3, 3);
+    dirtyRange(scaffolds.builts, k, 1);
+    dirtyRange(scaffolds.fades, k, 1);
+  }
+
+  function addScaffold(p: Placed): void {
+    if (scaffolds.count === scaffolds.ids.length) {
+      const next = scaffoldMeshFor(scaffolds.ids.length * 2);
+      next.mesh.instanceMatrix.array.set(scaffolds.mesh.instanceMatrix.array);
+      next.sizes.array.set(scaffolds.sizes.array);
+      next.builts.array.set(scaffolds.builts.array);
+      next.fades.array.set(scaffolds.fades.array);
+      next.ids.set(scaffolds.ids);
+      next.count = scaffolds.count;
+      next.mesh.count = scaffolds.count;
+      scaffolds.mesh.removeFromParent();
+      scaffolds.mesh.geometry.dispose();
+      scaffolds.mesh.dispose();
+      scaffolds = next;
+      root.add(scaffolds.mesh);
+    }
+    p.scaffold = scaffolds.count++;
+    scaffolds.mesh.count = scaffolds.count;
+    scaffolds.ids[p.scaffold] = p.id;
+    scaffolded.add(p);
+    writeScaffold(p);
+  }
+
+  /** Takes building `p`'s scaffolding away: the last one moves into the gap. */
+  function removeScaffold(p: Placed): void {
+    if (p.scaffold < 0) return;
+    const k = p.scaffold;
+    const last = scaffolds.count - 1;
+    if (k !== last) {
+      const moved = scaffolds.ids[last] ?? -1;
+      scaffolds.mesh.instanceMatrix.array.copyWithin(k * 16, last * 16, last * 16 + 16);
+      scaffolds.sizes.array.copyWithin(k * 3, last * 3, last * 3 + 3);
+      scaffolds.builts.array.copyWithin(k, last, last + 1);
+      scaffolds.fades.array.copyWithin(k, last, last + 1);
+      scaffolds.ids[k] = moved;
+      const other = placed.get(moved);
+      if (other) other.scaffold = k;
+      touchScaffold(k);
+    }
+    scaffolds.ids[last] = -1;
+    scaffolds.count = last;
+    scaffolds.mesh.count = last;
+    p.scaffold = -1;
+    scaffolded.delete(p);
+  }
+
+  /** Lets go of buildings whose construction finished: their scaffolding comes away, and they are no longer checked. */
+  function finishConstruction(): void {
+    for (const p of young) {
+      if (underConstruction(p.builtAt, now)) continue;
+      removeScaffold(p);
+      young.delete(p);
+    }
   }
 
   function chunkAt(c: number): Chunk {
@@ -724,6 +920,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         mesh: { simple: null, box: null, flat: null },
         built: { simple: false, box: false, flat: false },
         stale: { simple: false, box: false, flat: false },
+        rising: { simple: 0, box: 0, flat: 0 },
       };
       chunks.set(c, ch);
     }
@@ -765,6 +962,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     const p = placed.get(id);
     if (!p) return;
     removeInstance(p);
+    young.delete(p);
     chunkAt(p.chunk).ids.delete(id);
     staleChunk(p.chunk);
     unfileLot(id, p.lotChunks);
@@ -783,8 +981,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     const corners = info.corners ? [...info.corners] : [];
     const lots = cornerChunks(corners);
     fileLot(info.id, lots);
-    const p: Placed = { id: info.id, model, slot: -1, chunk, sig, lotChunks: lots, corners, tint, place, ...placeInfo(info, place), flat: flatColour(info.type) };
+    const p: Placed = { id: info.id, model, slot: -1, chunk, sig, lotChunks: lots, corners, tint, place, ...placeInfo(info, place), flat: flatColour(info.type), builtAt: info.builtAt, scaffold: -1 };
     placed.set(info.id, p);
+    if (underConstruction(p.builtAt, now)) young.add(p);
     chunkAt(chunk).ids.add(info.id);
     staleChunk(chunk);
     syncInstance(p);
@@ -870,6 +1069,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         roof: p.tint.roof,
         trim: p.tint.trim,
         flat: p.flat,
+        built: p.builtAt,
+        height: p.model.extent.maxY,
       });
     }
     return items;
@@ -878,6 +1079,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   /** Frees a chunk's merged mesh for `form`: it is built again before it is drawn. */
   function dropMerged(ch: Chunk, form: Merged): void {
     ch.built[form] = false;
+    ch.rising[form] = 0;
     const mesh = ch.mesh[form];
     if (!mesh) return;
     mergedBytes[form] -= Number(mesh.userData["bytes"] ?? 0);
@@ -894,8 +1096,13 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       const ci = c % CHUNKS_PER_SIDE;
       const cj = (c - ci) / CHUNKS_PER_SIDE;
       const arrays = form === "simple" ? mergeModels(items, theme.fixed) : form === "box" ? mergeBoxes(items) : mergeFlats(items);
-      const mesh = mergedMesh(`${MERGED_NAMES[form]} ${ci},${cj}`, arrays, form);
-      const bytes = arrays.positions.byteLength + (arrays.normals?.byteLength ?? 0) + arrays.colours.byteLength + (arrays.facades?.byteLength ?? 0) + arrays.indices.byteLength;
+      // Only a chunk with a building under construction carries the attribute it rises by, so a finished city costs nothing more.
+      let until = 0;
+      for (const item of items) if (underConstruction(item.built ?? LONG_AGO, now)) until = Math.max(until, finishedAt(item.built ?? LONG_AGO));
+      const rise = until > 0 ? mergedRise(items, arrays.positions, form) : null;
+      ch.rising[form] = until;
+      const mesh = mergedMesh(`${MERGED_NAMES[form]} ${ci},${cj}`, { ...arrays, rise }, form);
+      const bytes = arrays.positions.byteLength + (arrays.normals?.byteLength ?? 0) + arrays.colours.byteLength + (arrays.facades?.byteLength ?? 0) + arrays.indices.byteLength + (rise?.byteLength ?? 0);
       mesh.userData["bytes"] = bytes;
       mergedBytes[form] += bytes;
       mesh.visible = draws(ch.fade, form);
@@ -966,6 +1173,10 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       if (!p || !m?.fades || p.slot < 0) continue;
       m.fades.setX(p.slot, f);
       dirtyRange(m.fades, p.slot, 1);
+      if (p.scaffold >= 0) {
+        scaffolds.fades.setX(p.scaffold, f);
+        dirtyRange(scaffolds.fades, p.scaffold, 1);
+      }
     }
   }
 
@@ -979,6 +1190,13 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         for (const form of MERGED) dropMerged(ch, form);
         chunks.delete(c);
         continue;
+      }
+      // A merged mesh whose buildings have all finished is built again, plain.
+      for (const form of MERGED) {
+        if (ch.rising[form] > 0 && now >= ch.rising[form]) {
+          ch.rising[form] = 0;
+          ch.stale[form] = true;
+        }
       }
       ch.near = isNear(c, camera.x, camera.z, ch.near, BUILDINGS.fullRadius, BUILDINGS.fullHysteresis);
       ch.mid = isNear(c, camera.x, camera.z, ch.mid, BUILDINGS.simpleRadius, BUILDINGS.simpleHysteresis);
@@ -1063,6 +1281,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       for (const id of ids) pendingIds.add(id);
     },
     update(camera, budgetMs, view = { band: "street", seconds: Infinity }) {
+      now = view.tick ?? 1e9;
+      tick.value = now;
       if (pendingIds.size > 0) {
         const ids = pendingIds;
         pendingIds = new Set();
@@ -1101,6 +1321,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         batchMs += performance.now() - start;
       }
       forms(camera, view, start, budgetMs);
+      finishConstruction();
       stats = {
         ...stats,
         buildings: placed.size,
@@ -1111,6 +1332,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         totalMerged: merged,
         mergedBytes: { ...mergedBytes },
         forms: count(view.frustum),
+        building: young.size,
+        scaffolds: scaffolds.count,
       };
       if (dirty.size === 0 && wasDirty) {
         stats = { ...stats, lastWrites: batchWrites, lastRebuilt: batchRebuilt, totalRebuilt: stats.totalRebuilt + batchRebuilt, lastBuildMs: batchMs };
@@ -1198,7 +1421,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     },
     stats: () => stats,
     dispose() {
-      for (const m of [warm.mesh, warmSimple, warmFlat]) {
+      for (const m of [warm.mesh, warmSimple, warmFlat, warmRisingSimple, warmRisingFlat, warmScaffold.mesh, scaffolds.mesh]) {
         m.geometry.dispose();
         if (m instanceof InstancedMesh) m.dispose();
       }
@@ -1213,6 +1436,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       material.dispose();
       simples.dispose();
       flats.dispose();
+      risingSimples.dispose();
+      risingFlats.dispose();
+      scaffolding.dispose();
     },
   };
 }

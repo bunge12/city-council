@@ -39,6 +39,7 @@ import { cellColour } from "./render/cell-geometry";
 import { ZONE_PREVIEW } from "./render/config";
 import { createZonePreviewLayer, type ZoneMark } from "./render/zone-preview";
 import { createBuildingMarkLayer } from "./render/building-marks";
+import { createGameClock } from "./render/construction";
 import { snapMarks } from "./render/snap-marks-geometry";
 import { zonedCellLookup } from "./tools/cell-snap";
 import { BlockOverlayController, blockLabelPoint, blockShapes } from "./tools/block-overlay";
@@ -559,6 +560,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     const b = view.buildingStats();
     document.body.dataset["buildingsPending"] = String(b?.pending ?? 0);
     document.body.dataset["buildingsDrawn"] = String(b?.buildings ?? 0);
+    document.body.dataset["buildingsUnderConstruction"] = String(b?.building ?? 0);
+    document.body.dataset["scaffolds"] = String(b?.scaffolds ?? 0);
     // Every chunk shows the form it wants, with no fade under way (issue M2-13).
     document.body.dataset["buildingsSettled"] = String(b !== null && b.pending === 0 && b.fading === 0 && b.waiting === 0);
     if (!b || (b.buildings === 0 && b.totalWrites === 0)) return;
@@ -566,7 +569,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     setViewReadout({
       buildings: `${b.buildings} in ${b.models} models`,
       buildingUpdates: `${count(b.lastWrites, "instance")} and ${count(b.lastRebuilt, "chunk")} rebuilt last, ${count(b.totalWrites, "instance")} in all, ${b.lastBuildMs.toFixed(1)} ms; ${b.lastMerged} merged last, ${b.totalMerged} in all`,
-      buildingForms: `full ${form(b.forms.full)}, simple ${form(b.forms.simple)}, boxes ${form(b.forms.box)}, blocks ${form(b.forms.flat)}${b.fading > 0 ? `, ${b.fading} fading` : ""}`,
+      buildingForms: `full ${form(b.forms.full)}, simple ${form(b.forms.simple)}, boxes ${form(b.forms.box)}, blocks ${form(b.forms.flat)}${b.fading > 0 ? `, ${b.fading} fading` : ""}; ${b.building} under construction, ${b.scaffolds} in scaffolding`,
     });
   };
   const showBuildings = (update: MirrorUpdate) => {
@@ -600,7 +603,20 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   useUi.subscribe((now, before) => {
     if (now.tool !== before.tool && (now.tool === "zone" || before.tool === "zone")) setCellsVisible(now.tool === "zone");
   });
+  // Buildings under construction draw at the tick on screen (issue 136): the
+  // mirror's, run on between deltas at the city's speed. `?noconstruction`
+  // draws every building finished, to show the sim does not depend on it.
+  const construction = !new URLSearchParams(location.search).has("noconstruction");
+  const clock = createGameClock();
+  const watchClock = (update: MirrorUpdate) => {
+    const state = mirror.state;
+    if (!state) return;
+    if (update.kind === "snapshot") clock.reset(state.tick, state.speed, performance.now());
+    else clock.observe(state.tick, state.speed, performance.now());
+  };
+  if (construction) view.onBeforeFrame(() => view.setGameTick(mirror.state ? clock.at(performance.now()) : null));
   mirror.subscribe((update) => {
+    watchClock(update);
     showMap();
     showRoads(update);
     showCells(update);
@@ -608,6 +624,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   });
   showMap();
   if (mirror.state) {
+    watchClock({ kind: "snapshot" });
     showRoads({ kind: "snapshot" });
     showCells({ kind: "snapshot" });
     showBuildings({ kind: "snapshot" });

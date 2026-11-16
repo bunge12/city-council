@@ -10,6 +10,7 @@
 import { BUILDING_TYPES, CELL_OPEN, ZONING_BALANCE, buildingCount, cellStatuses, serialize, syncCells, typesFor, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
 import { lotProblem } from "../packages/sim/src/buildings/where";
+import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { fixtureCity } from "./road-fixtures";
 
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
@@ -81,6 +82,15 @@ export function buildEverySide(state: SimState): number[] {
   return counts;
 }
 
+/**
+ * Moves `state` on past the construction animation (issue 136), so the
+ * buildings a fixture put in straight are drawn finished when it opens.
+ * The tick alone moves: nothing steps.
+ */
+export function finishConstruction(state: SimState): void {
+  state.tick += CONSTRUCTION.ticks;
+}
+
 /** Where the pairs start, picked so every type finds a lot on the fixture's streets. */
 const PAIRS_FROM = 0;
 
@@ -89,6 +99,7 @@ export function builtFixtureCity(): { bytes: Buffer; state: SimState; counts: nu
   const { state } = fixtureCity();
   zoneSides(state, PAIRS_FROM);
   const counts = buildEverySide(state);
+  finishConstruction(state);
   // Saved paused: a building the grower adds during a test would change the counts and the screenshots.
   state.speed = 0;
   return { bytes: Buffer.from(serialize(state)), state, counts, buildings: buildingCount(state.buildings) };

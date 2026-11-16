@@ -7,7 +7,7 @@ import { createBuildingLayer, type BuildingSource } from "../src/render/building
 import { placeLot } from "../src/render/building-place";
 import { hashId, tintFor } from "../src/render/building-tint";
 import { MASK_SIDE, MASK_TREES } from "../src/render/road-geometry";
-import { BUILDINGS, CELLS, ROADS } from "../src/render/config";
+import { BUILDINGS, CELLS, CONSTRUCTION, ROADS } from "../src/render/config";
 import { FACADE, SURFACE } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
 import { BASE_DEPTH } from "../src/theme/north-american/generators";
@@ -457,6 +457,104 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     });
     const hex = CELLS.zones["residential"]?.[2] ?? 0;
     expect(colour).toEqual([(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff]);
+    layer.dispose();
+  });
+});
+
+describe("buildings under construction (issue 136)", () => {
+  const near = { x: 4000, z: 4000 };
+  const run = (layer: ReturnType<typeof createBuildingLayer>, band: "street" | "district" | "city", tick: number | undefined, frames = 20) => {
+    for (let k = 0; k < frames; k++) layer.update(near, 1000, { band, seconds: 1, ...(tick !== undefined ? { tick } : {}) });
+  };
+  const named = (scene: Scene, name: string) => {
+    const out: string[] = [];
+    scene.traverse((o) => {
+      const m = (o as { material?: { name?: string } }).material;
+      if (o.name.startsWith(name) && (o as { visible?: boolean }).visible !== false && m?.name) out.push(m.name);
+    });
+    return out;
+  };
+
+  it("draws scaffolding round a new building drawn in full, in one mesh, until its construction ends", () => {
+    const { source, rows, put } = fakeSource();
+    for (let id = 1; id <= 3; id++) put(id, 4000 + id * 16, 4000);
+    for (const id of [1, 2]) Object.assign(rows.get(id) ?? {}, { builtAt: 1000 });
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, "street", 1010);
+    expect(layer.stats()).toMatchObject({ building: 2, scaffolds: 2 });
+    run(layer, "street", 1000 + CONSTRUCTION.ticks - 1);
+    expect(layer.stats().scaffolds).toBe(2);
+    run(layer, "street", 1000 + CONSTRUCTION.ticks);
+    expect(layer.stats()).toMatchObject({ building: 0, scaffolds: 0 });
+    layer.dispose();
+  });
+
+  it("draws an old building finished, and every building finished with no tick", () => {
+    const { source, rows, put } = fakeSource();
+    put(1, 4004, 4004);
+    Object.assign(rows.get(1) ?? {}, { builtAt: 1000 });
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, "street", undefined);
+    expect(layer.stats()).toMatchObject({ building: 0, scaffolds: 0 });
+    const old = createBuildingLayer(new Scene(), source, theme, () => 0);
+    old.reset();
+    run(old, "street", 1000 + CONSTRUCTION.ticks + 5);
+    expect(old.stats()).toMatchObject({ building: 0, scaffolds: 0 });
+    layer.dispose();
+    old.dispose();
+  });
+
+  it("frees a building's scaffolding when its chunk leaves the full form, and gives it back when it returns", () => {
+    const { source, rows, put } = fakeSource();
+    put(1, 4004, 4004);
+    Object.assign(rows.get(1) ?? {}, { builtAt: 1000 });
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, "street", 1010);
+    expect(layer.stats().scaffolds).toBe(1);
+    run(layer, "district", 1011);
+    expect(layer.stats()).toMatchObject({ building: 1, scaffolds: 0 });
+    run(layer, "street", 1012);
+    expect(layer.stats().scaffolds).toBe(1);
+    layer.dispose();
+  });
+
+  it("drops a building's scaffolding at once when the building goes", () => {
+    const { source, rows, put } = fakeSource();
+    const c = put(1, 4004, 4004);
+    put(2, 4040, 4004);
+    for (const id of [1, 2]) Object.assign(rows.get(id) ?? {}, { builtAt: 1000 });
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, "street", 1010);
+    expect(layer.stats().scaffolds).toBe(2);
+    rows.delete(1);
+    layer.apply([c]);
+    run(layer, "street", 1011, 1);
+    expect(layer.stats()).toMatchObject({ buildings: 1, building: 1, scaffolds: 1 });
+    layer.dispose();
+  });
+
+  it("draws a merged chunk with a building under construction with the rising material, and plain again once it is finished", () => {
+    const { source, rows, put } = fakeSource();
+    put(1, 4004, 4004);
+    put(2, 4040, 4004);
+    Object.assign(rows.get(1) ?? {}, { builtAt: 1000 });
+    const scene = new Scene();
+    const layer = createBuildingLayer(scene, source, theme, () => 0);
+    layer.reset();
+    run(layer, "district", 1010);
+    expect(named(scene, "simple buildings")).toEqual(["rising simple buildings"]);
+    run(layer, "city", 1011);
+    expect(named(scene, "building blocks")).toEqual(["rising building blocks"]);
+    const merged = layer.stats().totalMerged;
+    run(layer, "city", 1000 + CONSTRUCTION.ticks);
+    expect(named(scene, "building blocks")).toEqual(["building blocks"]);
+    expect(layer.stats().totalMerged).toBeGreaterThan(merged);
+    run(layer, "district", 1000 + CONSTRUCTION.ticks + 1);
+    expect(named(scene, "simple buildings")).toEqual(["simple buildings"]);
     layer.dispose();
   });
 });
