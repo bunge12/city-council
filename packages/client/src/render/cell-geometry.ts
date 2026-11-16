@@ -23,8 +23,11 @@ export interface CellArrays {
   fills: Uint8Array;
   /** u, v per vertex, 0 or 255: u along the road, v back from it. */
   corners: Uint8Array;
-  /** 255 per vertex of a cell where no building type fits, 0 elsewhere. */
-  marks: Uint8Array;
+  /**
+   * 1 per vertex of a cell where no building type fits, 0 elsewhere. A
+   * float, since WebGPU has no vertex format for a single byte.
+   */
+  marks: Float32Array;
   indices: Uint16Array | Uint32Array;
   /** Cells drawn: zoned ones filled, unzoned ones as outlines. */
   zoned: number;
@@ -84,7 +87,7 @@ export function buildCellChunk(
   const positions = new Float32Array(drawn * 12);
   const fills = new Uint8Array(drawn * 16);
   const uv = new Uint8Array(drawn * 8);
-  const hatch = new Uint8Array(drawn * 4);
+  const hatch = new Float32Array(drawn * 4);
   const indices = drawn * 4 > 0xffff ? new Uint32Array(drawn * 6) : new Uint16Array(drawn * 6);
   const densities = ZONING_BALANCE.densities.length;
   let zoned = 0;
@@ -97,7 +100,7 @@ export function buildCellChunk(
     const d = density[slot] ?? DENSITY_NONE;
     const filled = z !== ZONE_NONE && d !== DENSITY_NONE;
     if (filled) zoned++;
-    const mark = filled && (marks?.[k] ?? 0) !== 0 ? 255 : 0;
+    const mark = filled && (marks?.[k] ?? 0) !== 0 ? 1 : 0;
     if (mark) marked++;
     const p = (filled ? (z - 1) * densities + d - 1 : UNZONED) * 3;
     const v0 = n * 4;

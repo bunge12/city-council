@@ -142,7 +142,7 @@ function geometryOf(a: CellArrays): BufferGeometry | null {
   g.setAttribute("position", new BufferAttribute(a.positions, 3));
   g.setAttribute("cellFill", new BufferAttribute(a.fills, 4, true));
   g.setAttribute("cellCorner", new BufferAttribute(a.corners, 2, true));
-  g.setAttribute("cellMark", new BufferAttribute(a.marks, 1, true));
+  g.setAttribute("cellMark", new BufferAttribute(a.marks, 1));
   g.setIndex(new BufferAttribute(a.indices, 1));
   g.computeBoundingSphere();
   if (g.boundingSphere) g.boundingSphere.radius += SHADER_REACH;
