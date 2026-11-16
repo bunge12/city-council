@@ -482,7 +482,7 @@ export const CELLS = {
    * `colour` across the cell, `stripeMetres` apart along x + z, each
    * `stripeShare` of that wide. None in the city band, where the cells have no lines.
    */
-  noLot: { colour: 0x2a2a2a, stripeMetres: 2.4, stripeShare: 0.35 },
+  noLot: { colour: 0x1f2a16, stripeMetres: 3, stripeShare: 0.4 },
   /**
    * Height over the ground, as the roads have it (`ROADS.lift`) but lower at
    * every distance, so a cell lies over the terrain without flicker and

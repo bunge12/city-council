@@ -225,6 +225,10 @@ test("an R3 strip of 3 x 6 is hatched, and the zone tool says why", async ({ pag
   });
   const marked = await page.evaluate(async () => (await window.cityCouncil.view).cellStats()?.marked ?? 0);
   expect(marked).toBe(18);
+  // With the pointer off the map, so the zone tool's own preview does not cover the strip.
+  await page.mouse.move(640, 20);
+  await frames(page, 4);
+  await attach(page, testInfo, "the R3 strip of 3 x 6 is hatched");
   const [x, z] = cellCentre(11, 3, false);
   await moveTo(page, x, z);
   const note = page.locator("#zone-lot-note");
