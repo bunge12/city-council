@@ -182,13 +182,20 @@ export function journalPaint(net: RoadNetwork, cells: CellState, slots: readonly
  * network and swapped back. Segments with no zoned cell are left out.
  */
 export function journalLostZones(net: RoadNetwork, cells: CellState, ops: readonly NetworkOp[]): Int32Array {
+  // The segments there before the command that it removed or made cell-less,
+  // with a zoned cell. Most commands, and every grid on open ground, have none,
+  // so the step pays only for one pass over the ops.
   const seen = new Set<number>();
-  const lost: { seg: number; anchor: SegmentAnchor; order: number }[] = [];
-  const carried = new Set<string>();
-  const curveKey = (a: SegmentAnchor, order: number) => `${order},${a.ax},${a.az},${a.cx},${a.cz},${a.bx},${a.bz}`;
+  const lost: { seg: number; anchor: SegmentAnchor; order: number; start: number; count: number }[] = [];
+  const isZoned = (seg: number): { start: number; count: number } | null => {
+    if (seg >= cells.offset.length - 1) return null;
+    const start = cells.offset[seg] ?? 0;
+    const count = (cells.offset[seg + 1] ?? 0) - start;
+    for (let k = 0; k < count; k++) if ((cells.zone[start + k] ?? ZONE_NONE) !== ZONE_NONE) return { start, count };
+    return null;
+  };
   for (const op of ops) {
     if (op.op === "addSeg") {
-      carried.add(curveKey(op.row.anchor, op.row.order));
       seen.add(op.id);
       continue;
     }
@@ -196,21 +203,25 @@ export function journalLostZones(net: RoadNetwork, cells: CellState, ops: readon
     // Only the first change to an id is to the segment there before.
     if (seen.has(op.id)) continue;
     seen.add(op.id);
-    if (op.op === "removeSeg") lost.push({ seg: op.id, anchor: op.row.anchor, order: op.row.order });
-    else if (ROAD_TYPES[op.from]?.zonable === true && ROAD_TYPES[op.to]?.zonable !== true) {
+    if (op.op === "restyle" && !(ROAD_TYPES[op.from]?.zonable === true && ROAD_TYPES[op.to]?.zonable !== true)) continue;
+    const run = isZoned(op.id);
+    if (!run) continue;
+    if (op.op === "removeSeg") lost.push({ seg: op.id, anchor: op.row.anchor, order: op.row.order, ...run });
+    else {
       const now = readAnchor(net, op.id);
       const anchor = op.reverse ? { ...now, tA: now.tB, tB: now.tA } : now;
-      lost.push({ seg: op.id, anchor, order: net.segOrder[op.id] ?? 0 });
+      lost.push({ seg: op.id, anchor, order: net.segOrder[op.id] ?? 0, ...run });
     }
   }
+  if (lost.length === 0) return NO_JOURNALS;
+  // A segment the command added on the same anchor and build order carries
+  // the zones, as the cell layout does (cell-index.ts), so nothing is lost.
+  const curveKey = (a: SegmentAnchor, order: number) => `${order},${a.ax},${a.az},${a.cx},${a.cz},${a.bx},${a.bz}`;
+  const carried = new Set<string>();
+  for (const op of ops) if (op.op === "addSeg") carried.add(curveKey(op.row.anchor, op.row.order));
   const out: number[] = [];
-  for (const { seg, anchor, order } of lost) {
-    if (carried.has(curveKey(anchor, order)) || seg >= cells.offset.length - 1) continue;
-    const start = cells.offset[seg] ?? 0;
-    const count = (cells.offset[seg + 1] ?? 0) - start;
-    let zoned = false;
-    for (let k = 0; k < count && !zoned; k++) zoned = (cells.zone[start + k] ?? ZONE_NONE) !== ZONE_NONE;
-    if (!zoned) continue;
+  for (const { seg, anchor, order, start, count } of lost) {
+    if (carried.has(curveKey(anchor, order))) continue;
     write(
       out,
       seg,
