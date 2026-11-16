@@ -21,7 +21,7 @@ export interface BuildingStats {
   pending: number;
   totalWrites: number;
   totalMerged: number;
-  mergedBytes: { simple: number; flat: number };
+  mergedBytes: number;
   forms: Record<Form, FormStats>;
   fading: number;
   waiting: number;

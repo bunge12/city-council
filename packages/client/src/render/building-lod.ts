@@ -1,6 +1,6 @@
 // Levels of detail for buildings (issue M2-13, PRD "Zoom bands"): which
 // form each 500 m chunk of buildings takes, how one form fades into the
-// next, and the geometry of the two merged forms. No three.js scene here,
+// next, and the geometry of the merged flat form. No three.js scene here,
 // so all of it can be tested without a GPU.
 //
 // Three forms:
@@ -8,10 +8,11 @@
 //   chunks near the camera in the street band take this form, and a chunk
 //   that leaves frees its instances.
 // - simple: each building its model without its small parts and paving
-//   (theme/model.ts, `simplify`), all of a chunk's in one mesh. Every other
-//   chunk in the street band, and every chunk in the district band. It is
-//   the full model's own geometry, colours and window pattern, so a chunk
-//   changing between it and the full form keeps its shapes and colours.
+//   (theme/model.ts, `simplify`), drawn instanced as the full form is, with
+//   the same material, tints and window pattern. Every other chunk in the
+//   street band, and every chunk in the district band. A chunk changing
+//   between it and the full form keeps its shapes and colours, and loses
+//   only the small parts.
 // - flat: each building a flat block on the ground, coloured by its zone
 //   and density, all of a chunk's in one mesh. The city band.
 //
@@ -22,7 +23,6 @@
 
 import type { ZoomBand } from "../camera/zoom-band";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "@city-council/sim";
-import { SURFACE, type ModelArrays } from "../theme/model";
 
 export type BuildingForm = "full" | "simple" | "flat";
 
@@ -163,14 +163,12 @@ export function modelExtent(positions: ArrayLike<number>, surfaces: ArrayLike<nu
 }
 
 /**
- * Where one building of a merged chunk stands: its model and the model's
- * extent, and the place that takes the model's frame to the world. The model is stretched
+ * Where one building of the flat form stands: its model's extent, and the
+ * place that takes the model's frame to the world. The model is stretched
  * by `sx` along the road and `sz` back from it, turned by `angle` about +y
  * as three.js turns, and set down at (x, y, z).
  */
 export interface MergedItem {
-  /** The geometry the simple form draws: the model, simplified. */
-  model: ModelArrays;
   extent: Extent;
   x: number;
   y: number;
@@ -178,33 +176,15 @@ export interface MergedItem {
   angle: number;
   sx: number;
   sz: number;
-  /** Colours as sRGB hex: the building's tints for the simple form, `flat` for a flat block. */
-  wall: number;
-  roof: number;
-  trim: number;
+  /** The flat block's colour, as sRGB hex. */
   flat: number;
 }
 
-/** The colours no building tints, as sRGB hex. */
-export interface FixedColours {
-  glass: number;
-  paving: number;
-}
-
-/**
- * A merged chunk's arrays. Colours are sRGB bytes, which the shader takes
- * to linear light; for the simple form the alpha byte is the vertex's
- * `FACADE` and `facades` holds where it is on its facade, in windows along
- * the wall with the lot's stretch taken out and in floors up, as the full
- * models' shader works them out. Normals are signed bytes, x, y, z and a
- * zero. The flat form has neither, and alpha 255.
- */
+/** A merged chunk's arrays: colours are sRGB bytes with alpha 255, which the shader takes to linear light. */
 export interface MergedArrays {
   positions: Float32Array;
-  normals: Int8Array | null;
   colours: Uint8Array;
-  facades: Float32Array | null;
-  indices: Uint16Array | Uint32Array;
+  indices: Uint32Array;
   /** The centre and radius of a sphere round every vertex, for culling. */
   centre: [number, number, number];
   radius: number;
@@ -250,62 +230,6 @@ function bounds(positions: Float32Array): { centre: [number, number, number]; ra
 }
 
 /**
- * One chunk's buildings as their simplified models, merged: each model
- * stretched, turned and set down as its building is, every vertex in the
- * colour of its surface, from the building's tints or `fixed`.
- */
-export function mergeModels(items: readonly MergedItem[], fixed: FixedColours): MergedArrays {
-  let vertices = 0;
-  let count = 0;
-  for (const item of items) {
-    vertices += item.model.surfaces.length;
-    count += item.model.indices.length;
-  }
-  const positions = new Float32Array(vertices * 3);
-  const normals = new Int8Array(vertices * 4);
-  const colours = new Uint8Array(vertices * 4);
-  const facades = new Float32Array(vertices * 2);
-  const indices = vertices > 0xffff ? new Uint32Array(count) : new Uint16Array(count);
-  const at = [0, 0, 0];
-  let v = 0;
-  let i = 0;
-  for (const item of items) {
-    const m = item.model;
-    const c = Math.cos(item.angle);
-    const s = Math.sin(item.angle);
-    const bySurface = [rgbaOf(item.wall), rgbaOf(item.roof), rgbaOf(item.trim), rgbaOf(fixed.glass), rgbaOf(fixed.paving)];
-    const n = m.surfaces.length;
-    for (let k = 0; k < n; k++) {
-      place(item, m.positions[k * 3] ?? 0, m.positions[k * 3 + 1] ?? 0, m.positions[k * 3 + 2] ?? 0, at, 0);
-      positions[(v + k) * 3] = at[0] ?? 0;
-      positions[(v + k) * 3 + 1] = at[1] ?? 0;
-      positions[(v + k) * 3 + 2] = at[2] ?? 0;
-      // A stretch turns a normal by the inverse: divide by the scale, then turn as the positions turn.
-      const lx = (m.normals[k * 3] ?? 0) / item.sx;
-      const ly = m.normals[k * 3 + 1] ?? 0;
-      const lz = (m.normals[k * 3 + 2] ?? 0) / item.sz;
-      const len = Math.hypot(lx, ly, lz) || 1;
-      normals[(v + k) * 4] = Math.round(((lx * c + lz * s) / len) * 127);
-      normals[(v + k) * 4 + 1] = Math.round((ly / len) * 127);
-      normals[(v + k) * 4 + 2] = Math.round(((-lx * s + lz * c) / len) * 127);
-      const surface = Math.round(m.surfaces[k] ?? SURFACE.wall);
-      const colour = bySurface[surface] ?? bySurface[SURFACE.wall] ?? [0, 0, 0, 0];
-      colours[(v + k) * 4] = colour[0];
-      colours[(v + k) * 4 + 1] = colour[1];
-      colours[(v + k) * 4 + 2] = colour[2];
-      colours[(v + k) * 4 + 3] = m.facades[k * 4 + 3] ?? 0;
-      const axis = m.facades[k * 4 + 2] ?? 0;
-      facades[(v + k) * 2] = (m.facades[k * 4] ?? 0) * (axis < 0.5 ? item.sx : item.sz);
-      facades[(v + k) * 2 + 1] = m.facades[k * 4 + 1] ?? 0;
-    }
-    for (let k = 0; k < m.indices.length; k++) indices[i + k] = v + (m.indices[k] ?? 0);
-    v += n;
-    i += m.indices.length;
-  }
-  return { positions, normals, colours, facades, indices, ...bounds(positions) };
-}
-
-/**
  * One chunk's buildings as flat blocks, merged: each the footprint of its
  * box, at the highest ground under its lot, in its `flat` colour. Wound to
  * face up.
@@ -336,5 +260,5 @@ export function mergeFlats(items: readonly MergedItem[]): MergedArrays {
     v += 4;
     i += 6;
   }
-  return { positions, normals: null, colours, facades: null, indices, ...bounds(positions) };
+  return { positions, colours, indices, ...bounds(positions) };
 }

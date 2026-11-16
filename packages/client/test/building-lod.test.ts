@@ -1,11 +1,11 @@
 // Levels of detail for buildings (issue M2-13): which form a chunk takes,
-// the fade between forms, and the merged geometry. building-lod.ts.
+// the fade between forms, the simplified models (theme/model.ts) and the
+// merged flat geometry (building-lod.ts).
 
 import { describe, expect, it } from "vitest";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "@city-council/sim";
-import { Matrix4, Quaternion, Vector3 } from "three";
-import { chunkDistance, draws, fadeOf, formFor, isNear, mergeFlats, mergeModels, modelExtent, stepFade, type ChunkFade, type MergedItem } from "../src/render/building-lod";
-import { FACADE, ModelBuilder, SURFACE, simplify } from "../src/theme/model";
+import { chunkDistance, draws, fadeOf, formFor, isNear, mergeFlats, modelExtent, stepFade, type ChunkFade, type MergedItem } from "../src/render/building-lod";
+import { ModelBuilder, SURFACE, simplify } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
 import { tower } from "../src/theme/north-american/generators";
 import { BUILDINGS } from "../src/render/config";
@@ -117,12 +117,7 @@ describe("simplified models", () => {
 
 describe("merged geometry", () => {
   const extent = { minX: -4, maxX: 4, minY: -1, maxY: 9, minZ: -6, maxZ: 6 };
-  const b = new ModelBuilder();
-  b.box(-4, 4, 0, 9, -6, 6, SURFACE.wall, SURFACE.roof, { kind: FACADE.windows, spacing: 2, floor: 3 });
-  b.box(-4.2, 4.2, -1, 0.3, -6.2, 6.2, SURFACE.trim, null);
-  const model = b.build();
-  const fixed = { glass: 0x0a0b0c, paving: 0x999999 };
-  const item = (angle: number): MergedItem => ({ model, extent, x: 100, y: 20, z: 200, angle, sx: 1.5, sz: 0.8, wall: 0x112233, roof: 0x445566, trim: 0xaabbcc, flat: 0x778899 });
+  const item = (angle: number): MergedItem => ({ extent, x: 100, y: 20, z: 200, angle, sx: 1.5, sz: 1, flat: 0x778899 });
 
   it("takes a model's box without its paving", () => {
     const positions = Float32Array.of(-1, 0, -1, 1, 5, 1, -10, 0, -10, 10, 0, 10);
@@ -131,49 +126,9 @@ describe("merged geometry", () => {
     expect(modelExtent(positions, Float32Array.of(4, 4, 4, 4), 4).maxX).toBe(10);
   });
 
-  for (const angle of [0, 0.7, Math.PI / 2, 2.5]) {
-    it(`sets a model down where its full model's instance stands, facing out, at angle ${angle}`, () => {
-      const a = mergeModels([item(angle), item(angle)], fixed);
-      const n = model.surfaces.length;
-      expect(a.positions.length).toBe(2 * n * 3);
-      expect(a.indices.length).toBe(2 * model.indices.length);
-      expect(a.indices).toBeInstanceOf(Uint16Array);
-      expect(a.indices[model.indices.length]).toBe((model.indices[0] ?? 0) + n);
-      // The same matrix the full form gives the instance (building-meshes.ts, `write`).
-      const matrix = new Matrix4().compose(new Vector3(100, 20, 200), new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), angle), new Vector3(1.5, 1, 0.8));
-      const normalMatrix = new Matrix4().copy(matrix).invert().transpose();
-      for (let v = 0; v < n; v++) {
-        const p = new Vector3(model.positions[v * 3], model.positions[v * 3 + 1], model.positions[v * 3 + 2]).applyMatrix4(matrix);
-        expect(a.positions[v * 3]).toBeCloseTo(p.x, 3);
-        expect(a.positions[v * 3 + 1]).toBeCloseTo(p.y, 3);
-        expect(a.positions[v * 3 + 2]).toBeCloseTo(p.z, 3);
-        const want = new Vector3(model.normals[v * 3], model.normals[v * 3 + 1], model.normals[v * 3 + 2]).transformDirection(normalMatrix);
-        const got = new Vector3(a.normals?.[v * 4] ?? 0, a.normals?.[v * 4 + 1] ?? 0, a.normals?.[v * 4 + 2] ?? 0).divideScalar(127);
-        expect(got.distanceTo(want)).toBeLessThan(0.02);
-        expect(a.normals?.[v * 4 + 3]).toBe(0);
-      }
-    });
-  }
-
-  it("colours each vertex by its surface and carries its window pattern", () => {
-    const a = mergeModels([item(0.7)], fixed);
-    const colour = (v: number) => [...a.colours.slice(v * 4, v * 4 + 3)];
-    for (let v = 0; v < model.surfaces.length; v++) {
-      const s = model.surfaces[v];
-      expect(colour(v)).toEqual(s === SURFACE.wall ? [0x11, 0x22, 0x33] : s === SURFACE.roof ? [0x44, 0x55, 0x66] : [0xaa, 0xbb, 0xcc]);
-      expect(a.colours[v * 4 + 3]).toBe(model.facades[v * 4 + 3]);
-      // Windows along the wall in the lot's metres: the stretch along the wall's axis is taken out, as the full models' shader does.
-      const stretch = model.facades[v * 4 + 2] === 0 ? 1.5 : 0.8;
-      expect(a.facades?.[v * 2]).toBeCloseTo((model.facades[v * 4] ?? 0) * stretch, 5);
-      expect(a.facades?.[v * 2 + 1]).toBeCloseTo(model.facades[v * 4 + 1] ?? 0, 5);
-    }
-    expect([...a.colours.slice(0, 4)]).toEqual([0x11, 0x22, 0x33, FACADE.windows]);
-  });
-
   it("makes a flat block of the box's footprint, facing up, in its zone's colour", () => {
     const a = mergeFlats([item(0.7), item(2.5)]);
     expect(a.positions.length).toBe(2 * 4 * 3);
-    expect(a.normals).toBeNull();
     for (let b = 0; b < 2; b++) {
       const p = (i: number, k: number) => a.positions[(b * 4 + i) * 3 + k] ?? 0;
       expect(p(0, 1)).toBe(20);
