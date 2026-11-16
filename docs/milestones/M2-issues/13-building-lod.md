@@ -9,7 +9,7 @@ A city full of buildings holds its frame rate at every zoom. See "Zoom bands" an
 ## Scope
 
 - Street band: the full meshes from issue 12
-- District band: each building is a plain box of its footprint and height, merged into one mesh per chunk
+- District band: each building is its own model without its small parts, merged into one mesh per chunk (a plain box at first; changed after review because the boxes did not match the buildings)
 - City band: flat blocks coloured by zone and density, one mesh per chunk
 - A short fade between bands, so nothing pops
 - Only chunks near the camera hold full geometry. A chunk that leaves frees it

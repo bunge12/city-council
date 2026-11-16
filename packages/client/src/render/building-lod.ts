@@ -7,9 +7,11 @@
 // - full: the theme's models, drawn instanced (building-meshes.ts). Only
 //   chunks near the camera in the street band take this form, and a chunk
 //   that leaves frees its instances.
-// - box: each building a plain box of its footprint and height, all of a
-//   chunk's in one mesh. Every other chunk in the street band, and every
-//   chunk in the district band.
+// - simple: each building its model without its small parts and paving
+//   (theme/model.ts, `simplify`), all of a chunk's in one mesh. Every other
+//   chunk in the street band, and every chunk in the district band. It is
+//   the full model's own geometry, colours and window pattern, so a chunk
+//   changing between it and the full form keeps its shapes and colours.
 // - flat: each building a flat block on the ground, coloured by its zone
 //   and density, all of a chunk's in one mesh. The city band.
 //
@@ -20,8 +22,9 @@
 
 import type { ZoomBand } from "../camera/zoom-band";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "@city-council/sim";
+import { SURFACE, type ModelArrays } from "../theme/model";
 
-export type BuildingForm = "full" | "box" | "flat";
+export type BuildingForm = "full" | "simple" | "flat";
 
 /**
  * The form a chunk wants. `near` is whether it is held near the camera
@@ -29,8 +32,8 @@ export type BuildingForm = "full" | "box" | "flat";
  */
 export function formFor(band: ZoomBand, near: boolean): BuildingForm {
   if (band === "city") return "flat";
-  if (band === "district") return "box";
-  return near ? "full" : "box";
+  if (band === "district") return "simple";
+  return near ? "full" : "simple";
 }
 
 /** Metres from (x, z) to the nearest point of chunk `c`'s square. */
@@ -134,7 +137,7 @@ export interface Extent {
 
 /**
  * The box round a model's positions, leaving out the vertices of surface
- * `skip`: the theme's paving, so a box is the building and not its car park.
+ * `skip`: the theme's paving, so a flat block is the building and not its car park.
  * A model with nothing else gets the box round everything.
  */
 export function modelExtent(positions: ArrayLike<number>, surfaces: ArrayLike<number>, skip: number): Extent {
@@ -160,12 +163,14 @@ export function modelExtent(positions: ArrayLike<number>, surfaces: ArrayLike<nu
 }
 
 /**
- * Where one building of a merged chunk stands: its model's extent, and the
- * place that takes the model's frame to the world. The model is stretched
+ * Where one building of a merged chunk stands: its model and the model's
+ * extent, and the place that takes the model's frame to the world. The model is stretched
  * by `sx` along the road and `sz` back from it, turned by `angle` about +y
  * as three.js turns, and set down at (x, y, z).
  */
 export interface MergedItem {
+  /** The geometry the simple form draws: the model, simplified. */
+  model: ModelArrays;
   extent: Extent;
   x: number;
   y: number;
@@ -173,18 +178,33 @@ export interface MergedItem {
   angle: number;
   sx: number;
   sz: number;
-  /** Colours as sRGB hex: walls and roof for a box, `flat` for a flat block. */
+  /** Colours as sRGB hex: the building's tints for the simple form, `flat` for a flat block. */
   wall: number;
   roof: number;
+  trim: number;
   flat: number;
 }
 
-/** A merged chunk's arrays: colours are sRGB bytes with alpha 255, which the shader takes to linear light. */
+/** The colours no building tints, as sRGB hex. */
+export interface FixedColours {
+  glass: number;
+  paving: number;
+}
+
+/**
+ * A merged chunk's arrays. Colours are sRGB bytes, which the shader takes
+ * to linear light; for the simple form the alpha byte is the vertex's
+ * `FACADE` and `facades` holds where it is on its facade, in windows along
+ * the wall with the lot's stretch taken out and in floors up, as the full
+ * models' shader works them out. Normals are signed bytes, x, y, z and a
+ * zero. The flat form has neither, and alpha 255.
+ */
 export interface MergedArrays {
   positions: Float32Array;
-  normals: Float32Array | null;
+  normals: Int8Array | null;
   colours: Uint8Array;
-  indices: Uint32Array;
+  facades: Float32Array | null;
+  indices: Uint16Array | Uint32Array;
   /** The centre and radius of a sphere round every vertex, for culling. */
   centre: [number, number, number];
   radius: number;
@@ -229,69 +249,60 @@ function bounds(positions: Float32Array): { centre: [number, number, number]; ra
   return { centre, radius: Math.hypot(maxX - centre[0], maxY - centre[1], maxZ - centre[2]) };
 }
 
-/** Corners of a box face, as bits of the corner index: x is bit 0, y bit 1, z bit 2. */
-const BOX_FACES: readonly { corners: readonly [number, number, number, number]; roof: boolean }[] = [
-  { corners: [1, 3, 7, 5], roof: false },
-  { corners: [0, 4, 6, 2], roof: false },
-  { corners: [4, 5, 7, 6], roof: false },
-  { corners: [0, 2, 3, 1], roof: false },
-  { corners: [2, 6, 7, 3], roof: true },
-];
-
 /**
- * One chunk's buildings as plain boxes, merged: four walls and a roof
- * each, no floor, flat shaded. Walls take the building's wall colour and
- * the roof its roof colour.
+ * One chunk's buildings as their simplified models, merged: each model
+ * stretched, turned and set down as its building is, every vertex in the
+ * colour of its surface, from the building's tints or `fixed`.
  */
-export function mergeBoxes(items: readonly MergedItem[]): MergedArrays {
-  const faces = BOX_FACES.length;
-  const positions = new Float32Array(items.length * faces * 4 * 3);
-  const normals = new Float32Array(positions.length);
-  const colours = new Uint8Array(items.length * faces * 4 * 4);
-  const indices = new Uint32Array(items.length * faces * 6);
-  const corner = new Array<number>(24).fill(0);
-  const mid = [0, 0, 0];
+export function mergeModels(items: readonly MergedItem[], fixed: FixedColours): MergedArrays {
+  let vertices = 0;
+  let count = 0;
+  for (const item of items) {
+    vertices += item.model.surfaces.length;
+    count += item.model.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const normals = new Int8Array(vertices * 4);
+  const colours = new Uint8Array(vertices * 4);
+  const facades = new Float32Array(vertices * 2);
+  const indices = vertices > 0xffff ? new Uint32Array(count) : new Uint16Array(count);
+  const at = [0, 0, 0];
   let v = 0;
   let i = 0;
   for (const item of items) {
-    const e = item.extent;
-    for (let k = 0; k < 8; k++) place(item, k & 1 ? e.maxX : e.minX, k & 2 ? e.maxY : e.minY, k & 4 ? e.maxZ : e.minZ, corner, k * 3);
-    place(item, (e.minX + e.maxX) / 2, (e.minY + e.maxY) / 2, (e.minZ + e.maxZ) / 2, mid, 0);
-    const wall = rgbaOf(item.wall);
-    const roof = rgbaOf(item.roof);
-    for (const face of BOX_FACES) {
-      let q = [...face.corners];
-      const p = (n: number, a: number) => corner[(q[n] ?? 0) * 3 + a] ?? 0;
-      // The face's normal from its corners, turned to point away from the box's middle.
-      let nx = (p(1, 1) - p(0, 1)) * (p(2, 2) - p(0, 2)) - (p(1, 2) - p(0, 2)) * (p(2, 1) - p(0, 1));
-      let ny = (p(1, 2) - p(0, 2)) * (p(2, 0) - p(0, 0)) - (p(1, 0) - p(0, 0)) * (p(2, 2) - p(0, 2));
-      let nz = (p(1, 0) - p(0, 0)) * (p(2, 1) - p(0, 1)) - (p(1, 1) - p(0, 1)) * (p(2, 0) - p(0, 0));
-      const out = (p(0, 0) + p(2, 0)) / 2 - (mid[0] ?? 0);
-      const up = (p(0, 1) + p(2, 1)) / 2 - (mid[1] ?? 0);
-      const across = (p(0, 2) + p(2, 2)) / 2 - (mid[2] ?? 0);
-      if (nx * out + ny * up + nz * across < 0) {
-        q = [q[0] ?? 0, q[3] ?? 0, q[2] ?? 0, q[1] ?? 0];
-        nx = -nx;
-        ny = -ny;
-        nz = -nz;
-      }
-      const len = Math.hypot(nx, ny, nz) || 1;
-      const colour = face.roof ? roof : wall;
-      for (let n = 0; n < 4; n++) {
-        positions[(v + n) * 3] = p(n, 0);
-        positions[(v + n) * 3 + 1] = p(n, 1);
-        positions[(v + n) * 3 + 2] = p(n, 2);
-        normals[(v + n) * 3] = nx / len;
-        normals[(v + n) * 3 + 1] = ny / len;
-        normals[(v + n) * 3 + 2] = nz / len;
-        colours.set(colour, (v + n) * 4);
-      }
-      indices.set([v, v + 1, v + 2, v, v + 2, v + 3], i);
-      v += 4;
-      i += 6;
+    const m = item.model;
+    const c = Math.cos(item.angle);
+    const s = Math.sin(item.angle);
+    const bySurface = [rgbaOf(item.wall), rgbaOf(item.roof), rgbaOf(item.trim), rgbaOf(fixed.glass), rgbaOf(fixed.paving)];
+    const n = m.surfaces.length;
+    for (let k = 0; k < n; k++) {
+      place(item, m.positions[k * 3] ?? 0, m.positions[k * 3 + 1] ?? 0, m.positions[k * 3 + 2] ?? 0, at, 0);
+      positions[(v + k) * 3] = at[0] ?? 0;
+      positions[(v + k) * 3 + 1] = at[1] ?? 0;
+      positions[(v + k) * 3 + 2] = at[2] ?? 0;
+      // A stretch turns a normal by the inverse: divide by the scale, then turn as the positions turn.
+      const lx = (m.normals[k * 3] ?? 0) / item.sx;
+      const ly = m.normals[k * 3 + 1] ?? 0;
+      const lz = (m.normals[k * 3 + 2] ?? 0) / item.sz;
+      const len = Math.hypot(lx, ly, lz) || 1;
+      normals[(v + k) * 4] = Math.round(((lx * c + lz * s) / len) * 127);
+      normals[(v + k) * 4 + 1] = Math.round((ly / len) * 127);
+      normals[(v + k) * 4 + 2] = Math.round(((-lx * s + lz * c) / len) * 127);
+      const surface = Math.round(m.surfaces[k] ?? SURFACE.wall);
+      const colour = bySurface[surface] ?? bySurface[SURFACE.wall] ?? [0, 0, 0, 0];
+      colours[(v + k) * 4] = colour[0];
+      colours[(v + k) * 4 + 1] = colour[1];
+      colours[(v + k) * 4 + 2] = colour[2];
+      colours[(v + k) * 4 + 3] = m.facades[k * 4 + 3] ?? 0;
+      const axis = m.facades[k * 4 + 2] ?? 0;
+      facades[(v + k) * 2] = (m.facades[k * 4] ?? 0) * (axis < 0.5 ? item.sx : item.sz);
+      facades[(v + k) * 2 + 1] = m.facades[k * 4 + 1] ?? 0;
     }
+    for (let k = 0; k < m.indices.length; k++) indices[i + k] = v + (m.indices[k] ?? 0);
+    v += n;
+    i += m.indices.length;
   }
-  return { positions, normals, colours, indices, ...bounds(positions) };
+  return { positions, normals, colours, facades, indices, ...bounds(positions) };
 }
 
 /**
@@ -325,5 +336,5 @@ export function mergeFlats(items: readonly MergedItem[]): MergedArrays {
     v += 4;
     i += 6;
   }
-  return { positions, normals: null, colours, indices, ...bounds(positions) };
+  return { positions, normals: null, colours, facades: null, indices, ...bounds(positions) };
 }

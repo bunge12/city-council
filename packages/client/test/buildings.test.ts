@@ -319,20 +319,20 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     for (let k = 0; k < frames; k++) layer.update(camera, 1000, { band, seconds });
   };
 
-  it("draws chunks near the camera in full and the rest as boxes in the street band, boxes in the district band and blocks in the city band", () => {
+  it("draws chunks near the camera in full and the rest simplified in the street band, simplified in the district band and blocks in the city band", () => {
     const { source, put } = fakeSource();
     const here = put(1, 4004, 4004);
     const far = put(2, 9004, 9004);
     const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
     layer.reset();
     run(layer, near, "street");
-    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["full", "box"]);
-    expect(layer.stats().forms).toMatchObject({ full: { buildings: 1, meshes: 1 }, box: { buildings: 1, meshes: 1 }, flat: { buildings: 0, meshes: 0 } });
+    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["full", "simple"]);
+    expect(layer.stats().forms).toMatchObject({ full: { buildings: 1, meshes: 1 }, simple: { buildings: 1, meshes: 1 }, flat: { buildings: 0, meshes: 0 } });
     run(layer, near, "district");
-    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["box", "box"]);
+    expect([layer.formOf(here), layer.formOf(far)]).toEqual(["simple", "simple"]);
     run(layer, near, "city");
     expect([layer.formOf(here), layer.formOf(far)]).toEqual(["flat", "flat"]);
-    expect(layer.stats().forms).toMatchObject({ full: { buildings: 0, meshes: 0 }, box: { meshes: 0 }, flat: { buildings: 2, meshes: 2 } });
+    expect(layer.stats().forms).toMatchObject({ full: { buildings: 0, meshes: 0 }, simple: { meshes: 0 }, flat: { buildings: 2, meshes: 2 } });
     layer.dispose();
   });
 
@@ -342,13 +342,13 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
     layer.reset();
     run(layer, near, "city", 5, 0.016);
-    // Half way from blocks to boxes, the camera drops into the street band: the chunk is filled, but the fade under way goes on.
+    // Half way from blocks to simple buildings, the camera drops into the street band: the chunk is filled, but the fade under way goes on.
     run(layer, near, "district", 3, 0.016);
     run(layer, near, "street", 1, 0.016);
     expect(layer.formOf(here)).toBe("flat");
     // Then back out before the full form could fade in: its instances go.
     run(layer, near, "district", 60, 0.016);
-    expect(layer.formOf(here)).toBe("box");
+    expect(layer.formOf(here)).toBe("simple");
     expect(layer.stats().forms.full).toEqual({ chunks: 0, buildings: 0, meshes: 0 });
     layer.dispose();
   });
@@ -362,9 +362,9 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     expect(layer.stats().forms.full.buildings).toBe(20);
     run(layer, { x: 9000, z: 9000 }, "street");
     expect(layer.stats().forms.full).toEqual({ chunks: 0, buildings: 0, meshes: 0 });
-    // The colours and the box stay: only the full form is freed.
+    // The colours and the simple form stay: only the full form is freed.
     expect(layer.tintOf(3)).not.toBeNull();
-    expect(layer.stats().forms.box.buildings).toBe(20);
+    expect(layer.stats().forms.simple.buildings).toBe(20);
     run(layer, near, "street");
     expect(layer.stats().forms.full.buildings).toBe(20);
     layer.dispose();
@@ -377,15 +377,15 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     layer.reset();
     run(layer, near, "street", 5, 0.016);
     expect(layer.formOf(here)).toBe("full");
-    // One frame into the district band: still full, fading to boxes.
+    // One frame into the district band: still full, fading to the simple form.
     run(layer, near, "district", 1, 0.016);
     expect(layer.formOf(here)).toBe("full");
     expect(layer.stats().fading).toBe(1);
     expect(layer.stats().forms.full.buildings).toBe(1);
-    expect(layer.stats().forms.box.buildings).toBe(1);
-    // Past the fade time, boxes alone.
+    expect(layer.stats().forms.simple.buildings).toBe(1);
+    // Past the fade time, the simple form alone.
     run(layer, near, "district", Math.ceil(BUILDINGS.fadeSeconds / 0.016) + 1, 0.016);
-    expect(layer.formOf(here)).toBe("box");
+    expect(layer.formOf(here)).toBe("simple");
     expect(layer.stats().fading).toBe(0);
     expect(layer.stats().forms.full.buildings).toBe(0);
     layer.dispose();
@@ -399,14 +399,14 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     layer.reset();
     run(layer, near, "district");
     const built = layer.stats().totalMerged;
-    // Both forms of both chunks, built once: the boxes shown and the blocks ahead of a zoom out.
+    // Both forms of both chunks, built once: the simple buildings shown and the blocks ahead of a zoom out.
     expect(built).toBe(4);
     // Moving the camera and changing band builds nothing again.
     run(layer, { x: 9000, z: 9000 }, "city");
     run(layer, near, "district");
     expect(layer.stats().totalMerged).toBe(built);
     // A building gone from one chunk and one come to another: that chunk's
-    // boxes and blocks are built again, and the emptied chunk's meshes are
+    // simple buildings and blocks are built again, and the emptied chunk's meshes are
     // dropped. Nothing is built again when the band changes after.
     rows.delete(2);
     put(3, 4040, 4004);

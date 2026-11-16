@@ -9,7 +9,7 @@ import type { Page, TestInfo } from "@playwright/test";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE, buildScaleCity, generateTerrain, growScaleCity, heightAt, serialize } from "../packages/sim/src/index";
 
 export type Vec3 = readonly [number, number, number];
-export type Form = "full" | "box" | "flat";
+export type Form = "full" | "simple" | "flat";
 export interface FormStats {
   chunks: number;
   buildings: number;
@@ -21,6 +21,7 @@ export interface BuildingStats {
   pending: number;
   totalWrites: number;
   totalMerged: number;
+  mergedBytes: { simple: number; flat: number };
   forms: Record<Form, FormStats>;
   fading: number;
   waiting: number;
