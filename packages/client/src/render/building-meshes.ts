@@ -118,7 +118,7 @@ export interface BuildingStats {
   totalMerged: number;
   /** Bytes of vertices and indices the flat meshes hold now. The instanced forms hold only their models and 88 bytes an instance. */
   mergedBytes: number;
-  /** What each form drew in the last frame, counting only meshes in the camera's view. */
+  /** What each form drew in the last frame. Flat blocks count only meshes in the camera's view; the instanced forms count every instance they hold, since an instanced mesh is not culled. */
   forms: Record<BuildingForm, FormStats>;
   /** Chunks fading from one form to another, and chunks waiting for the form they want to be built. */
   fading: number;

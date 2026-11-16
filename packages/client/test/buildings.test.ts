@@ -449,6 +449,45 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     layer.dispose();
   });
 
+  it("keeps both forms' instances in step when a building of a shared model goes from the middle", () => {
+    const { source, rows, put } = fakeSource();
+    const here = put(1, 4004, 4004);
+    put(2, 4040, 4004);
+    put(3, 4076, 4004);
+    const scene = new Scene();
+    const layer = createBuildingLayer(scene, source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "street", 5, 0.016);
+    // One frame into the fade: every building has an instance in both forms.
+    run(layer, near, "district", 1, 0.016);
+    type Inst = { name: string; count: number; instanceMatrix: { array: Float32Array }; geometry: { getAttribute(n: string): { array: Float32Array } } };
+    const drawn = () => {
+      const out: Record<string, string[]> = {};
+      scene.traverse((o) => {
+        if (!o.name.startsWith("buildings single-family-home/")) return;
+        const m = o as unknown as Inst;
+        const tints = m.geometry.getAttribute("buildingTint").array;
+        const list: string[] = [];
+        for (let k = 0; k < m.count; k++) list.push(`${Math.round(m.instanceMatrix.array[k * 16 + 12] ?? 0)},${Math.round(m.instanceMatrix.array[k * 16 + 14] ?? 0)}:${tints[k * 3]}`);
+        out[o.name.endsWith(" simple") ? "simple" : "full"] = list.sort();
+      });
+      return out;
+    };
+    const before = drawn();
+    expect(before["full"]).toHaveLength(3);
+    expect(before["simple"]).toEqual(before["full"]);
+    // The first building added holds slot 0 in both meshes: the last moves into its gap in each.
+    rows.delete(1);
+    layer.apply([here]);
+    run(layer, near, "district", 1, 0.016);
+    const after = drawn();
+    expect(after["simple"]).toHaveLength(2);
+    expect(after["simple"]).toEqual(after["full"]);
+    // The two left are drawn as they were, in both forms.
+    for (const e of after["simple"] ?? []) expect(before["simple"]).toContain(e);
+    layer.dispose();
+  });
+
   it("colours a flat block by its zone and density, as the zoning overlay does", () => {
     const { source, put } = fakeSource();
     const tower = BUILDING_TYPES.findIndex((t) => t.id === "high-tower");
