@@ -117,6 +117,18 @@
   color: var(--ink-soft);
 }
 
+.top-bar .homes {
+  white-space: nowrap;
+  color: var(--ink-soft);
+  cursor: default;
+}
+
+.top-bar .homes #homes-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .top-bar .speeds,
 .top-bar .panels {
   display: flex;

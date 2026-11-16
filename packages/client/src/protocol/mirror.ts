@@ -27,6 +27,7 @@ import {
   type SimState,
   type SystemTiming,
 } from "@city-council/sim";
+import { adjustHomes, countHomes, homesAfter, homesBefore, type Homes } from "./homes";
 import type { ClientTransport } from "./transport";
 
 /** Deeply read-only view of sim state. The client never writes it. */
@@ -107,6 +108,7 @@ export class SimMirror {
   private readonly listeners = new Set<Listener>();
   private hostStats: HostStats = { timings: [] };
   private awaitingSnapshot = false;
+  private homeTally: Homes | null = null;
 
   constructor(transport: ClientTransport, playerId: string) {
     this.transport = transport;
@@ -122,6 +124,16 @@ export class SimMirror {
 
   get stats(): HostStats {
     return this.hostStats;
+  }
+
+  /**
+   * The residential buildings standing in the copy and the residents they
+   * hold room for (issue M2-18), or null until the first snapshot. Counted
+   * in full from each snapshot, then moved by each building delta. The
+   * object is replaced only when a number changes, so a view can compare it.
+   */
+  get homes(): Homes | null {
+    return this.homeTally;
   }
 
   /**
@@ -271,6 +283,7 @@ export class SimMirror {
         this.settleFromSnapshot(message.state);
         this.skipSeqs(message.state);
         this.current = message.state;
+        this.homeTally = countHomes(message.state.buildings);
         this.logFrom = message.logFrom;
         this.deltaSeq = message.deltaSeq;
         this.awaitingSnapshot = false;
@@ -330,15 +343,20 @@ export class SimMirror {
     }
     // Then the buildings, on the cells as they now are.
     let buildingChunks: readonly number[] = [];
+    let homes = this.homeTally;
     if (delta.buildings) {
+      const before = homesBefore(state.buildings, delta.buildings);
       const applied = applyBuildingDelta(state, delta.buildings);
       if (typeof applied === "string") {
         this.outOfStep();
         return;
       }
       buildingChunks = applied;
+      const after = homesAfter(state.buildings, delta.buildings);
+      if (homes && (before.count !== after.count || before.capacity !== after.capacity)) homes = adjustHomes(homes, before, after);
     }
     this.deltaSeq++;
+    this.homeTally = homes;
     state.tick = delta.tick;
     state.speed = delta.speed;
     // Any step drains the host's queue, so queued commands from the
