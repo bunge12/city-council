@@ -112,21 +112,25 @@ describe("the growth rate", () => {
     }
   });
 
-  it("plans a day from the free front cells, to build them out by a deadline fillDays after they grew", () => {
+  it("plans a day from the free front cells, to build them out by a deadline fillDays after they came", () => {
     const { fillDays, frontCellsPerBuilding: per, growthPerDayMin, growthPerDayMax } = BUILDINGS_BALANCE;
     const g = createGrowth();
     planDay(g, 0, 0);
-    expect(g).toEqual({ quota: growthPerDayMin, day: 0, deadline: fillDays, free: 0 });
+    expect(g).toEqual({ quota: growthPerDayMin, day: 0, deadline: fillDays, free: 0, used: 0 });
     // New zoning: a full fillDays from today, the quota rounded up.
-    planDay(g, 5, 481);
-    expect(g).toEqual({ quota: Math.ceil(481 / (per * fillDays)), day: 5, deadline: 5 + fillDays, free: 481 });
-    // Fewer cells as it builds: the same deadline, so the quota follows the days left.
+    planDay(g, 5, 480);
+    expect(g).toEqual({ quota: Math.ceil(480 / (per * fillDays)), day: 5, deadline: 5 + fillDays, free: 480, used: 0 });
+    // Fewer cells, all of them built on by the grower: the same deadline, so the quota follows the days left.
+    g.used = 440;
     planDay(g, 5 + fillDays - 2, 40);
     expect(g.deadline).toBe(5 + fillDays);
     expect(g.quota).toBe(Math.ceil(40 / (per * 2)));
-    // More zoning moves the deadline out again.
-    planDay(g, 5 + fillDays - 1, 400);
-    expect(g.deadline).toBe(4 + 2 * fillDays);
+    expect(g.used).toBe(0);
+    // 360 new cells the day before the deadline: the deadline is the old and
+    // the new weighted by their cells, so the 40 planned are not held back a month.
+    g.used = 20;
+    planDay(g, 5 + fillDays - 1, 380);
+    expect(g.deadline).toBe(5 + fillDays - 1 + Math.ceil((20 * 1 + 360 * fillDays) / 380));
     // Held between the min and the max.
     planDay(g, 100, 10_000_000);
     expect(g.quota).toBe(growthPerDayMax);
@@ -134,19 +138,45 @@ describe("the growth rate", () => {
     expect(g.quota).toBe(growthPerDayMin);
   });
 
-  it("past its deadline, presses on while the cells still fall, and waits fillDays once they stop", () => {
+  it("sees new zoning that the day's building hid: the cells that came are counted net of what the grower used", () => {
+    const { fillDays } = BUILDINGS_BALANCE;
+    const g = createGrowth();
+    planDay(g, 0, 100);
+    // The grower built on 30 cells and 20 new ones came: F fell, but 20 came.
+    g.used = 30;
+    planDay(g, 25, 90);
+    expect(g.deadline).toBe(25 + Math.ceil((70 * 5 + 20 * fillDays) / 90));
+    // A bulldoze took 10 cells, not the grower: nothing came, nothing moves.
+    const deadline = g.deadline;
+    planDay(g, 26, 80);
+    expect(g.deadline).toBe(deadline);
+  });
+
+  it("past its deadline, presses on while the grower still builds, and waits fillDays once it stops", () => {
     const { fillDays, frontCellsPerBuilding: per } = BUILDINGS_BALANCE;
     const g = createGrowth();
     planDay(g, 0, 100);
+    g.used = 70;
     planDay(g, fillDays, 30);
     expect(g.deadline).toBe(fillDays + 1);
     expect(g.quota).toBe(Math.ceil(30 / per));
+    g.used = 25;
     planDay(g, fillDays + 1, 5);
     expect(g.deadline).toBe(fillDays + 2);
     // Nothing built yesterday: what is left fits no lot.
     planDay(g, fillDays + 2, 5);
     expect(g.deadline).toBe(2 * fillDays + 2);
     expect(g.quota).toBe(BUILDINGS_BALANCE.growthPerDayMin);
+  });
+
+  it("holds a saved quota above the cap to the cap", () => {
+    const state = street();
+    zone(state, "residential", 1, 0, 24, 6, "both");
+    runDays(state, 1);
+    state.growth = { ...state.growth, quota: 1e12 };
+    const before = buildings(state).length;
+    step(state);
+    expect(buildings(state).length - before).toBeLessThanOrEqual(Math.ceil(BUILDINGS_BALANCE.growthPerDayMax / DAY));
   });
 
   it("runs in the step as its own system", () => {
@@ -433,6 +463,56 @@ describe("the pace and the frontage", () => {
     }
     expect(buildings(ten).length).toBeGreaterThan(8 * buildings(one).length);
   }, 60_000);
+
+  it("fills ten streets zoned three days apart within about fillDays of the last", () => {
+    // The draw is uniform over every free cell, so an early street fills with
+    // the rest, not on its own month: the pace can promise the whole of it.
+    const { fillDays } = BUILDINGS_BALANCE;
+    const state = createState(SEED);
+    const zonedOn: number[] = [];
+    const fullOn: number[] = [];
+    const freeOn = (i: number) => {
+      // Free front cells along street i: its own segments, as the grower counts them.
+      const x = COLS[Math.floor(i / ROWS.length)] ?? 0;
+      const z = ROWS[i % ROWS.length] ?? 0;
+      let n = 0;
+      const { offset, zone: zones } = state.cells;
+      const where = segmentBuildings(state);
+      for (let seg = 0; seg + 1 < offset.length; seg++) {
+        if (!isSegment(state.roads, seg)) continue;
+        const a = state.roads.segA[seg] ?? 0;
+        if (state.roads.nodeZ[a] !== z || (state.roads.nodeX[a] ?? 0) < x - 1 || (state.roads.nodeX[a] ?? 0) > x + 24 * CELL + 1) continue;
+        for (let slot = offset[seg] ?? 0; slot < (offset[seg + 1] ?? 0); slot += ZONING_BALANCE.zoneDepthCells) {
+          const at = slot - (offset[seg] ?? 0);
+          if ((zones[slot] ?? 0) !== 0 && (where[seg]?.[at] ?? -1) === -1) n++;
+        }
+      }
+      return n;
+    };
+    for (let i = 0; i < 10; i++) {
+      const x = COLS[Math.floor(i / ROWS.length)] ?? 0;
+      const z = ROWS[i % ROWS.length] ?? 0;
+      ok(state, command("BuildRoad", { from: { x, z }, to: { x: x + 24 * CELL, z }, type: "street" }));
+      const rect = (side: number) => ({ from: { x: x + 2, z: z + side * 29 }, to: { x: x + 24 * CELL - 2, z: z + side * 29 }, width: 44 });
+      ok(state, command("ZoneCells", { zone: "residential", density: 1, rects: [rect(-1), rect(1)] }));
+      zonedOn.push(dayOf(state.tick));
+      for (let d = 0; d < 3; d++) {
+        runDays(state, 1);
+        for (let j = 0; j <= i; j++) if (fullOn[j] === undefined && freeOn(j) === 0) fullOn[j] = dayOf(state.tick);
+      }
+    }
+    for (let d = 0; d < 2 * fillDays && fullOn.filter((f) => f !== undefined).length < 10; d++) {
+      runDays(state, 1);
+      for (let j = 0; j < 10; j++) if (fullOn[j] === undefined && freeOn(j) === 0) fullOn[j] = dayOf(state.tick);
+    }
+    const last = zonedOn.at(-1) ?? 0;
+    for (let j = 0; j < 10; j++) {
+      expect(fullOn[j], `street ${j}`).toBeDefined();
+      expect((fullOn[j] ?? 0) - last, `street ${j}`).toBeLessThan(1.1 * fillDays);
+    }
+    // And all of it inside a month of the last street.
+    expect(Math.max(...fullOn) - last).toBeLessThan(fillDays);
+  }, 120_000);
 
   it("hashes the same saved and loaded mid-day, several buildings a day, as a city that never stopped", () => {
     const straight = streets(10);

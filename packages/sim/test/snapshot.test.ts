@@ -358,7 +358,7 @@ describe("committed snapshots", () => {
       cellsReadyAt: 0,
       buildings: fresh.buildings,
       // Saved on day 0, so the plan for that day a version 12 city grew by.
-      growth: { quota: 1, day: 0, deadline: 1, free: 0 },
+      growth: { quota: 1, day: 0, deadline: 1, free: 0, used: 0 },
     });
   });
 
@@ -375,7 +375,7 @@ describe("committed snapshots", () => {
     expect(cells).toEqual(fresh.cells);
     expect(cellsReadyAt).toBe(0);
     expect(buildings).toEqual(fresh.buildings);
-    expect(growth).toEqual({ quota: 1, day: 0, deadline: 1, free: 0 });
+    expect(growth).toEqual({ quota: 1, day: 0, deadline: 1, free: 0, used: 0 });
     // Everything the version 2 save held comes back unchanged.
     expect(hashState({ ...rest, version: 2 })).toBe(v2Fixture.hash);
   });
@@ -390,7 +390,7 @@ describe("committed snapshots", () => {
     expect(Array.from(state.roads.segFree)).toEqual([]);
     expect(Array.from(state.roads.nodeFree)).toEqual([]);
     expect(checkConnections(state.connections, state.roads)).toBeNull();
-    expect(hashState(state)).toBe("91c21c7e5ec4a72f");
+    expect(hashState(state)).toBe("f6fc21f989353cb1");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
@@ -556,7 +556,7 @@ describe("committed snapshots", () => {
   });
 
   it("refuses a save whose grower plan is malformed", () => {
-    for (const growth of [undefined, { quota: -1, day: 0, deadline: 0, free: 0 }, { quota: 1, day: 0.5, deadline: 0, free: 0 }, { quota: 1, day: 0, deadline: 0 }]) {
+    for (const growth of [undefined, { quota: -1, day: 0, deadline: 0, free: 0, used: 0 }, { quota: 1, day: 0.5, deadline: 0, free: 0, used: 0 }, { quota: 1, day: 0, deadline: 0 }]) {
       const { state } = deserialize(fromHex(v13Fixture.hex));
       (state as unknown as Record<string, unknown>)["growth"] = growth;
       const error = refusal(serialize(state));

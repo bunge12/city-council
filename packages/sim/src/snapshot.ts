@@ -611,15 +611,15 @@ function checkPendingCommand(command: unknown, where: string): void {
   }
 }
 
-/** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
-/** Whether `value` is a `GrowthState`: four whole numbers, the quota and free count at least 0 and the day at least -1. */
+/** Whether `value` is a `GrowthState`: five whole numbers, the day at least -1 and the rest at least 0. */
 function isGrowth(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  const { quota, day, deadline, free } = value;
+  const { quota, day, deadline, free, used } = value;
   const whole = (v: unknown, least: number) => Number.isSafeInteger(v) && (v as number) >= least;
-  return Object.keys(value).length === 4 && whole(quota, 0) && whole(day, -1) && whole(deadline, 0) && whole(free, 0);
+  return Object.keys(value).length === 5 && whole(quota, 0) && whole(day, -1) && whole(deadline, 0) && whole(free, 0) && whole(used, 0);
 }
 
+/** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
   const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, buildings, growth } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");

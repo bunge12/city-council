@@ -12,9 +12,11 @@ export interface GrowthState {
   deadline: number;
   /** Free zoned front cells counted at the last plan. */
   free: number;
+  /** Front cells the grower has built on since the last plan. */
+  used: number;
 }
 
 /** A new city's: nothing planned yet. */
 export function createGrowth(): GrowthState {
-  return { quota: 0, day: -1, deadline: 0, free: 0 };
+  return { quota: 0, day: -1, deadline: 0, free: 0, used: 0 };
 }

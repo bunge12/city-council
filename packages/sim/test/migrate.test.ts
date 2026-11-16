@@ -22,7 +22,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
 /** `state` with the grower's plan a version 12 save of it migrates to: one building on the day it was saved on. */
 function asMigrated(state: SimState): SimState {
   const day = Math.floor(state.tick / TIME_BALANCE.ticksPerDay);
-  return { ...state, growth: { quota: 1, day, deadline: day + 1, free: 0 } };
+  return { ...state, growth: { quota: 1, day, deadline: day + 1, free: 0, used: 0 } };
 }
 
 /** Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000) (build-road.test.ts). */
@@ -238,7 +238,7 @@ describe("migrateState", () => {
     while (state.tick < 2 * day + 40) step(state);
     const migrated = migrateState(older(state, 12));
     expect(migrated.version).toBe(13);
-    expect(migrated.growth).toEqual({ quota: 1, day: 2, deadline: 3, free: 0 });
+    expect(migrated.growth).toEqual({ quota: 1, day: 2, deadline: 3, free: 0, used: 0 });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
     const count = () => Array.from(migrated.buildings.flags).filter(Boolean).length;
     const before = count();

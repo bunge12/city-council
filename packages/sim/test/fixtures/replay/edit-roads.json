@@ -13,6 +13,6 @@
     { "tick": 7, "seq": 4, "playerId": "p2", "type": "BulldozeRoad", "payload": { "segments": [3, 2], "ends": [[4300, 4500, 4422.25, 4500], [4200, 4500, 4300, 4500]], "types": ["street", "avenue"] } },
     { "tick": 9, "seq": 5, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4250, "z": 4600 }, "to": { "x": 4450, "z": 4600 }, "type": "avenue" } }
   ],
-  "balance": "9167c27c43a93e01",
-  "hash": "659e9debd312916a"
+  "balance": "5fe641d3f2f36eb1",
+  "hash": "b30f833dee4427dd"
 }

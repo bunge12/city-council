@@ -149,11 +149,15 @@ function liveIds(): Set<number> {
   return ids;
 }
 
+/** Whether the case leaves the day unplanned, so the tick plans it. */
+let planning = false;
 function growOnce(): void {
-  const tick = busiestTick();
+  const tick = planning ? 2 * TIME_BALANCE.ticksPerDay - 1 : busiestTick();
   state.tick = tick;
   state.cellsReadyAt = 0;
-  state.growth = { quota, day: dayOf(tick), deadline: dayOf(tick) + 1, free: 0 };
+  state.growth = planning
+    ? { quota: 0, day: dayOf(tick) - 1, deadline: dayOf(tick), free: 0, used: 0 }
+    : { quota, day: dayOf(tick), deadline: dayOf(tick) + 1, free: 0, used: 0 };
   grow(state);
 }
 
@@ -191,6 +195,18 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   quota = BUILDINGS_BALANCE.growthPerDayMax;
   await time(`a grower tick at growthPerDayMax, ${growthOnTick(busiestTick(), quota)} buildings`, { afterEach: takeBack });
   quota = 1;
+  // The first tick of a day, which counts the free cells and plans the day
+  // before it grows. Every cell zoned asks for more than the cap, so the
+  // plan is the cap, and the tick, the day's last, its busiest.
+  await time("a grower tick that plans its day, at growthPerDayMax", {
+    beforeEach: () => {
+      planning = true;
+    },
+    afterEach: () => {
+      planning = false;
+      takeBack();
+    },
+  });
   const street = streetAcross();
   await time("the first grower tick after a street across a grid", {
     beforeEach: () => buildStreet(street),

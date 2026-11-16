@@ -63,7 +63,7 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // them as new and gives them a full `fillDays`.
   12: (old) => {
     const day = Math.floor((old["tick"] as number) / TIME_BALANCE.ticksPerDay);
-    return { ...old, version: 13, growth: { quota: 1, day, deadline: day + 1, free: 0 } };
+    return { ...old, version: 13, growth: { quota: 1, day, deadline: day + 1, free: 0, used: 0 } };
   },
 };
 

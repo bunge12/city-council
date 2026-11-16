@@ -189,7 +189,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       logFrom: 99,
       log: [],
       rng: new Uint32Array(4),
-      growth: { quota: 0, day: -1, deadline: 0, free: 0 },
+      growth: { quota: 0, day: -1, deadline: 0, free: 0, used: 0 },
       steps: 1,
       timings: [],
     });

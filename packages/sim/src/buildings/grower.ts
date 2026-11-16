@@ -3,14 +3,19 @@
 // included, grows as if its demand were positive; M3 puts the demand bars
 // in front of this.
 //
-// The pace scales with the free frontage (issue 135), so any amount of new
-// zoning fills in about `fillDays`. On the first settled tick of each game
+// The pace scales with the free frontage (issue 135), so any amount of
+// zoning fills in about `fillDays` from the last of it. On the first settled tick of each game
 // day the grower counts the free zoned front cells, F, and plans the day
-// (`planDay`). When F has grown since the last plan (new zoning, a
-// building gone), the deadline moves to today plus `fillDays`. When the
-// deadline has come and F is still falling, it moves to tomorrow, so the
-// last few cells fill at once rather than at the floor; when F has stopped
-// falling, what is left is cells no lot fits, and it moves `fillDays` on,
+// (`planDay`). The plan also keeps `used`, the front cells the grower
+// itself built on since the last plan, so the cells that came since are
+// F - (the last plan's F - used): new zoning, or a building gone. When some
+// came, they get a full `fillDays` and the cells already planned keep
+// their deadline: the new deadline is the two weighted by their cells,
+// rounded up, so zoning a street every few days does not hold back the
+// ones before it. When none came and the deadline has come, it moves to
+// tomorrow while the grower built anything since the last plan, so the
+// last few cells fill at once rather than at the floor; once it built
+// nothing, what is left is cells no lot fits, and it moves `fillDays` on,
 // so they cost few draws. The day's quota is then F over `frontCellsPerBuilding`
 // times the days left to the deadline, rounded up and held between
 // `growthPerDayMin` and `growthPerDayMax`. The plan is in state
@@ -73,13 +78,21 @@ export function dayOf(tick: number): number {
 /** Plans day `day` from `free`, the free zoned front cells counted at its start, as the header says. */
 export function planDay(growth: GrowthState, day: number, free: number): void {
   const b = BUILDINGS_BALANCE;
-  if (free > growth.free) growth.deadline = day + b.fillDays;
-  else if (day >= growth.deadline) growth.deadline = free < growth.free ? day + 1 : day + b.fillDays;
+  const planned = Math.max(0, growth.free - growth.used);
+  const came = free - planned;
+  if (came > 0) {
+    const left = Math.max(1, growth.deadline - day);
+    const days = planned * left + came * b.fillDays;
+    growth.deadline = day + Math.floor((days + free - 1) / free);
+  } else if (day >= growth.deadline) {
+    growth.deadline = growth.used > 0 ? day + 1 : day + b.fillDays;
+  }
   const per = b.frontCellsPerBuilding * (growth.deadline - day);
   const want = Math.floor((free + per - 1) / per);
   growth.quota = Math.min(b.growthPerDayMax, Math.max(b.growthPerDayMin, want));
   growth.day = day;
   growth.free = free;
+  growth.used = 0;
 }
 
 /** Residents for a `type` building on a `width` x `depth` lot. Draws from `rng` only for a type with `drawResidents`. */
@@ -132,8 +145,12 @@ export function grow(state: SimState): void {
   if (!cellsSettled(state)) return;
   const day = dayOf(state.tick);
   if (state.growth.day !== day) planDay(state.growth, day, freeFrontCells(state));
-  const due = growthOnTick(state.tick, state.growth.quota);
-  for (let i = 0; i < due; i++) if (growOne(state) < 0) return;
+  // Held to the cap here too, so a save that says more cannot stall a tick.
+  const due = growthOnTick(state.tick, Math.min(state.growth.quota, BUILDINGS_BALANCE.growthPerDayMax));
+  if (due === 0) return;
+  const before = freeFrontCells(state);
+  for (let i = 0; i < due; i++) if (growOne(state) < 0) break;
+  state.growth.used += before - freeFrontCells(state);
 }
 
 export const GROWER: System = { name: GROWER_SYSTEM, run: grow };

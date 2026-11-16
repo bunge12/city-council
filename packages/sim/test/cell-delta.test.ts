@@ -57,7 +57,7 @@ function pair() {
     copy.tick = sim.tick;
     copy.log = sim.log.slice();
     copy.undo = sim.undo;
-    // The grower's plan stays in the sim: no view reads it.
+    // The grower's plan travels in every delta, as the generator does.
     copy.growth = { ...sim.growth };
     return cells;
   };
