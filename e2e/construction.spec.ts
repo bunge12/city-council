@@ -113,7 +113,20 @@ const ground = groundAt(GRID.x, GRID.z);
 const DISTRICT: Vec3 = [GRID.x - 200, ground + 600, GRID.z + 650];
 const CLOSE: { position: Vec3; target: Vec3 } = { position: [GRID.x + 10, ground + 95, GRID.z + 150], target: [GRID.x + 10, ground + 4, GRID.z + 30] };
 
+// The two tests that run the city at 4x in the street band, with a canvas
+// grab of every frame, took 2.9 and 3.4 minutes on a CI runner when they
+// landed, and have since run into the file's four minutes on slower runners.
+// They get six.
+const RUN_TIMEOUT = 360_000;
+/**
+ * How long to wait for the frame that takes the scaffolding down once the
+ * tick has passed the end of construction. The page can go several seconds
+ * without a frame while it catches up on a burst of deltas at 4x.
+ */
+const FRAME_WAIT = 30_000;
+
 test("at 4x a new building's scaffolding goes up, the building rises inside it, and the scaffolding comes down", async ({ page }, testInfo) => {
+  test.setTimeout(RUN_TIMEOUT);
   await openCity(page, "?webgl&preset=balanced&debug", city.bytes);
   await setPose(page, CLOSE.position, CLOSE.target);
   await drawn(page, city.buildings);
@@ -139,7 +152,7 @@ test("at 4x a new building's scaffolding goes up, the building rises inside it, 
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 4 }))).toEqual({ ok: true });
   await page.waitForFunction((end) => (window.cityCouncil.mirror.state?.tick ?? 0) >= end, city.tick + T + 8, { timeout: 120_000 });
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 0 }))).toEqual({ ok: true });
-  await expect.poll(() => dataset(page, "scaffolds")).toBe("0");
+  await expect.poll(() => dataset(page, "scaffolds"), { timeout: FRAME_WAIT }).toBe("0");
   const frames = await page.evaluate(() => {
     const f = window.constructionFrames ?? [];
     delete window.constructionFrames;
@@ -183,6 +196,7 @@ test("at 4x a new building's scaffolding goes up, the building rises inside it, 
 });
 
 test("pausing freezes a building half way up, and running again finishes it", async ({ page }, testInfo) => {
+  test.setTimeout(RUN_TIMEOUT);
   // Opened paused with every building half way through its rise.
   const age = Math.round(T * (CONSTRUCTION.scaffoldUp + (1 - CONSTRUCTION.scaffoldUp - CONSTRUCTION.scaffoldDown) / 2));
   const mid = newCity(age);
@@ -215,7 +229,7 @@ test("pausing freezes a building half way up, and running again finishes it", as
   // Running again, construction carries on from where it stopped and finishes.
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 4 }))).toEqual({ ok: true });
   await page.waitForFunction((end) => (window.cityCouncil.mirror.state?.tick ?? 0) >= end, mid.tick + T, { timeout: 120_000 });
-  await expect.poll(() => dataset(page, "scaffolds")).toBe("0");
+  await expect.poll(() => dataset(page, "scaffolds"), { timeout: FRAME_WAIT }).toBe("0");
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 0 }))).toEqual({ ok: true });
   await attach(testInfo, "run on at 4x, finished", await canvasShot(page));
   await setPose(page, DISTRICT, [GRID.x, ground, GRID.z]);
