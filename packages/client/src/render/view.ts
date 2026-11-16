@@ -278,7 +278,6 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   renderer.setAnimationLoop((time: number) => {
     const seconds = last >= 0 ? (time - last) / 1000 : 0;
     for (const b of before) b(seconds);
-    terrainRoot?.decor.update(camera.position);
     camera.updateMatrixWorld();
     viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     frustum.setFromProjectionMatrix(viewProjection, camera.coordinateSystem);
@@ -289,6 +288,8 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       terrainRoot?.cells?.apply(lots);
       terrainRoot?.decor.refresh(lots);
     }
+    // After the refresh, so a chunk whose lots or roads changed this frame is built again before it is drawn (issue 141).
+    terrainRoot?.decor.update(camera.position);
     terrainRoot?.cells?.update(camera.position, CELLS.buildBudgetMs);
     const shown = terrainRoot?.terrain;
     lighting.update(camera, shown ? (x, z) => heightAt(shown, x, z) : null);
