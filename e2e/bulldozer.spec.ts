@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { BUILDING_TYPES, SEG_FIXED, cellAt, createState, generateTerrain, heightAt, serialize, syncCells, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
 import { lotProblem } from "../packages/sim/src/buildings/where";
+import { finishConstruction } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 
 // Issue 116: the bulldozer, a tool of its own. B turns it on, R the road
@@ -73,6 +74,7 @@ function houseCity(): { state: SimState; houses: number } {
     addBuilding(state, { ...lot, type, residents: 3, variant: p * 7 });
     houses++;
   }
+  finishConstruction(state);
   return { state, houses };
 }
 
