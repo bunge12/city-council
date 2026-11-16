@@ -9,6 +9,8 @@
 // a curve too tight where the terrain cuts a grid) are skipped. Everything
 // is laid out from fixed numbers, so every run builds the same city.
 
+import { buildingCount } from "./buildings/buildings";
+import { growOne } from "./buildings/grower";
 import { submit, type Command } from "./commands";
 import { isStraight, segmentQuad } from "./roads/curve";
 import { LEVEL_BRIDGE, segmentCount, segmentIdLimit, isSegment, type RoadNetwork } from "./roads/network";
@@ -16,6 +18,8 @@ import { createState, type SimState } from "./state";
 import { step } from "./step";
 import { terrainOf } from "./terrain/cache";
 import { isWaterAt, mapSize, type Terrain } from "./terrain/terrain";
+import { ZONING_BALANCE } from "./zoning/balance";
+import { cellsSettled } from "./zoning/cell-index";
 
 /** The seed every scale measurement uses. Its map has lakes and hills. */
 export const SCALE_SEED = 2026;
@@ -234,4 +238,81 @@ function bridgeAcross(
     }
   }
   return built;
+}
+
+/** M2.md: "The 30,000 segment city from M1 with about 100,000 buildings". */
+export const SCALE_BUILDINGS = 100_000;
+
+export interface ScaleTown {
+  /** ZoneCells commands applied. */
+  zoneCommands: number;
+  /** Zoned cells once they were all painted. */
+  zonedCells: number;
+  buildings: number;
+  /** Draws in a row that found no lot when the fill stopped, or 0 if it reached its target. */
+  misses: number;
+}
+
+/** Draws in a row with no building before the fill takes the city as full. */
+const FULL_AFTER_MISSES = 2000;
+
+/**
+ * Fills the scale city with buildings (issue M2-13), in place. Zones the
+ * whole map through ZoneCells commands, one 256 m square at a time, each
+ * square one zone and density: high density in the middle of the map,
+ * medium around it, low further out, and residential on six squares in
+ * ten. Then asks the grower for buildings one at a time, with its own
+ * draw and lot finder, until `target` stand or the draws stop finding
+ * lots.
+ *
+ * The zoning goes through `submit` and `step` and is in the log. The
+ * buildings do not come on ticks: at `growthPerDay` a day the grower
+ * would take thousands of game years, so `growOne` is called directly, as
+ * the grower bench does. A replay of the log gives the roads and the
+ * zoning; the buildings are in the state, which is what a city file saves.
+ *
+ * Under M2's lot rules the 30,000 segment city holds about 57,000
+ * buildings, short of the 100,000 the M2 spec names: every lot fronts a
+ * road, and the network has about 108,000 cells of frontage.
+ */
+export function growScaleCity(city: ScaleCity, target = SCALE_BUILDINGS): ScaleTown {
+  const { state } = city;
+  const size = mapSize(terrainOf(state.seed));
+  const side = ZONING_BALANCE.maxRectSide;
+  const per = Math.ceil(size / side);
+  const middle = Math.floor(per / 2);
+  const zones = ["residential", "residential", "residential", "residential", "residential", "residential", "commercial", "commercial", "mixed", "office"];
+  const groups = new Map<string, { from: { x: number; z: number }; to: { x: number; z: number }; width: number }[]>();
+  for (let j = 0; j < per; j++) {
+    for (let i = 0; i < per; i++) {
+      const ring = Math.max(Math.abs(i - middle), Math.abs(j - middle));
+      const density = ring < 3 ? 3 : ring < 7 ? 2 : 1;
+      let zone = zones[(i * 7 + j * 13) % zones.length] ?? "residential";
+      if (zone === "office" && j % 2 === 1) zone = "industrial";
+      const key = `${zone}/${density}`;
+      const list = groups.get(key) ?? [];
+      list.push({ from: { x: i * side, z: j * side + side / 2 }, to: { x: (i + 1) * side, z: j * side + side / 2 }, width: side });
+      groups.set(key, list);
+    }
+  }
+  let seq = state.log.reduce((most, e) => Math.max(most, e.seq), 0);
+  let zoneCommands = 0;
+  for (const [key, rects] of [...groups].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    const [zone, density] = key.split("/");
+    for (let k = 0; k < rects.length; k += ZONING_BALANCE.maxRectsPerCommand) {
+      const command: Command = { seq: ++seq, playerId: SCALE_PLAYER, type: "ZoneCells", payload: { zone, density: Number(density), rects: rects.slice(k, k + ZONING_BALANCE.maxRectsPerCommand) } };
+      // A square of water or steep ground has nothing to paint, and is refused.
+      if (submit(state, command).ok) zoneCommands++;
+      step(state);
+    }
+  }
+  while (!cellsSettled(state)) step(state);
+  let zonedCells = 0;
+  for (let k = 0; k < state.cells.zone.length; k++) if ((state.cells.zone[k] ?? 0) > 0) zonedCells++;
+  let misses = 0;
+  while (buildingCount(state.buildings) < target && misses < FULL_AFTER_MISSES) {
+    if (growOne(state) < 0) misses++;
+    else misses = 0;
+  }
+  return { zoneCommands, zonedCells, buildings: buildingCount(state.buildings), misses: buildingCount(state.buildings) < target ? misses : 0 };
 }

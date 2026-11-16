@@ -536,10 +536,14 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     const b = view.buildingStats();
     document.body.dataset["buildingsPending"] = String(b?.pending ?? 0);
     document.body.dataset["buildingsDrawn"] = String(b?.buildings ?? 0);
-    if (!b || b.totalWrites === 0) return;
+    // Every chunk shows the form it wants, with no fade under way (issue M2-13).
+    document.body.dataset["buildingsSettled"] = String(b !== null && b.pending === 0 && b.fading === 0 && b.waiting === 0);
+    if (!b || (b.buildings === 0 && b.totalWrites === 0)) return;
+    const form = (f: { buildings: number; meshes: number }) => `${f.buildings} in ${f.meshes} ${f.meshes === 1 ? "mesh" : "meshes"}`;
     setViewReadout({
       buildings: `${b.buildings} in ${b.models} models`,
-      buildingUpdates: `${count(b.lastWrites, "instance")} and ${count(b.lastRebuilt, "chunk")} rebuilt last, ${count(b.totalWrites, "instance")} in all, ${b.lastBuildMs.toFixed(1)} ms`,
+      buildingUpdates: `${count(b.lastWrites, "instance")} and ${count(b.lastRebuilt, "chunk")} rebuilt last, ${count(b.totalWrites, "instance")} in all, ${b.lastBuildMs.toFixed(1)} ms; ${b.lastMerged} merged last, ${b.totalMerged} in all`,
+      buildingForms: `full ${form(b.forms.full)}, boxes ${form(b.forms.box)}, blocks ${form(b.forms.flat)}${b.fading > 0 ? `, ${b.fading} fading` : ""}`,
     });
   };
   const showBuildings = (update: MirrorUpdate) => {

@@ -5,10 +5,13 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   NETWORKS_ROAD,
+  SCALE_BUILDINGS,
   SCALE_SEED,
   SCALE_SEGMENTS,
   buildScaleCity,
+  buildingCount,
   deserialize,
+  growScaleCity,
   hashState,
   planRoad,
   replay,
@@ -181,5 +184,29 @@ describe("save and resume on the scale city", () => {
     expect(resumed.log).toEqual(straight.log);
     // And a replay of the whole log agrees with both.
     expect(hashState(replay(SCALE_SEED, [...straight.log], straight.tick))).toBe(hashState(straight));
+  }, 120_000);
+});
+
+describe("the scale city filled with buildings (issue M2-13)", () => {
+  it("zones the map through commands and grows tens of thousands of buildings, the same every time", () => {
+    const fill = () => {
+      const copy = { ...city, state: deserialize(serialize(city.state)).state };
+      return { town: growScaleCity(copy), state: copy.state };
+    };
+    const { town, state } = fill();
+    // The zoning is in the log, as commands.
+    expect(state.log.filter((e) => e.type === "ZoneCells").length).toBe(town.zoneCommands);
+    expect(town.zonedCells).toBeGreaterThan(600_000);
+    // Short of SCALE_BUILDINGS: the network's frontage runs out first (scale.ts).
+    expect(town.buildings).toBeGreaterThan(50_000);
+    expect(town.buildings).toBeLessThan(SCALE_BUILDINGS);
+    expect(buildingCount(state.buildings)).toBe(town.buildings);
+    // Every zone and density grew something.
+    const types = new Set<number>();
+    state.buildings.flags.forEach((f, id) => {
+      if (f !== 0) types.add(state.buildings.type[id] ?? -1);
+    });
+    expect(types.size).toBeGreaterThan(30);
+    expect(hashState(fill().state)).toBe(hashState(state));
   }, 120_000);
 });
