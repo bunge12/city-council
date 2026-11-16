@@ -12,6 +12,7 @@ import {
   snapToGrid,
   ZONING_BALANCE,
   type Block,
+  type BuildingInfo,
   type CommandResult,
   type LogEntry,
   type Terrain,
@@ -37,6 +38,7 @@ import { createSnapMarkLayer } from "./render/snap-marks";
 import { cellColour } from "./render/cell-geometry";
 import { ZONE_PREVIEW } from "./render/config";
 import { createZonePreviewLayer, type ZoneMark } from "./render/zone-preview";
+import { createBuildingMarkLayer } from "./render/building-marks";
 import { snapMarks } from "./render/snap-marks-geometry";
 import { zonedCellLookup } from "./tools/cell-snap";
 import { BlockOverlayController, blockLabelPoint, blockShapes } from "./tools/block-overlay";
@@ -50,7 +52,7 @@ import { ZoneToolController, type ZoneHover, type ZonePreview } from "./tools/zo
 import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import { setBlockLabels, setEditHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useUi, type BlockLabel } from "./ui/store";
+import { setBlockLabels, setBuildingHover, setEditHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useUi, type BlockLabel } from "./ui/store";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
 const TAB_CITY_KEY = "city-council:city";
@@ -236,17 +238,23 @@ let shownTerrain: Terrain | null = null;
 const roadTool = new RoadToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
-  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state) } : null),
+  world: () =>
+    mirror.state && shownTerrain
+      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.roadClears(plan) }
+      : null,
   send: (payload) => sendCommand("BuildRoad", payload),
 });
 
 const gridTool = new GridToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
-  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state) } : null),
+  world: () =>
+    mirror.state && shownTerrain
+      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.gridClears(plan) }
+      : null,
   send: (payload) => sendCommand("BuildRoadGrid", payload),
 });
-mirror.subscribe((update) => gridTool.mirrorUpdated(update));
+mirror.subscribe((update) => gridTool.mirrorUpdated(update, (id) => mirror.building(id)?.corners ?? null));
 
 const editTool = new EditToolController({
   get: () => useUi.getState(),
@@ -527,6 +535,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     shapes: (chunk) => mirror.cellShapesInChunk(chunk),
     cells: () => mirror.state?.cells ?? null,
     built: () => mirror.cellBuildings(),
+    // Free zoned ground where no building type fits, hatched (issue M2-15).
+    marks: (chunk) => mirror.lotMarksInChunk(chunk),
   });
   // Buildings come from the mirror alone too: a snapshot draws them all,
   // nearest the camera first, and a delta the chunks it changed.
@@ -737,11 +747,18 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   const marks = createSnapMarkLayer(view.scene, () => hooks.terrain);
   const connectionLayer = createConnectionMarkLayer(view.scene, () => hooks.terrain);
   const zoneLayer = createZonePreviewLayer(view.scene, () => hooks.terrain);
+  const buildingMarks = createBuildingMarkLayer(view.scene, () => hooks.terrain);
   /** Metres one CSS pixel covers on the ground at (x, z). */
   const scaleAt = (x: number, z: number): number => metresPerPixel({ x, y: heightAt(hooks.terrain, x, z), z, distance: 0 });
   // The live preview, worked out again only when what it depends on changes.
   let mirrorVersion = 0;
   mirror.subscribe(() => mirrorVersion++);
+  // Counts only the updates that changed roads, cells or buildings, so what follows from those alone
+  // (the buildings a road clears, the marks, the hover readouts) is not worked out again every tick.
+  let worldVersion = 0;
+  mirror.subscribe((u) => {
+    if (u.kind === "snapshot" || u.roadNodes.length > 0 || u.roadSegs.length > 0 || u.cellChunks.length > 0 || u.buildingIds.length > 0) worldVersion++;
+  });
   let previewKey = "";
   let preview: RoadPreview | null = null;
   const livePreview = (cursor: { x: number; z: number } | null): RoadPreview | null => {
@@ -751,7 +768,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const end = cursor ? { x: snapToGrid(cursor.x), z: snapToGrid(cursor.z) } : null;
     const key =
       ui.tool === "road" && start && end
-        ? `${start.x},${start.z},${control ? `${control.x},${control.z}` : "-"},${end.x},${end.z},${ui.roadType},${ui.roadMode},${mirrorVersion}`
+        ? `${start.x},${start.z},${control ? `${control.x},${control.z}` : "-"},${end.x},${end.z},${ui.roadType},${ui.roadMode},${ui.roadLevel},${worldVersion}`
         : "";
     if (key !== previewKey) {
       previewKey = key;
@@ -837,6 +854,57 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     }
     return out;
   };
+  // The building under the pointer while no tool is on, and why nothing grows under the zone tool's pointer (issue M2-15),
+  // looked up again only when the ground under the pointer or the city changes.
+  let hoverKey = "";
+  let hoverBuilding: BuildingInfo | null = null;
+  const buildingUnder = (cursor: { x: number; z: number } | null): BuildingInfo | null => {
+    const key = useUi.getState().tool === null && cursor ? `${cursor.x.toFixed(1)},${cursor.z.toFixed(1)},${worldVersion}` : "";
+    if (key !== hoverKey) {
+      hoverKey = key;
+      hoverBuilding = key === "" || !cursor ? null : mirror.buildingAt(cursor.x, cursor.z);
+    }
+    return hoverBuilding;
+  };
+  let lotNoteKey = "";
+  let lotNote: string | null = null;
+  const lotNoteUnder = (cursor: { x: number; z: number } | null): string | null => {
+    const key = zoneTool.active() && cursor ? `${cursor.x.toFixed(1)},${cursor.z.toFixed(1)},${worldVersion}` : "";
+    if (key !== lotNoteKey) {
+      lotNoteKey = key;
+      lotNote = key === "" || !cursor ? null : mirror.lotMarkAt(cursor.x, cursor.z);
+    }
+    return lotNote;
+  };
+  /** The lots of the buildings `ids` names, leaving out any no longer standing. */
+  const lotsOf = (ids: readonly number[]): number[][] =>
+    ids.flatMap((id) => {
+      const corners = mirror.building(id)?.corners;
+      return corners ? [corners] : [];
+    });
+  // A sent road or grid keeps the lots it would clear as they were when it was sent: building ids are
+  // reused, so looking them up later could mark a building that came since.
+  const sentLots = new WeakMap<object, number[][]>();
+  const lotsWhenSent = (preview: { clears: { ids: number[] } | null }): number[][] => {
+    let lots = sentLots.get(preview);
+    if (!lots) {
+      lots = lotsOf(preview.clears?.ids ?? []);
+      sentLots.set(preview, lots);
+    }
+    return lots;
+  };
+  /** Each preview gets a number, so the marks' key names previews and not every id they clear. */
+  const previewIds = new WeakMap<object, number>();
+  let nextPreviewId = 1;
+  const previewId = (p: object | null): number => {
+    if (!p) return 0;
+    let id = previewIds.get(p);
+    if (id === undefined) {
+      id = nextPreviewId++;
+      previewIds.set(p, id);
+    }
+    return id;
+  };
   view.onBeforeFrame((seconds) => {
     controls.update(seconds);
     const p = view.camera.position;
@@ -882,7 +950,23 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       `${zoneShown ? zonePreviewId : "-"}|${zonePendingNow.map((p) => p.id).join(",")}`,
     );
     document.body.dataset["zonePreview"] = zoneNow ? (zoneNow.ok ? String(zoneNow.cells.length) : "0") : "";
-    setZoneHover(zoneNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, preview: zoneNow } : null);
+    setZoneHover(zoneNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, preview: zoneNow, lotNote: lotNoteUnder(cursor) } : null);
+    // The buildings the road or the grid would clear, those of roads and grids in flight, and the building under the pointer.
+    const liveClears = live?.ok ? live : null;
+    const gridClearsNow = gridNow?.ok ? gridNow : null;
+    const sent = [...useUi.getState().roadPending.map((p) => p.preview), ...useUi.getState().gridPending.map((p) => p.preview)];
+    const under = buildingUnder(cursor);
+    setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under } : null);
+    document.body.dataset["buildingHover"] = under ? String(under.id) : "";
+    document.body.dataset["buildingsToClear"] = String((liveClears?.clears?.ids.length ?? 0) + (gridClearsNow?.clears?.ids.length ?? 0));
+    buildingMarks.show(
+      () => ({
+        clear: lotsOf([...(liveClears?.clears?.ids ?? []), ...(gridClearsNow?.clears?.ids ?? [])]),
+        pending: sent.flatMap(lotsWhenSent),
+        hover: under?.corners ?? null,
+      }),
+      `${previewId(liveClears)},${previewId(gridClearsNow)}|${sent.map(previewId).join(",")}|${under?.id ?? "-"}|${worldVersion}`,
+    );
     // The debug route tool's route, under nothing else the tools draw.
     const route = useUi.getState().routeResult;
     if (net && route?.ok) shapes.unshift(...routeShapes(net, route.route));

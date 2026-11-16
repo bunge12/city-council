@@ -180,7 +180,7 @@ for (const { name, query } of BACKENDS) {
   });
 }
 
-test("painting one strip rebuilds only the chunks it touches", async ({ page }, testInfo) => {
+test("painting one strip rebuilds only the chunks it touches and their neighbours", async ({ page }, testInfo) => {
   await openCity(page, "?webgl&debug", "Zoned", fixture.bytes);
   await overlayOn(page);
   const paint = async (from: [number, number], to: [number, number]) => {
@@ -192,12 +192,13 @@ test("painting one strip rebuilds only the chunks it touches", async ({ page }, 
     expect(result).toEqual({ ok: true });
   };
   const total = (await cellStats(page)).totalRebuilt;
-  // East of the street x = 4150, inside chunk (8, 9).
+  // East of the street x = 4150, inside chunk (8, 9), and the eight around
+  // it, since a lot mark there can follow from ground across the line (M2-15).
   await paint([4170, 4560], [4170, 4640]);
-  await expect(page.locator("#cell-rebuilds")).toHaveText(new RegExp(`^1 last, ${total + 1} total,`));
-  // The same street across the chunk line z = 4500: two chunks.
+  await expect(page.locator("#cell-rebuilds")).toHaveText(new RegExp(`^9 last, ${total + 9} total,`));
+  // The same street across the chunk line z = 4500: two chunks, and the twelve round them both.
   await paint([4170, 4470], [4170, 4530]);
-  await expect(page.locator("#cell-rebuilds")).toHaveText(new RegExp(`^2 last, ${total + 3} total,`));
+  await expect(page.locator("#cell-rebuilds")).toHaveText(new RegExp(`^12 last, ${total + 21} total,`));
   await setPose(page, [4250, ground + 300, 4700], [4180, ground, 4520]);
   await settle(page);
   await attach(testInfo, "two painted strips, debug panel open", await page.screenshot());

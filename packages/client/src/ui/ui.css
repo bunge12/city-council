@@ -547,7 +547,22 @@ kbd {
 .road-readout .angle,
 .road-readout .offset,
 .road-readout .bridge,
-.road-readout .junctions {
+.road-readout .junctions,
+.building-readout .detail {
+  color: var(--ink-soft);
+}
+
+/* The buildings a road or grid would clear (issue M2-15), in the red of their marks on the map. */
+.road-readout .clears,
+#grid-clears {
+  color: #c42d22;
+  font-weight: 600;
+}
+
+/* Why nothing grows on ground the zoning overlay hatches. */
+.road-readout .lot-note {
+  white-space: normal;
+  min-width: 220px;
   color: var(--ink-soft);
 }
 

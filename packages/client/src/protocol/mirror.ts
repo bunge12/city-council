@@ -6,12 +6,20 @@ import {
   applyCellDelta,
   applyRoadDelta,
   buildingInfo,
+  buildingOnSlot,
   buildingsInChunk,
   cellAt,
   cellBuildings,
   cellShapesInChunk,
   cellsInChunk,
+  gridClears,
+  lotMarkAt,
+  lotMarksInChunk,
+  roadClears,
   type BuildingInfo,
+  type BuildingsInTheWay,
+  type GridPlan,
+  type RoadPlan,
   type CellInfo,
   type ChunkCellShapes,
   type CommandResult,
@@ -178,6 +186,11 @@ export class SimMirror {
     return buildingsInChunk(state, chunk).flatMap((id) => buildingInfo(state, id) ?? []);
   }
 
+  /** Building `id` with its lot's corners, or null if there is none. */
+  building(id: number): BuildingInfo | null {
+    return this.current ? buildingInfo(this.current, id) : null;
+  }
+
   /** The chunk building `id`'s lot's centre is in, or -1 if there is none. */
   buildingChunk(id: number): number {
     return this.current ? (buildingInfo(this.current, id)?.chunk ?? -1) : -1;
@@ -203,6 +216,47 @@ export class SimMirror {
   /** The zoning cell whose ground holds the point, in metres, or null. */
   cellAt(x: number, z: number): CellInfo | null {
     return this.current ? cellAt(this.current, x, z) : null;
+  }
+
+  /**
+   * By the order of `cellShapesInChunk(chunk)`, 1 for each free zoned cell
+   * where no building type fits, as the zoning overlay marks it (issue
+   * M2-15). Worked out by the sim's own lot finder on the copy. Null until
+   * the first snapshot.
+   */
+  lotMarksInChunk(chunk: number): Uint8Array | null {
+    return this.current ? lotMarksInChunk(this.current, chunk) : null;
+  }
+
+  /** Why no building type fits on the free ground at (x, z), as the overlay marks it, or null where it is not marked. */
+  lotMarkAt(x: number, z: number): string | null {
+    const state = this.current;
+    const cell = state ? cellAt(state, x, z) : null;
+    return state && cell ? lotMarkAt(state, cell) : null;
+  }
+
+  /** The building standing on the ground at (x, z), with its lot's corners, or null. */
+  buildingAt(x: number, z: number): BuildingInfo | null {
+    const state = this.current;
+    const cell = state ? cellAt(state, x, z) : null;
+    if (!state || !cell) return null;
+    const id = buildingOnSlot(state, cell.index);
+    return id < 0 ? null : buildingInfo(state, id);
+  }
+
+  /**
+   * The buildings a road the sim has planned would clear, and their
+   * residents, for the road tool's preview (issue M2-15). The sim rehearses
+   * the road on the copy's network and takes it back, so the copy is as it
+   * was. Empty until the first snapshot.
+   */
+  roadClears(plan: RoadPlan): BuildingsInTheWay {
+    return this.current ? roadClears(this.current, plan) : { ids: [], residents: 0 };
+  }
+
+  /** As `roadClears`, for a grid the sim has planned. */
+  gridClears(plan: GridPlan): BuildingsInTheWay {
+    return this.current ? gridClears(this.current, plan) : { ids: [], residents: 0 };
   }
 
   requestSnapshot(): void {

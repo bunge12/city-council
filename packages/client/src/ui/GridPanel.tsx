@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { GRID_TOOL } from "../tools/config";
-import { formatMoneyShort } from "./format";
+import { formatClears, formatMoneyShort } from "./format";
 import { useServices, useSim } from "./hooks";
 import { useUi } from "./store";
 
@@ -58,7 +58,8 @@ function CellsField(props: { id: string; label: string; value: number; onCommit(
 
 /**
  * The grid tool's part of the build bar: the block size in cells, and once
- * a rectangle is drawn, what the sim would build and the Confirm button.
+ * a rectangle is drawn, what the sim would build, the buildings it would
+ * clear once the drag is over (issue M2-15), and the Confirm button.
  * The numbers are also on data attributes, for tests.
  */
 export function GridPanel() {
@@ -76,6 +77,7 @@ export function GridPanel() {
 
   const junctions = preview?.junctions.length ?? 0;
   const cuts = preview?.cuts.length ?? 0;
+  const clears = formatClears(preview?.clears);
   return (
     <div className="grid-panel" id="grid-panel">
       <CellsField id="grid-depth" label="Depth" value={depth} onCommit={(v) => gridTool.setBlock("depth", v)} onEnter={() => gridTool.confirm()} onEscape={() => gridTool.escape()} />
@@ -91,6 +93,8 @@ export function GridPanel() {
           data-cost={String(preview.cost)}
           data-junctions={String(junctions)}
           data-cuts={String(cuts)}
+          data-clears={preview.clears ? String(preview.clears.ids.length) : ""}
+          data-residents={preview.clears ? String(preview.clears.residents) : ""}
         >
           {preview.ok ? (
             <>
@@ -98,6 +102,12 @@ export function GridPanel() {
               <span id="grid-cost">{formatMoneyShort(preview.cost)}</span>
               {junctions > 0 && <> · {junctions === 1 ? "1 junction" : `${junctions} junctions`}</>}
               {cuts > 0 && <> · {cuts === 1 ? "1 street end cut" : `${cuts} street ends cut`} by water or slope</>}
+              {clears !== null && (
+                <>
+                  {" "}
+                  · <span id="grid-clears">{clears}</span>
+                </>
+              )}
             </>
           ) : (
             <span id="grid-reason">{preview.reason}</span>
