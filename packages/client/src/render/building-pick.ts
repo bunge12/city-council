@@ -23,12 +23,29 @@ export interface PickBox {
   sz: number;
 }
 
+/** The slab test on one axis: narrows [near, far] to where the ray is between `lo` and `hi`, or returns false when it misses. */
+const slab = { near: 0, far: 0 };
+function clip(o: number, d: number, lo: number, hi: number): boolean {
+  if (Math.abs(d) < 1e-12) return o >= lo && o <= hi;
+  let t0 = (lo - o) / d;
+  let t1 = (hi - o) / d;
+  if (t0 > t1) {
+    const t = t0;
+    t0 = t1;
+    t1 = t;
+  }
+  if (t0 > slab.near) slab.near = t0;
+  if (t1 < slab.far) slab.far = t1;
+  return slab.near <= slab.far;
+}
+
 /**
  * How far along `ray` it enters `box`, in units of the ray's direction, or
- * null when it misses or the box is behind the origin. Zero when the
- * origin is inside.
+ * null when it misses, the box is behind the origin, or it is entered past
+ * `limit`. Zero when the origin is inside. Allocates nothing: it runs for
+ * every building along the ray while the camera moves.
  */
-export function rayBoxDistance(ray: Ray, box: PickBox): number | null {
+export function rayBoxDistance(ray: Ray, box: PickBox, limit = Infinity): number | null {
   // Into the model's frame: undo the move, the turn and the stretch.
   const c = Math.cos(box.angle);
   const s = Math.sin(box.angle);
@@ -36,43 +53,12 @@ export function rayBoxDistance(ray: Ray, box: PickBox): number | null {
   const pz = ray.oz - box.z;
   const sx = box.sx || 1;
   const sz = box.sz || 1;
+  const e = box.extent;
+  slab.near = 0;
+  slab.far = limit;
   // The inverse of three.js's turn about +y: x = x' cos - z' sin, z = x' sin + z' cos.
-  const o = [(px * c - pz * s) / sx, ray.oy - box.y, (px * s + pz * c) / sz];
-  const d = [(ray.dx * c - ray.dz * s) / sx, ray.dy, (ray.dx * s + ray.dz * c) / sz];
-  const lo = [box.extent.minX, box.extent.minY, box.extent.minZ];
-  const hi = [box.extent.maxX, box.extent.maxY, box.extent.maxZ];
-  let near = 0;
-  let far = Infinity;
-  for (let a = 0; a < 3; a++) {
-    const oa = o[a] ?? 0;
-    const da = d[a] ?? 0;
-    const l = lo[a] ?? 0;
-    const h = hi[a] ?? 0;
-    if (Math.abs(da) < 1e-12) {
-      if (oa < l || oa > h) return null;
-      continue;
-    }
-    let t0 = (l - oa) / da;
-    let t1 = (h - oa) / da;
-    if (t0 > t1) [t0, t1] = [t1, t0];
-    if (t0 > near) near = t0;
-    if (t1 < far) far = t1;
-    if (near > far) return null;
-  }
-  return near;
-}
-
-/** The id of the box `ray` enters first, or -1. Ties go to the lower id. */
-export function pickBox(ray: Ray, boxes: Iterable<{ id: number; box: PickBox }>): number {
-  let best = -1;
-  let bestT = Infinity;
-  for (const { id, box } of boxes) {
-    const t = rayBoxDistance(ray, box);
-    if (t === null) continue;
-    if (t < bestT || (t === bestT && id < best)) {
-      best = id;
-      bestT = t;
-    }
-  }
-  return best;
+  if (!clip((px * c - pz * s) / sx, (ray.dx * c - ray.dz * s) / sx, e.minX, e.maxX)) return null;
+  if (!clip(ray.oy - box.y, ray.dy, e.minY, e.maxY)) return null;
+  if (!clip((px * s + pz * c) / sz, (ray.dx * s + ray.dz * c) / sz, e.minZ, e.maxZ)) return null;
+  return slab.near;
 }

@@ -62,7 +62,7 @@ import type { ZoomBand } from "../camera/zoom-band";
 import { SURFACE, simplify, type ModelArrays } from "../theme/model";
 import type { Theme } from "../theme/theme";
 import type { Ray } from "../camera/pick";
-import { pickBox, rayBoxDistance, type PickBox } from "./building-pick";
+import { rayBoxDistance, type PickBox } from "./building-pick";
 import { placeLot, type Placement } from "./building-place";
 import {
   chunkDistance,
@@ -178,11 +178,16 @@ export interface BuildingLayer {
   /** The form chunk `chunk` shows whole, or null. For tests. */
   formOf(chunk: number): BuildingForm | null;
   /**
-   * The building whose drawn box `ray` enters first, or -1 (issue 116): the
-   * bulldozer's pick. A chunk drawn as flat blocks is tested as its blocks.
+   * The building whose drawn box `ray` enters first, no further than
+   * `limit` along it, or -1 (issue 116): the bulldozer's pick. The page
+   * passes where the ray meets the ground, so a building behind a hill is
+   * not picked. A chunk drawn as flat blocks is tested as its blocks, and
+   * one not drawn yet is skipped.
    * See building-pick.ts.
    */
-  pick(ray: Ray): number;
+  pick(ray: Ray, limit?: number): number;
+  /** Counts the times a chunk's shown form changed, so a pick made on the old form is known to be stale. */
+  formVersion(): number;
   /** The middle of the top of building `id`'s box as drawn, in world metres, or null. Where the bulldozer's price tag stands. */
   topOf(id: number): { x: number; y: number; z: number } | null;
   stats(): BuildingStats;
@@ -478,6 +483,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   let batchRebuilt = 0;
   let batchMs = 0;
   let merged = 0;
+  let formChanges = 0;
+  /** One box reused for every test, so a pick allocates nothing per building. */
+  const probe: PickBox = { extent: { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 }, x: 0, y: 0, z: 0, angle: 0, sx: 1, sz: 1 };
   const mergedBytes: Record<Merged, number> = { simple: 0, box: 0, flat: 0 };
 
   // Stand-ins drawn from the first frame: a single triangle of each
@@ -825,10 +833,23 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     stats = { ...stats, pending: dirty.size };
   }
 
-  /** Building `p`'s box as drawn, for picking: its model's, or its flat block's when its chunk shows blocks. */
-  function pickBoxOf(p: Placed, flat: boolean): PickBox {
-    const extent = flat ? { ...p.model.extent, ...FLAT_PICK_Y } : p.model.extent;
-    return { extent, x: p.place.x, y: p.place.y, z: p.place.z, angle: p.place.angle, sx: p.sx, sz: p.sz };
+  /** Writes building `p`'s box as drawn into `box`, for picking: its model's, or its flat block's when its chunk shows blocks. */
+  function setPickBox(box: PickBox, p: Placed, flat: boolean): PickBox {
+    const m = p.model.extent;
+    const e = box.extent;
+    e.minX = m.minX;
+    e.maxX = m.maxX;
+    e.minZ = m.minZ;
+    e.maxZ = m.maxZ;
+    e.minY = flat ? FLAT_PICK_Y.minY : m.minY;
+    e.maxY = flat ? FLAT_PICK_Y.maxY : m.maxY;
+    box.x = p.place.x;
+    box.y = p.place.y;
+    box.z = p.place.z;
+    box.angle = p.place.angle;
+    box.sx = p.sx;
+    box.sz = p.sz;
+    return box;
   }
 
   function itemsOf(ch: Chunk): MergedItem[] {
@@ -978,12 +999,14 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     let waiting = 0;
     for (const ch of chunks.values()) {
       const want = formFor(view.band, ch.near, ch.mid);
+      const shownBefore = ch.fade.shown;
       const { released } = stepFade(ch.fade, want, (form) => ready(ch, form), view.seconds, BUILDINGS.fadeSeconds);
       // A chunk filled for a fade that never started, because another was under way and then the camera left, is freed too.
       if (ch.full && !draws(ch.fade, "full") && (released === "full" || want !== "full")) free(ch);
       // A merged form the chunk no longer keeps is freed once it is not drawn.
       for (const form of MERGED) if (ch.built[form] && !keeps(ch, form) && !draws(ch.fade, form)) dropMerged(ch, form);
       showFade(ch);
+      if (ch.fade.shown !== shownBefore) formChanges++;
       if (ch.fade.next !== null) fading++;
       else if (ch.fade.shown !== want) waiting++;
     }
@@ -1129,42 +1152,43 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     },
     tintOf: (id) => placed.get(id)?.tint ?? null,
     formOf: (chunk) => chunks.get(chunk)?.fade.shown ?? null,
-    pick(ray) {
-      const boxes: { id: number; box: PickBox }[] = [];
+    pick(ray, limit = Infinity) {
+      let best = -1;
+      let bestT = limit;
       for (const [c, ch] of chunks) {
-        if (ch.ids.size === 0) continue;
+        if (ch.ids.size === 0 || ch.fade.shown === null) continue;
         const ci = c % CHUNKS_PER_SIDE;
         const cj = Math.floor(c / CHUNKS_PER_SIDE);
-        const area: PickBox = {
-          extent: {
-            minX: ci * CHUNK_SIZE - PICK_CHUNK_PAD,
-            maxX: (ci + 1) * CHUNK_SIZE + PICK_CHUNK_PAD,
-            minY: PICK_CHUNK_Y.min,
-            maxY: PICK_CHUNK_Y.max,
-            minZ: cj * CHUNK_SIZE - PICK_CHUNK_PAD,
-            maxZ: (cj + 1) * CHUNK_SIZE + PICK_CHUNK_PAD,
-          },
-          x: 0,
-          y: 0,
-          z: 0,
-          angle: 0,
-          sx: 1,
-          sz: 1,
-        };
-        if (rayBoxDistance(ray, area) === null) continue;
+        const e = probe.extent;
+        e.minX = ci * CHUNK_SIZE - PICK_CHUNK_PAD;
+        e.maxX = (ci + 1) * CHUNK_SIZE + PICK_CHUNK_PAD;
+        e.minY = PICK_CHUNK_Y.min;
+        e.maxY = PICK_CHUNK_Y.max;
+        e.minZ = cj * CHUNK_SIZE - PICK_CHUNK_PAD;
+        e.maxZ = (cj + 1) * CHUNK_SIZE + PICK_CHUNK_PAD;
+        probe.x = probe.y = probe.z = probe.angle = 0;
+        probe.sx = probe.sz = 1;
+        if (rayBoxDistance(ray, probe, bestT) === null) continue;
         const flat = ch.fade.shown === "flat";
         for (const id of ch.ids) {
           const p = placed.get(id);
-          if (p) boxes.push({ id, box: pickBoxOf(p, flat) });
+          if (!p) continue;
+          setPickBox(probe, p, flat);
+          const t = rayBoxDistance(ray, probe, bestT);
+          if (t !== null && (t < bestT || (t === bestT && id < best))) {
+            best = id;
+            bestT = t;
+          }
         }
       }
-      return pickBox(ray, boxes);
+      return best;
     },
+    formVersion: () => formChanges,
     topOf(id) {
       const p = placed.get(id);
       if (!p) return null;
       const flat = chunks.get(p.chunk)?.fade.shown === "flat";
-      const box = pickBoxOf(p, flat);
+      const box = setPickBox({ extent: { ...p.model.extent }, x: 0, y: 0, z: 0, angle: 0, sx: 1, sz: 1 }, p, flat);
       const e = box.extent;
       const lx = ((e.minX + e.maxX) / 2) * box.sx;
       const lz = ((e.minZ + e.maxZ) / 2) * box.sz;

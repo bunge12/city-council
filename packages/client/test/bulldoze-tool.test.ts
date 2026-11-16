@@ -296,6 +296,20 @@ describe("BulldozeToolController", () => {
     expect(segmentTypeId(copy().roads, road)).toBe("street");
   });
 
+  it("passes over a building a sent bulldoze takes, so a second click before the step sends nothing", async () => {
+    const { tool, apply, sent, copy, ui } = setup(houseCity());
+    tool.toggle();
+    const house = housesWestToEast(copy())[0] ?? NONE;
+    const road = street(copy());
+    tool.click({ kind: "building", id: house });
+    expect(tool.pick(pickerOf({ building: house, road }))).toEqual({ kind: "road", id: road });
+    expect(tool.preview({ kind: "building", id: house })).toBeNull();
+    tool.click({ kind: "building", id: house });
+    await apply();
+    expect(sent).toHaveLength(1);
+    expect(ui().bulldozeNote).toBeNull();
+  });
+
   it("drops a drag on Escape, and leaves the tool on a second", () => {
     const { tool, copy, ui, sent } = setup(houseCity());
     tool.toggle();
@@ -340,6 +354,8 @@ describe("building picking", () => {
     // From the west, level through both houses: the western one is in front.
     const y = Math.min(topA.y, topB.y) - 1;
     expect(layer.pick({ ox: topA.x - 200, oy: y, oz: (topA.z + topB.z) / 2, dx: 1, dy: 0, dz: 0 })).toBe(a);
+    // Stopped short of the house, as where the ground under the pointer is in front of it, it picks nothing.
+    expect(layer.pick({ ox: topA.x, oy: topA.y + 50, oz: topA.z, dx: 0, dy: -1, dz: 0 }, 40)).toBe(-1);
     // Straight down onto the street.
     const g = heightAt(terrain, 4300, 4600);
     expect(layer.pick({ ox: 4300, oy: g + 100, oz: 4600, dx: 0, dy: -1, dz: 0 })).toBe(-1);

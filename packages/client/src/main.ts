@@ -675,7 +675,9 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   }
   /** The building whose drawn box the ray through screen point `p` enters first, or -1. */
   function buildingAtPointer(p: { x: number; y: number }): number {
-    return view.pickBuilding(rig.ray(p.x, p.y));
+    // No further than the ground under the pointer, give or take a metre, so a building behind a hill is not picked.
+    const ground = rig.pickGround(p.x, p.y);
+    return view.pickBuilding(rig.ray(p.x, p.y), ground ? ground.distance + 1 : Infinity);
   }
   /** How the bulldozer finds each kind at screen point `p`: a building by its box under the ray, a road in screen pixels. */
   const pickerAt =
@@ -831,7 +833,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   const liveBulldoze = (target: BulldozeTarget | null): BulldozePreview | null => {
     const ui = useUi.getState();
     const key = bulldozeTool.active()
-      ? `${target ? `${target.kind}:${target.id}` : "-"},${ui.bulldozeDrag ? `${ui.bulldozeDrag.kind ?? "?"}:${ui.bulldozeDrag.ids.join(";")}` : "-"},${worldVersion}`
+      ? `${target ? `${target.kind}:${target.id}` : "-"},${ui.bulldozeDrag ? `${ui.bulldozeDrag.kind ?? "?"}:${ui.bulldozeDrag.ids.join(";")}` : "-"},${ui.bulldozePending.map((p) => p.id).join(";")},${worldVersion}`
       : "";
     if (key !== bulldozeKey) {
       bulldozeKey = key;
@@ -847,7 +849,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const c = view.camera.position;
     const key =
       bulldozeTool.active() && pointer
-        ? `${pointer.x},${pointer.y},${c.x},${c.y},${c.z},${rig.pose.yaw},${rig.pose.pitch},${ui.bulldozeFilters.building},${ui.bulldozeFilters.road},${ui.bulldozeDrag?.kind ?? "-"},${ui.bulldozeDrag?.ids.at(-1) ?? "-"},${worldVersion},${view.buildingStats()?.totalWrites ?? 0},${view.buildingStats()?.totalMerged ?? 0}`
+        ? `${pointer.x},${pointer.y},${c.x},${c.y},${c.z},${rig.pose.yaw},${rig.pose.pitch},${ui.bulldozeFilters.building},${ui.bulldozeFilters.road},${ui.bulldozeDrag?.kind ?? "-"},${ui.bulldozeDrag?.ids.at(-1) ?? "-"},${worldVersion},${view.buildingStats()?.totalWrites ?? 0},${view.buildingFormVersion()},${ui.bulldozePending.length}`
         : "";
     if (key !== targetKey) {
       targetKey = key;
@@ -859,8 +861,10 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   const tagPoint = (p: BulldozePreview, pointer: { x: number; y: number }): { x: number; y: number } => {
     const top = p.kind === "building" && p.ids.length === 1 && !useUi.getState().bulldozeDrag ? view.buildingTop(p.ids[0] ?? -1) : null;
     if (!top) return pointer;
-    const at = hooks.project(top.x, top.y, top.z);
-    return Number.isFinite(at.x) && Number.isFinite(at.y) ? at : pointer;
+    v.set(top.x, top.y, top.z).project(view.camera);
+    // Behind the camera, or off the canvas: the tag stays by the pointer.
+    if (!(v.z < 1) || !(v.x > -1 && v.x < 1 && v.y > -1 && v.y < 1)) return pointer;
+    return { x: ((v.x + 1) / 2) * canvas.clientWidth, y: ((1 - v.y) / 2) * canvas.clientHeight };
   };
   // What the zone tool would paint, checked with the sim's planner only when the cells it aims at, the paint, the strokes in flight or the city change.
   // The tool keeps its targets while what they follow from holds, so the same array means the same cells.

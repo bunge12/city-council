@@ -176,8 +176,8 @@ export const BULLDOZE_TARGETS: readonly BulldozeTargetKind[] = [
     id: "road",
     label: "Roads",
     see: (world, id) => (liveRoadSegment(world.state.roads, id) ? seeSegment(world.state.roads, id) : null),
-    // A fixed segment would refuse the whole drag, so a drag leaves it out.
-    takes: (world, id) => liveRoadSegment(world.state.roads, id) && roadPlan(world, [id], [seeSegment(world.state.roads, id)]).ok,
+    // A fixed segment would refuse the whole drag, so a drag leaves it out. The road's own plan says so; the buildings on it do not matter.
+    takes: (world, id) => liveRoadSegment(world.state.roads, id) && previewEdit(world.state.roads, world.terrain, "bulldoze", [id], "street").ok,
     plan: roadPlan,
   },
 ];
@@ -279,8 +279,18 @@ export class BulldozeToolController {
   }
 
   /**
+   * Whether `target` goes with a bulldoze already sent and not yet applied:
+   * one the sim has not answered still shows in the copy, and a second
+   * click on it would only be refused.
+   */
+  private going(target: BulldozeTarget): boolean {
+    return this.host.get().bulldozePending.some(({ preview: p }) => (p.kind === target.kind && p.ids.includes(target.id)) || (target.kind === "building" && p.buildings.includes(target.id)));
+  }
+
+  /**
    * The target under the pointer: the first kind in pick order whose filter
-   * is on and that `pick` finds there. While a drag is on, only the drag's
+   * is on and that `pick` finds there. Something a bulldoze sent already
+   * takes is passed over. While a drag is on, only the drag's
    * kind, with the one it took last preferred.
    */
   pick(pick: BulldozePicker): BulldozeTarget | null {
@@ -292,7 +302,7 @@ export class BulldozeToolController {
       if (drag?.kind && drag.kind !== t.id) continue;
       const prefer = drag?.kind === t.id ? (drag.ids[drag.ids.length - 1] ?? NONE) : NONE;
       const id = pick(t.id, prefer);
-      if (id !== NONE) return { kind: t.id, id };
+      if (id !== NONE && !this.going({ kind: t.id, id })) return { kind: t.id, id };
     }
     return null;
   }
@@ -308,6 +318,7 @@ export class BulldozeToolController {
     const drag = this.host.get().bulldozeDrag;
     if (drag) return drag.kind && drag.ids.length > 0 ? targetKind(drag.kind).plan(world, drag.ids, this.dragSeen) : null;
     if (!target) return null;
+    if (this.going(target)) return null;
     const kind = targetKind(target.kind);
     const seen = kind.see(world, target.id);
     return seen === null ? null : kind.plan(world, [target.id], [seen]);
@@ -334,7 +345,7 @@ export class BulldozeToolController {
     if (!this.active() || !drag || !world || !target || target.id === NONE) return;
     if (!s.bulldozeFilters[target.kind]) return;
     if (drag.kind && drag.kind !== target.kind) return;
-    if (drag.ids.includes(target.id)) return;
+    if (drag.ids.includes(target.id) || this.going(target)) return;
     const kind = targetKind(target.kind);
     if (!kind.takes(world, target.id)) return;
     this.dragSeen = [...this.dragSeen.slice(0, drag.ids.length), kind.see(world, target.id)];

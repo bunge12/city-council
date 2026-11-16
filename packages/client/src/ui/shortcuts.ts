@@ -72,7 +72,7 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "Drag", description: "with the grid tool: lay out a grid's rectangle" },
   { label: "Hold Alt while dragging", description: "with the grid tool on open ground: turn the rectangle" },
   { label: "Click, drag", description: "with upgrade: one road, or every road the drag passes over" },
-  { label: "Click, drag", description: "with the bulldozer: what is under the pointer, or every thing of that kind the drag passes over" },
+  { label: "Click or drag over things", description: "with the bulldozer: what is under the pointer, or every thing of that kind the drag passes over" },
   { label: "Right-click", description: "with upgrade: reverse a one-way" },
   { label: "Shift-drag", description: "with the bulldozer or upgrade: orbit, since a drag picks" },
   { label: "Click a road", description: "with the zone tool's fill: zone the strip on the side the pointer is" },
