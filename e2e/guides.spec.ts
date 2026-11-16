@@ -142,7 +142,7 @@ async function overStreet(page: Page): Promise<void> {
   await openCity(page, streetCity());
   const g = groundAt(4372, 4730);
   await setPose(page, [4372, g + 470, 4730 + 150], [4372, g, 4730]);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyZ");
   for (const id of ["lines", "offset"]) await expect(page.locator(`#guide-${id}`)).toHaveAttribute("aria-pressed", "true");
 }
@@ -292,7 +292,7 @@ test("drawing in a network of 30,000 segments keeps its frame time with the guid
   await openCity(page, bytes, "Thirty thousand");
   const g = groundAt(at.x, at.z);
   await setPose(page, [at.x, g + 380, at.z + 170], [at.x, g, at.z]);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   // Free-hand, so the start lands where clicked, on open ground or a road.
   await page.keyboard.down("Alt");
   const centre = await screenAt(page, at.x, at.z);

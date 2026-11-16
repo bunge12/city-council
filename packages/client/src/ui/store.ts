@@ -8,6 +8,7 @@ import type { BuildingInfo } from "@city-council/sim";
 import { DEFAULT_PRESET } from "../render/config";
 import type { Preset, PresetSource } from "../render/presets";
 import { INITIAL_BLOCK_OVERLAY, type BlockOverlayState } from "../tools/block-overlay";
+import { INITIAL_BULLDOZE_TOOL, type BulldozePreview, type BulldozeToolState } from "../tools/bulldoze-tool";
 import { INITIAL_EDIT_TOOL, type EditPreview, type EditToolState } from "../tools/edit-tool";
 import { INITIAL_GRID_TOOL, type GridToolState } from "../tools/grid-tool";
 import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tools/road-tool";
@@ -15,7 +16,7 @@ import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
 import { INITIAL_ZONE_TOOL, type ZonePreview, type ZoneToolState } from "../tools/zone-tool";
 
-export interface UiState extends RoadToolState, GridToolState, EditToolState, RouteToolState, BlockOverlayState, ZoneToolState {
+export interface UiState extends RoadToolState, GridToolState, EditToolState, BulldozeToolState, RouteToolState, BlockOverlayState, ZoneToolState {
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
@@ -48,6 +49,7 @@ export const useUi = create<UiState>(() => ({
   ...INITIAL_ROAD_TOOL,
   ...INITIAL_GRID_TOOL,
   ...INITIAL_EDIT_TOOL,
+  ...INITIAL_BULLDOZE_TOOL,
   ...INITIAL_ROUTE_TOOL,
   ...INITIAL_BLOCK_OVERLAY,
   ...INITIAL_ZONE_TOOL,
@@ -169,6 +171,26 @@ export function setEditHover(hover: EditHover | null): void {
 }
 
 /**
+ * The bulldozer's price tag (issue 116): where it stands on screen, CSS
+ * pixels over the canvas, above the target, and what it says. Null when the
+ * tool shows nothing. Its own store, like the readouts beside the cursor.
+ */
+export interface BulldozeHover {
+  x: number;
+  y: number;
+  preview: BulldozePreview;
+}
+
+export const useBulldozeHover = create<{ hover: BulldozeHover | null }>(() => ({ hover: null }));
+
+export function setBulldozeHover(hover: BulldozeHover | null): void {
+  const current = useBulldozeHover.getState().hover;
+  if (current === hover) return;
+  if (current && hover && Math.round(current.x) === Math.round(hover.x) && Math.round(current.y) === Math.round(hover.y) && current.preview === hover.preview) return;
+  useBulldozeHover.setState({ hover });
+}
+
+/**
  * What the zone tool shows next to the cursor: the pointer in CSS pixels
  * over the canvas and what a click would paint there, or null when it shows
  * nothing. Its own store, like the road readout's.
@@ -193,8 +215,8 @@ export function setZoneHover(hover: ZoneHoverReadout | null): void {
 /**
  * The building under the pointer while no tool is on (issue M2-15): the
  * pointer in CSS pixels over the canvas and the building, or null when
- * there is none. Its own store, like the road readout's. The bulldozer
- * (issue 116) shows the same readout.
+ * there is none. Its own store, like the road readout's. The bulldozer's
+ * price tag (issue 116) shows the same lines.
  */
 export interface BuildingHover {
   x: number;

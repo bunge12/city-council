@@ -8,6 +8,7 @@ import type { SimMirror } from "../protocol/mirror";
 import type { SaveStatus } from "../save/channel";
 import type { SaveClient } from "../save/page";
 import type { BlockOverlayController } from "../tools/block-overlay";
+import type { BulldozeToolController } from "../tools/bulldoze-tool";
 import type { EditToolController } from "../tools/edit-tool";
 import type { GridToolController } from "../tools/grid-tool";
 import type { RoadToolController } from "../tools/road-tool";
@@ -47,6 +48,7 @@ export interface AppServices {
   gridTool: GridToolController;
   /** The bulldoze and upgrade tools' input handling. Their state is in the UI store too. */
   editTool: EditToolController;
+  bulldozeTool: BulldozeToolController;
   /** The zone tool's input handling. Its state is in the UI store too. */
   zoneTool: ZoneToolController;
   /** The debug panel's route tool. Its state is in the UI store too. */

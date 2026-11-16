@@ -1,6 +1,7 @@
 // The lots of the buildings the tools point at (issue M2-15): red for those
 // a road or a grid would clear, fainter for those of one sent and not yet
-// built, and white for the building under the pointer. Each lot is one quad
+// built, white for the building under the pointer, and the bulldoze orange
+// for those the bulldozer would remove (issue 116). Each lot is one quad
 // at its four corners, drawn through the terrain and the buildings, like
 // the road preview, so it shows behind the building on it. Built from the
 // tools' previews; the sim knows nothing of it.
@@ -15,6 +16,8 @@ export interface BuildingMarks {
   clear: readonly (readonly number[])[];
   pending: readonly (readonly number[])[];
   hover: readonly number[] | null;
+  /** The lots the bulldozer would remove, picked or taken with a road. */
+  bulldoze?: readonly (readonly number[])[];
 }
 
 export interface BuildingMarkLayer {
@@ -38,7 +41,8 @@ export function createBuildingMarkLayer(scene: Scene, terrain: () => Terrain): B
   const hoverMesh = make("building hover", BUILDING_MARKS.hoverOpacity, 8.3);
   const pendingMesh = make("buildings pending clear", BUILDING_MARKS.pendingOpacity, 8.4);
   const clearMesh = make("buildings to clear", BUILDING_MARKS.clearOpacity, 8.5);
-  const meshes = [hoverMesh, pendingMesh, clearMesh];
+  const bulldozeMesh = make("buildings to bulldoze", BUILDING_MARKS.bulldozeOpacity, 8.6);
+  const meshes = [hoverMesh, pendingMesh, clearMesh, bulldozeMesh];
   let shown = "";
   const height = (x: number, z: number) => {
     const t = terrain();
@@ -69,6 +73,7 @@ export function createBuildingMarkLayer(scene: Scene, terrain: () => Terrain): B
       fill(clearMesh, m.clear, BUILDING_MARKS.clear);
       fill(pendingMesh, m.pending, BUILDING_MARKS.clear);
       fill(hoverMesh, m.hover ? [m.hover] : [], BUILDING_MARKS.hover);
+      fill(bulldozeMesh, m.bulldoze ?? [], BUILDING_MARKS.bulldoze);
     },
     dispose() {
       for (const mesh of meshes) {

@@ -1,4 +1,5 @@
-// The bulldoze and upgrade tools (issue M1-13) against the same SimHost the
+// The upgrade tool (issue M1-13), and the road edits the bulldozer prices
+// with (issue 116, tested in bulldoze-tool.test.ts), against the same SimHost the
 // worker runs, with an in-memory transport and a fake clock, and segment
 // picking against made-up camera projections. The tools' state is a plain
 // object standing in for the UI store.
@@ -13,7 +14,6 @@ import {
   heightAt,
   planBulldoze,
   planUpgrade,
-  SEGMENT_CHANGED,
   segmentEnds,
   segmentTypeId,
   step,
@@ -124,12 +124,6 @@ function segmentNear(net: RoadNet, x: number, z: number): number {
   return best;
 }
 
-function liveSegments(net: RoadNet): number {
-  let n = 0;
-  for (let s = 0; s < net.segFlags.length; s++) if ((net.segFlags[s] ?? 0) & 1) n++;
-  return n;
-}
-
 describe("previewEdit", () => {
   it("prices a bulldoze and an upgrade with the sim's planners", () => {
     const state = cityWith(CROSSED);
@@ -168,26 +162,6 @@ describe("previewEdit", () => {
 });
 
 describe("EditToolController", () => {
-  it("bulldozes a segment with a click, in one log entry", async () => {
-    const { tool, tick, settle, sent, net, ends, mirror, ui } = setup(cityWith(CROSSED));
-    tool.toggle("bulldoze");
-    expect(ui().tool).toBe("bulldoze");
-    const seg = segmentNear(net(), 4300, 4600);
-    const seen = ends([seg]);
-    const before = liveSegments(net());
-    const log = mirror.state?.log.length ?? 0;
-    tool.click(seg);
-    expect(ui().editPending).toHaveLength(1);
-    await settle();
-    tick();
-    await settle();
-    expect(sent).toEqual([{ type: "BulldozeRoad", payload: { segments: [seg], ...seen } }]);
-    expect(liveSegments(net())).toBe(before - 1);
-    expect((net().segFlags[seg] ?? 0) & 1).toBe(0);
-    expect((mirror.state?.log.length ?? 0) - log).toBe(1);
-    expect(ui().editPending).toHaveLength(0);
-  });
-
   it("upgrades a street to the type in the road type picker with a click", async () => {
     const { tool, tick, settle, sent, net, ends, ui, setUi } = setup(cityWith(CROSSED));
     tool.toggle("upgrade");
@@ -205,25 +179,6 @@ describe("EditToolController", () => {
     await settle();
     expect(sent).toEqual([{ type: "UpgradeRoad", payload: { segments: [seg], ...seen, type: "avenue" } }]);
     expect(net().segType[seg]).toBe(1);
-  });
-
-  it("sends one command for every segment a drag passes over", async () => {
-    const { tool, tick, settle, sent, net, ends, mirror } = setup(cityWith(CROSSED));
-    tool.toggle("bulldoze");
-    const along = [4200, 4300, 4400, 4500].map((x) => segmentNear(net(), x, 4600));
-    const seen = ends(along);
-    expect(new Set(along).size).toBe(4);
-    const log = mirror.state?.log.length ?? 0;
-    tool.dragStart();
-    // Passing over the same segment again, and over nothing, adds nothing.
-    for (const seg of [along[0], along[0], NONE, along[1], along[2], along[2], along[3]]) tool.dragOver(seg ?? NONE);
-    tool.dragEnd();
-    await settle();
-    tick();
-    await settle();
-    expect(sent).toEqual([{ type: "BulldozeRoad", payload: { segments: along, ...seen } }]);
-    expect((mirror.state?.log.length ?? 0) - log).toBe(1);
-    for (const seg of along) expect((net().segFlags[seg] ?? 0) & 1).toBe(0);
   });
 
   it("leaves out of a drag what it could not act on alone", async () => {
@@ -253,63 +208,6 @@ describe("EditToolController", () => {
     expect(sent).toEqual([{ type: "UpgradeRoad", payload: { segments: [street], ...ends([street]), type: "avenue" } }]);
   });
 
-  it("refuses a bulldoze whose street another player's crossing split first, and removes nothing (issue 94)", async () => {
-    const { tool, tick, settle, net, join, ui, mirror } = setup(cityWith([[[4200, 4600], [4500, 4600], "street"]]));
-    const other = join("p2");
-    tool.toggle("bulldoze");
-    const street = segmentNear(net(), 4350, 4600);
-    const before = liveSegments(net());
-    const log = mirror.state?.log.length ?? 0;
-    // The preview is the whole street.
-    expect(tool.preview(street)).toMatchObject({ ok: true, length: 300 });
-    // The other player's crossing road lands first, in the same tick, and splits the street.
-    void other.sendCommand("BuildRoad", { from: { x: 4350, z: 4500 }, to: { x: 4350, z: 4700 }, type: "street" });
-    tool.click(street);
-    await settle();
-    tick();
-    await settle();
-    expect(ui().editPending).toEqual([]);
-    expect(ui().editNote).toBe(SEGMENT_CHANGED);
-    // The crossing is built, in two pieces, and both halves of the street are still there.
-    expect(liveSegments(net())).toBe(before + 3);
-    expect(mirror.state?.log.slice(log).map((e) => [e.playerId, e.type])).toEqual([["p2", "BuildRoad"]]);
-  });
-
-  it("sends a drag's segments as they were when the pointer passed over them, so a split since refuses it", async () => {
-    const { tool, tick, settle, sent, net, join, ui } = setup(cityWith([[[4200, 4600], [4500, 4600], "street"]]));
-    const other = join("p2");
-    tool.toggle("bulldoze");
-    const street = segmentNear(net(), 4350, 4600);
-    const before = liveSegments(net());
-    tool.dragStart();
-    tool.dragOver(street);
-    // Another player's crossing splits the street while the button is still down.
-    const built = other.sendCommandSettled("BuildRoad", { from: { x: 4350, z: 4500 }, to: { x: 4350, z: 4700 }, type: "street" });
-    tick();
-    expect(await built).toEqual({ ok: true });
-    await settle();
-    tool.dragEnd();
-    await settle();
-    tick();
-    await settle();
-    // The preview at release already saw the change, so nothing was sent.
-    expect(sent).toEqual([]);
-    expect(ui().editNote).toBe(SEGMENT_CHANGED);
-    expect(liveSegments(net())).toBe(before + 3);
-  });
-
-  it("refuses to bulldoze a fixed segment on hover and click, and sends nothing", () => {
-    const state = cityWith(CROSSED);
-    const seg = segmentNear(state.roads, 4300, 4600);
-    state.roads.segFlags[seg] = (state.roads.segFlags[seg] ?? 0) | SEG_FIXED;
-    const { tool, sent, ui } = setup(state);
-    tool.toggle("bulldoze");
-    expect(tool.preview(seg)).toMatchObject({ ok: false, fixed: true });
-    tool.click(seg);
-    expect(sent).toEqual([]);
-    expect(ui().editNote).toBe("This road is fixed and cannot be removed");
-  });
-
   it("reverses a one-way with a right-click, for free", async () => {
     const { tool, tick, settle, sent, net, ends } = setup(cityWith([[[4200, 4600], [4500, 4600], "oneWay"]]));
     tool.toggle("upgrade");
@@ -332,14 +230,15 @@ describe("EditToolController", () => {
     expect(tool.rightClick(segmentNear(net(), 4300, 4600))).toBe(true);
     expect(sent).toEqual([]);
     expect(ui().editNote).toBe("A right-click reverses a one-way road");
-    // The bulldoze tool leaves right-clicks alone.
-    tool.toggle("bulldoze");
+    // With the tool off, right-clicks are left alone.
+    tool.toggle("upgrade");
     expect(tool.rightClick(segmentNear(net(), 4300, 4600))).toBe(false);
   });
 
   it("drops a drag on Escape, and leaves the tool on a second", () => {
-    const { tool, net, ui, sent } = setup(cityWith(CROSSED));
-    tool.toggle("bulldoze");
+    const { tool, net, ui, sent, setUi } = setup(cityWith(CROSSED));
+    tool.toggle("upgrade");
+    setUi({ roadType: "avenue" });
     tool.dragStart();
     tool.dragOver(segmentNear(net(), 4300, 4600));
     expect(tool.escape()).toBe(true);

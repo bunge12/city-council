@@ -42,6 +42,7 @@ import { createBuildingMarkLayer } from "./render/building-marks";
 import { snapMarks } from "./render/snap-marks-geometry";
 import { zonedCellLookup } from "./tools/cell-snap";
 import { BlockOverlayController, blockLabelPoint, blockShapes } from "./tools/block-overlay";
+import { BulldozeToolController, type BulldozeKind, type BulldozePreview, type BulldozeTarget } from "./tools/bulldoze-tool";
 import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
 import { GridToolController, gridMarks, gridShapes } from "./tools/grid-tool";
 import { dragSamples, pickSegment } from "./tools/pick-segment";
@@ -52,7 +53,7 @@ import { ZoneToolController, type ZoneHover, type ZonePreview } from "./tools/zo
 import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import { setBlockLabels, setBuildingHover, setEditHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useUi, type BlockLabel } from "./ui/store";
+import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useUi, type BlockLabel } from "./ui/store";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
 const TAB_CITY_KEY = "city-council:city";
@@ -263,6 +264,13 @@ const editTool = new EditToolController({
   send: (type, payload) => sendCommand(type, payload),
 });
 
+const bulldozeTool = new BulldozeToolController({
+  get: () => useUi.getState(),
+  set: (patch) => useUi.setState(patch),
+  world: () => (mirror.state && shownTerrain ? { state: mirror.state, terrain: shownTerrain } : null),
+  send: (type, payload) => sendCommand(type, payload),
+});
+
 /** Counts every snapshot and delta, so the zone tool knows when what it worked out from the copy is stale. */
 let cityVersion = 0;
 mirror.subscribe(() => cityVersion++);
@@ -345,6 +353,7 @@ const services: AppServices = {
   roadTool,
   gridTool,
   editTool,
+  bulldozeTool,
   zoneTool,
   routeTool,
   blockOverlay,
@@ -454,8 +463,12 @@ interface CameraHooks {
   project(x: number, y: number, z: number): { x: number; y: number };
   /** Where the road tool's cursor lands now, with the guides that are on, or null. */
   snap(): Snap | null;
-  /** The road segment the bulldoze or upgrade tool would pick at screen point (sx, sy), or NONE (-1). */
+  /** The road segment the bulldozer or the upgrade tool would pick at screen point (sx, sy), or NONE (-1). */
   pickSegmentAt(sx: number, sy: number): number;
+  /** The building whose drawn box is under screen point (sx, sy), or -1 (issue 116). */
+  pickBuildingAt(sx: number, sy: number): number;
+  /** What the bulldozer would pick at screen point (sx, sy), with its filters, or null. */
+  bulldozeTargetAt(sx: number, sy: number): BulldozeTarget | null;
 }
 
 let resolveCamera: (hooks: CameraHooks) => void = () => undefined;
@@ -623,6 +636,8 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     },
     snap: () => lastSnap,
     pickSegmentAt: (sx, sy) => segmentAt({ x: sx, y: sy }),
+    pickBuildingAt: (sx, sy) => buildingAtPointer({ x: sx, y: sy }),
+    bulldozeTargetAt: (sx, sy) => bulldozeTool.pick(pickerAt({ x: sx, y: sy })),
   };
   /**
    * Metres one CSS pixel covers on the ground at `hit`: the mean of the
@@ -658,11 +673,25 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       project: hooks.project,
     }, undefined, prefer);
   }
+  /** The building whose drawn box the ray through screen point `p` enters first, or -1. */
+  function buildingAtPointer(p: { x: number; y: number }): number {
+    return view.pickBuilding(rig.ray(p.x, p.y));
+  }
+  /** How the bulldozer finds each kind at screen point `p`: a building by its box under the ray, a road in screen pixels. */
+  const pickerAt =
+    (p: { x: number; y: number }) =>
+    (kind: BulldozeKind, prefer: number): number =>
+      kind === "building" ? buildingAtPointer(p) : segmentAt(p, prefer);
   controls.onPick((hit) => {
     hooks.lastPick = hit;
     setViewReadout({ pick: metres(hit) });
     if (routeTool.active()) {
       routeTool.click(hit);
+      return;
+    }
+    if (bulldozeTool.active()) {
+      const pointer = controls.pointer();
+      bulldozeTool.click(pointer ? bulldozeTool.pick(pickerAt(pointer)) : null);
       return;
     }
     if (editTool.active()) {
@@ -700,10 +729,11 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   /** A grid drag has started and its first move, which carries the press point, has not come yet. */
   let gridDragStarting = false;
   controls.setToolDrag({
-    active: () => editTool.active() !== null || gridTool.active() || zoneTool.brushing(),
+    active: () => editTool.active() !== null || bulldozeTool.active() || gridTool.active() || zoneTool.brushing(),
     start: () => {
       if (gridTool.active()) gridDragStarting = true;
       else if (zoneTool.brushing()) zoneTool.dragStart();
+      else if (bulldozeTool.active()) bulldozeTool.dragStart();
       else editTool.dragStart();
     },
     move: (from, to) => {
@@ -723,6 +753,11 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
         }
         return;
       }
+      if (bulldozeTool.active()) {
+        // Sampled along the path, so a fast drag skips nothing. The tool picks only the drag's kind once it has one.
+        for (const p of dragSamples(from, to)) bulldozeTool.dragOver(bulldozeTool.pick(pickerAt(p)));
+        return;
+      }
       for (const p of dragSamples(from, to)) {
         // The segment the drag took last wins while the pointer is on it, so a drag along a road skips the roads crossing it.
         const drag = useUi.getState().editDrag;
@@ -733,12 +768,14 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       gridDragStarting = false;
       if (gridTool.active()) gridTool.dragEnd();
       else if (zoneTool.active()) zoneTool.dragEnd();
+      else if (bulldozeTool.active()) bulldozeTool.dragEnd();
       else editTool.dragEnd();
     },
     cancel: () => {
       gridDragStarting = false;
       if (gridTool.active()) gridTool.dragCancel();
       else if (zoneTool.active()) zoneTool.dragCancel();
+      else if (bulldozeTool.active()) bulldozeTool.dragCancel();
       else editTool.dragCancel();
     },
   });
@@ -787,6 +824,43 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       edit = key === "" ? null : editTool.preview(seg);
     }
     return edit;
+  };
+  // What the bulldozer would remove, worked out again only when the target, the drag, the filters or the city change.
+  let bulldozeKey = "";
+  let bulldozeNow: BulldozePreview | null = null;
+  const liveBulldoze = (target: BulldozeTarget | null): BulldozePreview | null => {
+    const ui = useUi.getState();
+    const key = bulldozeTool.active()
+      ? `${target ? `${target.kind}:${target.id}` : "-"},${ui.bulldozeDrag ? `${ui.bulldozeDrag.kind ?? "?"}:${ui.bulldozeDrag.ids.join(";")}` : "-"},${worldVersion}`
+      : "";
+    if (key !== bulldozeKey) {
+      bulldozeKey = key;
+      bulldozeNow = key === "" ? null : bulldozeTool.preview(target);
+    }
+    return bulldozeNow;
+  };
+  // The bulldozer's pick, worked out again only when the pointer, the camera, the filters or the city change.
+  let targetKey = "";
+  let targetNow: BulldozeTarget | null = null;
+  const bulldozeTargetUnder = (pointer: { x: number; y: number } | null): BulldozeTarget | null => {
+    const ui = useUi.getState();
+    const c = view.camera.position;
+    const key =
+      bulldozeTool.active() && pointer
+        ? `${pointer.x},${pointer.y},${c.x},${c.y},${c.z},${rig.pose.yaw},${rig.pose.pitch},${ui.bulldozeFilters.building},${ui.bulldozeFilters.road},${ui.bulldozeDrag?.kind ?? "-"},${ui.bulldozeDrag?.ids.at(-1) ?? "-"},${worldVersion},${view.buildingStats()?.totalWrites ?? 0},${view.buildingStats()?.totalMerged ?? 0}`
+        : "";
+    if (key !== targetKey) {
+      targetKey = key;
+      targetNow = key === "" || !pointer ? null : bulldozeTool.pick(pickerAt(pointer));
+    }
+    return targetNow;
+  };
+  /** Where the bulldozer's tag stands: over the top of a building picked alone, otherwise over the pointer. */
+  const tagPoint = (p: BulldozePreview, pointer: { x: number; y: number }): { x: number; y: number } => {
+    const top = p.kind === "building" && p.ids.length === 1 && !useUi.getState().bulldozeDrag ? view.buildingTop(p.ids[0] ?? -1) : null;
+    if (!top) return pointer;
+    const at = hooks.project(top.x, top.y, top.z);
+    return Number.isFinite(at.x) && Number.isFinite(at.y) ? at : pointer;
   };
   // What the zone tool would paint, checked with the sim's planner only when the cells it aims at, the paint, the strokes in flight or the city change.
   // The tool keeps its targets while what they follow from holds, so the same array means the same cells.
@@ -893,6 +967,16 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     }
     return lots;
   };
+  /** A bulldoze sent, as the lots it clears: the same object each frame, so its lots are kept as they were when it was sent. */
+  const sentBulldozes = new WeakMap<BulldozePreview, { clears: { ids: number[] } }>();
+  const bulldozeClearsOf = (p: BulldozePreview): { clears: { ids: number[] } } => {
+    let c = sentBulldozes.get(p);
+    if (!c) {
+      c = { clears: { ids: [...p.buildings] } };
+      sentBulldozes.set(p, c);
+    }
+    return c;
+  };
   /** Each preview gets a number, so the marks' key names previews and not every id they clear. */
   const previewIds = new WeakMap<object, number>();
   let nextPreviewId = 1;
@@ -939,6 +1023,18 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       }
     }
     setEditHover(editNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, preview: editNow } : null);
+    // The bulldozer: what it has sent, then what it would remove now. Roads as orange strips, buildings as orange lots.
+    const target = bulldozeTargetUnder(pointerNow);
+    document.body.dataset["bulldozeTarget"] = target ? `${target.kind}:${target.id}` : "";
+    // The road segment the bulldozer would pick, as the upgrade tool reports its own.
+    if (bulldozeTool.active()) document.body.dataset["pickedSegment"] = String(target?.kind === "road" ? target.id : -1);
+    const razeNow = liveBulldoze(target);
+    const razePending = useUi.getState().bulldozePending;
+    if (net) {
+      for (const p of razePending) if (p.preview.road) shapes.push(...editShapes(net, p.preview.road, "pending"));
+      if (razeNow?.road) shapes.push(...editShapes(net, razeNow.road, razeNow.ok ? "bulldoze" : "refused"));
+    }
+    setBulldozeHover(razeNow && pointerNow ? { ...tagPoint(razeNow, pointerNow), preview: razeNow } : null);
     // The zone tool: strokes in flight, then what a click would paint.
     const zoneHover: ZoneHover = { ground: cursor, segment: zoneTool.active() && pointerNow ? segmentAt(pointerNow) : -1 };
     const zoneNow = liveZone(zoneHover);
@@ -954,7 +1050,12 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     // The buildings the road or the grid would clear, those of roads and grids in flight, and the building under the pointer.
     const liveClears = live?.ok ? live : null;
     const gridClearsNow = gridNow?.ok ? gridNow : null;
-    const sent = [...useUi.getState().roadPending.map((p) => p.preview), ...useUi.getState().gridPending.map((p) => p.preview)];
+    const sent = [
+      ...useUi.getState().roadPending.map((p) => p.preview),
+      ...useUi.getState().gridPending.map((p) => p.preview),
+      ...razePending.map((p) => bulldozeClearsOf(p.preview)),
+    ];
+    const razeShown = razeNow?.ok ? razeNow : null;
     const under = buildingUnder(cursor);
     setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under } : null);
     document.body.dataset["buildingHover"] = under ? String(under.id) : "";
@@ -964,8 +1065,9 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
         clear: lotsOf([...(liveClears?.clears?.ids ?? []), ...(gridClearsNow?.clears?.ids ?? [])]),
         pending: sent.flatMap(lotsWhenSent),
         hover: under?.corners ?? null,
+        bulldoze: lotsOf(razeShown?.buildings ?? []),
       }),
-      `${previewId(liveClears)},${previewId(gridClearsNow)}|${sent.map(previewId).join(",")}|${under?.id ?? "-"}|${worldVersion}`,
+      `${previewId(liveClears)},${previewId(gridClearsNow)}|${sent.map(previewId).join(",")}|${under?.id ?? "-"}|${previewId(razeShown)}|${worldVersion}`,
     );
     // The debug route tool's route, under nothing else the tools draw.
     const route = useUi.getState().routeResult;

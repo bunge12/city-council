@@ -130,7 +130,7 @@ test("an elevated road built from the debug panel passes over a ground street wi
   await page.keyboard.press("Backquote");
 
   await look(page, OVER.x, STREET.z, 320);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyX");
   await click(page, OVER.x, OVER.z0);
   await hover(page, OVER.x, OVER.z1);
@@ -159,7 +159,7 @@ test("an elevated road built from the debug panel passes over a ground street wi
 
   // A second elevated road across the first splits it and joins it, up on its level.
   await look(page, OVER.x, SECOND.z, 320);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyZ");
   await click(page, SECOND.x0, SECOND.z);
   await hover(page, SECOND.x1, SECOND.z);

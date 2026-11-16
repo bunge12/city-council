@@ -54,12 +54,13 @@ export function formatSpeed(speed: number): string {
 /**
  * What a road or a grid would clear (issue M2-15), such as "Clears 3
  * buildings, 12 residents", or null when it clears none. Residents are left
- * out when the buildings hold none, as shops and offices do.
+ * out when the buildings hold none, as shops and offices do. The bulldozer's
+ * tag says "Takes" for the buildings a road takes with it.
  */
-export function formatClears(clears: BuildingsInTheWay | null | undefined): string | null {
+export function formatClears(clears: BuildingsInTheWay | null | undefined, verb = "Clears"): string | null {
   const n = clears?.ids.length ?? 0;
   if (!clears || n === 0) return null;
   const buildings = n === 1 ? "1 building" : `${n} buildings`;
   const r = clears.residents;
-  return r === 0 ? `Clears ${buildings}` : `Clears ${buildings}, ${r === 1 ? "1 resident" : `${r.toLocaleString("en-US")} residents`}`;
+  return r === 0 ? `${verb} ${buildings}` : `${verb} ${buildings}, ${r === 1 ? "1 resident" : `${r.toLocaleString("en-US")} residents`}`;
 }

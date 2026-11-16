@@ -118,7 +118,7 @@ test("picks two points, sees the route, bulldozes the only link and sees no rout
 
   // Bulldoze the link with the bulldoze tool. The points stay set.
   const before = await liveSegments(page);
-  await page.keyboard.press("KeyN");
+  await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
   await click(page, 4350, LINK_Z);
   await expect.poll(() => liveSegments(page)).toBe(before - 1);

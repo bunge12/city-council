@@ -140,7 +140,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 test("a continuous road stops at a segment the step drops, and says why", async ({ page }, testInfo) => {
   await openCity(page, city(false));
   await look(page, 4320, 4640, 260);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyU");
   await expect(page.locator("#draw-mode-continuous")).toHaveAttribute("aria-pressed", "true");
   await click(page, 4240, 4600);
@@ -163,10 +163,10 @@ test("a continuous road stops at a segment the step drops, and says why", async 
 test("a bulldoze of a street another road split first is refused, and removes nothing", async ({ page }, testInfo) => {
   await openCity(page, city(true));
   await look(page, 4370, 4620, 260);
-  await page.keyboard.press("KeyN");
+  await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
   await hover(page, 4300, STREET.z);
-  await expect(page.locator("#edit-readout")).toContainText(/^Bulldoze this road, 300 m/);
+  await expect(page.locator("#bulldoze-tag .price")).toHaveText(/^300 m/);
   await attach(page, testInfo, "3 the bulldoze preview marks the whole street");
   const start = (await log(page)).length;
   // A crossing road lands first, in the same tick, and splits the street the player picked.

@@ -61,6 +61,8 @@ import { BUILDING_TYPES, CHUNKS_PER_SIDE, CHUNK_SIZE, ZONING_BALANCE, type Build
 import type { ZoomBand } from "../camera/zoom-band";
 import { SURFACE, simplify, type ModelArrays } from "../theme/model";
 import type { Theme } from "../theme/theme";
+import type { Ray } from "../camera/pick";
+import { pickBox, rayBoxDistance, type PickBox } from "./building-pick";
 import { placeLot, type Placement } from "./building-place";
 import {
   chunkDistance,
@@ -175,9 +177,24 @@ export interface BuildingLayer {
   tintOf(id: number): { wall: number; roof: number; trim: number } | null;
   /** The form chunk `chunk` shows whole, or null. For tests. */
   formOf(chunk: number): BuildingForm | null;
+  /**
+   * The building whose drawn box `ray` enters first, or -1 (issue 116): the
+   * bulldozer's pick. A chunk drawn as flat blocks is tested as its blocks.
+   * See building-pick.ts.
+   */
+  pick(ray: Ray): number;
+  /** The middle of the top of building `id`'s box as drawn, in world metres, or null. Where the bulldozer's price tag stands. */
+  topOf(id: number): { x: number; y: number; z: number } | null;
   stats(): BuildingStats;
   dispose(): void;
 }
+
+/** How far a building's box can reach past the chunk its lot's centre is in, metres: more than the deepest through-lot. */
+const PICK_CHUNK_PAD = 150;
+/** Lowest and highest a building's box can reach, metres, for the chunk test before the buildings'. */
+const PICK_CHUNK_Y = { min: -200, max: 2000 };
+/** A flat block's box, in its frame: the blocks lie on the ground. */
+const FLAT_PICK_Y = { minY: -1, maxY: 1 };
 
 /** Instances a model's mesh has room for at first. It doubles when full. */
 const FIRST_CAPACITY = 16;
@@ -808,6 +825,12 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     stats = { ...stats, pending: dirty.size };
   }
 
+  /** Building `p`'s box as drawn, for picking: its model's, or its flat block's when its chunk shows blocks. */
+  function pickBoxOf(p: Placed, flat: boolean): PickBox {
+    const extent = flat ? { ...p.model.extent, ...FLAT_PICK_Y } : p.model.extent;
+    return { extent, x: p.place.x, y: p.place.y, z: p.place.z, angle: p.place.angle, sx: p.sx, sz: p.sz };
+  }
+
   function itemsOf(ch: Chunk): MergedItem[] {
     const items: MergedItem[] = [];
     for (const id of ch.ids) {
@@ -1106,6 +1129,49 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     },
     tintOf: (id) => placed.get(id)?.tint ?? null,
     formOf: (chunk) => chunks.get(chunk)?.fade.shown ?? null,
+    pick(ray) {
+      const boxes: { id: number; box: PickBox }[] = [];
+      for (const [c, ch] of chunks) {
+        if (ch.ids.size === 0) continue;
+        const ci = c % CHUNKS_PER_SIDE;
+        const cj = Math.floor(c / CHUNKS_PER_SIDE);
+        const area: PickBox = {
+          extent: {
+            minX: ci * CHUNK_SIZE - PICK_CHUNK_PAD,
+            maxX: (ci + 1) * CHUNK_SIZE + PICK_CHUNK_PAD,
+            minY: PICK_CHUNK_Y.min,
+            maxY: PICK_CHUNK_Y.max,
+            minZ: cj * CHUNK_SIZE - PICK_CHUNK_PAD,
+            maxZ: (cj + 1) * CHUNK_SIZE + PICK_CHUNK_PAD,
+          },
+          x: 0,
+          y: 0,
+          z: 0,
+          angle: 0,
+          sx: 1,
+          sz: 1,
+        };
+        if (rayBoxDistance(ray, area) === null) continue;
+        const flat = ch.fade.shown === "flat";
+        for (const id of ch.ids) {
+          const p = placed.get(id);
+          if (p) boxes.push({ id, box: pickBoxOf(p, flat) });
+        }
+      }
+      return pickBox(ray, boxes);
+    },
+    topOf(id) {
+      const p = placed.get(id);
+      if (!p) return null;
+      const flat = chunks.get(p.chunk)?.fade.shown === "flat";
+      const box = pickBoxOf(p, flat);
+      const e = box.extent;
+      const lx = ((e.minX + e.maxX) / 2) * box.sx;
+      const lz = ((e.minZ + e.maxZ) / 2) * box.sz;
+      const c = Math.cos(box.angle);
+      const s = Math.sin(box.angle);
+      return { x: box.x + lx * c + lz * s, y: box.y + e.maxY, z: box.z - lx * s + lz * c };
+    },
     stats: () => stats,
     dispose() {
       for (const m of [warm.mesh, warmSimple, warmFlat]) {

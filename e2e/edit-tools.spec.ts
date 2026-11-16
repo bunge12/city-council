@@ -201,12 +201,14 @@ test("upgrades a street to an avenue and sees it widen, then bulldozes it, with 
 
   const upgraded = await endsOf(page, [seg]);
   expect(upgraded.types).toEqual(["avenue"]);
-  // N turns on the bulldoze tool.
-  await page.keyboard.press("KeyN");
+  // B turns on the bulldozer (issue 116), whose price tag stands over the road.
+  await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
   await hover(page, 4300, MAIN_Z);
-  await expect(readout).toHaveAttribute("data-kind", "bulldoze");
-  await expect(readout).toContainText(/^Bulldoze this road, 100 m · \$[\d.]+K$/);
+  const tag = page.locator("#bulldoze-tag");
+  await expect(tag).toHaveAttribute("data-kind", "road");
+  await expect(tag.locator(".what")).toHaveText("Bulldoze this road");
+  await expect(tag.locator(".price")).toHaveText(/^100 m · \$[\d.]+K$/);
   await attach(page, testInfo, "4 bulldoze preview marks the avenue");
   await click(page, 4300, MAIN_Z);
   await expect.poll(async () => (await segment(page, seg)).alive).toBe(false);
@@ -227,16 +229,17 @@ test("a drag across four segments bulldozes them in one log entry", async ({ pag
   await look(page, 4350, MAIN_Z, 320);
   const start = (await logEntries(page)).length;
   const ends = await endsOf(page, segs);
-  await page.keyboard.press("KeyN");
+  await page.keyboard.press("KeyB");
   const a = await screenAt(page, 4165, MAIN_Z);
   const b = await screenAt(page, 4535, MAIN_Z);
   await page.mouse.move(a.x, a.y);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 30 });
   await frames(page);
-  const readout = page.locator("#edit-readout");
-  await expect(readout).toHaveAttribute("data-segments", segs.join(","));
-  await expect(readout).toContainText(/^Bulldoze 4 segments, 400 m/);
+  const tag = page.locator("#bulldoze-tag");
+  await expect(tag).toHaveAttribute("data-ids", segs.join(","));
+  await expect(tag.locator(".what")).toHaveText("Bulldoze 4 road segments");
+  await expect(tag.locator(".price")).toHaveText(/^400 m/);
   await attach(page, testInfo, "6 a drag marks four segments");
   await page.mouse.up();
   await expect.poll(async () => (await logEntries(page)).length).toBe(start + 1);
@@ -256,7 +259,7 @@ test("picks a curve along the curve, a bridge at its deck, and the nearer of two
   const bridge = Array.from(state.roads.segLevelA).indexOf(LEVEL_BRIDGE);
   expect(bridge).toBeGreaterThanOrEqual(0);
   await openCity(page, state);
-  await page.keyboard.press("KeyN");
+  await page.keyboard.press("KeyB");
 
   // The arch's apex is 50 m off its chord.
   await look(page, 4250, 4860, 200);
@@ -278,7 +281,7 @@ test("picks a curve along the curve, a bridge at its deck, and the nearer of two
   await look(page, RIVER.mid, RIVER.z, 60, 2);
   await hover(page, RIVER.mid, RIVER.z, bridgeDeckLevel(terrain.waterLevel));
   expect(await picked(page)).toBe(bridge);
-  await expect(page.locator("#edit-readout")).toHaveAttribute("data-segments", String(bridge));
+  await expect(page.locator("#bulldoze-tag")).toHaveAttribute("data-ids", String(bridge));
   await attach(page, testInfo, "10 picking a bridge at its deck");
 });
 
@@ -289,13 +292,13 @@ test("a fixed road shows as not removable, and a right-click reverses a one-way"
   const oneWay = segmentNear(state, 4575, 4700);
   await openCity(page, state);
   const start = (await logEntries(page)).length;
-  await page.keyboard.press("KeyN");
+  await page.keyboard.press("KeyB");
   await look(page, 4300, 4608, 120);
   await hover(page, 4300, 4600);
-  const readout = page.locator("#edit-readout");
+  const readout = page.locator("#bulldoze-tag");
   await expect(readout).toHaveAttribute("data-ok", "false");
   await expect(readout).toHaveAttribute("data-fixed", "true");
-  await expect(page.locator("#edit-reason")).toHaveText("This road is fixed and cannot be removed");
+  await expect(page.locator("#bulldoze-reason")).toHaveText("This road is fixed and cannot be removed");
   await attach(page, testInfo, "11 a fixed road cannot be removed");
   await click(page, 4300, 4600);
   await expect(page.locator("#road-note")).toHaveText("This road is fixed and cannot be removed");
@@ -317,14 +320,15 @@ test("both tools' keys are listed with the other shortcuts", async ({ page }, te
   await page.keyboard.press("Backquote");
   const panel = page.locator("#debug-panel");
   await expect(panel).toContainText("upgrade tool on or off");
-  await expect(panel).toContainText("bulldoze tool on or off");
+  await expect(panel).toContainText("bulldozer on or off");
   await page.keyboard.press("KeyV");
   await expect(page.locator("#upgrade-tool")).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("KeyN");
+  await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#upgrade-tool")).toHaveAttribute("aria-pressed", "false");
+  // The bulldozer has its own menu, so the road menu closes (issue 116).
+  await expect(page.locator("#road-menu")).toHaveCount(0);
   await page.keyboard.press("Escape");
-  // Off, the road menu closes and takes the bulldoze button with it (issue 47).
-  await expect(page.locator("#bulldoze-tool")).toHaveCount(0);
+  await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "false");
   await attach(page, testInfo, "13 the shortcut list");
 });

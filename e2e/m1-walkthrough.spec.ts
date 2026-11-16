@@ -323,7 +323,7 @@ async function download(page: Page, info: TestInfo, name: string): Promise<Uint8
 
 /** Turns the road tool on if it is off, in straight mode, drawing `type`. */
 async function roadTool(page: Page, type: "KeyZ" | "KeyX" = "KeyZ"): Promise<void> {
-  if ((await page.locator("#road-tool").getAttribute("aria-pressed")) !== "true") await page.keyboard.press("KeyB");
+  if ((await page.locator("#road-tool").getAttribute("aria-pressed")) !== "true") await page.keyboard.press("KeyR");
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press(type);
   await page.keyboard.press("KeyT");
@@ -550,7 +550,7 @@ for (const variant of [
       await away(page);
       await shot(page, info, dir, "6-upgraded");
 
-      await page.keyboard.press("KeyN");
+      await page.keyboard.press("KeyB");
       await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
       await click(page, B.x, (A.z + B.z1) / 2);
       await expect.poll(async () => segmentNear(await roads(page), B.x, (A.z + B.z1) / 2)).toBeNull();
@@ -587,7 +587,7 @@ for (const variant of [
       await shot(page, info, dir, "7-route");
 
       const before = await roads(page);
-      await page.keyboard.press("KeyN");
+      await page.keyboard.press("KeyB");
       await click(page, (A.x0 + B.x) / 2, A.z);
       await expect.poll(async () => segmentNear(await roads(page), (A.x0 + B.x) / 2, A.z)).toBeNull();
       await expect(route).toHaveText("no route");
@@ -720,7 +720,7 @@ for (const variant of [
       await away(page);
       await shot(page, info, dir, "11-block-outlined");
 
-      await page.keyboard.press("KeyN");
+      await page.keyboard.press("KeyB");
       await click(page, 4620, 4860);
       await expect(blocks).toHaveAttribute("data-count", String(startCount));
       await expect(page.locator(".block-label[data-area='14400']")).toHaveCount(0);

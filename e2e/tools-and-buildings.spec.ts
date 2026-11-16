@@ -138,7 +138,7 @@ test("a road through a row of houses marks and counts them before the click, and
   const before = await live(page);
   expect(before).toHaveLength(houses);
 
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "true");
   // A street from the street, through the houses, to open ground north of them.
   await clickAt(page, 4300, 4600);

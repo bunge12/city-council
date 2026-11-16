@@ -560,6 +560,9 @@ export const BUILDING_MARKS = {
   /** The lot of the building under the pointer. */
   hover: 0xffffff,
   hoverOpacity: 0.4,
+  /** The lots the bulldozer would remove (issue 116), in the orange it marks roads in. */
+  bulldoze: 0xff8a1f,
+  bulldozeOpacity: 0.75,
   /** Share of the lot's size each mark is drawn at, around its centre, so neighbouring lots read apart. */
   inset: 0.94,
   /** Metres over the ground. */

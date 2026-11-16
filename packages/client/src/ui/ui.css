@@ -631,3 +631,25 @@ kbd {
   background: #7f8a74;
   margin-right: 4px;
 }
+
+/* The bulldozer's price tag (issue 116): above what it stands for, centred on it. */
+.bulldoze-tag {
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  border-color: #ff8a1f;
+}
+
+.bulldoze-tag .detail,
+.bulldoze-tag .price {
+  color: var(--ink-soft);
+}
+
+.bulldoze-tag .no-undo {
+  color: #b35a00;
+  font-weight: 600;
+}
+
+/* The buildings a road takes with it, in the orange they are marked in. */
+.bulldoze-tag .clears {
+  color: #b35a00;
+}

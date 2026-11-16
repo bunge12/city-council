@@ -198,12 +198,12 @@ test("the camera stays above the terrain and keeps the map in view", async ({ pa
   // The tilt stops where the ground would come too close, so hold the key
   // for a number of frames, not until the pitch reaches some value.
   const pitch0 = await page.evaluate(async () => (await window.cityCouncil.camera).rig.pose.pitch);
-  await page.keyboard.down("KeyF");
+  await page.keyboard.down("PageDown");
   for (let k = 0; k < 4; k++) {
     await frames(page);
     expect(await clearance()).toBeGreaterThanOrEqual(19.99);
   }
-  await page.keyboard.up("KeyF");
+  await page.keyboard.up("PageDown");
   expect(await page.evaluate(async () => (await window.cityCouncil.camera).rig.pose.pitch)).toBeLessThan(pitch0);
   expect(await clearance()).toBeGreaterThanOrEqual(19.99);
   await testInfo.attach("zoomed in on the steepest slope and tilted down", { body: await page.screenshot(), contentType: "image/png" });
