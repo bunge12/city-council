@@ -1,4 +1,5 @@
 import { createBuildings } from "./buildings/buildings";
+import { TIME_BALANCE } from "./calendar";
 import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -56,6 +57,14 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 12 gives each building the back lot of a through-lot (M2-14).
   // No building before it had one, so every back field is 0.
   11: (old) => ({ ...old, version: 12, buildings: withBackLots(old["buildings"]) }),
+  // Version 13 adds the grower's plan for the day (issue 135). A version 12
+  // city grew one building a day, so the day it was saved on keeps that
+  // quota. Its free cells are counted as none, so the next day's plan sees
+  // them as new and gives them a full `fillDays`.
+  12: (old) => {
+    const day = Math.floor((old["tick"] as number) / TIME_BALANCE.ticksPerDay);
+    return { ...old, version: 13, growth: { quota: 1, day, deadline: day + 1, free: 0, used: 0 } };
+  },
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */

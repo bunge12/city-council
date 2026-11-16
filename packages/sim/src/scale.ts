@@ -266,7 +266,7 @@ const FULL_AFTER_MISSES = 2000;
  * lots.
  *
  * The zoning goes through `submit` and `step` and is in the log. The
- * buildings do not come on ticks: at `growthPerDay` a day the grower
+ * buildings do not come on ticks: at the grower's daily pace it
  * would take thousands of game years, so `growOne` is called directly, as
  * the grower bench does. A replay of the log gives the roads and the
  * zoning; the buildings are in the state, which is what a city file saves.
