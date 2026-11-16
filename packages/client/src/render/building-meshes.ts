@@ -1,13 +1,17 @@
 // Buildings on screen (issues M2-12 and M2-13): every building in the
-// mirror, in one of three forms by how far out the camera is (PRD, "Zoom
+// mirror, in one of four forms by how far out the camera is (PRD, "Zoom
 // bands"; building-lod.ts):
 // - full: one instanced mesh per model, with the building's tint as data on
 //   its instance. Only for chunks near the camera in the street band. A
 //   chunk that leaves frees its instances.
 // - simple: each building's model without its small parts and paving,
 //   merged into one mesh per chunk and drawn with the full models' window
-//   patterns and colours. Every other chunk in the street band, and every
-//   chunk in the district band.
+//   patterns and colours. Chunks within `BUILDINGS.simpleRadius` in the
+//   street and district bands, beyond the full form's reach. A chunk that
+//   leaves frees it.
+// - box: a plain box per building in its wall and roof colours, one mesh per
+//   chunk, in the simple form's vertex format and material. Chunks further
+//   out in the street and district bands.
 // - flat: a flat block on the ground per building, coloured by its zone and
 //   density, one mesh per chunk. The city band.
 // A chunk changing form fades from one to the next, dithered, so nothing
@@ -863,8 +867,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   /**
    * Whether a chunk keeps a merged form it is not drawing: the simple form
    * only within its reach, boxes only beyond it, so the simple form's
-   * memory grows with the radius and not the city. Flat blocks are kept
-   * everywhere; they are small.
+   * memory grows with the radius and not the city. Boxes, about 600 bytes a
+   * building, and flat blocks, smaller, grow with the city, as the boxes
+   * did when they were the only far form.
    */
   function keeps(ch: Chunk, form: Merged): boolean {
     if (form === "simple") return ch.mid;
@@ -964,7 +969,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       const ahead: { c: number; ch: Chunk; d: number; form: Merged }[] = [];
       for (const [c, ch] of chunks) {
         const d = chunkDistance(c, camera.x, camera.z);
-        for (const form of MERGED) if (keeps(ch, form) && (!ch.built[form] || ch.stale[form])) ahead.push({ c, ch, d, form });
+        // The city band draws neither simple buildings nor boxes: they are built when a zoom in wants them, not ahead.
+        for (const form of MERGED) if ((form === "flat" || view.band !== "city") && keeps(ch, form) && (!ch.built[form] || ch.stale[form])) ahead.push({ c, ch, d, form });
       }
       ahead.sort((a, b) => a.d - b.d || a.c - b.c || (a.form < b.form ? -1 : 1));
       for (const a of ahead) {
