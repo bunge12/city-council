@@ -66,7 +66,7 @@ export function TopBar() {
         type="button"
         id="undo"
         disabled={!canUndo}
-        title={canUndo ? "Undo your last road change (Ctrl+Z or Cmd+Z)" : "Nothing to undo"}
+        title={canUndo ? "Undo your last road or zoning change (Ctrl+Z or Cmd+Z)" : "Nothing to undo"}
         onClick={() => void undo()}
       >
         Undo

@@ -114,6 +114,8 @@ describe("cell deltas", () => {
     run(zone("residential", [4200, 4470], [4300, 4470], 60));
     send();
     expect(zoned(copy)).toBeGreaterThan(0);
+    // The first undo takes back the paint (issue 111), the second the road.
+    run(command("Undo"));
     run(command("Undo"));
     const cells = send();
     expect(cells?.local.length).toBe(0);

@@ -65,6 +65,7 @@ import { isWaterAt, mapSize, slopeAt, type Terrain } from "../terrain/terrain";
 import { ZONING_BALANCE } from "./balance";
 import { CELL_KEY_STRIDE, noteCellsRelaid } from "./cell-changes";
 import { cellsPerPlace, fromLocal, zonableFields, type CellRef, type CellState } from "./cells";
+import { forJournalCells, journalCells, journalFits, readJournals } from "./zone-undo";
 import {
   STATION_FLOATS,
   anchorSpan,
@@ -288,6 +289,12 @@ export interface CellIndex {
    * stall the sim for tens of milliseconds at a time.
    */
   spare: { zone: Uint8Array; density: Uint8Array } | null;
+  /**
+   * Zoning an undo is bringing back with the segments it puts back
+   * (zone-undo.ts), for the next layout to give them. Set and used within
+   * one command, so never there across a tick.
+   */
+  restore: Int32Array | null;
   /**
    * True for a client's copy of a city, whose zone and density arrays are
    * laid out by cell deltas (delta.ts) and not here.
@@ -772,6 +779,7 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     touched: new Set<number>(),
     pending: null,
     spare: null,
+    restore: null,
     follows: false,
     dirty: null,
     watch: null,
@@ -938,6 +946,8 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   const limit = segmentIdLimit(net);
   const oldLimit = index.segs.length;
   const changed: Before[] = [];
+  const restore = index.restore;
+  index.restore = null;
   const look = [...index.touched];
   index.touched.clear();
   for (let id = Math.min(limit, oldLimit); id < Math.max(limit, oldLimit); id++) look.push(id);
@@ -1156,7 +1166,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
     for (let local = 0; local < gone.length; local++) if (marks?.[local] !== 1) work++;
   }
   // A copy's cells came laid out in the delta that brought the roads.
-  return { cells: index.follows ? cells : relayout(index, cells, changed, byAnchor), work, folded: earlier !== null };
+  return { cells: index.follows ? cells : relayout(index, cells, changed, byAnchor, restore), work, folded: earlier !== null };
 }
 
 /**
@@ -1227,7 +1237,13 @@ function drain(index: CellIndex, limit: number): boolean {
  * width: so a split, an upgrade, a reverse and an undo that joins pieces
  * again all keep each zone on its ground.
  */
-function relayout(index: CellIndex, cells: CellState, changed: readonly Before[], byAnchor: ReadonlyMap<string, Before[]>): CellState {
+function relayout(
+  index: CellIndex,
+  cells: CellState,
+  changed: readonly Before[],
+  byAnchor: ReadonlyMap<string, Before[]>,
+  restore: Int32Array | null,
+): CellState {
   const limit = index.segs.length;
   const offset = new Int32Array(limit + 1);
   // Up to the first changed id the runs start where they did.
@@ -1273,6 +1289,7 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
     stretch = c.id + 1;
   }
   copyStretch(Math.min(limit, oldLimit));
+  const restoring = restore ? new Map(readJournals(restore).map((j) => [j.seg, j])) : null;
   for (const c of changed) {
     if (c.id >= limit) continue;
     const s = index.segs[c.id];
@@ -1282,8 +1299,9 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
     const to = offset[c.id] ?? 0;
     zone.fill(0, to, to + status.length);
     density.fill(0, to, to + status.length);
-    const sources = byAnchor.get(anchorKeyOf(s));
-    if (!sources) continue;
+    const sources = byAnchor.get(anchorKeyOf(s)) ?? [];
+    const back = restoring?.get(c.id);
+    if (sources.length === 0 && !back) continue;
     // The first removed shape, in order, that has a cell's anchor cell gives it its zone.
     const got = new Uint8Array(status.length);
     for (const b of sources) {
@@ -1294,6 +1312,14 @@ function relayout(index: CellIndex, cells: CellState, changed: readonly Before[]
           zone[to + sl + d] = cells.zone[b.start + ol + d] ?? 0;
           density[to + sl + d] = cells.density[b.start + ol + d] ?? 0;
         }
+      });
+    }
+    // A cell no removed cell carried a zone to takes the one an undo brings back for it.
+    if (restore && back && journalCells(restore, back) === status.length && journalFits(index.net, back)) {
+      forJournalCells(restore, back, status.length, (local, z, d) => {
+        if (got[local] === 1) return;
+        zone[to + local] = z;
+        density[to + local] = d;
       });
     }
   }
@@ -1366,6 +1392,25 @@ export function laidOutCells(state: SimState): CellIndex {
   if (built) drain(index, Infinity);
   else state.cells = update(index, state.cells)?.cells ?? state.cells;
   return index;
+}
+
+/**
+ * Makes sure `state`'s roads have a cell index that has seen every change
+ * so far, so the next change is laid out from the cells as they are now.
+ * For an undo about to bring segments back with their zoning.
+ */
+export function readyCells(state: SimState): void {
+  laidOutCells(state);
+}
+
+/**
+ * Gives the segments an undo has just put back the zoning `journals` hold,
+ * at the next layout: each cell no removed cell carries a zone to takes the
+ * journal's. Call `readyCells` before the undo changes the roads.
+ */
+export function restoreZones(state: SimState, journals: Int32Array): void {
+  const index = live.get(state.roads);
+  if (index) index.restore = journals;
 }
 
 /**

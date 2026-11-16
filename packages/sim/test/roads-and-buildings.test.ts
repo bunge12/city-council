@@ -177,7 +177,10 @@ describe("a road that goes", () => {
   });
 
   it("takes its buildings when the build is undone", () => {
-    const { state } = housesBothSides();
+    const { state, ids } = housesBothSides();
+    // The first undo takes back the zoning and leaves the houses (issue 111), the second the street.
+    ok(state, command("Undo", {}));
+    expect(live(state)).toEqual(ids);
     ok(state, command("Undo", {}));
     expect(live(state)).toEqual([]);
     expect(state.cells.zone.length).toBe(0);

@@ -1,9 +1,12 @@
-// Undo (issue 14): each player takes back their own road changes, newest
-// first, while the result still makes sense.
+// Undo (issue 14): each player takes back their own road and zoning
+// changes, newest first, while the result still makes sense.
 //
 // Every BuildRoad, BuildRoadGrid, BulldozeRoad and UpgradeRoad that applies leaves an undo
 // record: the journal of network changes it made (roads/network.ts), tied to
-// its log entry. An `Undo` command finds its sender's newest record and runs
+// its log entry, with the zoning of any road it took away for good
+// (zoning/zone-undo.ts). Every ZoneCells leaves one too, holding what each
+// cell it painted held before (issue 111). Buildings never come back: the
+// road and the zoning do, and the grower builds again. An `Undo` command finds its sender's newest record and runs
 // the reverse of each change, last first. A segment or node the command
 // removed and left removed is held under its id until then, so it comes back as it was, at
 // the same place in its nodes' lists. Built and then undone with nothing in
@@ -24,6 +27,20 @@
 // changed by comparing references.
 
 import type { SimState } from "./state";
+import { noteFrontCells } from "./buildings/candidates";
+import { noteCellsPainted } from "./zoning/cell-changes";
+import { laidOutCells, readyCells, restoreZones } from "./zoning/cell-index";
+import { DENSITY_NONE, ZONE_NONE } from "./zoning/cells";
+import {
+  ZONE_UNTOUCHED,
+  checkJournals,
+  forJournalCells,
+  isZoneValue,
+  journalCells,
+  journalFits,
+  readJournals,
+  type ZoneValue,
+} from "./zoning/zone-undo";
 import { ROAD_BUILD, ROAD_TYPES } from "./roads/balance";
 import { hullBox, isStraight, quadsMeetAwayFrom, type Quad } from "./roads/curve";
 import {
@@ -56,9 +73,20 @@ export interface UndoRecord {
   entry: number;
   /** The command type, such as "BuildRoad". */
   type: string;
-  /** Every change it made to the network, oldest first. */
+  /** Every change it made to the network, oldest first. Empty for a ZoneCells. */
   ops: NetworkOp[];
+  /**
+   * For a road command, the zoning of each segment it took away for good,
+   * to give back with the segment. For a ZoneCells, what each cell it
+   * painted held before. One flat array of journals: see zoning/zone-undo.ts.
+   */
+  zones: Int32Array;
+  /** For a ZoneCells only: the zone and density it painted. */
+  painted?: ZoneValue;
 }
+
+/** The command type whose records hold a paint, not road changes. */
+const ZONE_CELLS = "ZoneCells";
 
 /** Most records each player keeps. */
 export const UNDO_STEPS = ROAD_BUILD.undoSteps;
@@ -67,6 +95,8 @@ const NOTHING = "Nothing to undo";
 const CHANGED = "Cannot undo: someone has changed or removed that road since";
 const JOINED = "Cannot undo: another road now joins one of its junctions";
 const IN_THE_WAY = "Cannot undo: a road built since is in the way";
+const ROAD_GONE = "Cannot undo: someone has changed or removed a road those cells are on";
+const REZONED = "Cannot undo: someone has rezoned those cells since";
 
 /** The ids a record holds: everything it removed and left removed, which waits for it to come back. */
 export function heldBy(record: UndoRecord): HeldIds {
@@ -125,7 +155,7 @@ export function planUndo(state: SimState, playerId: string): UndoPlanResult {
   const index = newestRecord(state.undo, playerId);
   const record = state.undo[index];
   if (!record) return { ok: false, reason: NOTHING };
-  const reason = rehearse(state.roads, record.ops);
+  const reason = record.type === ZONE_CELLS ? checkPaint(state, record) : rehearse(state.roads, record.ops);
   return reason === null ? { ok: true, index } : { ok: false, reason };
 }
 
@@ -133,8 +163,69 @@ export function planUndo(state: SimState, playerId: string): UndoPlanResult {
 export function applyUndo(state: SimState, index: number): void {
   const record = state.undo[index];
   if (!record) return;
-  reverseOps(state.roads, record.ops);
+  if (record.type === ZONE_CELLS) unpaint(state, record);
+  else {
+    // The cells must be laid out for the roads as they are before the
+    // roads change back, so the next layout sees the segments come back.
+    const zones = record.zones.length > 0;
+    if (zones) readyCells(state);
+    reverseOps(state.roads, record.ops);
+    if (zones) restoreZones(state, record.zones);
+  }
   state.undo = state.undo.filter((_, i) => i !== index);
+}
+
+/**
+ * Calls `visit` with the slot in `state.cells` of each cell a ZoneCells
+ * record changed, and what it held before. Returns why the record no
+ * longer applies, or null: a segment it painted is gone or is not the road
+ * it was, or a cell no longer holds what it painted.
+ */
+function forPainted(state: SimState, record: UndoRecord, visit: ((slot: number, zone: number, density: number) => void) | null): string | null {
+  // The cells laid out for the roads as they are, which can replace `state.cells`.
+  laidOutCells(state);
+  const cells = state.cells;
+  const painted = record.painted ?? { zone: ZONE_NONE, density: DENSITY_NONE };
+  for (const journal of readJournals(record.zones)) {
+    if (!journalFits(state.roads, journal)) return ROAD_GONE;
+    const start = cells.offset[journal.seg] ?? 0;
+    const count = (cells.offset[journal.seg + 1] ?? 0) - start;
+    if (journalCells(record.zones, journal) !== count) return ROAD_GONE;
+    let reason: string | null = null;
+    forJournalCells(record.zones, journal, count, (local, zone, density) => {
+      if (zone === ZONE_UNTOUCHED || reason !== null) return;
+      const slot = start + local;
+      if (cells.zone[slot] !== painted.zone || cells.density[slot] !== painted.density) reason = REZONED;
+      else visit?.(slot, zone, density);
+    });
+    if (reason !== null) return reason;
+  }
+  return null;
+}
+
+/** Why a ZoneCells record can no longer be undone, or null. */
+function checkPaint(state: SimState, record: UndoRecord): string | null {
+  return forPainted(state, record, null);
+}
+
+/** Puts back what a ZoneCells record's cells held. Only after `checkPaint` passed. */
+function unpaint(state: SimState, record: UndoRecord): void {
+  const slots: number[] = [];
+  const zones: number[] = [];
+  const densities: number[] = [];
+  forPainted(state, record, (slot, zone, density) => {
+    slots.push(slot);
+    zones.push(zone);
+    densities.push(density);
+  });
+  const cells = state.cells;
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i] ?? 0;
+    cells.zone[slot] = zones[i] ?? ZONE_NONE;
+    cells.density[slot] = densities[i] ?? DENSITY_NONE;
+  }
+  noteCellsPainted(state.roads, cells, slots);
+  noteFrontCells(state, slots);
 }
 
 /**
@@ -305,6 +396,14 @@ function isOp(value: unknown): boolean {
   }
 }
 
+function isRecordZones(record: Record<string, unknown>): boolean {
+  const zones = record["zones"];
+  if (record["type"] !== ZONE_CELLS) return record["painted"] === undefined && checkJournals(zones, false);
+  const painted = record["painted"];
+  if (!isRecord(painted) || !isZoneValue(painted["zone"], painted["density"])) return false;
+  return (record["ops"] as unknown[]).length === 0 && checkJournals(zones, true);
+}
+
 /** Why `value` is not an undo history, or null if it is. For loading a save. */
 export function checkUndoHistory(value: unknown): string | null {
   if (!Array.isArray(value)) return "it is not a list";
@@ -316,7 +415,8 @@ export function checkUndoHistory(value: unknown): string | null {
       !isId(record["entry"]) ||
       typeof record["type"] !== "string" ||
       !Array.isArray(record["ops"]) ||
-      !record["ops"].every(isOp)
+      !record["ops"].every(isOp) ||
+      !isRecordZones(record)
     ) {
       return `record ${i} is malformed`;
     }

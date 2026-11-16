@@ -189,13 +189,20 @@ export function planZoneCells(state: SimState, payload: unknown): ZonePlanResult
 /**
  * Plans and paints in one pass, as the step does: null once painted, or the
  * reason, with the city as it was. Refuses exactly what `planZoneCells`
- * refuses and changes exactly the cells it lists.
+ * refuses and changes exactly the cells it lists. `before`, when given, is
+ * called with the cells it is about to paint and the zone and density they
+ * get, while they still hold what they had, for the undo record.
  */
-export function zoneCellsIfValid(state: SimState, payload: unknown): string | null {
+export function zoneCellsIfValid(
+  state: SimState,
+  payload: unknown,
+  before?: (slots: readonly number[], zone: number, density: number) => void,
+): string | null {
   const parsed = parse(payload);
   if (typeof parsed === "string") return parsed;
   const slots = gather(state, parsed);
   if (slots.length === 0) return NOTHING;
+  before?.(slots, parsed.zone, parsed.density);
   const { zone, density } = state.cells;
   for (const slot of slots) {
     zone[slot] = parsed.zone;

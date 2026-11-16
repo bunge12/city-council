@@ -37,7 +37,7 @@ export interface AppServices {
   /** Reloads into saved city `id`, or reports why not. */
   openCity(id: string): Promise<void>;
   /**
-   * Sends `Undo` for this player's newest road change. A refusal's reason
+   * Sends `Undo` for this player's newest road or zoning change. A refusal's reason
    * goes in the UI store as `undoNote`, for the build bar to show.
    */
   undo(): Promise<CommandResult>;

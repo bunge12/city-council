@@ -471,7 +471,8 @@ describe("a client's copy", () => {
  * across the block. On day 2 p2 runs a street south off the south street,
  * outside the block, which splits it under the back lots. p2 bulldozes the
  * piece of the south street under x 4300 on day 4, which takes the
- * through-lot on it, and undoes that on day 6. Ten game days.
+ * through-lot on it, and undoes that on day 6, which brings the road back
+ * with its zoning but not its buildings. Ten game days.
  */
 function playSession(): SimState {
   const state = createState(SEED);
@@ -529,11 +530,13 @@ describe("replay fixture through-lots", () => {
     const beforeBulldoze = at(4 * DAY);
     const bulldozed = at(4 * DAY + 1);
     expect(throughIds(bulldozed).length).toBeLessThan(throughIds(beforeBulldoze).length);
-    // The front strip behind the lost one is free again, and grows lots of
-    // its own: the undo brings the road back but not its zoning, which is
-    // issue 16's.
+    // The undo brings the road back with its zoning but not its buildings
+    // (issue 111), and the block grows again.
+    const undone = at(6 * DAY + 1);
+    expect(undone.cells.zone.filter((z) => z !== 0).length).toBe(beforeBulldoze.cells.zone.filter((z) => z !== 0).length);
+    expect(live(undone).length).toBeLessThanOrEqual(live(at(6 * DAY)).length);
     const end = runFixture(fixture).state;
-    expect(live(end).length).toBeGreaterThan(live(bulldozed).length);
+    expect(live(end).length).toBeGreaterThan(live(undone).length);
     expect(live(end).filter((id) => (end.buildings.backDepth[id] ?? 0) === 0).length).toBeGreaterThan(0);
   });
 
