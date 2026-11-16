@@ -23,14 +23,20 @@ export interface ZoneMarkArrays {
 }
 
 /**
- * One quad a cell, shrunk around its centre by `ZONE_PREVIEW.inset` so
- * neighbouring cells read apart, lifted over the ground.
+ * One quad a cell, shrunk around its centre by `inset` so neighbouring
+ * cells read apart, lifted `lift` metres over the ground. The building
+ * marks (building-marks.ts) draw lots the same way.
  */
-export function buildZoneMarks(marks: readonly ZoneMark[], height: (x: number, z: number) => number): ZoneMarkArrays {
+export function buildZoneMarks(
+  marks: readonly ZoneMark[],
+  height: (x: number, z: number) => number,
+  inset: number = ZONE_PREVIEW.inset,
+  lift: number = ZONE_PREVIEW.lift,
+): ZoneMarkArrays {
   const positions = new Float32Array(marks.length * 12);
   const colours = new Float32Array(marks.length * 12);
   const indices = new Uint32Array(marks.length * 6);
-  const k = ZONE_PREVIEW.inset;
+  const k = inset;
   marks.forEach((m, n) => {
     const c = m.corners;
     const cx = ((c[0] ?? 0) + (c[2] ?? 0) + (c[4] ?? 0) + (c[6] ?? 0)) / 4;
@@ -40,7 +46,7 @@ export function buildZoneMarks(marks: readonly ZoneMark[], height: (x: number, z
       const x = cx + ((c[i * 2] ?? 0) - cx) * k;
       const z = cz + ((c[i * 2 + 1] ?? 0) - cz) * k;
       const v = n * 4 + i;
-      positions.set([x, height(x, z) + ZONE_PREVIEW.lift, z], v * 3);
+      positions.set([x, height(x, z) + lift, z], v * 3);
       colours.set(rgb, v * 3);
     }
     const v0 = n * 4;

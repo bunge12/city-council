@@ -1,6 +1,6 @@
 import { SNAP } from "../tools/config";
 import type { Snap } from "../tools/snap";
-import { formatMoneyShort } from "./format";
+import { formatClears, formatMoneyShort } from "./format";
 import { useRoadHover } from "./store";
 
 /** A length in whole cells when it is one, otherwise to a tenth. */
@@ -27,7 +27,7 @@ const OFFSET = 18;
  * Next to the cursor while a road is being drawn: its type, length in metres
  * and in cells, cost, how much of it is bridge, and angle to the road it
  * starts from, or the reason the sim would refuse it, and the gap a parallel
- * offset holds. Before the first click it shows only the offset, when one
+ * offset holds, and the buildings it would clear with their residents. Before the first click it shows only the offset, when one
  * caught the cursor. The numbers are also on data attributes, in metres,
  * whole dollars and degrees, for tests.
  */
@@ -51,6 +51,7 @@ export function RoadReadout() {
   }
   const length = `${preview.length.toFixed(0)} m`;
   const angle = snap?.angle ?? null;
+  const clears = preview.ok ? formatClears(preview.clears) : null;
   return (
     <div
       className={preview.ok ? "road-readout" : "road-readout refused"}
@@ -66,6 +67,8 @@ export function RoadReadout() {
       data-snap={snap?.kind ?? "none"}
       data-square={String(snap?.square ?? false)}
       data-offset-cells={cells === null ? "" : String(cells)}
+      data-clears={String(preview.clears?.ids.length ?? 0)}
+      data-residents={String(preview.clears?.residents ?? 0)}
       style={{ left: hover.x + OFFSET, top: hover.y + OFFSET }}
     >
       <div className="what">
@@ -86,6 +89,11 @@ export function RoadReadout() {
       {preview.ok && preview.junctions.length > 0 && (
         <div className="junctions">
           {preview.junctions.length === 1 ? "1 junction" : `${preview.junctions.length} junctions`}
+        </div>
+      )}
+      {clears !== null && (
+        <div className="clears" id="road-clears">
+          {clears}
         </div>
       )}
       {!preview.ok && <div className="reason" id="road-reason">{preview.reason}</div>}

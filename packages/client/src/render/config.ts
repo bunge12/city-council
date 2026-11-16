@@ -478,6 +478,12 @@ export const CELLS = {
   linePx: 1.25,
   lineMaxShare: 0.1,
   /**
+   * Free zoned ground where no building type fits (issue M2-15): stripes of
+   * `colour` across the cell, `stripeMetres` apart along x + z, each
+   * `stripeShare` of that wide. None in the city band, where the cells have no lines.
+   */
+  noLot: { colour: 0x1f2a16, stripeMetres: 3, stripeShare: 0.4 },
+  /**
    * Height over the ground, as the roads have it (`ROADS.lift`) but lower at
    * every distance, so a cell lies over the terrain without flicker and
    * under the road beside it.
@@ -537,4 +543,25 @@ export const ZONE_PREVIEW = {
   lift: 0.3,
   /** Each cell is drawn this share of its size, around its centre, so neighbouring cells stay apart. */
   inset: 0.9,
+} as const;
+
+/**
+ * The lots of buildings the tools point at (issue M2-15): those a road or a
+ * grid would clear, and the one under the pointer. Drawn through the
+ * terrain and the buildings, like the road preview, so a lot shows behind
+ * the building standing on it.
+ */
+export const BUILDING_MARKS = {
+  /** The lots a click would clear. */
+  clear: 0xe5372b,
+  clearOpacity: 0.7,
+  /** The lots of a road or grid sent and not yet built. */
+  pendingOpacity: 0.45,
+  /** The lot of the building under the pointer. */
+  hover: 0xffffff,
+  hoverOpacity: 0.4,
+  /** Share of the lot's size each mark is drawn at, around its centre, so neighbouring lots read apart. */
+  inset: 0.94,
+  /** Metres over the ground. */
+  lift: 0.35,
 } as const;

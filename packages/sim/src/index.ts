@@ -87,6 +87,7 @@ export type { BuildingType, BuildingTypeBalance, BuildingsBalance } from "./buil
 export { BUILDING_ALIVE, buildingCount, buildingIdLimit, isBuilding, readBuilding } from "./buildings/buildings";
 export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
+export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
 export { GROWER_SYSTEM, dayOf, freeFrontCells, growthOnTick, planDay, residentsFor } from "./buildings/grower";
 export { createGrowth, type GrowthState } from "./buildings/growth";

@@ -1,7 +1,7 @@
 // Number formatting for the UI. Display only: nothing here feeds back into
 // state.
 
-import type { GameDate } from "@city-council/sim";
+import type { BuildingsInTheWay, GameDate } from "@city-council/sim";
 
 const UNITS = [
   { size: 1e12, suffix: "T" },
@@ -49,4 +49,17 @@ export function formatGameDate(date: GameDate): string {
 /** Speed as the page shows it: "paused", "1x" and so on. */
 export function formatSpeed(speed: number): string {
   return speed === 0 ? "paused" : `${speed}x`;
+}
+
+/**
+ * What a road or a grid would clear (issue M2-15), such as "Clears 3
+ * buildings, 12 residents", or null when it clears none. Residents are left
+ * out when the buildings hold none, as shops and offices do.
+ */
+export function formatClears(clears: BuildingsInTheWay | null | undefined): string | null {
+  const n = clears?.ids.length ?? 0;
+  if (!clears || n === 0) return null;
+  const buildings = n === 1 ? "1 building" : `${n} buildings`;
+  const r = clears.residents;
+  return r === 0 ? `Clears ${buildings}` : `Clears ${buildings}, ${r === 1 ? "1 resident" : `${r.toLocaleString("en-US")} residents`}`;
 }

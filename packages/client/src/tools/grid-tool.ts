@@ -33,6 +33,8 @@ import {
   snapToGrid,
   type BuildPoint,
   type BuildRoadGridPayload,
+  type BuildingsInTheWay,
+  type GridPlan,
   type CommandResult,
   type GridStreet,
   type RoadNetwork,
@@ -73,7 +75,17 @@ export interface GridPreview {
   length: number;
   /** Whole dollars. Not charged until M4. */
   cost: number;
+  /**
+   * The buildings the grid would clear and their residents, from the sim's
+   * `gridClears` on the mirror (issue M2-15). Null while the rectangle is
+   * being dragged, since rehearsing a big grid takes tens of milliseconds,
+   * and for a refused grid.
+   */
+  clears: BuildingsInTheWay | null;
 }
+
+/** Finds the buildings a planned grid would clear: the sim's `gridClears` on the mirror. */
+export type GridClears = (plan: GridPlan) => BuildingsInTheWay;
 
 /** A grid the tool has sent and the sim has not yet built or refused. */
 export interface PendingGrid {
@@ -210,11 +222,11 @@ const samePoint = (p: BuildPoint, q: BuildPoint): boolean => p.x === q.x && p.z 
  * Changes nothing. A refused plan has no streets; a plan whose link the
  * sim would refuse keeps its streets and names the street, as the sim does.
  */
-export function previewGrid(net: RoadNet, terrain: Terrain, payload: BuildRoadGridPayload): GridPreview {
+export function previewGrid(net: RoadNet, terrain: Terrain, payload: BuildRoadGridPayload, clearsOf: GridClears | null = null): GridPreview {
   const type = typeById(payload.type);
   const result = planRoadGrid(asNetwork(net), terrain, payload);
   if (!result.ok) {
-    return { payload, type, ok: false, reason: result.reason, streets: [], junctions: [], cuts: [], length: 0, cost: 0 };
+    return { payload, type, ok: false, reason: result.reason, streets: [], junctions: [], cuts: [], length: 0, cost: 0, clears: null };
   }
   const { streets, length, cost } = result.plan;
   const junctions: BuildPoint[] = [];
@@ -244,7 +256,8 @@ export function previewGrid(net: RoadNet, terrain: Terrain, payload: BuildRoadGr
       }
     }
   });
-  return { payload, type, ok: reason === null, reason, streets, junctions, cuts, length, cost: reason === null ? cost : 0 };
+  const ok = reason === null;
+  return { payload, type, ok, reason, streets, junctions, cuts, length, cost: ok ? cost : 0, clears: ok && clearsOf ? clearsOf(result.plan) : null };
 }
 
 /** The road preview strips for a grid: one per link, with junction discs on the links that meet a road. */
@@ -292,8 +305,12 @@ export function gridMarks(payload: BuildRoadGridPayload, cuts: readonly BuildPoi
 export interface GridToolHost {
   get(): GridToolState & Pick<RoadToolState, "tool" | "roadType" | "guides">;
   set(patch: Partial<GridToolState & Pick<RoadToolState, "tool" | "roadNote" | "roadStart" | "roadControl" | "roadChain">>): void;
-  /** The mirror's roads and the map, and its zoned cells for the snap, or null before the first snapshot. */
-  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup } | null;
+  /**
+   * The mirror's roads and the map, its zoned cells for the snap, and a way
+   * to find the buildings a grid would clear, or null before the first
+   * snapshot.
+   */
+  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup; clears?: GridClears } | null;
   /** Sends `BuildRoadGrid` and resolves once the sim has built it, or with why it did not. */
   send(payload: BuildRoadGridPayload): Promise<CommandResult>;
 }
@@ -316,6 +333,8 @@ export class GridToolController {
   private cacheKey = "";
   private cached: GridPreview | null = null;
   private version = 0;
+  /** Counts mirror updates that carried buildings, so the buildings in the way are found again. */
+  private buildingsVersion = 0;
 
   constructor(host: GridToolHost) {
     this.host = host;
@@ -440,9 +459,51 @@ export class GridToolController {
     if (this.host.get().gridDragging) this.drop();
   }
 
-  /** Call on every mirror update, so the preview is checked again against the new roads. */
-  mirrorUpdated(update: { kind: "snapshot" } | { kind: "delta"; steps: number; roadNodes: readonly number[]; roadSegs: readonly number[] }): void {
+  /**
+   * Call on every mirror update, so the preview is checked again against the
+   * new roads. `lotOf` gives a standing building's lot corners. The
+   * buildings in the way are found again only when a building that came or
+   * went was among them or stands within reach of the rectangle, since
+   * rehearsing a big grid takes tens of milliseconds and a growing city
+   * changes buildings nearly every tick.
+   */
+  mirrorUpdated(
+    update: { kind: "snapshot" } | { kind: "delta"; steps: number; roadNodes: readonly number[]; roadSegs: readonly number[]; buildingIds?: readonly number[] },
+    lotOf: (id: number) => readonly number[] | null = () => null,
+  ): void {
     if (update.kind === "snapshot" || update.roadNodes.length > 0 || update.roadSegs.length > 0) this.version++;
+    if (update.kind === "snapshot") {
+      this.buildingsVersion++;
+      return;
+    }
+    const ids = update.buildingIds ?? [];
+    if (ids.length === 0) return;
+    const counted = this.cached?.clears?.ids ?? [];
+    const box = this.reach();
+    const near = (id: number): boolean => {
+      if (counted.includes(id)) return true;
+      const c = lotOf(id);
+      if (!c || !box) return false;
+      for (let i = 0; i + 1 < c.length; i += 2) {
+        const x = c[i] ?? 0;
+        const z = c[i + 1] ?? 0;
+        if (x >= box.x0 && x <= box.x1 && z >= box.z0 && z <= box.z1) return true;
+      }
+      return false;
+    };
+    if (ids.some(near)) this.buildingsVersion++;
+  }
+
+  /** The rectangle's bounding box, widened by a street's reach, or null when none is drawn. */
+  private reach(): { x0: number; z0: number; x1: number; z1: number } | null {
+    const p = this.payload();
+    if (!p) return null;
+    const far = { x: p.along.x + p.across.x - p.origin.x, z: p.along.z + p.across.z - p.origin.z };
+    const xs = [p.origin.x, p.along.x, p.across.x, far.x];
+    const zs = [p.origin.z, p.along.z, p.across.z, far.z];
+    // A street's surface reaches half its width past its line; a lot's corner can sit outside the box while the lot crosses it.
+    const pad = GRID_TOOL.clearsReachMetres;
+    return { x0: Math.min(...xs) - pad, x1: Math.max(...xs) + pad, z0: Math.min(...zs) - pad, z1: Math.max(...zs) + pad };
   }
 
   /** The payload for the rectangle drawn now, or null when there is none or it has no size. */
@@ -453,15 +514,20 @@ export class GridToolController {
     return gridPayload(s.gridOrigin, s.gridCorner, s.gridDir, s.gridDepthCells, s.gridWidthCells, s.roadType);
   }
 
-  /** The preview of the rectangle drawn now, worked out again only when it or the roads change. */
+  /**
+   * The preview of the rectangle drawn now, worked out again only when it or
+   * the roads change. The buildings in its way are found once the drag is
+   * over, and again when buildings come or go.
+   */
   preview(): GridPreview | null {
     const payload = this.payload();
     const world = this.host.world();
     if (!payload || !world) return null;
-    const key = `${JSON.stringify(payload)}|${this.version}`;
+    const settled = !this.host.get().gridDragging && world.clears !== undefined;
+    const key = `${JSON.stringify(payload)}|${this.version}|${settled ? this.buildingsVersion : "-"}`;
     if (key !== this.cacheKey) {
       this.cacheKey = key;
-      this.cached = previewGrid(world.net, world.terrain, payload);
+      this.cached = previewGrid(world.net, world.terrain, payload, settled ? (world.clears ?? null) : null);
     }
     return this.cached;
   }
