@@ -31,7 +31,9 @@ async function groups(page: Page, menu: string): Promise<string[]> {
 test("the dock shows only the road button until a road tool is on, and opens the road menu above it", async ({ page }, testInfo) => {
   await open(page);
   await expect(page.locator("#road-tool")).toBeVisible();
-  for (const id of ["#road-menu", "#road-type-street", "#draw-mode-straight", "#grid-tool", "#guide-angle", "#bulldoze-tool"]) {
+  // The bulldozer has its own button beside the road's (issue 116).
+  await expect(page.locator("#bulldoze-tool")).toBeVisible();
+  for (const id of ["#road-menu", "#bulldoze-menu", "#road-type-street", "#draw-mode-straight", "#grid-tool", "#guide-angle"]) {
     await expect(page.locator(id)).toHaveCount(0);
   }
   await attach(page, testInfo, "1 the dock with no tool on");
@@ -48,13 +50,17 @@ test("the dock shows only the road button until a road tool is on, and opens the
   expect(menu.x + menu.width).toBeGreaterThan(button.x + button.width);
   await attach(page, testInfo, "2 the road menu above the road button");
 
-  // Bulldoze keeps the menu open with only the actions; pressing it again goes back to drawing.
+  // The bulldozer closes the road menu and opens its own, with its filters; pressing it again turns it off.
   await page.locator("#bulldoze-tool").click();
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("#road-tool")).toHaveAttribute("aria-expanded", "true");
-  expect(await groups(page, "#road-menu")).toEqual(["Actions"]);
+  await expect(page.locator("#road-menu")).toHaveCount(0);
+  expect(await groups(page, "#bulldoze-menu")).toEqual(["Removes"]);
+  await expect(page.locator("#bulldoze-filter-building")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#bulldoze-filter-road")).toHaveAttribute("aria-pressed", "true");
   await attach(page, testInfo, "3 bulldoze on");
   await page.locator("#bulldoze-tool").click();
+  await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "false");
+  await page.locator("#road-tool").click();
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "true");
 
   // Upgrade shows the road type it upgrades to.

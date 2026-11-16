@@ -180,7 +180,7 @@ test("draws a square block with clicks up to 10 pixels off target", async ({ pag
   await setPose(page, [4350, g + 170, 4740], [4350, g, 4610]);
   // Close enough that 10 px is well under half a cell, as a player zooms in to place a block.
   expect(await metresPerPixel(page, 4350, 4610)).toBeLessThan(0.45);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyZ");
   for (const id of ["angle", "length"]) await expect(page.locator(`#guide-${id}`)).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#guide-grid")).toHaveAttribute("aria-pressed", "false");

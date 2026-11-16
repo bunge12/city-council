@@ -5,10 +5,11 @@
 // middle drag orbits, wheel zooms towards the cursor, a left click picks the
 // ground and a right click without a drag is reported too, so a tool can
 // use it to cancel, and so is a double click, which ends a continuous road.
-// While a tool that drags is on (bulldoze and upgrade, issue M1-13), a left
+// While a tool that drags is on (the bulldozer and upgrade, issue M1-13), a left
 // drag goes to that tool instead of panning; Shift and a left drag still
 // orbit, and the keys still pan. Keyboard: WASD or arrows pan, Q and E turn,
-// R and F tilt, + and - zoom on the screen centre.
+// Page Up and Page Down tilt (issue 116; R is the road tool), + and - zoom
+// on the screen centre.
 
 import { Mesh, MeshBasicNodeMaterial, RingGeometry, type Scene } from "three/webgpu";
 import { CAMERA_SPEEDS, CLICK_SLOP, CURSOR_MARKER_SCALE } from "./config";
@@ -69,8 +70,8 @@ const KEYS: Record<string, string> = {
   ArrowRight: "right",
   KeyQ: "turnLeft",
   KeyE: "turnRight",
-  KeyR: "tiltUp",
-  KeyF: "tiltDown",
+  PageUp: "tiltUp",
+  PageDown: "tiltDown",
   Equal: "zoomIn",
   NumpadAdd: "zoomIn",
   Minus: "zoomOut",

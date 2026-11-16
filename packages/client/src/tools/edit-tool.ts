@@ -1,12 +1,14 @@
-// The bulldoze and upgrade tools (issue M1-13).
+// The upgrade tool (issue M1-13), and the road edits the bulldozer uses.
 //
-//   bulldoze  hover a segment to see it marked and what removing it costs,
-//             click to send `BulldozeRoad`
 //   upgrade   hover a segment to see it as the type picked in the road type
 //             picker, click to send `UpgradeRoad`. A right-click on a one-way
 //             reverses it
 //
-// With either tool a left drag collects every segment the pointer passes
+// The bulldozer has been a tool of its own since issue 116
+// (bulldoze-tool.ts). It still prices a road with `previewEdit` here and
+// draws it with `editShapes`.
+//
+// With the upgrade tool a left drag collects every segment the pointer passes
 // over and sends one command for all of them on release, so the activity log
 // gets one entry. A segment the tool could not act on alone is left out of
 // the drag: a fixed one, or for an upgrade one that is already the type
@@ -168,8 +170,8 @@ export const INITIAL_EDIT_TOOL: EditToolState = {
   editNote: null,
 };
 
-/** The edit tools' ids. */
-export type EditToolId = "bulldoze" | "upgrade";
+/** The edit tools' ids. The bulldozer left them in issue 116. */
+export type EditToolId = "upgrade";
 
 /** What the controller needs from the page. */
 export interface EditToolHost {
@@ -184,7 +186,7 @@ export interface EditToolHost {
 /** Nothing being drawn with the road tool. */
 const ROAD_IDLE = { roadStart: null, roadControl: null, roadChain: 0 } as const;
 
-/** The bulldoze and upgrade tools' input handling. Holds no state of its own beyond a counter for ids. */
+/** The upgrade tool's input handling. Holds no state of its own beyond a counter for ids. */
 export class EditToolController {
   private readonly host: EditToolHost;
   private nextId = 1;
@@ -201,8 +203,7 @@ export class EditToolController {
 
   /** The edit tool that is on, or null. */
   active(): EditToolId | null {
-    const tool = this.host.get().tool;
-    return tool === "bulldoze" || tool === "upgrade" ? tool : null;
+    return this.host.get().tool === "upgrade" ? "upgrade" : null;
   }
 
   /** Turns tool `id` on, or off when it is on. Either way a road being drawn and a drag are dropped. */

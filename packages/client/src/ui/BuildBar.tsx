@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ROAD_TYPES, ZONING_BALANCE } from "@city-council/sim";
 import { FREE_HAND_KEY_LABEL, GUIDES } from "../tools/config";
+import { BULLDOZE_TARGETS } from "../tools/bulldoze-tool";
 import { DRAW_MODES, TOOL_ROAD_TYPES, type DrawMode } from "../tools/road-tool";
 import { ZONE_DEPTHS, ZONE_MODES, type ZoneMode } from "../tools/zone-tool";
 import { GridPanel, gridHint } from "./GridPanel";
@@ -27,12 +28,16 @@ function toolHint(mode: DrawMode, drawing: boolean, curving: boolean): string {
   return "Click to end the road. Esc or right-click drops it.";
 }
 
-/** What the hint says while the bulldoze or upgrade tool is on. */
-function editHint(tool: "bulldoze" | "upgrade", dragging: boolean, type: string): string {
+/** What the hint says while the upgrade tool is on. */
+function editHint(dragging: boolean, type: string): string {
   if (dragging) return "Release to apply to every road marked. Esc drops the drag.";
-  const drag = "Drag across roads to take several at once. Shift-drag orbits.";
-  if (tool === "bulldoze") return `Click a road to bulldoze it. ${drag}`;
-  return `Click a road to upgrade it to ${type.toLowerCase()}. Right-click a one-way to reverse it. ${drag}`;
+  return `Click a road to upgrade it to ${type.toLowerCase()}. Right-click a one-way to reverse it. Drag across roads to take several at once. Shift-drag orbits.`;
+}
+
+/** What the hint says while the bulldozer is on. */
+function bulldozeHint(dragging: boolean): string {
+  if (dragging) return "Release to remove everything marked. Esc drops the drag.";
+  return "Click what is under the pointer to remove it. Drag to take every thing of the kind the drag starts on. Shift-drag orbits.";
 }
 
 const ZONE_MODE_LABELS: Record<ZoneMode, { label: string; title: string }> = {
@@ -64,11 +69,13 @@ function MenuGroup({ label, id, children }: { label: string; id: string; childre
 /**
  * The build dock along the bottom edge. Its road button opens the road menu
  * above it, and the menu is hidden while no road tool is on, so the dock
- * stays short (issue 47). Bulldoze and upgrade are actions in the menu, and
- * the grid is a build mode beside straight, curved and continuous.
+ * stays short (issue 47). Upgrade is an action in the menu, and the grid is
+ * a build mode beside straight, curved and continuous. The bulldozer has its
+ * own button beside the road's, with its filters in a menu above it (issue
+ * 116).
  */
 export function BuildBar() {
-  const { roadTool, gridTool, editTool, zoneTool } = useServices();
+  const { roadTool, gridTool, editTool, bulldozeTool, zoneTool } = useServices();
   const ready = useSim((s) => s !== null);
   const undoNote = useUi((s) => s.undoNote);
   const tool = useUi((s) => s.tool);
@@ -95,29 +102,36 @@ export function BuildBar() {
   const zoneBrushing = useUi((s) => s.zoneBrush !== null);
   const zonePending = useUi((s) => s.zonePending.length);
   const zoneNote = useUi((s) => s.zoneNote);
+  const bulldozeDragging = useUi((s) => s.bulldozeDrag !== null);
+  const bulldozePending = useUi((s) => s.bulldozePending.length);
+  const bulldozeNote = useUi((s) => s.bulldozeNote);
+  const filters = useUi((s) => s.bulldozeFilters);
   const zoning = tool === "zone";
+  const bulldozing = tool === "bulldoze";
   const active = tool === "road";
   const gridding = tool === "grid";
-  const editing = tool === "bulldoze" || tool === "upgrade";
+  const editing = tool === "upgrade";
   const roadMenu = active || editing || gridding;
 
-  let hint = "Pick the road tool to draw roads, or the zone tool to zone along them.";
+  let hint = "Pick the road tool to draw roads, the zone tool to zone along them, or the bulldozer to remove things.";
   if (active) {
     hint = toolHint(roadMode, drawing, curving);
     hint += ` Hold ${FREE_HAND_KEY_LABEL} to draw free-hand.`;
   } else if (gridding) {
     hint = gridHint(gridDrawn, gridDragging, gridOnRoad);
   } else if (editing) {
-    hint = editHint(tool, dragging, typeName(roadType));
+    hint = editHint(dragging, typeName(roadType));
+  } else if (bulldozing) {
+    hint = bulldozeHint(bulldozeDragging);
   } else if (zoning) {
     hint = zoneHint(zoneMode, zoneBrushing, zoneDepth);
   }
-  const shownNote = editing ? editNote : gridding ? gridNote : zoning ? zoneNote : note;
+  const shownNote = editing ? editNote : bulldozing ? bulldozeNote : gridding ? gridNote : zoning ? zoneNote : note;
 
   // An action or the grid that is on goes back to drawing roads rather than closing the menu.
-  const action = (id: "upgrade" | "bulldoze") => {
-    editTool.toggle(id);
-    if (tool === id) roadTool.toggle();
+  const upgrade = () => {
+    editTool.toggle("upgrade");
+    if (tool === "upgrade") roadTool.toggle();
   };
   const grid = () => {
     gridTool.toggle();
@@ -155,22 +169,12 @@ export function BuildBar() {
                   aria-pressed={tool === "upgrade"}
                   disabled={!ready}
                   title="Upgrade (V): change a road to the type picked"
-                  onClick={() => action("upgrade")}
+                  onClick={upgrade}
                 >
                   Upgrade <kbd>V</kbd>
                 </button>
-                <button
-                  type="button"
-                  id="bulldoze-tool"
-                  aria-pressed={tool === "bulldoze"}
-                  disabled={!ready}
-                  title="Bulldoze (N): remove roads"
-                  onClick={() => action("bulldoze")}
-                >
-                  Bulldoze <kbd>N</kbd>
-                </button>
               </MenuGroup>
-              {tool !== "bulldoze" && roadTypes}
+              {roadTypes}
               {(active || gridding) && (
                 <MenuGroup label="Build mode" id="draw-modes">
                   {DRAW_MODES.map((mode) => (
@@ -224,10 +228,42 @@ export function BuildBar() {
             aria-expanded={roadMenu}
             aria-controls={roadMenu ? "road-menu" : undefined}
             disabled={!ready}
-            title="Road tool (B)"
+            title="Road tool (R)"
             onClick={() => roadTool.toggle()}
           >
-            Road <kbd>B</kbd>
+            Road <kbd>R</kbd>
+          </button>
+        </div>
+        <div className="dock-slot">
+          {bulldozing && (
+            <div className="panel tool-menu" id="bulldoze-menu" aria-label="Bulldozer options">
+              <MenuGroup label="Removes" id="bulldoze-filters">
+                {BULLDOZE_TARGETS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    id={`bulldoze-filter-${t.id}`}
+                    aria-pressed={filters[t.id]}
+                    title={`${t.label}: ${filters[t.id] ? "the pointer picks them" : "the pointer passes over them"}`}
+                    onClick={() => bulldozeTool.toggleFilter(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </MenuGroup>
+            </div>
+          )}
+          <button
+            type="button"
+            id="bulldoze-tool"
+            aria-pressed={bulldozing}
+            aria-expanded={bulldozing}
+            aria-controls={bulldozing ? "bulldoze-menu" : undefined}
+            disabled={!ready}
+            title="Bulldozer (B): remove what is under the pointer"
+            onClick={() => bulldozeTool.toggle()}
+          >
+            Bulldoze <kbd>B</kbd>
           </button>
         </div>
         <div className="dock-slot">
@@ -316,6 +352,7 @@ export function BuildBar() {
         {hint}
         {pending > 0 && <span id="road-pending"> Building {pending === 1 ? "1 road" : `${pending} roads`}…</span>}
         {gridPending > 0 && <span id="grid-pending"> Building {gridPending === 1 ? "1 grid" : `${gridPending} grids`}…</span>}
+        {bulldozePending > 0 && <span id="bulldoze-pending"> Removing {bulldozePending === 1 ? "1 thing" : `${bulldozePending} things`}…</span>}
         {editPending > 0 && <span id="edit-pending"> Applying {editPending === 1 ? "1 change" : `${editPending} changes`}…</span>}
         {zonePending > 0 && <span id="zone-pending"> Zoning {zonePending === 1 ? "1 stroke" : `${zonePending} strokes`}…</span>}
       </p>

@@ -158,7 +158,7 @@ test("draws a street, crosses it with an avenue, and refuses a road into water",
   expect(await logLength(page)).toBe(0);
 
   // B turns the tool on; Z picks streets.
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("KeyX");
   await expect(page.locator("#road-type-avenue")).toHaveAttribute("aria-pressed", "true");
@@ -258,9 +258,9 @@ test("Escape drops a road being drawn, and the keys are listed with the others",
   await page.keyboard.press("Escape");
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "false");
   // B toggles the tool.
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "false");
 
   await page.keyboard.press("Backquote");

@@ -142,7 +142,7 @@ test("a street drawn along the back of a zoned strip snaps to its corners and le
   expect((await strip(page)).every((c) => c.open && c.zoned)).toBe(true);
   expect(await strip(page)).toHaveLength(8 * DEPTH);
 
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyZ");
   await expect(page.locator("#guide-cells")).toHaveAttribute("aria-pressed", "true");
   const log0 = await page.evaluate(() => window.cityCouncil.mirror.state?.log.length ?? 0);
@@ -180,7 +180,7 @@ test("the Cells toggle turns the source off", async ({ page }, testInfo) => {
   await openCity(page, zonedStrip());
   await look(page, (X0 + X1) / 2, BACK + 10, 150);
   await page.locator("#view").focus();
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyZ");
   const at = { x: X0 + 3 * CELL, z: BEHIND };
   expect((await hover(page, at.x, at.z, [4, 4]))?.kind).toBe("corner");

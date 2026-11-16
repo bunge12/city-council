@@ -185,12 +185,12 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   await attach(page, testInfo, "1 a street from the city file, nothing to undo");
 
   // Draw a street west to east across it. It splits the street it crosses.
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyZ");
   await click(page, 4220, 4600);
   await click(page, 4480, 4600);
   await expect.poll(async () => (await logTypes(page)).length).toBe(startLog + 1);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await expect(undoButton).toBeEnabled();
   const built = await roads(page);
   const west = await segmentNear(page, 4285, 4600);
@@ -224,10 +224,10 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   await page.getByRole("button", { name: "Pause" }).click();
 
   // Bulldoze the east piece, which takes its house.
-  await page.keyboard.press("KeyN");
+  await page.keyboard.press("KeyB");
   await click(page, 4415, 4600);
   await expect.poll(async () => (await segmentNear(page, 4415, 4600)).id).toBe(-1);
-  await page.keyboard.press("KeyN");
+  await page.keyboard.press("KeyB");
   await expect.poll(() => zonedCount(page)).toBe(0);
   expect(await buildingCount(page)).toBe(0);
   await attachZoning(page, testInfo, "5 bulldozed the east piece, its zoning and its house");

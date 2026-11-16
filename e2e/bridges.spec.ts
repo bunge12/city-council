@@ -104,7 +104,7 @@ async function band(page: Page): Promise<string | undefined> {
 test("a street drawn across the river becomes a bridge, shown in the preview, the cost and both near bands", async ({ page }, testInfo) => {
   await openCity(page, Buffer.from(serialize(createState(SEED))));
   await look(page, RIVER.mid, RIVER.z, 260);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await click(page, RIVER.x0, RIVER.z);
   await hover(page, RIVER.x1, RIVER.z);
 
@@ -146,7 +146,7 @@ test("a second bridge across the first, and a road that ends in the water, are r
   buildRoads(state, [[[RIVER.x0, RIVER.z], [RIVER.x1, RIVER.z], "street"]]);
   await openCity(page, Buffer.from(serialize(state)));
   await look(page, RIVER.mid, RIVER.z, 300);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   const readout = page.locator("#road-readout");
 
   // From the north-west bank to the south-east one, across the bridge over the water.

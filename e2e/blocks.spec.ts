@@ -110,7 +110,7 @@ test("closes a loop of streets, sees the block and its area, bulldozes a side an
 
   // Close the loop with the road tool: a street up the west side.
   const before = await liveSegments(page);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("KeyZ");
   await click(page, 4200, 4700);
@@ -136,7 +136,7 @@ test("closes a loop of streets, sees the block and its area, bulldozes a side an
   await attach(page, testInfo, "1 the closed loop's block outlined with its area");
 
   // Bulldoze the east side. The block goes.
-  await page.keyboard.press("KeyN");
+  await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
   await click(page, 4400, 4600);
   await expect.poll(() => liveSegments(page)).toBe(before);

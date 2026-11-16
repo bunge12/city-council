@@ -103,7 +103,9 @@ describe("shortcuts", () => {
   });
 
   it("maps B to the road tool, Z X C to the road types and Escape to cancel", () => {
-    expect(shortcutFor(press("KeyB"))).toEqual({ kind: "roadTool" });
+    expect(shortcutFor(press("KeyR"))).toEqual({ kind: "roadTool" });
+    expect(shortcutFor(press("KeyB"))).toEqual({ kind: "bulldozeTool" });
+    expect(shortcutFor(press("KeyN"))).toBeNull();
     expect(shortcutFor(press("KeyZ"))).toEqual({ kind: "roadType", type: "street" });
     expect(shortcutFor(press("KeyX"))).toEqual({ kind: "roadType", type: "avenue" });
     expect(shortcutFor(press("KeyC"))).toEqual({ kind: "roadType", type: "oneWay" });
@@ -129,7 +131,7 @@ describe("shortcuts", () => {
     expect(shortcutFor(press("Digit1", { repeat: true }))).toBeNull();
     expect(shortcutFor(press("Space", { targetTag: "BUTTON" }))).toBeNull();
     expect(shortcutFor(press("Digit1", { targetTag: "BUTTON" }))).toEqual({ kind: "speed", speed: 1 });
-    for (const code of ["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyR", "KeyF", "Equal", "Minus"]) {
+    for (const code of ["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "PageUp", "PageDown", "Equal", "Minus"]) {
       expect(shortcutFor(press(code))).toBeNull();
     }
   });

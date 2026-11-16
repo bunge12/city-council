@@ -169,7 +169,7 @@ const hint = (page: Page) => page.locator("#road-hint");
 test("a curved avenue ends on an existing node, with the preview following the curve", async ({ page }, testInfo) => {
   await openCity(page, city(true));
   await look(page, 4420, 4700, 330);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyX");
   await page.keyboard.press("KeyY");
   await expect(page.locator("#draw-mode-curved")).toHaveAttribute("aria-pressed", "true");
@@ -212,7 +212,7 @@ test("a curved avenue ends on an existing node, with the preview following the c
 test("a curve from the end of a road leaves in line with it, with no kink at the join", async ({ page }, testInfo) => {
   await openCity(page, city(true));
   await look(page, 4180, 4560, 160);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyY");
   // From the street's west end, the direction is held in line with the street.
   await click(page, STREET.ax, STREET.z);
@@ -241,7 +241,7 @@ test("a curve from the end of a road leaves in line with it, with no kink at the
 test("continuous mode draws a three-segment road, one log entry per segment, ended by a double click", async ({ page }, testInfo) => {
   await openCity(page, city(false));
   await look(page, 4400, 4640, 300);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyU");
   await expect(page.locator("#draw-mode-continuous")).toHaveAttribute("aria-pressed", "true");
   const corners: [number, number][] = [
@@ -284,7 +284,7 @@ test("continuous mode draws a three-segment road, one log entry per segment, end
 test("a continuous road stops at a refused segment and keeps the ones built", async ({ page }, testInfo) => {
   await openCity(page, city(false));
   await look(page, 4320, 4600, 220);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyU");
   await click(page, 4240, 4600);
   await click(page, 4400, 4600);
@@ -304,7 +304,7 @@ test("a continuous road stops at a refused segment and keeps the ones built", as
 test("switching mode or tool part way through a road cancels it and leaves nothing behind", async ({ page }) => {
   await openCity(page, city(true));
   await look(page, 4380, 4680, 260);
-  await page.keyboard.press("KeyB");
+  await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyY");
   await click(page, 4300, 4760);
   await click(page, 4400, 4700);

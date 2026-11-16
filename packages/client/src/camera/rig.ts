@@ -55,6 +55,8 @@ export interface CameraRig {
    * ground the ground pick lands on.
    */
   pickLevel(sx: number, sy: number, y: number): { x: number; z: number } | null;
+  /** The ray from the camera through screen point (sx, sy), in world metres, with a unit direction. */
+  ray(sx: number, sy: number): Ray;
   /** Camera height above the ground directly below it, in metres. */
   heightAboveGround(): number;
   zoomBand(): ZoomBand;
@@ -196,6 +198,7 @@ export function createCameraRig(camera: PerspectiveCamera, terrain: Terrain, vie
     },
     pickGround,
     pickLevel: hitLevel,
+    ray: rayAt,
     heightAboveGround() {
       const p = camera.position;
       return p.y - heightAt(t, p.x, p.z);

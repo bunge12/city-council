@@ -23,6 +23,7 @@ import {
 } from "three/webgpu";
 import { heightAt, mapSize, type Terrain } from "@city-council/sim";
 import { BUILDINGS, CELLS, FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, TERRAIN_LODS } from "./config";
+import type { Ray } from "../camera/pick";
 import type { ZoomBand } from "../camera/zoom-band";
 import { createBuildingLayer, type BuildingLayer, type BuildingSource, type BuildingStats } from "./building-meshes";
 import { createCellLayer, type CellLayer, type CellSource, type CellStats } from "./cell-meshes";
@@ -105,6 +106,12 @@ export interface View {
    */
   updateBuildings(roadChunks: readonly number[], changed: readonly number[], ids: readonly number[]): void;
   buildingStats(): BuildingStats | null;
+  /** The building whose drawn box the ray enters first, or -1 (issue 116). */
+  pickBuilding(ray: Ray, limit?: number): number;
+  /** Changes whenever a chunk's buildings change form, so a pick made before is stale. */
+  buildingFormVersion(): number;
+  /** The middle of the top of building `id` as drawn, or null. */
+  buildingTop(id: number): { x: number; y: number; z: number } | null;
   /** The colours building `id` is drawn in, as sRGB hex, or null. For tests. */
   buildingTint(id: number): { wall: number; roof: number; trim: number } | null;
   /** Switches the lighting to a graphics preset once its shaders are compiled. */
@@ -375,6 +382,9 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     buildingStats: () => terrainRoot?.buildings?.stats() ?? null,
     buildingForm: (chunk) => terrainRoot?.buildings?.formOf(chunk) ?? null,
     buildingTint: (id) => terrainRoot?.buildings?.tintOf(id) ?? null,
+    pickBuilding: (ray, limit) => terrainRoot?.buildings?.pick(ray, limit) ?? -1,
+    buildingFormVersion: () => terrainRoot?.buildings?.formVersion() ?? 0,
+    buildingTop: (id) => terrainRoot?.buildings?.topOf(id) ?? null,
     setPreset: (preset) => lighting.setPreset(preset),
     lighting: () => lighting.report(),
     async benchmark() {
