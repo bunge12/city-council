@@ -8,10 +8,10 @@ The M2 exit test runs automatically, a city full of buildings holds up, and the 
 
 ## Scope
 
-- One Playwright walkthrough that performs the fourteen exit test steps in M2.md, on the WebGPU path where the CI browser supports it and on `?webgl`
+- One Playwright walkthrough that performs the fifteen exit test steps in M2.md, on the WebGPU path where the CI browser supports it and on `?webgl`
 - Screenshots from the walkthrough saved as CI artifacts and published as browser evidence on the pull request
 - The scale city from M1 with every cell zoned and grown out to about 100,000 buildings
-- On that city, measure and record: the grower's time per tick, worker time per tick against the 20 ms budget, one `ZoneCells` at the cap, one `BuildRoad` through built ground, one `BulldozeRoad` of a built street, frame time in each zoom band at Low and at Balanced, snapshot size, autosave time and tab memory
+- On that city, measure and record: the grower's time per tick, worker time per tick against the 20 ms budget, one `ZoneCells` at the cap, one `BuildRoad` through built ground, one `BulldozeRoad` of a built street, the top bar's homes counter while the city grows out, frame time in each zoom band at Low and at Balanced, snapshot size, autosave time and tab memory
 - A save and resume test: run a scripted session with zoning and growth straight through, and separately save and reload half way. The final hashes must match
 - The soak script extended to zone, rezone and clear buildings while it runs
 - `pnpm bench` gains the cell and lot queries

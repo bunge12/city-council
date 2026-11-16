@@ -167,15 +167,15 @@ Your list put Map & Zoning first. I split it. With free-form roads, zoning cells
 | M0 ✓ | Foundation and terrain | none | A seeded map renders with camera controls. The sim runs in a worker, accepts a no-op command, and the state saves and reloads from IndexedDB. |
 | M1 ✓ | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Angle guides hold a road at 90 degrees, and the grid tool lays out a block grid in one action. Roads at different levels cross without forming an intersection. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
 | M2 | Zoning and buildings | M1 | Paint R, C, I, O, and M on cells along roads. Buildings appear on zoned cells at a fixed rate and disappear when the road is removed. Each zone can have a level 1-3 which indicates density & impact. Three graphics presets exist, and buildings set the default look. |
-| M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. |
-| M4 | Economy | M3 | Taxes, upkeep and construction costs hit one treasury. A monthly budget panel balances. Running out of money blocks building. Allow borrowing. Demolishing an occupied building charges compensation. Property and business taxes and development charges work. The first population milestones unlock density 2 and pay grants. |
+| M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. Population shows in the top bar and its history is graphed. Pops turn over at a steady yearly rate. |
+| M4 | Economy | M3 | Taxes, upkeep and construction costs hit one treasury. A monthly budget panel balances. Running out of money blocks building. Allow borrowing. Demolishing an occupied building charges compensation. Property and business taxes and development charges work. The first population milestones unlock density 2 and pay grants. City Hall can be placed, and clicking it opens the budget. |
 | M5 | Traffic | M3 | Commutes load onto roads. A traffic overlay shows congested segments. Widening a road or adding a bypass visibly changes the overlay. Long commutes lower demand. Decorative cars visualize the traffic levels. Assignment stays inside its time budget on a 500,000 resident test city. Roads can be raised and lowered, with ramps, overpasses and tunnels, so a highway interchange can be built. |
-| M6 | Public transport: buses | M5 | Draw a bus line with stops. Pops choose it when it beats driving. Road volume on the parallel route drops. Fares show in the budget. Bike lanes on a street shift short trips from cars to cycling. |
-| M7 | Rail transport | M1, M6 | Lay tram, subway and commuter rail track with the same tools as roads. Stations, tunnels and elevated track work. Lines, mode choice and fares from M6 also work for heavy (commuter) rail, trams, and subways. A subway line carries more people per hour than the avenue above it. Off-street bike paths work, and a station reached by bike lanes draws riders from further away. |
+| M6 | Public transport: buses | M5 | Draw a bus line with stops. Pops choose it when it beats driving. Road volume on the parallel route drops. Fares show in the budget. Bike lanes on a street shift short trips from cars to cycling. Pedestrians walk to stops and shops at street zoom. |
+| M7 | Rail transport | M1, M6 | Lay tram, subway and commuter rail track with the same tools as roads. Stations, tunnels and elevated track work. Lines, mode choice and fares from M6 also work for heavy (commuter) rail, trams, and subways. A subway line carries more people per hour than the avenue above it. The central station landmark can be placed. Off-street bike paths work, and a station reached by bike lanes draws riders from further away. |
 | M8 | Services | M4, M5 | Clinics, schools, childcare, fire and police have capacity and network coverage. Parks and recreation raise satisfaction and land value within walking distance. Each changes a number the player can see, such as health, education level or the share of parents who work. |
 | M9 | Utilities | M8 | Power, water and sewage plants are placed on the map and add capacity, with no grid to draw. A shortage lowers demand across the city. Pollution from plants feeds land value and satisfaction. |
 | M10 | Multiplayer | M4 minimum | Two browsers edit one city through a server. Roles work. A third player joins mid-game and sees the same city. The project owner moves a local city online. No accounts or payments yet. |
-| M11 | Polish and launch | all | Tutorial, sound, a performance pass against the targets above at 500,000 residents, public link. |
+| M11 | Polish and launch | all | Tutorial, sound, the remaining six landmarks, a performance pass against the targets above at 500,000 residents, public link. |
 
 M10 is listed late but it can start any time after M4. I would run a short spike right after M1. Host the sim in a Node process, connect two tabs and draw roads together. It costs a few days and tells us early if any sim rule broke the architecture.
 
@@ -476,6 +476,8 @@ Lots are counted in cells, and a cell is 8 m on a side. A 2 × 4 lot is 16 m by 
 
 The lot sizes are my starting proposal. The resident numbers are fixed by design.
 
+**Capacity and residents are different numbers.** The figure for a lot is the building's capacity, the most people it can hold. The number living there is whatever its households add up to, and it changes over time. A single family home has room for four and may hold one person living alone, a couple, or a family. A tower with room for 1,000 is rarely full. Population counts the people who live in a building, not its capacity.
+
 How the grower chooses:
 
 1. It finds the free zoned cells beside a road and takes the largest lot that fits a building type for that zone. Since M2-10 it takes the largest lot of a type drawn among those that fit, so a long strip does not fill with the biggest type alone: see "The grower" below.
@@ -621,6 +623,8 @@ The scale check for buildings fills the 30,000 segment city through 45 `ZoneCell
 
 Measured on that city of 57,345 buildings in the development container's software WebGL 2, with no GPU (`e2e/building-lod-scale.spec.ts`), the mean frame was 553, 631 and 616 ms in the street, district and city bands at Low, and 775, 814 and 790 ms at Balanced, with the tab's JS heap at about 110 to 120 MB plus 34 MB in the sim worker. Draw calls were 186, 222 and 1,370 at Low. The street band drew 968 buildings in full in 118 model meshes and the rest in view as boxes; the district band 2,640 buildings as boxes in 30 meshes; the city band all of them as blocks in 436 meshes. The district and city bands do not hold 60 fps on a machine with no GPU, and nothing in a software renderer can say whether they would on the reference machines. The city band's one mesh per chunk is the largest cost: 436 draw calls for blocks that cover under a pixel each. Flying a loop of eight stops twice left the heap, the models and the instances where one loop left them.
 
+**Before demand exists.** In M2 there are no pops yet. Buildings appear on zoned lots at a fixed rate and stand empty. Each one records the resident or job capacity its type and lot give it, so M3 can fill it without touching the building. Until then the top bar shows homes built in place of population.
+
 Removing a road removes its cells and their buildings. The pops inside are displaced and look for a new home or job.
 
 #### Art direction
@@ -742,6 +746,62 @@ Job matching borrows from [Subway Builder](https://www.subwaybuilder.com/simulat
 One correction to the question I asked you at the start. I described Subway Builder as using grouped pops. Its page says it simulates millions of individual commuters. We borrow its demand and mode-choice ideas, not its agent model. At 500,000 residents, pops matter even more.
 
 Before M5 exists, commute length uses free-flow travel time from the M1 pathfinder.
+
+#### Turnover
+
+Pops do not age and nobody is tracked through a life. A pop is a household slot, and over time the household in it changes.
+
+| Event | What happens | Effect on population |
+| --- | --- | --- |
+| Birth | A pop gains a person and is marked as having children, if its home has room | Up by one |
+| Child grows up and leaves | A pop with children loses a person. After about 18 game years on average it no longer counts as having children. | Down by one |
+| Death | A pop loses a person | Down by one |
+| Household replaced | The household moves out and a newcomer takes the home. Size, education, wealth and children are all drawn again, the old job is freed, and the newcomer looks for work. | Up or down |
+| Spare room fills | When residential demand is positive, free capacity in apartments and towers fills before anything new is built | Up |
+| Home empties | A pop that falls to zero people is removed. The home stands vacant until demand fills it. | None further |
+
+The rates live in the balance file. They are applied a little every game day from the seeded generator, so replays stay identical and change is smooth.
+
+Smooth rates are the point. A district that fills in one month does not empty in one month decades later, which is the death-wave problem age-based games have.
+
+What turnover gives the game:
+
+- **Districts change.** A newcomer is drawn from who is moving to the city now, shaped by the building's land value. An old suburb drifts toward current conditions and does not stay frozen at the day it was built.
+- **School demand moves.** As children arrive and grow up, the number of pops with children in a neighbourhood rises and falls.
+- **Schools get their slow effect.** From M8, a newcomer replacing a pop in an area with good school and university coverage draws a higher education level. This is how the workforce becomes educated over time.
+- **Births and deaths as statistics.** The statistics panel shows births, deaths, arrivals and departures per year. From M8, clinic and hospital coverage lowers the share of replacements counted as deaths, so households stay longer where healthcare is good. There are no cemeteries to build.
+
+So the population moves in three ways. Natural change is births minus deaths. Migration fills or empties room in existing buildings. Construction adds new room. A city can shrink a little with every building still standing, and grow a little with nothing new built.
+
+A neighbourhood's population therefore dips and recovers, and does not simply decline. A new street of houses fills with families. As their children grow up and leave, the street holds fewer people. Then households are replaced, some of the newcomers have children, and the count climbs back toward a steady level.
+
+How deep the dip goes depends on two rates set against each other, how fast children leave and how fast households are replaced. One replacement rate applies to all housing. The game does not model owning or renting.
+
+The recovery is not guaranteed. Newcomers are drawn from who wants to live there now, so a street with poor schools or low satisfaction refills with fewer families and settles at a lower count. Its roads cost the same to maintain either way.
+
+#### City statistics
+
+Population is the sum of the sizes of all pops. The sim keeps it as a running total in its state, along with the other counts the game leans on, and saves them with the city.
+
+| Kept as a running total | Used by |
+| --- | --- |
+| Population, and the number of pops | Top bar, milestones, credit limit, the 500,000 goal |
+| Residents by zone density, education and wealth | Demand, statistics panel |
+| Workers employed and unemployed | Demand |
+| Jobs offered and filled, by commercial, office and industrial | Demand |
+| Pops with children | Schools and childcare in M8 |
+| Buildings by zone and density | Statistics panel |
+
+The totals are adjusted when a pop moves in, moves out or changes, and are not recounted every tick. A test recounts them from the pops and checks they match, so a drifting total is caught.
+
+Once per game month the sim records a sample of each total. The history is a fixed-length series saved with the city, long enough for a hundred game years.
+
+What the player sees:
+
+- **Top bar.** Population with an arrow for its recent trend. The treasury joins it in M4 and the approval rating in M8.
+- **Statistics panel.** A graph of population over time, with the breakdowns above. Each later module adds its own lines, such as income and spending in M4, average commute in M5, mode share in M6 and satisfaction in M8.
+
+Milestones read the highest population the city has reached, so a city that shrinks does not lose what it has unlocked.
 
 ### M4 Economy
 
@@ -975,6 +1035,17 @@ The Subway Builder table has no cycling weight. The cycling weight, the comfort 
 
 The cycling overlay shows riders per segment and where the lane network has gaps.
 
+#### Pedestrians
+
+People on foot appear at street zoom. Like the cars, each stands for a real pop and is drawn by the client from trips the sim has already assigned.
+
+- **Who walks.** Pops on a walking trip, and transit riders on the walk between a building and their stop.
+- **Where.** Along the sidewalks of every road that is not a highway. Off-street paths join in M7 and park cells in M8.
+- **How many.** A share of the real number, set by the graphics preset. A pop of 80 people shows as a few figures.
+- **Clicking one.** The same panel as a car: its home, where it is going and how long the trip takes. The camera can follow it onto a bus and off again.
+
+The figures are simple generated shapes with varied colours, drawn as instances. Pedestrians are not simulated. They do not queue, crowd a sidewalk or delay cars at a crossing in v1.
+
 ### M7 Rail transport
 
 Rail is what lets a city pass a few hundred thousand residents. One subway line moves more people per hour than several avenues, and it does not share their congestion.
@@ -1077,7 +1148,7 @@ What it costs:
 
 Forest already on the map counts as green space while it stands. Building over it removes that benefit, and drawing a natural area around it keeps it.
 
-The overlay shows park area per resident by block, so underserved districts stand out. Stadiums, zoos and other one-off attractions wait until after v1.
+The overlay shows park area per resident by block, so underserved districts stand out. An arena or stadium arrives as a landmark in M11. Zoos and other attractions wait until after v1.
 
 #### Satisfaction
 
@@ -1148,7 +1219,38 @@ A per-cell value computed from service coverage, parks, transit stations, conges
 
 #### Progression
 
-The milestone system is built in M4, where its first jobs are the starting grant and unlocking density 2. Each later module registers its own unlocks. Population milestones unlock road types, densities, rail modes, services, larger plants and bigger loans. Each one also pays a grant from a higher level of government, and the later ones open cost-sharing programs for rail, freeways and hospitals. They pace the tutorial and stop the build menu overwhelming a new player. With a 500,000 ceiling there is room for about ten milestones, with density 3 and subways arriving in the middle of the curve.
+The milestone system is built in M4, where its first jobs are the starting grant and unlocking density 2. Each later module registers its own unlocks. Population milestones unlock road types, densities, rail modes, services, larger plants, landmarks and bigger loans. Each one also pays a grant from a higher level of government, and the later ones open cost-sharing programs for rail, freeways and hospitals. They pace the tutorial and stop the build menu overwhelming a new player. With a 500,000 ceiling there is room for about ten milestones, with density 3 and subways arriving in the middle of the curve.
+
+#### Landmarks
+
+A landmark is a unique building. There is one of each per city, the player places it, and it is paid for at honest prices. Milestones unlock them, so passing a milestone earns something to build and not only more tools.
+
+| Landmark | Arrives in | Unlocked by |
+| --- | --- | --- |
+| City Hall | M4, with the milestone system | The first milestone |
+| Central station | M7, with rail | A mid-game milestone, once a rail line exists |
+| Central library | M11 | Early milestones |
+| Museum | M11 | Mid-game milestones |
+| Arena or stadium | M11 | Mid-game milestones |
+| Concert hall | M11 | Mid-game milestones |
+| Convention centre | M11 | Late milestones |
+| Observation tower | M11 | The last milestone |
+
+**City Hall** is the first and the one the rest of the game leans on. It gives the budget panel a home on the map, and clicking it opens the city's finances. It grows visibly at three points as the city passes milestones. If council votes arrive after v1, they happen here.
+
+**The central station** is a rail station with a much larger capacity and catchment than an ordinary one. Lines that meet there transfer for free.
+
+What every landmark does:
+
+- **Lifts its surroundings.** Land value and satisfaction rise across a wide area around it.
+- **Draws trips from the whole city.** Each landmark attracts visits, mostly in the midday and evening periods. That makes placement a real decision. A stadium on a street with no transit jams the district around it.
+- **Costs upkeep.** A yearly cost like any city building.
+
+A landmark needs road frontage and a large lot, and its cells cannot be zoned. It is city-owned, so removing one costs only demolition. In a shared city, placing one shows in the activity log.
+
+There is no tourism system. A landmark's visitors are the city's own residents.
+
+The list stays short on purpose. Ordinary buildings share a generator that yields many variants, but each landmark needs a generator of its own. Eight is about what that work justifies in v1. City Hall and the central station come early because other things depend on them. The rest are rewards, so they wait for M11.
 
 ### Running through every milestone
 
@@ -1241,7 +1343,7 @@ What gets drawn depends on how far out the camera is. Three bands, with a short 
 
 | Band | Camera height, to tune | Buildings | Cars, buses and trains | Roads and traffic |
 | --- | --- | --- | --- | --- |
-| Street | Under about 500 m | Full meshes with facades | Drawn and moving | Lane markings and street detail |
+| Street | Under about 500 m | Full meshes with facades | Drawn and moving, with pedestrians | Lane markings and street detail |
 | District | About 500 m to 3 km | Simplified models merged per chunk, boxes beyond 2 km | Trains and trams only. No cars. | Road surfaces. Traffic shows as colour on the road. |
 | City | Above about 3 km | Flat blocks coloured by zone and density | None | Arterials, highways and rail lines only, as coloured lines |
 
