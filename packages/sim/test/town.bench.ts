@@ -214,12 +214,12 @@ function builtStreet(): { seg: number; n: number } {
 /** `bulldozeMaxBuildings` buildings in a row of ids, as the player saw them. */
 let nextClear = 0;
 function buildingsToClear(): unknown {
-  const seen: { id: number; segment: number; side: number; place: number }[] = [];
+  const seen: { id: number; segment: number; side: number; place: number; builtAt: number }[] = [];
   while (seen.length < BUILDINGS_BALANCE.bulldozeMaxBuildings && nextClear < liveBuildings.length) {
     const id = liveBuildings[nextClear++] ?? 0;
     if (!state.buildings.flags[id]) continue;
     const row = readBuilding(state.buildings, id);
-    seen.push({ id, segment: row.firstSeg, side: row.firstSide, place: row.firstPlace });
+    seen.push({ id, segment: row.firstSeg, side: row.firstSide, place: row.firstPlace, builtAt: row.builtAt });
   }
   return { buildings: seen };
 }

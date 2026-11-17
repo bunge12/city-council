@@ -432,7 +432,7 @@ describe("BulldozeBuilding", () => {
     if (id === undefined) throw new Error("nothing built");
     const row = state.buildings;
     const before = state.undo;
-    ok(state, command("BulldozeBuilding", { buildings: [{ id, segment: row.firstSeg[id], side: row.firstSide[id], place: row.firstPlace[id] }] }));
+    ok(state, command("BulldozeBuilding", { buildings: [{ id, segment: row.firstSeg[id], side: row.firstSide[id], place: row.firstPlace[id], builtAt: row.builtAt[id] }] }));
     expect(state.undo).toBe(before);
   });
 });

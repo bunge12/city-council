@@ -34,7 +34,7 @@ const UI_WRITES_STATE = [
 ];
 
 const INEXACT_MATH =
-  "Terrain and road code use only +, -, *, /, Math.sqrt, Math.floor and integer operations, which round the same in every engine. See CLAUDE.md rule 6.";
+  "Sim code uses only +, -, *, /, Math.sqrt, Math.floor and integer operations, which round the same in every engine. See CLAUDE.md rule 6.";
 
 /** Clock, timer and randomness bans for all of packages/sim. */
 const SIM_RESTRICTED_PROPERTIES = [
@@ -115,11 +115,13 @@ export default tseslint.config(
   },
 
   // Rule 6: terrain is rebuilt from the seed on every machine, and road
-  // geometry must come out the same on every machine, so only exact
-  // operations. This block repeats the sim bans because a later
+  // geometry, zoning cells and lots must come out the same on every
+  // machine, so only exact operations. It covers the whole sim: the M2
+  // review (#147) found `**` in the cell index, which decides lots, outside
+  // the terrain and road folders this rule used to cover. This block repeats the sim bans because a later
   // no-restricted-properties setting replaces an earlier one.
   {
-    files: ["packages/sim/src/terrain/**/*.{ts,js}", "packages/sim/src/roads/**/*.{ts,js}"],
+    files: ["packages/sim/src/**/*.{ts,js}"],
     rules: {
       "no-restricted-properties": [
         "error",

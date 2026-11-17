@@ -346,7 +346,7 @@ describe("a through-lot and its roads", () => {
   it("can be cleared with BulldozeBuilding, by its first cell", () => {
     const { state, id } = withMall();
     const b = state.buildings;
-    ok(state, command("BulldozeBuilding", { buildings: [{ id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id] }] }));
+    ok(state, command("BulldozeBuilding", { buildings: [{ id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id], builtAt: b.builtAt[id] }] }));
     expect(isBuilding(state.buildings, id)).toBe(false);
     expectSound(state);
   });

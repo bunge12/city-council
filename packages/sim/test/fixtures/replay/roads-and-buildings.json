@@ -3,7 +3,7 @@
   "seed": 2026,
   "untilTick": 2400,
   "balance": "5fe641d3f2f36eb1",
-  "hash": "1b909ae11f8feba7",
+  "hash": "af1cf5a6a2e8e73c",
   "log": [
     {
       "tick": 0,
@@ -96,7 +96,8 @@
             "id": 0,
             "segment": 2,
             "side": 0,
-            "place": 7
+            "place": 7,
+            "builtAt": 99
           }
         ]
       }

@@ -3,9 +3,11 @@
 //
 // A building id alone can name a different building a tick later, since ids
 // are reused from a free list (issue 94 found the same with segment ids).
-// So the command names each building by its id and its lot's first cell as
-// the player saw them, and refuses the whole command when any no longer
-// match. A cleared lot is free at once, and the grower may build on it
+// So the command names each building by its id, its lot's first cell and
+// the tick it was built on, as the player saw them, and refuses the whole
+// command when any no longer match. The tick matters when the grower builds
+// again on the lot it was cleared from: the new building can take the freed
+// id and the same first cell (M2 review, #147). A cleared lot is free at once, and the grower may build on it
 // under the cells' current zoning. Clearing costs nothing until the
 // treasury and the eminent domain price arrive in M4.
 
@@ -18,15 +20,22 @@ import { terrainOf } from "../terrain/cache";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { openCellsUnder, syncCells } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE } from "./balance";
-import { isBuilding, removeBuilding } from "./buildings";
+import { isBuilding, removeBuilding, type BuildingState } from "./buildings";
 import { buildingsOnCells, buildingsOnSegments } from "./where";
 
-/** One building a `BulldozeBuilding` names, as the player saw it: its id and its lot's first cell. */
+/** One building a `BulldozeBuilding` names, as the player saw it: its id, its lot's first cell and the tick it was built on. */
 export interface BuildingSeen {
   id: number;
   segment: number;
   side: number;
   place: number;
+  builtAt: number;
+}
+
+/** Building `id` of `b` as a `BulldozeBuilding` names it, or null when no building has that id. */
+export function seeBuilding(b: BuildingState, id: number): BuildingSeen | null {
+  if (!isBuilding(b, id)) return null;
+  return { id, segment: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0, builtAt: b.builtAt[id] ?? 0 };
 }
 
 /** What a `BulldozeBuilding` command carries besides the player id. */
@@ -43,7 +52,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** The building ids a `BulldozeBuilding` payload names, ascending, or the reason it cannot apply to `state`. Changes nothing. */
 export function planBulldozeBuildings(state: SimState, payload: unknown): { ok: true; ids: number[] } | { ok: false; reason: string } {
-  const need = "BulldozeBuilding needs a list of buildings, each { id, segment, side, place }";
+  const need = "BulldozeBuilding needs a list of buildings, each { id, segment, side, place, builtAt }";
   if (!isRecord(payload) || !Array.isArray(payload["buildings"]) || payload["buildings"].length === 0) return { ok: false, reason: need };
   const list = payload["buildings"] as unknown[];
   const most = BUILDINGS_BALANCE.bulldozeMaxBuildings;
@@ -52,13 +61,15 @@ export function planBulldozeBuildings(state: SimState, payload: unknown): { ok: 
   const ids = new Set<number>();
   for (const item of list) {
     if (!isRecord(item)) return { ok: false, reason: need };
-    const { id, segment, side, place } = item;
-    if (![id, segment, side, place].every((v) => Number.isSafeInteger(v))) return { ok: false, reason: need };
+    const { id, segment, side, place, builtAt } = item;
+    if (![id, segment, side, place, builtAt].every((v) => Number.isSafeInteger(v))) return { ok: false, reason: need };
     if (ids.has(id as number)) return { ok: false, reason: `Building ${id} is named twice` };
     ids.add(id as number);
     if (!isBuilding(b, id as number)) return { ok: false, reason: BUILDING_CHANGED };
     const i = id as number;
-    if (b.firstSeg[i] !== segment || b.firstSide[i] !== side || b.firstPlace[i] !== place) return { ok: false, reason: BUILDING_CHANGED };
+    if (b.firstSeg[i] !== segment || b.firstSide[i] !== side || b.firstPlace[i] !== place || b.builtAt[i] !== builtAt) {
+      return { ok: false, reason: BUILDING_CHANGED };
+    }
   }
   return { ok: true, ids: [...ids].sort((p, q) => p - q) };
 }

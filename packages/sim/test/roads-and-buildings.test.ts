@@ -334,7 +334,7 @@ describe("rezoning built land", () => {
     const until = state.tick + 3 * DAY;
     while (state.tick < until) step(state);
     expect(live(state)).toEqual([house]);
-    ok(state, command("BulldozeBuilding", { buildings: [{ id: house, segment: row.firstSeg, side: row.firstSide, place: row.firstPlace }] }));
+    ok(state, command("BulldozeBuilding", { buildings: [{ id: house, segment: row.firstSeg, side: row.firstSide, place: row.firstPlace, builtAt: row.builtAt }] }));
     expect(live(state)).toEqual([]);
     const later = state.tick + 3 * DAY;
     while (state.tick < later && live(state).length === 0) step(state);
@@ -351,7 +351,13 @@ describe("BulldozeBuilding", () => {
     zone(state, "residential", 1, 0, 8, 4);
     return { state, ids: fill(state) };
   }
-  const seen = (state: SimState, id: number) => ({ id, segment: state.buildings.firstSeg[id], side: state.buildings.firstSide[id], place: state.buildings.firstPlace[id] });
+  const seen = (state: SimState, id: number) => ({
+    id,
+    segment: state.buildings.firstSeg[id],
+    side: state.buildings.firstSide[id],
+    place: state.buildings.firstPlace[id],
+    builtAt: state.buildings.builtAt[id],
+  });
 
   it("removes the buildings it names and frees their ground at once", () => {
     const { state, ids } = housed();
@@ -378,6 +384,19 @@ describe("BulldozeBuilding", () => {
     if (!result.ok) throw new Error(result.reason);
     expect(build(state, result.lot)).toBe(id);
     expect(cell.side).toBe(1);
+    expect(submit(state, command("BulldozeBuilding", { buildings: [stale] }))).toEqual({ ok: false, reason: BUILDING_CHANGED });
+    expect(isBuilding(state.buildings, id)).toBe(true);
+  });
+
+  it("refuses a building cleared and built again on the same lot under the same id (M2 review, #147)", () => {
+    const { state, ids } = housed();
+    const id = ids[0] as number;
+    const row = readBuilding(state.buildings, id);
+    const stale = seen(state, id);
+    ok(state, command("BulldozeBuilding", { buildings: [stale] }));
+    // The grower's next building on that lot takes the freed id and starts from the same first cell.
+    expect(addBuilding(state, row)).toBe(id);
+    expect(seen(state, id)).toEqual({ ...stale, builtAt: state.tick });
     expect(submit(state, command("BulldozeBuilding", { buildings: [stale] }))).toEqual({ ok: false, reason: BUILDING_CHANGED });
     expect(isBuilding(state.buildings, id)).toBe(true);
   });
@@ -536,7 +555,15 @@ function playSession(): SimState {
   const north = live(state).filter((id) => state.buildings.firstSide[id] === 0 && state.buildings.zone[id] === 1);
   const house = north[0] as number;
   send("BulldozeBuilding", {
-    buildings: [{ id: house, segment: state.buildings.firstSeg[house], side: state.buildings.firstSide[house], place: state.buildings.firstPlace[house] }],
+    buildings: [
+      {
+        id: house,
+        segment: state.buildings.firstSeg[house],
+        side: state.buildings.firstSide[house],
+        place: state.buildings.firstPlace[house],
+        builtAt: state.buildings.builtAt[house],
+      },
+    ],
   });
   until(14 * DAY);
   send("BuildRoad", { from: { x: 4248, z: 4500 }, to: { x: 4248, z: 4600 }, type: "street" });

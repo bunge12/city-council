@@ -127,7 +127,13 @@ describe("the homes count", () => {
     const state = copy();
     const [house] = homesIn(state);
     if (house === undefined) throw new Error("no house");
-    const seen = { id: house, segment: state.buildings.firstSeg[house], side: state.buildings.firstSide[house], place: state.buildings.firstPlace[house] };
+    const seen = {
+      id: house,
+      segment: state.buildings.firstSeg[house],
+      side: state.buildings.firstSide[house],
+      place: state.buildings.firstPlace[house],
+      builtAt: state.buildings.builtAt[house],
+    };
     expect(await send("BulldozeBuilding", { buildings: [seen] })).toEqual({ ok: true });
     const lessOne = check();
     expect(lessOne.count).toBe(grown.count - 1);

@@ -12,9 +12,11 @@ import {
   deserialize,
   hashState,
   replay,
+  seeBuilding,
   serialize,
   serializeDetachedSteps,
   step,
+  type BuildingSeen,
   type SimState,
   type SnapshotBuffer,
 } from "../src/index";
@@ -53,10 +55,13 @@ function drive(state: SimState, i: number): void {
   if (i % 70 === 33) {
     // Clears up to three standing buildings from an id that moves with the step.
     const b = state.buildings;
-    const seen: { id: number; segment: number; side: number; place: number }[] = [];
+    const seen: BuildingSeen[] = [];
     for (let k = 0; k < b.flags.length && seen.length < 3; k++) {
       const id = (k + i * 7) % b.flags.length;
-      if (b.flags[id]) seen.push({ id, segment: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0 });
+      {
+          const one = seeBuilding(b, id);
+          if (one) seen.push(one);
+        }
     }
     if (seen.length > 0) send("BulldozeBuilding", { buildings: seen });
   }
@@ -103,7 +108,6 @@ describe("M2 review: save and resume", () => {
     for (const t of ["BuildRoad", "ZoneCells", "BulldozeBuilding", "BulldozeRoad", "Undo"]) expect(types.has(t), t).toBe(true);
     expect(buildingCount(straight.buildings)).toBeGreaterThan(20);
     expect(straight.tick).toBeGreaterThan(900);
-    console.log(buildingCount(straight.buildings), JSON.stringify(Object.fromEntries([...types].map((t) => [t, straight.log.filter((e) => e.type === t).length]))));
   });
 
   it("500 steps, save, load, 500 more ends on the straight hash", () => {

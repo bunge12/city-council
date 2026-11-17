@@ -1855,8 +1855,12 @@ const edgeB = new Float64Array(4);
 
 /** Whether two edges as `columnEdge` writes them are one edge, inner to inner and outer to outer. */
 function sameEdge(p: Float64Array, q: Float64Array): boolean {
-  const d0 = ((p[0] ?? 0) - (q[0] ?? 0)) ** 2 + ((p[1] ?? 0) - (q[1] ?? 0)) ** 2;
-  const d1 = ((p[2] ?? 0) - (q[2] ?? 0)) ** 2 + ((p[3] ?? 0) - (q[3] ?? 0)) ** 2;
+  const ax = (p[0] ?? 0) - (q[0] ?? 0);
+  const az = (p[1] ?? 0) - (q[1] ?? 0);
+  const bx = (p[2] ?? 0) - (q[2] ?? 0);
+  const bz = (p[3] ?? 0) - (q[3] ?? 0);
+  const d0 = ax * ax + az * az;
+  const d1 = bx * bx + bz * bz;
   return d0 <= SAME_POINT_SQ && d1 <= SAME_POINT_SQ;
 }
 

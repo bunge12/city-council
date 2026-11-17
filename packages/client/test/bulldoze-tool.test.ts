@@ -109,7 +109,7 @@ function housesWestToEast(state: SimState): number[] {
 }
 
 function seen(state: SimState, id: number) {
-  return { id, segment: state.buildings.firstSeg[id], side: state.buildings.firstSide[id], place: state.buildings.firstPlace[id] };
+  return { id, segment: state.buildings.firstSeg[id], side: state.buildings.firstSide[id], place: state.buildings.firstPlace[id], builtAt: state.buildings.builtAt[id] };
 }
 
 /** The one live segment of the street. */

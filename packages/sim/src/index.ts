@@ -103,6 +103,7 @@ export {
   previewBuildRoadGrid,
   previewBulldozeRoad,
   roadClears,
+  seeBuilding,
 } from "./buildings/bulldoze";
 export type { BuildingSeen, BuildingsInTheWay, BulldozeBuildingPayload } from "./buildings/bulldoze";
 export { applyBuildingDelta, drainBuildingDelta, recordBuildingChanges } from "./buildings/delta";
