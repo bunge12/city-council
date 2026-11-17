@@ -57,7 +57,9 @@ jobs:
     needs: deploy
     runs-on: ubuntu-latest
     # The three walkthroughs, one after the other, each on WebGPU and WebGL 2.
-    timeout-minutes: 60
+    # M0 and M1 took up to 30 minutes, and M2 adds 10 to 20 more, or twice
+    # that when a test fails once and runs again.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

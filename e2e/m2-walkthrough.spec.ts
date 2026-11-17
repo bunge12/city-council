@@ -11,6 +11,7 @@ import {
   CHUNK_SIZE,
   ROAD_TYPES,
   ZONING_BALANCE,
+  cellAt,
   cellCorners,
   cellStatuses,
   createState,
@@ -629,6 +630,13 @@ for (const variant of [
         expect(cells, `segment ${seg}`).toBeGreaterThan(0);
         expect(cells % (2 * DEPTH), `segment ${seg}`).toBe(0);
       }
+      // And the cells really reach six deep: on each side of a grid street, the cell six back from the edge is open and is the sixth.
+      for (const north of [true, false]) {
+        const [x, z] = stripCell({ ...R1_STRIP, north }, DEPTH - 1);
+        const deepest = cellAt(state, x, z);
+        expect(deepest?.depth, `${north ? "north" : "south"} side, six back`).toBe(DEPTH - 1);
+        expect(deepest?.status, `${north ? "north" : "south"} side, six back`).toBe(CELL_OPEN);
+      }
       // The shore street's south cells reach the water, the slope street's west cells are too steep, and every junction blocks some.
       expect(counts.get(CELL_WATER) ?? 0).toBeGreaterThan(20);
       expect(counts.get(CELL_STEEP) ?? 0).toBeGreaterThan(20);
@@ -1178,6 +1186,10 @@ for (const variant of [
       await settle(page);
       const bs = await buildings(page);
       saved = { roads: await roads(page), zoning: await zoning(page), buildings: bs, tints: await tints(page, bs.map((b) => b.id)), log: await log(page), tick };
+      // Through all the growth since step 5, nothing grew on the R3 strip that is too shallow for a tower.
+      // Its key is read again: the streets drawn and bulldozed since may have renumbered its segment.
+      const smallStrip = await stripKey(page, SMALL_R3);
+      expect(bs.filter((b) => b.strip === smallStrip)).toEqual([]);
       expect(saved.tints.filter((t) => t !== null).length).toBeGreaterThan(20);
       await shot(page, info, dir, "13-before-reload");
       const id = (await status(page)).city.id;
@@ -1212,7 +1224,9 @@ for (const variant of [
       expect(homes.at(-1)?.shown).toBe(homes.at(-2)?.shown);
       expect(homes.at(-1)?.shown).toBe(saved.buildings.filter((b) => b.zone === zoneNumber("residential")).length);
       info.annotations.push({ type: "homes", description: homes.map((h) => `${h.when}: ${h.shown}`).join("; ") });
-      await page.locator(".top-bar").screenshot({ path: join(SCREENSHOTS, dir, "14-homes-in-the-top-bar.png") });
+      const topBar = join(SCREENSHOTS, dir, "14-homes-in-the-top-bar.png");
+      await page.locator(".top-bar").screenshot({ path: topBar });
+      await info.attach("14-homes-in-the-top-bar", { path: topBar, contentType: "image/png" });
     });
 
     await test.step("15. a replay of the recorded command log from the same seed gives the same state hash", async () => {

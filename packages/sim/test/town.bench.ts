@@ -21,6 +21,14 @@
 import { expect, test } from "vitest";
 import {
   BUILDINGS_BALANCE,
+  CELL_LEFT,
+  CELL_OPEN,
+  CELL_RIGHT,
+  NO_BUILDING,
+  buildingOnSlot,
+  cellSlot,
+  cellStatuses,
+  placesAlong,
   CHUNKS_PER_SIDE,
   CHUNK_SIZE,
   TIME_BALANCE,
@@ -93,17 +101,33 @@ for (let i = 0; i < POINTS; i++) {
 let next = 0;
 const point = (): number => (next = (next + 1) % POINTS);
 
-/** Zoned open cells by the road, one per query point that lands on one. */
+/**
+ * Zoned open cells by the road with no building on them, where the lot
+ * queries have to fit a lot: on a built cell they stop at once. The town is
+ * full, so these are the cells no lot fits, and every slot is looked at.
+ */
 const fronts: CellInfo[] = [];
-for (let i = 0; i < POINTS; i++) {
-  const cell = cellAt(state, xs[i] ?? 0, zs[i] ?? 0);
-  if (cell && (state.cells.zone[cell.index] ?? 0) > 0) fronts.push({ ...cell, depth: 0 });
+{
+  const status = cellStatuses(state);
+  const segs = new Set<number>();
+  for (let i = 0; i < POINTS; i++) segs.add(cellAt(state, xs[i] ?? 0, zs[i] ?? 0)?.segment ?? -1);
+  for (const segment of segs) {
+    if (segment < 0) continue;
+    for (const side of [CELL_LEFT, CELL_RIGHT]) {
+      for (let place = 0; place < placesAlong(state.roads, segment); place++) {
+        const ref = { segment, side, place, depth: 0 };
+        const slot = cellSlot(state.roads, state.cells, ref);
+        if (slot < 0 || (state.cells.zone[slot] ?? 0) === 0 || status[slot] !== CELL_OPEN || buildingOnSlot(state, slot) !== NO_BUILDING) continue;
+        fronts.push({ ...ref, index: slot, status: CELL_OPEN });
+      }
+    }
+  }
 }
 let nextFront = 0;
 const front = (): CellInfo => {
   nextFront = (nextFront + 1) % fronts.length;
   const cell = fronts[nextFront];
-  if (!cell) throw new Error("no zoned cells");
+  if (!cell) throw new Error("no free zoned cells");
   return cell;
 };
 
@@ -180,7 +204,9 @@ let nextStreet = 0;
 function builtStreet(): { seg: number; n: number } {
   while (nextStreet < builtStreets.length) {
     const s = builtStreets[nextStreet++];
-    if (s && isSegment(state.roads, s.seg) && buildingsOnSegments(state, [s.seg]).length > 0) return s;
+    // Counted again: the commands timed before this one split streets and cleared houses.
+    const n = s && isSegment(state.roads, s.seg) ? buildingsOnSegments(state, [s.seg]).length : 0;
+    if (s && n > 0) return { seg: s.seg, n };
   }
   throw new Error("out of built streets");
 }
@@ -202,6 +228,7 @@ test("the M2 scale town", async ({ bench, annotate }) => {
   const buildingsAtStart = buildingCount(state.buildings);
   expect(buildingsAtStart).toBe(town.buildings);
   expect(buildingsAtStart).toBeGreaterThan(50_000);
+  expect(fronts.length, "free zoned cells by the road").toBeGreaterThan(100);
 
   const meanMs: Record<string, number> = {};
   const p99Ms: Record<string, number> = {};
@@ -353,6 +380,7 @@ test("the M2 scale town", async ({ bench, annotate }) => {
       ...town,
       buildingsAtEnd: buildingCount(state.buildings),
       cells: state.cells.zone.length,
+      freeFrontCellsQueried: fronts.length,
       zoneCellsChanged: zoneCells.ok ? zoneCells.plan.cells.length : 0,
       meanBuildingsCleared: { buildRoad: mean(cleared["road"] ?? []), bulldozeRoad: mean(cleared["bulldoze"] ?? []), bulldozeBuilding: mean(cleared["clear"] ?? []) },
       snapshotBytes,
@@ -371,6 +399,6 @@ test("the M2 scale town", async ({ bench, annotate }) => {
     if (name.includes("for comparison")) continue;
     expect(meanMs[name], name).toBeLessThan(TICK_BUDGET_MS);
   }
-  // A query the client makes per chunk or per pointer move: well inside a frame.
-  for (const name of Object.keys(queries)) expect(meanMs[name], name).toBeLessThan(5);
+  // A query the client makes per chunk or per pointer move: inside a 60 fps frame, with room for a slower runner.
+  for (const name of Object.keys(queries)) expect(meanMs[name], name).toBeLessThan(16);
 }, 600_000);
