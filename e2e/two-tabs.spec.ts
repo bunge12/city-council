@@ -21,8 +21,9 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Seven page loads with the whole map, two tabs drawing at once, on a
-// machine that may have no GPU.
-test.setTimeout(240_000);
+// machine that may have no GPU. One to two minutes on most CI runners; a
+// slow one reached the last reload at four (issue #152).
+test.setTimeout(360_000);
 
 async function status(page: Page): Promise<SaveStatus> {
   await page.waitForFunction(() => window.cityCouncil.saves.status !== null);

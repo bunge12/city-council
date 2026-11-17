@@ -286,7 +286,9 @@ async function drawingFrameTime(page: Page, centre: { x: number; y: number }, co
 }
 
 test("drawing in a network of 30,000 segments keeps its frame time with the guides on", async ({ page }, testInfo) => {
-  test.setTimeout(300_000);
+  // 3.1 minutes on a CI runner that draws a frame here in 0.7 s; one that
+  // takes 1.2 s ran past five minutes (issue #152).
+  test.setTimeout(480_000);
   const bytes = scaleCity(30_000);
   const at = busySpot(bytes, 150);
   await openCity(page, bytes, "Thirty thousand");
