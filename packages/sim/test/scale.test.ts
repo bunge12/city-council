@@ -248,7 +248,7 @@ function zoningTick(state: SimState, grids: readonly { x: number; z: number }[],
         send("ZoneCells", { zone: "commercial", density: 2, rects: [{ from: { x: g.x + 96, z: g.z + 128 }, to: { x: g.x + 288, z: g.z + 128 }, width: 96 }] });
         break;
       case 2: {
-        // Clears up to five of the buildings standing, the lowest ids first.
+        // Clears up to five of the buildings standing, from an id that moves with the tick.
         const seen: { id: number; segment: number; side: number; place: number }[] = [];
         const b = state.buildings;
         for (let id = (t * 31) % Math.max(1, b.flags.length); id < b.flags.length && seen.length < 5; id++) {
@@ -258,9 +258,11 @@ function zoningTick(state: SimState, grids: readonly { x: number; z: number }[],
         break;
       }
       case 3: {
-        // Through the zoned rows of an earlier grid, where houses may stand.
-        const z = g.z + 96 * (slot % 6) + 24;
-        send("BuildRoad", { from: { x: g.x - 24, z }, to: { x: g.x + 3 * 96 + 24, z }, type: "street" });
+        // Through the zoned rows of the grid the previous round zoned, 60 ticks back, where houses stand.
+        const round = Math.floor(slot / 6);
+        const old = grids[(Math.max(0, round - 1) * 11) % grids.length] ?? g;
+        const z = old.z + 96 * (round % 6) + 24;
+        send("BuildRoad", { from: { x: old.x - 24, z }, to: { x: old.x + 3 * 96 + 24, z }, type: "street" });
         break;
       }
       case 4: {

@@ -86,6 +86,8 @@ const ZONE_CYCLE = ["ZoneCells", "ZoneCells", "BulldozeBuilding"] as const;
 const ZONES = ZONING_BALANCE.zones.map((z) => z.id);
 /** Buildings one BulldozeBuilding of the soak names. */
 const CLEAR_COUNT = 50;
+/** The player the zoning cycle sends as, apart from the road cycle's, so the road cycle's Undo takes back a road change. */
+const ZONING_PLAYER = "soak-zoning";
 /** Grid lines of the scale city and of a grid at the cap: 7 lines each way, 96 m apart. */
 const LINE = 96;
 const SPAN = 6 * LINE;
@@ -246,8 +248,8 @@ test("soak: one hour of game time at 4x", () => {
   expect(mirror.state).not.toBeNull();
 
   let seq = 0;
-  const command = (type: string, payload: unknown = {}): void =>
-    inject({ v: PROTOCOL_VERSION, type: "command", command: { seq: ++seq, playerId: "soak", type, payload } });
+  const command = (type: string, payload: unknown = {}, playerId = "soak"): void =>
+    inject({ v: PROTOCOL_VERSION, type: "command", command: { seq: ++seq, playerId, type, payload } });
 
   command("SetSpeed", { speed: SPEED });
 
@@ -364,7 +366,9 @@ test("soak: one hour of game time at 4x", () => {
         const stats = byCommand[zoning[0]];
         if (stats) stats.sent++;
         waitingRoad = { type: zoning[0], logBefore: host.fullLog.length };
-        command(zoning[0], zoning[1]);
+        // As a player of its own: Undo takes back its sender's newest change, and a
+        // ZoneCells leaves one, so on the road cycle's player the Undo would take back zoning.
+        command(zoning[0], zoning[1], ZONING_PLAYER);
       }
     }
     offset += PUMP_INTERVAL_MS;
@@ -496,7 +500,8 @@ test("soak: one hour of game time at 4x", () => {
     check("autosaves' slowest parts", saveSlowest, SAVE_PAUSES_ALLOWED),
   ];
   // A save written in parts from a copy is the save written at once.
-  expect(Array.from(finishSave(host.startSave(0)))).toEqual(Array.from(host.saveBytes(0).bytes));
+  // Compared as bytes: as arrays of numbers, two saves of the grown town (about 22 MB each) take gigabytes to compare.
+  expect(Buffer.from(finishSave(host.startSave(0))).equals(Buffer.from(host.saveBytes(0).bytes))).toBe(true);
   const report = {
     seed: SEED,
     startSegments: scale.counts.segments,
