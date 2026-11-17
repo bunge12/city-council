@@ -364,6 +364,18 @@ describe("ZoneCells", () => {
     while (state.pending.length > 0) step(state);
     expect(state.log.slice(-2).map((e) => e.seq)).toEqual([stroke.seq, street.seq]);
   });
+
+  it("lets another player's commands go on while one player's stroke waits", () => {
+    const state = createState(SEED);
+    ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4404 }, along: { x: 4680, z: 4404 }, across: { x: 4104, z: 4980 }, depth: 86, width: 86, type: "street" }));
+    const stroke = zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200)]);
+    const street = command("BuildRoad", { from: { x: 4150, z: 4300 }, to: { x: 4400, z: 4300 }, type: "street" }, "p2");
+    expect(submit(state, stroke)).toEqual({ ok: true });
+    expect(submit(state, street)).toEqual({ ok: true });
+    step(state);
+    expect(state.log.at(-1)?.seq).toBe(street.seq);
+    expect(state.pending.map((c) => c.seq)).toEqual([stroke.seq]);
+  });
 });
 
 /**

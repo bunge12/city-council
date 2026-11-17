@@ -323,8 +323,11 @@ function copyPayload(payload: unknown): unknown {
 const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding"]);
 
 /**
- * Whether the step holds `command`, with every command queued behind it,
- * until the cells settle on `state.cellsReadyAt`. From state alone, so a
+ * Whether the step holds `command`, with every later command of its
+ * sender, until the cells settle on `state.cellsReadyAt`. Other players'
+ * commands go on: one player's stroke does not hold up everyone, and the
+ * commands that pile up behind it, which all apply in one step once the
+ * cells settle, are one player's. From state alone, so a
  * replay applies it on the tick it was logged. A paused game has no tick to
  * wait for and applies it at once, walking whatever is left: nothing moves
  * while paused, so the walk holds nothing up.
@@ -379,7 +382,7 @@ export function enqueue(state: SimState, command: Command): void {
  * command and after each one (zoning/cell-index.ts), so the cells of a
  * removed road are read before it goes. A big change settles over the next
  * few ticks (`stepCells`). A command that reads the cells while one does
- * waits for it, and the commands behind it wait too, in order
+ * waits for it, and its sender's later commands wait too, in order
  * (`waitsForCells`): they stay queued for a later step. The buildings follow each time
  * (buildings/upkeep.ts): the ones whose ground went are removed on the
  * command's tick, and the ones a new road blocks once the cells settle.
@@ -392,11 +395,14 @@ export function applyPending(state: SimState): DroppedCommand[] {
     stepCells(state);
     keepBuildings(state);
   }
-  for (let at = 0; at < queue.length; at++) {
-    const command = queue[at] as Command;
-    if (waitsForCells(state, command)) {
-      state.pending = queue.slice(at);
-      break;
+  // Players with a command waiting for the cells, whose later commands wait behind it.
+  const waiting = new Set<string>();
+  const held: Command[] = [];
+  for (const command of queue) {
+    if (waiting.has(command.playerId) || waitsForCells(state, command)) {
+      waiting.add(command.playerId);
+      held.push(command);
+      continue;
     }
     const def = commandDef(command);
     let reason: string | null;
@@ -420,5 +426,6 @@ export function applyPending(state: SimState): DroppedCommand[] {
       });
     }
   }
+  state.pending = held;
   return dropped;
 }
