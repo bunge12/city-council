@@ -736,7 +736,9 @@ describe("snapshots with a road network", () => {
       grow(n);
       const kept = saveKept();
       expect(toHex(kept), `after growing by ${n}`).toBe(toHex(serializeDetached(state)));
-      expect(deserialize(kept, state.log.slice(0, state.logOffset)).state).toBeDefined();
+      // A view into a larger buffer reads back as the city.
+      expect(kept.buffer.byteLength).toBeGreaterThanOrEqual(kept.byteLength);
+      expect(hashState(deserialize(kept).state)).toBe(hashState(deserialize(serializeDetached(state)).state));
     }
     // The buffers were reused, not made afresh each time.
     expect(into.buffer).not.toBeNull();
