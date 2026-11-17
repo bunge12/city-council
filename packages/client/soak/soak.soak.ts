@@ -24,7 +24,10 @@
 // rezone of half of that ground to another zone, and a BulldozeBuilding of
 // buildings the mirror shows standing. The grower builds on the zoning as
 // the hour goes on, so the idle steps carry its work, and its own time per
-// step is reported.
+// step is reported. The SimMirror runs in a worker thread of its own
+// (mirror-worker.ts), as the page does in the browser: with it in the
+// soak's thread, one heap held both copies of the grown town, and a full
+// collection of it landed in whichever step allocated past the limit.
 //
 // The tick budget is checked per source of work: each road command type,
 // the steps that walk a slice of zoning cells, the idle steps (log paging
@@ -41,7 +44,11 @@
 // seed, the scale city's own commands included, must give the same state
 // hash as the live city.
 
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import { memoryUsage } from "node:process";
 import { performance } from "node:perf_hooks";
 import {
@@ -51,7 +58,6 @@ import {
   PROTOCOL_VERSION,
   SCALE_SEGMENTS,
   SEG_ALIVE,
-  SEG_FIXED,
   TICK_MS,
   ZONING_BALANCE,
   buildScaleCity,
@@ -59,15 +65,14 @@ import {
   deserialize,
   hashState,
   replay,
-  segmentEnds,
-  segmentTypeId,
   type FromSimMessage,
 } from "@city-council/sim";
 import { expect, test } from "vitest";
 import { PUMP_INTERVAL_MS, SimHost, type PendingSave } from "../src/protocol/host";
+import { build } from "vite";
 import { countHomes } from "../src/protocol/homes";
-import { SimMirror } from "../src/protocol/mirror";
-import type { ClientTransport, HostTransport } from "../src/protocol/transport";
+import type { HostTransport } from "../src/protocol/transport";
+import type { FromMirror, MirrorQuestion, ToMirror } from "./mirror-worker";
 import { AUTOSAVE_INTERVAL_MS } from "../src/save/config";
 
 const SPEED = 4;
@@ -113,66 +118,75 @@ const SETTLE_MIN_MS = 0.25;
 const REPORT = process.env["SOAK_REPORT"] ?? "soak-report.json";
 
 /**
- * A loopback transport: the soak plays the client. Messages to the client
- * are kept for the timings and handed, copied as a worker port would copy
- * them, to a mirror's transport.
+ * The mirror-worker bundled for Node, so a worker thread can run it:
+ * mirror-worker.ts imports the sim and the client from their TypeScript
+ * sources, which Node cannot load on its own.
  */
-function loopback(): {
+async function bundleMirrorWorker(): Promise<string> {
+  const outDir = mkdtempSync(join(tmpdir(), "soak-mirror-"));
+  await build({
+    configFile: false,
+    logLevel: "silent",
+    build: {
+      ssr: fileURLToPath(new URL("./mirror-worker.ts", import.meta.url)),
+      outDir,
+      emptyOutDir: true,
+      minify: false,
+      rollupOptions: { output: { format: "es", entryFileNames: "mirror-worker.mjs" } },
+    },
+    ssr: { noExternal: true },
+  });
+  return join(outDir, "mirror-worker.mjs");
+}
+
+/**
+ * The host's transport to a page in a worker thread of its own, as in the
+ * browser, where the sim and the page do not share a heap (mirror-worker.ts).
+ * Messages to the page are kept for the timings and posted to it, copied
+ * as a worker port copies them. `ask` puts a question to the page and
+ * resolves once the page has taken in every message sent before it.
+ */
+function pageInWorker(file: string): {
   transport: HostTransport;
-  client: ClientTransport;
   inject(message: unknown): void;
+  ask<T>(question: MirrorQuestion): Promise<T>;
   received: FromSimMessage[];
+  stop(): Promise<number>;
 } {
+  const worker = new Worker(file);
   let handler: ((message: unknown) => void) | null = null;
-  let clientHandler: ((message: FromSimMessage) => void) | null = null;
   const received: FromSimMessage[] = [];
+  const waiting = new Map<number, (answer: unknown) => void>();
+  let asked = 0;
+  worker.on("message", (data: FromMirror) => {
+    if (data.kind === "send") handler?.(data.message);
+    else {
+      waiting.get(data.id)?.(data.answer);
+      waiting.delete(data.id);
+    }
+  });
+  const post = (data: ToMirror) => worker.postMessage(data);
   return {
     transport: {
       send: (message) => {
         received.push(message);
-        clientHandler?.(structuredClone(message));
+        post({ kind: "message", message });
       },
       onMessage: (h) => {
         handler = h;
         return () => (handler = null);
       },
     },
-    client: {
-      send: (message) => handler?.(message),
-      onMessage: (h) => {
-        clientHandler = h;
-        return () => (clientHandler = null);
-      },
-    },
     inject: (message) => handler?.(message),
+    ask: <T>(question: MirrorQuestion) =>
+      new Promise<T>((resolve) => {
+        const id = ++asked;
+        waiting.set(id, resolve as (answer: unknown) => void);
+        post({ kind: "ask", id, question });
+      }),
     received,
+    stop: () => worker.terminate(),
   };
-}
-
-/** The `k`th live segment from `from` on, by id, that a player may change, read from the mirror's copy. */
-function pickSegment(mirror: SimMirror, from: number): number | null {
-  const roads = mirror.state?.roads;
-  if (!roads) return null;
-  const limit = roads.segFlags.length;
-  for (let k = 0; k < limit; k++) {
-    const id = (from + k) % limit;
-    const flags = roads.segFlags[id] ?? 0;
-    if ((flags & SEG_ALIVE) !== 0 && (flags & SEG_FIXED) === 0) return id;
-  }
-  return null;
-}
-
-/** Up to `count` buildings standing in the mirror's copy, from id `from` on, as the player saw them. */
-function pickBuildings(mirror: SimMirror, from: number, count: number): { id: number; segment: number; side: number; place: number }[] {
-  const b = mirror.state?.buildings;
-  if (!b) return [];
-  const seen: { id: number; segment: number; side: number; place: number }[] = [];
-  const limit = b.flags.length;
-  for (let k = 0; k < limit && seen.length < count; k++) {
-    const id = (from + k) % limit;
-    if (b.flags[id]) seen.push({ id, segment: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0 });
-  }
-  return seen;
 }
 
 function finishSave(save: PendingSave): Uint8Array {
@@ -229,7 +243,8 @@ function heapUsed(): number {
   return memoryUsage().heapUsed;
 }
 
-test("soak: one hour of game time at 4x", () => {
+test("soak: one hour of game time at 4x", async () => {
+  const page = pageInWorker(await bundleMirrorWorker());
   let offset = 0;
   let pumpStart = 0;
   let paced = false;
@@ -240,12 +255,17 @@ test("soak: one hour of game time at 4x", () => {
     }
     return offset + (performance.now() - pumpStart);
   };
-  const { transport, client, inject, received } = loopback();
+  const { transport, inject, ask, received } = page;
   const scale = buildScaleCity();
   const SEED = scale.state.seed;
   const host = new SimHost(scale.state, transport, clock);
-  const mirror = new SimMirror(client, "soak");
-  expect(mirror.state).not.toBeNull();
+  // The page asks for a snapshot as it starts; wait until it has one.
+  let ready = false;
+  for (let k = 0; k < 1000 && !ready; k++) {
+    ready = await ask<boolean>({ q: "ready" });
+    if (!ready) await new Promise((r) => setTimeout(r, 10));
+  }
+  expect(ready, "the page has its snapshot").toBe(true);
 
   let seq = 0;
   const command = (type: string, payload: unknown = {}, playerId = "soak"): void =>
@@ -254,7 +274,7 @@ test("soak: one hour of game time at 4x", () => {
   command("SetSpeed", { speed: SPEED });
 
   /** The road command for the `n`th road slot, from the cycle, at a grid of the scale city. */
-  const roadCommand = (n: number): [type: string, payload: unknown] | null => {
+  const roadCommand = async (n: number): Promise<[type: string, payload: unknown] | null> => {
     const type = ROAD_CYCLE[n % ROAD_CYCLE.length] ?? "Undo";
     /** How many times round the cycle. */
     const round = Math.floor(n / ROAD_CYCLE.length);
@@ -272,19 +292,18 @@ test("soak: one hour of game time at 4x", () => {
       }
       case "UpgradeRoad":
       case "BulldozeRoad": {
-        const seg = pickSegment(mirror, (n * 7919) % SCALE_SEGMENTS);
-        const roads = mirror.state?.roads;
-        if (seg === null || !roads) return null;
-        // As the mirror shows the segment now: the sim refuses an edit of one that changed since (issue 94).
-        const seen = { ends: [segmentEnds(roads, seg)], types: [segmentTypeId(roads, seg)] };
-        return type === "UpgradeRoad" ? [type, { segments: [seg], ...seen, type: "avenue" }] : [type, { segments: [seg], ...seen }];
+        // As the page shows the segment now: the sim refuses an edit of one that changed since (issue 94).
+        const picked = await ask<{ seg: number; ends: number[][]; types: string[] } | null>({ q: "segment", from: (n * 7919) % SCALE_SEGMENTS });
+        if (!picked) return null;
+        const seen = { ends: picked.ends, types: picked.types };
+        return type === "UpgradeRoad" ? [type, { segments: [picked.seg], ...seen, type: "avenue" }] : [type, { segments: [picked.seg], ...seen }];
       }
       default:
         return [type, {}];
     }
   };
   /** The zoning command for the `n`th zoning slot: paint a grid and the ground round it, rezone half of it, or clear buildings. */
-  const zoneCommand = (n: number): [type: string, payload: unknown] | null => {
+  const zoneCommand = async (n: number): Promise<[type: string, payload: unknown] | null> => {
     const type = ZONE_CYCLE[n % ZONE_CYCLE.length] ?? "ZoneCells";
     const round = Math.floor(n / ZONE_CYCLE.length);
     const g = scale.grids[(round * 13) % scale.grids.length] ?? { x: 0, z: 0 };
@@ -298,7 +317,7 @@ test("soak: one hour of game time at 4x", () => {
         return { from: { x, z }, to: { x: x + side, z }, width: side };
       });
     if (type === "BulldozeBuilding") {
-      const buildings = pickBuildings(mirror, (n * 104_729) % Math.max(1, mirror.state?.buildings.flags.length ?? 1), CLEAR_COUNT);
+      const buildings = await ask<{ id: number; segment: number; side: number; place: number }[]>({ q: "buildings", seed: n * 104_729, count: CLEAR_COUNT });
       return buildings.length > 0 ? [type, { buildings }] : null;
     }
     if (n % ZONE_CYCLE.length === 0) {
@@ -351,7 +370,7 @@ test("soak: one hour of game time at 4x", () => {
     }
     if (tick % ROAD_EVERY === ROAD_EVERY / 2 && tick !== lastRoadTick) {
       lastRoadTick = tick;
-      const road = roadCommand(roadSlot++);
+      const road = await roadCommand(roadSlot++);
       if (road) {
         const stats = byCommand[road[0]];
         if (stats) stats.sent++;
@@ -361,7 +380,7 @@ test("soak: one hour of game time at 4x", () => {
     }
     if (tick % ZONE_EVERY === ZONE_OFFSET && tick !== lastZoneTick) {
       lastZoneTick = tick;
-      const zoning = zoneCommand(zoneSlot++);
+      const zoning = await zoneCommand(zoneSlot++);
       if (zoning) {
         const stats = byCommand[zoning[0]];
         if (stats) stats.sent++;
@@ -436,10 +455,10 @@ test("soak: one hour of game time at 4x", () => {
     }
     if (host.tick % SAMPLE_EVERY === 0 && heap.at(-1)?.tick !== host.tick) {
       heap.push({ tick: host.tick, mb: mb(memoryUsage().heapUsed) });
-      if (mirror.state) {
-        const homes = mirror.homes?.count ?? -1;
-        if (homes !== countHomes(mirror.state.buildings).count) homesMismatches++;
-        buildingsOverTime.push({ tick: host.tick, buildings: buildingCount(mirror.state.buildings), homes });
+      const sample = await ask<{ homes: number; counted: number; buildings: number } | null>({ q: "homes" });
+      if (sample) {
+        if (sample.homes !== sample.counted) homesMismatches++;
+        buildingsOverTime.push({ tick: host.tick, buildings: sample.buildings, homes: sample.homes });
       }
     }
   }
@@ -455,10 +474,12 @@ test("soak: one hour of game time at 4x", () => {
   expect(hashState(replayed)).toBe(hashState(live.state));
   expect(host.tick).toBe(TICKS);
   expect(host.fullLog.length).toBeGreaterThan(LOG_LIVE_LIMIT);
-  // The mirror kept up with every road change.
-  expect(hashState(mirror.state?.roads)).toBe(hashState(live.state.roads));
-  expect(hashState(mirror.state?.cells)).toBe(hashState(live.state.cells));
-  expect(hashState(mirror.state?.buildings)).toBe(hashState(live.state.buildings));
+  // The page kept up with every road, cell and building change.
+  const pageHashes = await ask<{ roads: string; cells: string; buildings: string; homes: number | null } | null>({ q: "hashes" });
+  await page.stop();
+  expect(pageHashes?.roads).toBe(hashState(live.state.roads));
+  expect(pageHashes?.cells).toBe(hashState(live.state.cells));
+  expect(pageHashes?.buildings).toBe(hashState(live.state.buildings));
 
   const sorted = stepMs.slice(0, steps).sort();
   const over = sorted.filter((t) => t > BUDGET_MS).length;
@@ -541,7 +562,7 @@ test("soak: one hour of game time at 4x", () => {
         maxMs: ms(times.at(-1) ?? 0),
         buildingsAtEnd: buildingCount(live.state.buildings),
         mostBuildings: most,
-        homesAtEnd: mirror.homes?.count ?? null,
+        homesAtEnd: pageHashes?.homes ?? null,
         mostHomes: buildingsOverTime.reduce((a, b) => Math.max(a, b.homes), 0),
         homesMismatches,
         // One sample every ten game minutes, for the shape of the growth.
@@ -595,5 +616,5 @@ test("soak: one hour of game time at 4x", () => {
   expect(report.grower.mostBuildings, "buildings grown").toBeGreaterThan(10_000);
   // The top bar's homes counter, kept from the deltas, never strayed from a count from scratch, and ends on the live city's.
   expect(homesMismatches, "samples where the homes counter strayed").toBe(0);
-  expect(mirror.homes?.count).toBe(countHomes(live.state.buildings).count);
+  expect(pageHashes?.homes).toBe(countHomes(live.state.buildings).count);
 });
