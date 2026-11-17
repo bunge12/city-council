@@ -672,6 +672,28 @@ Redevelopment is the one place a land-value check applies to construction. A bui
 
 Rezoning has to stay cheap. Every city starts at density 1, because densities 2 and 3 unlock later. If built land could only densify through expropriation, growth toward 500,000 would stall.
 
+**M2 exit numbers** (issue M2-17). Measured, not estimated, on the scale town: the M1 scale city with every cell zoned through 45 `ZoneCells` commands and grown out by `growScaleCity` to 57,345 buildings, about 650,000 zoned cells of 2.9 million. That is short of the 100,000 buildings M2.md names, for the frontage reason given under "Building levels of detail" above. The reference machines for Low and Balanced are still an open question, so every number here names the machine it came from. The sim numbers are from `pnpm bench` (`packages/sim/test/town.bench.ts`) on the development container, a 4-core cloud container with no GPU:
+
+| Measurement | Result | Budget |
+| --- | --- | --- |
+| A step with nothing queued on the full town, over two game days | 0.09 ms mean, 1.3 ms worst. The town is full, so the grower's draws find no lot | 20 ms tick |
+| The grower on its own on the full town | 0.08 ms mean, 1.0 ms worst | 5 ms, its share at `growthPerDayMax` |
+| A step while the grower builds back cleared ground | 0.26 ms mean, 5.4 ms worst | 20 ms tick |
+| The step that applies one `ZoneCells` at the cap over built ground, 64 rectangles of 256 m, every open cell under them changing | 9.9 ms mean, 17 ms worst | 20 ms tick |
+| The step that applies one `BuildRoad` across a grid through rows of houses, 23 buildings cleared on average | 3.4 ms mean, 11 ms worst | 20 ms tick |
+| The step that applies one `BulldozeRoad` of a built street, 61 buildings on average | 3.2 ms mean, 8.5 ms worst | 20 ms tick |
+| The step that applies one `BulldozeBuilding` at its cap of 5,000 buildings | 17.4 ms mean, 19 ms worst. The closest to the budget of anything measured; `bulldozeMaxBuildings` is the number to lower if it passes | 20 ms tick |
+| Snapshot of the town | 17.5 MB. Written whole in 14 ms; an autosave writes it in four parts, the slowest 8.3 ms mean, 10 ms worst | 20 ms tick, each part |
+| Cell queries: `cellAt`, `cellsInBox` over 64 m | 0.006 ms, 0.06 ms | none |
+| A built chunk's cells, cell corners and lot marks, as the overlay reads them | 3.5 ms, 3.4 ms, 4.1 ms per chunk | read on a chunk change only |
+| Lot queries: `findLot`, `lotOptions`, `lotMarkAt`, `buildingInfo`, a chunk's buildings | 0.001 to 0.004 ms | none |
+
+The soak run now also zones, rezones and clears buildings while it runs: a `ZoneCells` at the cap over a grid and the ground round it, a rezone of half that ground, and a `BulldozeBuilding` of 50 buildings the mirror shows standing, each on a cycle of its own beside the road commands. The grower builds on that zoning through the hour, to 46,689 buildings of which 8,408 are homes. The top bar's homes count, kept by the mirror from the deltas, matched a count from scratch at every one of 60 samples. The grower's own time per step was 0.12 ms at the median, 0.9 to 1.1 ms at p99, and 18 to 20 ms at worst. Its snapshot grew to 17.8 MB and an autosave of it took about 36 ms of worker time in all at the median, the slowest part 10 ms at the median. The heap peaked at about 190 MB and came back to 91 MB after GC. A replay of the full log gave the live city's hash. On the development container with nothing else running, `ZoneCells` steps passed the 20 ms budget 3 to 4 times in 518 (worst 37 to 49 ms) and undos of a bulldoze 5 to 8 times in 142 (worst about 29 ms), more than the two pauses a run allows each source. Their medians are 7 and 10 ms; the slow steps land on garbage collections, because those commands allocate tens of megabytes a step on a city of 2.9 million cells. That is issue #155. The soak keeps its allowance of two, so it fails until #155 is fixed or CI runners prove fast enough.
+
+A save taken half way through a scripted session of 1,000 ticks on the scale city, with the cells settled first, that zones, rezones, clears buildings, builds and bulldozes streets through them and undoes, while the grower builds 833 buildings, loaded into a new state and run on, ends on the same hash as the session run straight through, and a replay of its log agrees (`scale.test.ts`). The save is taken with 202 buildings standing and lots half built.
+
+The M2 walkthrough (`e2e/m2-walkthrough.spec.ts`) runs the fifteen exit test steps in M2.md on the production build, on WebGPU where the browser has an adapter and on WebGL 2, with a screenshot of each step. It starts from a city file of streets built in Node, and everything after that goes through the page's own tools. CI runs it on a runner of its own beside the M0 and M1 walkthroughs, and the deploy workflow runs all three against the public address. On the development container it takes about 7.5 minutes on software WebGPU and 3 minutes on WebGL 2. Two steps wait on the grower's draw: the second house of one type in step 3 and apartments on the deep R2 strip in step 5, each with a long timeout.
+
 ### Removing things
 
 Decided in issue 116. The bulldozer is one tool for everything the player can remove. B turns it on and off; its button sits beside the road button in the build dock. With it on, the thing under the pointer is marked in the bulldoze orange, a price tag above it says what a click removes and what it costs, and the click removes it. Each milestone that adds something removable registers it as a target kind of this tool. **Nobody builds a second bulldozer or a delete button of its own.**
@@ -1397,8 +1419,8 @@ Where this sits in the build:
 - **Unit tests on sim systems.** Given this state and this command, expect that state. They run headless in Vitest.
 - **Replay tests.** A recorded command log plus a seed must produce the same state hash on every run. This catches accidental nondeterminism and most regressions. The hash is 64-bit FNV-1a over every field of state, typed arrays as raw bytes, object keys in sorted order.
 - **Scenario tests.** Scripted cities that assert outcomes. A city with no jobs must lose population. A bus line beside a jammed road must take riders.
-- **Soak test.** A bot that plays for an hour of game time at 4x and reports tick time and memory. Since M1 it plays on the scale city and builds, upgrades, bulldozes and undoes roads as it goes.
-- **Benchmarks.** `pnpm bench` times hot sim queries on the M1 scale network and fails when one passes its target. CI runs it and keeps the report. `scale.bench.ts` takes the M1 exit measurements on the generated scale city.
+- **Soak test.** A bot that plays for an hour of game time at 4x and reports tick time and memory. Since M1 it plays on the scale city and builds, upgrades, bulldozes and undoes roads as it goes. Since M2 it also zones, rezones and clears buildings, and the grower builds a town on it as it goes.
+- **Benchmarks.** `pnpm bench` times hot sim queries on the M1 scale network and fails when one passes its target. CI runs it and keeps the report. `scale.bench.ts` takes the M1 exit measurements on the generated scale city. `town.bench.ts` takes the M2 ones on the same city grown out with buildings, the cell and lot queries among them.
 - **Playwright walkthroughs.** One per milestone exit test, with screenshots attached to the pull request.
 - **Balance checks.** A script that runs a standard city for ten game years and prints population, treasury and average commute, so a tuning change shows its effect.
 
