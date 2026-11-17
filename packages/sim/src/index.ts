@@ -9,7 +9,8 @@ export function simInfo(): { name: string; tickMs: number } {
   return { name: "city-council sim", tickMs: TICK_MS };
 }
 
-export { SNAPSHOT_VERSION, SPEEDS, captureState, createBareState, createState } from "./state";
+export { SNAPSHOT_VERSION, SPEEDS, captureState, createBareState, createCaptureBuffers, createState } from "./state";
+export type { CaptureBuffers } from "./state";
 export type { SimState, Speed } from "./state";
 export { COMMANDS, MAX_PENDING_COMMANDS, submit, validateCommand } from "./commands";
 export type { Command, CommandDef, CommandResult, DroppedCommand } from "./commands";
@@ -34,7 +35,7 @@ export {
   serializeDetachedSteps,
   serializeSteps,
 } from "./snapshot";
-export type { Snapshot, SnapshotErrorCode, SnapshotHeader, SnapshotSteps } from "./snapshot";
+export type { Snapshot, SnapshotBuffer, SnapshotErrorCode, SnapshotHeader, SnapshotSteps } from "./snapshot";
 export { PROTOCOL_VERSION, parseToSimMessage } from "./protocol";
 export type {
   CommandMessage,

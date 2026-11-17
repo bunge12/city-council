@@ -317,7 +317,12 @@ export class Saver {
         } catch (error) {
           snapshotError = String(error);
         }
-        await this.write(reason, seed, tick, save, snapshotError, requestId);
+        try {
+          await this.write(reason, seed, tick, save, snapshotError, requestId);
+        } finally {
+          // The store has its own copy of the bytes now (store.ts), so the host may write the next save over them.
+          pending?.release();
+        }
       });
     }
     // Any other save is one the player asked for or one taken as the tab
