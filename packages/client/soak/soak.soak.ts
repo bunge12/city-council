@@ -340,6 +340,8 @@ test("soak: one hour of game time at 4x", () => {
       }
       snapshotParts.push(parts);
       pagesStored = save.pageCount;
+      // Stored, as the saver does once IndexedDB has the bytes: the next save may write into the same buffers (issue #158).
+      save.release();
     }
     if (host.tick % SAMPLE_EVERY === 0 && heap.at(-1)?.tick !== host.tick) {
       heap.push({ tick: host.tick, mb: mb(memoryUsage().heapUsed) });
@@ -403,7 +405,10 @@ test("soak: one hour of game time at 4x", () => {
     check("autosaves' slowest parts", saveSlowest, SAVE_PAUSES_ALLOWED),
   ];
   // A save written in parts from a copy is the save written at once.
-  expect(Array.from(finishSave(host.startSave(0)))).toEqual(Array.from(host.saveBytes(0).bytes));
+  // A save written in parts into the kept buffers is the save written at once.
+  const lastSave = host.startSave(0);
+  expect(Buffer.from(finishSave(lastSave)).equals(Buffer.from(host.saveBytes(0).bytes))).toBe(true);
+  lastSave.release();
   const report = {
     seed: SEED,
     startSegments: scale.counts.segments,

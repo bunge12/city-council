@@ -145,20 +145,58 @@ export function cloneState(state: SimState): SimState {
  * with `state`, not copied: each is made once and never changed (log.ts,
  * undo.ts). Everything else is copied as `cloneState` copies it.
  */
-export function captureState(state: SimState): SimState {
+export function captureState(state: SimState, keep?: CaptureBuffers): SimState {
   // The spread keeps the keys in the order `state` has them, which is the
   // order a snapshot writes them in.
-  const rest = cloneValue({ ...state, log: [], undo: [] }) as SimState;
+  const rest = cloneValue({ ...state, log: [], undo: [] }, "", keep) as SimState;
   return { ...rest, log: state.log.slice(), undo: state.undo };
 }
 
-function cloneValue(value: unknown): unknown {
-  // slice() copies only the view, not spare capacity behind it.
-  if (ArrayBuffer.isView(value)) return (value as Uint8Array).slice();
-  if (Array.isArray(value)) return value.map(cloneValue);
+/**
+ * Buffers a host keeps between captures (issue #158), so that a capture of
+ * a large city copies its typed arrays into memory it already has instead
+ * of making megabytes of garbage each autosave. One buffer per place in
+ * the state, by its path. Not state: the sim never reads it.
+ *
+ * A capture made into these buffers is overwritten by the next one, so the
+ * host must be done with it, its save written, before it captures again.
+ */
+export interface CaptureBuffers {
+  readonly arrays: Map<string, ArrayBuffer>;
+}
+
+export function createCaptureBuffers(): CaptureBuffers {
+  return { arrays: new Map() };
+}
+
+type TypedArrayConstructor = new (buffer: ArrayBuffer, byteOffset: number, length: number) => ArrayBufferView & {
+  set(source: ArrayLike<number>): void;
+};
+
+/** A copy of typed array `value` in the buffer `keep` holds for `path`, grown by a quarter when it is too small. */
+function copyInto(value: ArrayBufferView, path: string, keep: CaptureBuffers): ArrayBufferView {
+  const Type = value.constructor as TypedArrayConstructor;
+  let buffer = keep.arrays.get(path);
+  if (!buffer || buffer.byteLength < value.byteLength) {
+    buffer = new ArrayBuffer(Math.ceil((value.byteLength * 1.25) / 8) * 8 + 64);
+    keep.arrays.set(path, buffer);
+  }
+  const length = value.byteLength / ((value as unknown as { BYTES_PER_ELEMENT: number }).BYTES_PER_ELEMENT);
+  const copy = new Type(buffer, 0, length);
+  copy.set(value as unknown as ArrayLike<number>);
+  return copy;
+}
+
+function cloneValue(value: unknown, path = "", keep?: CaptureBuffers): unknown {
+  if (ArrayBuffer.isView(value)) {
+    if (keep && !(value instanceof DataView)) return copyInto(value, path, keep);
+    // slice() copies only the view, not spare capacity behind it.
+    return (value as Uint8Array).slice();
+  }
+  if (Array.isArray(value)) return value.map((item, i) => cloneValue(item, `${path}.${i}`, keep));
   if (typeof value === "object" && value !== null) {
     const out: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value)) out[key] = cloneValue(child);
+    for (const [key, child] of Object.entries(value)) out[key] = cloneValue(child, path === "" ? key : `${path}.${key}`, keep);
     return out;
   }
   return value;

@@ -41,7 +41,7 @@ function setup(seed = 7) {
     now += ms;
     host.pump();
   };
-  return { host, mirror, received, run, stall };
+  return { host, client, mirror, received, run, stall };
 }
 
 describe("SimMirror and SimHost over an in-memory transport", () => {
@@ -583,5 +583,44 @@ describe("snapshot transfer", () => {
     expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers, ...buildingBuffers]);
     expect(buildingBuffers).toHaveLength(19);
     expect(roadBuffers.length).toBeGreaterThan(10);
+  });
+});
+
+describe("autosave buffers (issue #158)", () => {
+  const finish = (steps: ReturnType<SimHost["startSave"]>["steps"]): Uint8Array => {
+    for (;;) {
+      const part = steps.next();
+      if (part.done) return part.value;
+    }
+  };
+
+  it("writes the next save into the last one's buffers once it is released, and never into a save still held", () => {
+    const { host, client, run } = setup(11);
+    client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4000, z: 4000 }, to: { x: 4200, z: 4000 }, type: "street" } } });
+    run(200);
+    const first = host.startSave(0);
+    const firstBytes = finish(first.steps);
+    const firstCopy = firstBytes.slice();
+    expect(Array.from(firstCopy)).toEqual(Array.from(host.saveBytes(0).bytes));
+
+    // Held: a second save gets buffers of its own and leaves the first one's bytes alone.
+    client.send({ v: PROTOCOL_VERSION, type: "command", command: { seq: 2, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4000, z: 4300 }, to: { x: 4200, z: 4300 }, type: "street" } } });
+    run(200);
+    const second = host.startSave(0);
+    const secondBytes = finish(second.steps);
+    expect(secondBytes.buffer).not.toBe(firstBytes.buffer);
+    expect(Array.from(firstBytes)).toEqual(Array.from(firstCopy));
+    expect(Array.from(secondBytes)).toEqual(Array.from(host.saveBytes(0).bytes));
+    second.release();
+
+    // Released: the next save reuses the first one's buffer and still writes the city as it is.
+    first.release();
+    first.release();
+    const third = host.startSave(0);
+    const thirdBytes = finish(third.steps);
+    expect(thirdBytes.buffer).toBe(firstBytes.buffer);
+    expect(Array.from(thirdBytes)).toEqual(Array.from(host.saveBytes(0).bytes));
+    expect(hashState(deserialize(thirdBytes).state)).toBe(hashState(deserialize(host.saveBytes(0).bytes).state));
+    third.release();
   });
 });
