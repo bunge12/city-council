@@ -164,15 +164,23 @@ describe("save and resume on the scale city", () => {
 
   it("a session saved and reloaded half way ends on the same hash as one that ran straight through", () => {
     // Straight through, on the city as the generator left it, with every
-    // piece of derived data kept current since the first road.
-    const straight = buildScaleCity().state;
+    // piece of derived data kept current since the first road. Its cells
+    // are settled first: an undo that puts roads back waits for them, and
+    // the generator's last grids leave a walk of thousands of ticks (M2
+    // review, #147).
+    const fresh = (): SimState => {
+      const state = buildScaleCity().state;
+      while (!cellsSettled(state)) step(state);
+      return state;
+    };
+    const straight = fresh();
     const start = straight.tick;
     const seqA = { n: 100_000 };
     while (straight.tick < start + TICKS) scriptedTick(straight, city.grids, seqA);
 
     // Half way, then a save, a load into a new state with no derived data,
     // and the rest.
-    let resumed = buildScaleCity().state;
+    let resumed = fresh();
     const seqB = { n: 100_000 };
     while (resumed.tick < start + TICKS / 2) scriptedTick(resumed, city.grids, seqB);
     const bytes = serialize(resumed);

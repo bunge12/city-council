@@ -1,9 +1,9 @@
 {
-  "description": "Roads and buildings on seed 2026. p1 builds a street and zones R1 four deep along its north side; p2 zones C1 three deep along its south side. After twelve days of growth p2 runs a street south from x 4296, which splits the first street under the houses across it and clears the shops in its way. p1 clears its lowest-numbered house with BulldozeBuilding, named on the piece the split moved it to, then runs a street north from x 4248 through its houses. p2 bulldozes its street, and undoes that three days later, which clears what grew on the ground meanwhile. Twenty-four game days.",
+  "description": "Roads and buildings on seed 2026. p1 builds a street and zones R1 four deep along its north side; p2 zones C1 three deep along its south side. After twelve days of growth p2 runs a street south from x 4296, which splits the first street under the houses across it and clears the shops in its way. p1 clears its lowest-numbered house with BulldozeBuilding, named on the piece the split moved it to, then runs a street north from x 4248 through its houses. p2 bulldozes its street. Three days later its undo is refused, since shops grew where the street was (M2 review, #147); p2 clears them and undoes. Twenty-four game days.",
   "seed": 2026,
   "untilTick": 2400,
   "balance": "5fe641d3f2f36eb1",
-  "hash": "af2341a6a2edd40e",
+  "hash": "8182c149b55c0e64",
   "log": [
     {
       "tick": 0,
@@ -143,7 +143,24 @@
     },
     {
       "tick": 1900,
-      "seq": 8,
+      "seq": 9,
+      "playerId": "p2",
+      "type": "BulldozeBuilding",
+      "payload": {
+        "buildings": [
+          {
+            "id": 13,
+            "segment": 5,
+            "side": 1,
+            "place": 4,
+            "builtAt": 1699
+          }
+        ]
+      }
+    },
+    {
+      "tick": 1901,
+      "seq": 10,
       "playerId": "p2",
       "type": "Undo",
       "payload": {}

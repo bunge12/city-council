@@ -29,7 +29,9 @@
 import type { SimState } from "./state";
 import { noteFrontCells } from "./buildings/candidates";
 import { noteCellsPainted } from "./zoning/cell-changes";
-import { laidOutCells, readyCells, restoreZones } from "./zoning/cell-index";
+import { buildingsOnCells } from "./buildings/where";
+import { CELL_KEY_STRIDE } from "./zoning/cell-changes";
+import { laidOutCells, openCellsTakenBy, readyCells, restoreZones, syncCells, type ReturningSegment } from "./zoning/cell-index";
 import { ZONING_BALANCE } from "./zoning/balance";
 import { DENSITY_NONE, ZONE_NONE, localIndex } from "./zoning/cells";
 import {
@@ -103,6 +105,7 @@ const JOINED = "Cannot undo: another road now joins one of its junctions";
 const IN_THE_WAY = "Cannot undo: a road built since is in the way";
 const ROAD_GONE = "Cannot undo: someone has changed or removed a road those cells are on";
 const REZONED = "Cannot undo: someone has rezoned those cells since";
+const BUILT_ON = "Cannot undo: buildings now stand on ground that road would take back";
 
 /** The ids a record holds: everything it removed and left removed, which waits for it to come back. */
 export function heldBy(record: UndoRecord): HeldIds {
@@ -188,6 +191,17 @@ export function recordUndo(state: SimState, record: UndoRecord): void {
   state.undo = history;
 }
 
+/** Whether `playerId`'s next undo would put back roads its command removed, so it reads the cells (`takesBuiltGround`). */
+export function undoPutsRoadsBack(state: SimState, playerId: string): boolean {
+  const record = state.undo[newestStep(state.undo, playerId)[0] ?? -1];
+  return record !== undefined && record.type !== ZONE_CELLS && returningSegments(record.ops).back.length > 0;
+}
+
+/** Whether `playerId` has any record to undo, without checking it still applies. */
+export function hasUndo(state: SimState, playerId: string): boolean {
+  return state.undo.some((r) => r.playerId === playerId);
+}
+
 export type UndoPlanResult = { ok: true; index: number; indices: number[] } | { ok: false; reason: string };
 
 /**
@@ -202,7 +216,7 @@ export function planUndo(state: SimState, playerId: string): UndoPlanResult {
   const record = state.undo[index];
   if (!record) return { ok: false, reason: NOTHING };
   if (record.type !== ZONE_CELLS) {
-    const reason = rehearse(state.roads, record.ops);
+    const reason = rehearse(state.roads, record.ops) ?? takesBuiltGround(state, record.ops);
     return reason === null ? { ok: true, index, indices } : { ok: false, reason };
   }
   for (const i of indices) {
@@ -229,6 +243,38 @@ export function applyUndo(state: SimState, indices: readonly number[]): void {
   }
   const gone = new Set(indices);
   state.undo = state.undo.filter((_, i) => !gone.has(i));
+}
+
+/**
+ * The segments the reverse of `ops` puts back: each one the command
+ * removed that it had not added itself first. With the ids of every
+ * segment the command touched, which the reverse removes or changes.
+ */
+function returningSegments(ops: readonly NetworkOp[]): { back: ReturningSegment[]; touched: Set<number> } {
+  const touched = new Set<number>();
+  const back: ReturningSegment[] = [];
+  for (const op of ops) {
+    if (op.op === "removeSeg" && !touched.has(op.id)) back.push({ id: op.id, row: op.row, ax: op.ax, az: op.az, bx: op.bx, bz: op.bz });
+    if (op.op === "addSeg" || op.op === "removeSeg" || op.op === "restyle") touched.add(op.id);
+  }
+  return { back, touched };
+}
+
+/**
+ * Why putting back the roads `ops` removed would take ground buildings now
+ * stand on, or null (M2 review, #147). A road that comes back is as old as
+ * it was, so its cells win the ground back from any newer road's built
+ * since, and its surface blocks what grew under it. With two players that
+ * would clear another player's buildings without a word, so the undo is
+ * refused instead. Buildings on the segments the undo removes go as for any
+ * undo of a build. The cells must be settled: the step holds an Undo while
+ * they settle (commands.ts).
+ */
+function takesBuiltGround(state: SimState, ops: readonly NetworkOp[]): string | null {
+  const { back, touched } = returningSegments(ops);
+  if (back.length === 0) return null;
+  const keys = openCellsTakenBy(syncCells(state), back, touched);
+  return keys.length > 0 && buildingsOnCells(state, keys, CELL_KEY_STRIDE).length > 0 ? BUILT_ON : null;
 }
 
 // What an undo of a paint puts back: the slot of each cell and the zone

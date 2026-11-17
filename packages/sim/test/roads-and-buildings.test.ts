@@ -232,7 +232,7 @@ describe("a road that comes", () => {
     expectSound(state);
   });
 
-  it("clears the houses that grew where a bulldozed road was, when the bulldoze is undone", () => {
+  it("refuses to undo a bulldoze while houses stand where the road was, and undoes it once they are cleared (M2 review, #147)", () => {
     const state = street();
     // A street from the north meets this one at x 4296.
     ok(state, road([4296, 4450], [4296, 4600]));
@@ -247,6 +247,9 @@ describe("a road that comes", () => {
       return lo < 4296 + half && hi > 4296 - half;
     });
     expect(under.length).toBeGreaterThan(0);
+    expect(submit(state, command("Undo", {}, "p2"))).toEqual({ ok: false, reason: "Cannot undo: buildings now stand on ground that road would take back" });
+    const b = state.buildings;
+    ok(state, command("BulldozeBuilding", { buildings: under.map((id) => ({ id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id], builtAt: b.builtAt[id] })) }));
     ok(state, command("Undo", {}, "p2"));
     expect(live(state)).toEqual(ids.filter((id) => !under.includes(id)));
     expectSound(state);
@@ -535,8 +538,9 @@ describe("the building index across changes of roads", () => {
  * growth, then p2 runs a street south from x 4296, which splits the first
  * one under the houses across it and clears the shops in its way. p1 clears
  * its lowest-numbered house with BulldozeBuilding, then runs a street north
- * from x 4248 through its houses. p2 bulldozes its street and undoes that,
- * which clears whatever grew on the ground meanwhile. Twenty-four days.
+ * from x 4248 through its houses. p2 bulldozes its street. Three days on
+ * its undo is refused, since shops grew on the ground meanwhile; p2 clears
+ * them and undoes. Twenty-four days.
  */
 function playSession(): SimState {
   const state = createState(SEED);
@@ -572,6 +576,18 @@ function playSession(): SimState {
   until(16 * DAY);
   send("BulldozeRoad", withEnds(state.roads, { segments: [cellAt(state, 4303, 4680)?.segment as number] }), "p2");
   until(19 * DAY);
+  // Shops grew on p1's cells where the street was, so the undo would clear
+  // them, and it is refused (M2 review, #147). p2 clears them and undoes.
+  expect(submit(state, { seq: ++n, playerId: "p2", type: "Undo", payload: {} }).ok).toBe(false);
+  const half = halfWidth("street");
+  const inTheWay = live(state).filter((id) => {
+    const [lo, hi] = xRange(state, id);
+    return lo < 4296 + half && hi > 4296 - half && (buildingInfo(state, id)?.corners?.[1] ?? 0) > 4600;
+  });
+  expect(inTheWay.length).toBeGreaterThan(0);
+  const b = state.buildings;
+  send("BulldozeBuilding", { buildings: inTheWay.map((id) => ({ id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id], builtAt: b.builtAt[id] })) }, "p2");
+  until(19 * DAY + 1);
   send("Undo", {}, "p2");
   until(24 * DAY);
   return state;
@@ -608,8 +624,9 @@ describe("replay fixture roads-and-buildings", () => {
     expect(count(at(1301))).toBe(count(at(1300)) - 1);
     // The street north clears houses.
     expect(byZone(at(1401), 1)).toBeLessThan(byZone(at(1400), 1));
-    // The undo of the bulldoze clears what grew on its ground.
+    // The undo of the bulldoze waits for the shops on its ground to be cleared (M2 review, #147).
     expect(count(at(1901))).toBeLessThan(count(at(1900)));
+    expect(fixture.log.filter((e) => e.type === "Undo").map((e) => e.tick)).toEqual([1901]);
   });
 
   /** Replays the fixture, saving and loading the city at `at` and stepping on from the copy. */
@@ -679,5 +696,55 @@ describe("a client's copy", () => {
     check();
     ok(state, command("BulldozeRoad", { segments: [cellAt(state, 4230, 4591)?.segment as number] }));
     check();
+  });
+});
+
+describe("undo of a bulldoze over ground built on since (M2 review, #147)", () => {
+  /** p1's street at z 4600, bulldozed by p1, and p2's street 32 m north of it, inside the ground the first one's cells held. */
+  function bulldozedThenBuiltBeside(): SimState {
+    const state = street();
+    const seg = cellAt(state, 4300, 4591)?.segment as number;
+    ok(state, command("BulldozeRoad", withEnds(state.roads, { segments: [seg] })));
+    ok(state, command("BuildRoad", { from: { x: 4200, z: 4568 }, to: { x: 4392, z: 4568 }, type: "street" }, "p2"));
+    while (!cellsSettled(state)) step(state);
+    return state;
+  }
+
+  it("is refused when buildings stand on ground the street would take back", () => {
+    const state = bulldozedThenBuiltBeside();
+    // p2 zones the south side of its street, over where the first street and its cells were.
+    ok(state, command("ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4597 }, to: { x: 4390, z: 4597 }, width: 46 }] }, "p2"));
+    const until = state.tick + 20 * DAY;
+    while (state.tick < until && live(state).length === 0) step(state);
+    expect(live(state).length).toBeGreaterThan(0);
+    const before = hashState(state);
+    expect(submit(state, command("Undo", {}))).toEqual({ ok: false, reason: "Cannot undo: buildings now stand on ground that road would take back" });
+    expect(hashState(state)).toBe(before);
+    // Once p2's buildings there are cleared, the undo goes through.
+    const b = state.buildings;
+    const seen = live(state).map((id) => ({ id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id], builtAt: b.builtAt[id] }));
+    ok(state, command("BulldozeBuilding", { buildings: seen }, "p2"));
+    ok(state, command("Undo", {}));
+    expectSound(state);
+  });
+
+  it("goes through when only empty ground, or zoning, lies there", () => {
+    const state = bulldozedThenBuiltBeside();
+    ok(state, command("Undo", {}));
+    expect(cellAt(state, 4300, 4591)).not.toBeNull();
+    expectSound(state);
+  });
+
+  it("is held, not refused, while a change of roads settles, and checked once the cells settle", () => {
+    const state = bulldozedThenBuiltBeside();
+    ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4704 }, along: { x: 4680, z: 4704 }, across: { x: 4104, z: 4992 }, depth: 86, width: 86, type: "street" }, "p2"));
+    expect(cellsSettled(state)).toBe(false);
+    const undo = command("Undo", {});
+    expect(submit(state, undo)).toEqual({ ok: true });
+    step(state);
+    expect(state.pending.map((c) => c.seq)).toEqual([undo.seq]);
+    while (state.pending.length > 0) step(state);
+    expect(state.log.at(-1)?.seq).toBe(undo.seq);
+    expect(state.log.at(-1)?.tick).toBe(state.cellsReadyAt);
   });
 });

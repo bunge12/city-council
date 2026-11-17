@@ -61,6 +61,8 @@ const undo = (playerId = "p1") => command("Undo", {}, playerId);
 function ok(state: SimState, c: Command): void {
   expect(submit(state, c), c.type).toEqual({ ok: true });
   step(state);
+  // An undo that puts roads back waits for the cells to settle (M2 review, #147).
+  while (state.pending.length > 0) step(state);
   expect(state.log.at(-1)?.seq, `${c.type} should apply`).toBe(c.seq);
 }
 

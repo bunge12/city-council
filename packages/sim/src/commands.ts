@@ -7,7 +7,7 @@ import { bulldozeRoad, planBulldoze, planUpgrade, upgradeRoad } from "./roads/ed
 import { endJournal, reverseOps, startJournal, type NetworkOp } from "./roads/network";
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
-import { applyUndo, planUndo, recordUndo } from "./undo";
+import { applyUndo, hasUndo, planUndo, recordUndo, undoPutsRoadsBack } from "./undo";
 import { cellsSettled, stepCells } from "./zoning/cell-index";
 import { checkZoneCellsPayload, planZoneCells, strokeOf, zoneCellsIfValid } from "./zoning/zone";
 import { NO_JOURNALS, journalLostZones, journalPaint } from "./zoning/zone-undo";
@@ -193,6 +193,8 @@ const UpgradeRoad: CommandDef = {
  */
 const Undo: CommandDef = {
   validate: (state, command) => {
+    // A command the step will hold is checked in full when it applies.
+    if (waitsForCells(state, command)) return hasUndo(state, command.playerId) ? null : "Nothing to undo";
     const result = planUndo(state, command.playerId);
     return result.ok ? null : result.reason;
   },
@@ -314,7 +316,9 @@ function copyPayload(payload: unknown): unknown {
  * Commands that read which cells are open, and so would walk the whole of a
  * change of roads still settling in one go, far past the tick budget (M2
  * review, #147): painting zoning reads the open cells, and clearing a
- * building reads its lot's columns.
+ * building reads its lot's columns. An `Undo` whose record puts roads back
+ * reads what ground they would take, and waits too; any other undo does
+ * not.
  */
 const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding"]);
 
@@ -325,8 +329,9 @@ const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuildin
  * wait for and applies it at once, walking whatever is left: nothing moves
  * while paused, so the walk holds nothing up.
  */
-export function waitsForCells(state: SimState, command: Pick<Command, "type">): boolean {
-  return CELL_READERS.has(command.type) && state.speed !== 0 && !cellsSettled(state);
+export function waitsForCells(state: SimState, command: Pick<Command, "type" | "playerId">): boolean {
+  if (state.speed === 0 || cellsSettled(state)) return false;
+  return CELL_READERS.has(command.type) || (command.type === "Undo" && undoPutsRoadsBack(state, command.playerId));
 }
 
 /**

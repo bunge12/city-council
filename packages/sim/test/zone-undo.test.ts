@@ -55,6 +55,8 @@ const undo = (playerId = "p1") => command("Undo", {}, playerId);
 function run(state: SimState, c: Command): CommandResult {
   const result = submit(state, c);
   step(state);
+  // An undo that puts roads back waits for the cells to settle (M2 review, #147).
+  while (state.pending.length > 0) step(state);
   return result;
 }
 
