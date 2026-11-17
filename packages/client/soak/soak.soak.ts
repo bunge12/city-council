@@ -314,6 +314,8 @@ test("soak: one hour of game time at 4x", () => {
   let lastZoneTick = -1;
   /** The command waiting for its step: its type and the log length before it. */
   let waitingRoad: { type: string; logBefore: number } | null = null;
+  /** Every step over the budget: its tick, what it applied, and each system's time, to say where the time went. */
+  const slowSteps: { tick: number; command: string | null; ms: Record<string, number> }[] = [];
   /** The grower's time in each step it ran in. */
   const growerMs: number[] = [];
   /**
@@ -384,6 +386,7 @@ test("soak: one hour of game time at 4x", () => {
       // The first step after a road command was sent applies it, or drops
       // it when an earlier command that tick made it invalid.
       let applied = false;
+      const waitingType = waitingRoad?.type;
       if (waitingRoad) {
         const stats = byCommand[waitingRoad.type];
         applied = host.fullLog.slice(waitingRoad.logBefore).some((e) => e.type === waitingRoad?.type);
@@ -392,6 +395,11 @@ test("soak: one hour of game time at 4x", () => {
           stats.ms.push(total);
         }
         waitingRoad = null;
+      }
+      if (total > BUDGET_MS) {
+        const bySystem: Record<string, number> = {};
+        for (const timing of message.timings) bySystem[timing.system] = ms((bySystem[timing.system] ?? 0) + timing.ms);
+        slowSteps.push({ tick: host.tick, command: applied ? (waitingType ?? null) : null, ms: bySystem });
       }
       if (!applied) {
         const settling = message.timings.some((t) => t.system === CELLS_SYSTEM && t.ms > SETTLE_MIN_MS);
@@ -533,6 +541,7 @@ test("soak: one hour of game time at 4x", () => {
     })(),
     settleSteps: { count: settleSorted.length, p50: ms(quantile(settleSorted, 0.5)), p95: ms(quantile(settleSorted, 0.95)), max: ms(settleSorted.at(-1) ?? 0), overBudget: overOf(settleSorted) },
     idleSteps: { count: idleSorted.length, p99: ms(quantile(idleSorted, 0.99)), max: ms(idleSorted.at(-1) ?? 0), overBudget: overOf(idleSorted) },
+    slowSteps,
     checks: checks.map((c) => ({ ...c, medianMs: ms(c.medianMs), maxMs: ms(c.maxMs) })),
     snapshot: {
       count: snapshotParts.length,

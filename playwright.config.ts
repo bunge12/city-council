@@ -7,7 +7,7 @@ const isCI = Boolean(process.env["CI"]);
 const walkthroughFiles = new RegExp(projectFiles.walkthrough);
 
 /**
- * Where the M0 walkthrough runs. Unset, it runs against a production build
+ * Where the walkthroughs run. Unset, they run against a production build
  * served by `vite preview`. Set it to the public address to check the
  * deployed game, for example
  * `BASE_URL=https://bunge12.github.io/city-council/ pnpm e2e --project walkthrough`.
@@ -94,7 +94,7 @@ export default defineConfig({
       },
     },
     {
-      // The M0 and M1 exit tests, on the built client, on WebGPU and on WebGL 2.
+      // The M0, M1 and M2 exit tests, on the built client, on WebGPU and on WebGL 2.
       // It runs headed in the full Chromium build: the headless shell loses
       // its WebGPU device, and a headless page's screenshots leave out a
       // WebGPU canvas. On Linux without a display, run it under `xvfb-run`.
