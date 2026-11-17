@@ -61,7 +61,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(14);
+    expect(SNAPSHOT_VERSION).toBe(15);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,

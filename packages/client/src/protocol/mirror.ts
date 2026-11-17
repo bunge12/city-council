@@ -146,6 +146,11 @@ export class SimMirror {
     return () => void this.listeners.delete(listener);
   }
 
+  /** The seq the next command this copy sends will carry. No earlier command of this player has it, even from before a reload. */
+  get upcomingSeq(): number {
+    return this.nextSeq;
+  }
+
   /**
    * Sends a command and resolves with the host's answer: queued, or refused
    * with a reason. Queued is not applied: a command ahead of it in the same

@@ -351,6 +351,13 @@ export interface ZoneToolHost {
   version(): number;
   /** Sends a `ZoneCells` and resolves once the sim has applied it, or with why it did not. */
   send(payload: ZoneCellsPayload): Promise<CommandResult>;
+  /**
+   * An id for a stroke too big for one command, put on each of its
+   * commands so one undo takes the whole stroke back: the seq the next
+   * command will carry, which no earlier command of this player has, even
+   * across a reload (M2 review, #147).
+   */
+  strokeId(): number;
 }
 
 /** The zone tool's input handling. Holds no state of its own beyond a counter for ids and caches of what it worked out from the copy. */
@@ -583,8 +590,10 @@ export class ZoneToolController {
     }
     const pending: PendingZone = { id: this.nextId++, preview, waiting: preview.payloads.length };
     this.host.set({ zoneNote: null, zonePending: [...this.host.get().zonePending, pending] });
+    const stroke = preview.payloads.length > 1 ? this.host.strokeId() : null;
     for (const payload of preview.payloads) {
-      void this.host.send(payload).then((result) => this.answered(pending.id, result));
+      const sent = stroke === null ? payload : { ...payload, stroke };
+      void this.host.send(sent).then((result) => this.answered(pending.id, result));
     }
   }
 

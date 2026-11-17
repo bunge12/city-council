@@ -83,6 +83,12 @@ export interface UndoRecord {
   zones: Int32Array;
   /** For a ZoneCells only: the zone and density it painted. */
   painted?: ZoneValue;
+  /**
+   * For a ZoneCells that is one part of a stroke too big for one command:
+   * the stroke's id, the same on every part. One undo takes back the run of
+   * the sender's newest records that share it (M2 review, #147).
+   */
+  stroke?: number;
 }
 
 /** The command type whose records hold a paint, not road changes. */
@@ -123,56 +129,106 @@ function forget(net: RoadNetwork, record: UndoRecord): void {
 }
 
 /**
+ * Whether `later`, the next record of its player after `earlier`, is another
+ * part of the same stroke: both ZoneCells with one stroke id, painting one
+ * zone and density. Parts of one stroke paint cells no other part did, since
+ * a part leaves alone cells that already hold what it paints, so they can be
+ * taken back in any order (M2 review, #147).
+ */
+function sameStroke(earlier: UndoRecord, later: UndoRecord): boolean {
+  return (
+    later.stroke !== undefined &&
+    earlier.stroke === later.stroke &&
+    earlier.type === ZONE_CELLS &&
+    later.type === ZONE_CELLS &&
+    earlier.painted?.zone === later.painted?.zone &&
+    earlier.painted?.density === later.painted?.density
+  );
+}
+
+/**
+ * Places in `history` of `playerId`'s newest step: the newest record and,
+ * for a part of a stroke, the parts before it, newest first. Empty when the
+ * player has nothing to undo.
+ */
+function newestStep(history: readonly UndoRecord[], playerId: string): number[] {
+  const out: number[] = [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const record = history[i];
+    if (record?.playerId !== playerId) continue;
+    const last = out.length > 0 ? history[out[out.length - 1] as number] : undefined;
+    if (last && !sameStroke(record, last)) break;
+    out.push(i);
+  }
+  return out;
+}
+
+/**
  * Adds a record for a command that just applied and forgets the player's
- * oldest records past `UNDO_STEPS`.
+ * oldest steps past `UNDO_STEPS`. The parts of one stroke are one step.
  */
 export function recordUndo(state: SimState, record: UndoRecord): void {
   const history = [...state.undo, record];
-  let count = 0;
-  for (const r of history) if (r.playerId === record.playerId) count++;
-  while (count > UNDO_STEPS) {
-    const oldest = history.findIndex((r) => r.playerId === record.playerId);
-    const [gone] = history.splice(oldest, 1);
-    if (gone) forget(state.roads, gone);
-    count--;
+  const mine: number[] = [];
+  for (let i = 0; i < history.length; i++) if (history[i]?.playerId === record.playerId) mine.push(i);
+  // Where each of the player's steps starts, oldest first.
+  const starts: number[] = [];
+  for (let k = 0; k < mine.length; k++) {
+    const prev = k > 0 ? history[mine[k - 1] as number] : undefined;
+    if (!prev || !sameStroke(prev, history[mine[k] as number] as UndoRecord)) starts.push(k);
+  }
+  const over = starts.length - UNDO_STEPS;
+  if (over > 0) {
+    // Forgets the oldest `over` steps: every record before the first step kept.
+    const goneIds = new Set(mine.slice(0, starts[over]));
+    for (const i of goneIds) forget(state.roads, history[i] as UndoRecord);
+    state.undo = history.filter((_, i) => !goneIds.has(i));
+    return;
   }
   state.undo = history;
 }
 
-/** Index in `state.undo` of the newest record `playerId` can undo, or -1. */
-function newestRecord(history: readonly UndoRecord[], playerId: string): number {
-  for (let i = history.length - 1; i >= 0; i--) if (history[i]?.playerId === playerId) return i;
-  return -1;
-}
-
-export type UndoPlanResult = { ok: true; index: number } | { ok: false; reason: string };
+export type UndoPlanResult = { ok: true; index: number; indices: number[] } | { ok: false; reason: string };
 
 /**
  * Checks that `playerId` has something to undo and that its reverse still
- * applies. Changes nothing.
+ * applies: its newest record, or every part of its newest stroke. `index`
+ * is the newest record's place in `state.undo`, `indices` every record's,
+ * newest first. Changes nothing.
  */
 export function planUndo(state: SimState, playerId: string): UndoPlanResult {
-  const index = newestRecord(state.undo, playerId);
+  const indices = newestStep(state.undo, playerId);
+  const index = indices[0] ?? -1;
   const record = state.undo[index];
   if (!record) return { ok: false, reason: NOTHING };
-  const reason = record.type === ZONE_CELLS ? checkPaint(state, record) : rehearse(state.roads, record.ops);
-  return reason === null ? { ok: true, index } : { ok: false, reason };
+  if (record.type !== ZONE_CELLS) {
+    const reason = rehearse(state.roads, record.ops);
+    return reason === null ? { ok: true, index, indices } : { ok: false, reason };
+  }
+  for (const i of indices) {
+    const reason = checkPaint(state, state.undo[i] as UndoRecord);
+    if (reason !== null) return { ok: false, reason };
+  }
+  return { ok: true, index, indices };
 }
 
-/** Applies a plan from `planUndo`: reverses the record's changes and drops it from the history. */
-export function applyUndo(state: SimState, index: number): void {
-  const record = state.undo[index];
-  if (!record) return;
-  if (record.type === ZONE_CELLS) unpaint(state, record);
-  else {
-    // The cells must be laid out for the roads as they are before the
-    // roads change back, so the next layout sees the segments come back.
-    const zones = record.zones.length > 0;
-    if (zones) readyCells(state);
-    reverseOps(state.roads, record.ops);
-    if (zones) restoreZones(state, record.zones);
+/** Applies a plan from `planUndo`: reverses each record's changes, newest first, and drops them from the history. */
+export function applyUndo(state: SimState, indices: readonly number[]): void {
+  for (const index of indices) {
+    const record = state.undo[index];
+    if (!record) continue;
+    if (record.type === ZONE_CELLS) unpaint(state, record);
+    else {
+      // The cells must be laid out for the roads as they are before the
+      // roads change back, so the next layout sees the segments come back.
+      const zones = record.zones.length > 0;
+      if (zones) readyCells(state);
+      reverseOps(state.roads, record.ops);
+      if (zones) restoreZones(state, record.zones);
+    }
   }
-  state.undo = state.undo.filter((_, i) => i !== index);
+  const gone = new Set(indices);
+  state.undo = state.undo.filter((_, i) => !gone.has(i));
 }
 
 // What an undo of a paint puts back: the slot of each cell and the zone
@@ -433,9 +489,11 @@ function isOp(value: unknown): boolean {
 
 function isRecordZones(record: Record<string, unknown>): boolean {
   const zones = record["zones"];
-  if (record["type"] !== ZONE_CELLS) return record["painted"] === undefined && checkJournals(zones, false);
+  if (record["type"] !== ZONE_CELLS) return record["painted"] === undefined && record["stroke"] === undefined && checkJournals(zones, false);
   const painted = record["painted"];
   if (!isRecord(painted) || !isZoneValue(painted["zone"], painted["density"])) return false;
+  const stroke = record["stroke"];
+  if (stroke !== undefined && !isId(stroke)) return false;
   return (record["ops"] as unknown[]).length === 0 && checkJournals(zones, true);
 }
 

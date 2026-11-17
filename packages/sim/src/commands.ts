@@ -9,7 +9,7 @@ import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 import { applyUndo, planUndo, recordUndo } from "./undo";
 import { cellsSettled, stepCells } from "./zoning/cell-index";
-import { checkZoneCellsPayload, planZoneCells, zoneCellsIfValid } from "./zoning/zone";
+import { checkZoneCellsPayload, planZoneCells, strokeOf, zoneCellsIfValid } from "./zoning/zone";
 import { NO_JOURNALS, journalLostZones, journalPaint } from "./zoning/zone-undo";
 
 /**
@@ -198,7 +198,7 @@ const Undo: CommandDef = {
   },
   apply: (state, command) => {
     const result = planUndo(state, command.playerId);
-    if (result.ok) applyUndo(state, result.index);
+    if (result.ok) applyUndo(state, result.indices);
   },
 };
 
@@ -231,7 +231,9 @@ function zoneCells(state: SimState, command: Command): string | null {
     painted = { zone, density };
   });
   if (reason === null) {
-    recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops: [], zones, painted });
+    const stroke = strokeOf(command.payload);
+    const record = { playerId: command.playerId, entry: logLength(state), type: command.type, ops: [], zones, painted };
+    recordUndo(state, stroke === undefined ? record : { ...record, stroke });
   }
   return reason;
 }

@@ -49,6 +49,18 @@ export interface ZoneCellsPayload {
   density?: number;
   /** At most `maxRectsPerCommand`, each side at most `maxRectSide`. */
   rects: ZoneRect[];
+  /**
+   * Optional. The same id on every command of a stroke too big for one, so
+   * one undo takes back the whole stroke (M2 review, #147). A whole number,
+   * 0 or more; the zone tool gives the seq of the stroke's first command.
+   */
+  stroke?: number;
+}
+
+/** The stroke id a ZoneCells payload carries, or undefined. Only for a payload `parse` accepted. */
+export function strokeOf(payload: unknown): number | undefined {
+  const stroke = isRecord(payload) ? payload["stroke"] : undefined;
+  return typeof stroke === "number" ? stroke : undefined;
 }
 
 /** What a ZoneCells command would do. */
@@ -96,6 +108,8 @@ function parse(payload: unknown): Parsed | string {
   if (!known && !(zoneId === ZONE_CLEAR && level === undefined)) {
     return `unknown density ${JSON.stringify(level)}: it must be one of ${ZONING_BALANCE.densities.map((d) => d.level).join(", ")}`;
   }
+  const stroke = payload["stroke"];
+  if (stroke !== undefined && !(Number.isSafeInteger(stroke) && (stroke as number) >= 0)) return "stroke must be a whole number, 0 or more";
   const list = payload["rects"];
   if (!Array.isArray(list) || list.length === 0) return "rects must be a list of at least one rectangle";
   const most = ZONING_BALANCE.maxRectsPerCommand;

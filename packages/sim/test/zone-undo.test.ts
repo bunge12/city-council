@@ -436,3 +436,87 @@ describe("BulldozeBuilding", () => {
     expect(state.undo).toBe(before);
   });
 });
+
+describe("undo of a stroke split over several commands (M2 review, #147)", () => {
+  /** `c` with `stroke` in its payload. */
+  const part = (c: Command, stroke: number): Command => ({ ...c, payload: { ...(c.payload as object), stroke } });
+
+  it("takes back every part of the stroke with one undo, and leaves the stroke before it", () => {
+    const state = street();
+    const before = zones(state);
+    ok(state, paint("commercial", 1, 0, 24, 2));
+    const afterFirst = zones(state);
+    // Three parts of one residential stroke, and p2's command between two of them.
+    ok(state, part(paint("residential", 1, 0, 8, 4, "south"), 70));
+    ok(state, paint("industrial", 2, 0, 4, 6, "north", "p2"));
+    ok(state, part(paint("residential", 1, 8, 8, 4, "south"), 70));
+    ok(state, part(paint("residential", 1, 16, 8, 4, "south"), 70));
+    expect(state.undo.filter((r) => r.stroke === 70)).toHaveLength(3);
+    ok(state, undo());
+    // The whole stroke went at once; p2's paint stays.
+    expect(state.undo.filter((r) => r.stroke === 70)).toHaveLength(0);
+    const twin = street();
+    ok(twin, paint("commercial", 1, 0, 24, 2));
+    ok(twin, paint("industrial", 2, 0, 4, 6, "north", "p2"));
+    expect(zones(state)).toEqual(zones(twin));
+    ok(state, undo("p2"));
+    expect(zones(state)).toEqual(afterFirst);
+    ok(state, undo());
+    expect(zones(state)).toEqual(before);
+  });
+
+  it("refuses the whole stroke when one part of it can no longer be undone", () => {
+    const state = street();
+    ok(state, part(paint("residential", 1, 0, 12, 4), 9));
+    ok(state, part(paint("residential", 1, 12, 12, 4), 9));
+    // p2 rezones a corner of the first part.
+    ok(state, paint("office", 1, 0, 2, 2, "north", "p2"));
+    const held = zones(state);
+    expect(refusal(state, undo())).toMatch(/rezoned/);
+    expect(zones(state)).toEqual(held);
+    expect(state.undo.filter((r) => r.stroke === 9)).toHaveLength(2);
+  });
+
+  it("keeps strokes with another id, or another zone, as steps of their own", () => {
+    const state = street();
+    ok(state, part(paint("residential", 1, 0, 12, 4), 5));
+    ok(state, part(paint("residential", 1, 12, 12, 4), 6));
+    ok(state, part(paint("commercial", 1, 0, 12, 4, "south"), 6));
+    const strokes = () => state.undo.filter((r) => r.type === "ZoneCells").map((r) => r.stroke);
+    ok(state, undo());
+    expect(strokes()).toEqual([5, 6]);
+    ok(state, undo());
+    expect(strokes()).toEqual([5]);
+  });
+
+  it("counts a split stroke as one of the player's undo steps", () => {
+    const state = street();
+    // The street is a step of its own, so these fill the history but for one step.
+    for (let i = 0; i < UNDO_STEPS - 2; i++) ok(state, paint(["residential", "commercial", "office"][Math.floor(i / 24)] ?? "mixed", 1, i % 24, 1, 1));
+    ok(state, part(paint("office", 1, 0, 12, 3, "south"), 77));
+    ok(state, part(paint("office", 1, 12, 12, 3, "south"), 77));
+    // UNDO_STEPS steps in UNDO_STEPS + 1 records, all kept.
+    expect(state.undo.filter((r) => r.playerId === "p1")).toHaveLength(UNDO_STEPS + 1);
+    expect(state.undo[0]?.type).toBe("BuildRoad");
+    // One more step pushes out the oldest step only, the street.
+    ok(state, paint("mixed", 1, 0, 4, 6, "south"));
+    expect(state.undo.filter((r) => r.playerId === "p1")).toHaveLength(UNDO_STEPS + 1);
+    expect(state.undo[0]?.type).toBe("ZoneCells");
+    expect(state.undo.filter((r) => r.stroke === 77)).toHaveLength(2);
+  });
+
+  it("refuses a stroke id that is not a whole number, 0 or more", () => {
+    const state = street();
+    for (const stroke of [-1, 0.5, "a"]) expect(refusal(state, part(paint("residential", 1, 0, 4, 2), stroke as number))).toMatch(/stroke/);
+  });
+
+  it("keeps the stroke id through a save, so the stroke still undoes whole", () => {
+    let state = street();
+    ok(state, part(paint("residential", 1, 0, 12, 4), 3));
+    ok(state, part(paint("residential", 1, 12, 12, 4), 3));
+    state = deserialize(serialize(state)).state;
+    expect(checkUndoHistory(state.undo)).toBeNull();
+    ok(state, undo());
+    expect(zonedCount(state)).toBe(0);
+  });
+});
