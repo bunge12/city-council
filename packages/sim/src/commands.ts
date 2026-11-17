@@ -8,8 +8,8 @@ import { endJournal, reverseOps, startJournal, type NetworkOp } from "./roads/ne
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 import { applyUndo, planUndo, recordUndo } from "./undo";
-import { stepCells } from "./zoning/cell-index";
-import { planZoneCells, zoneCellsIfValid } from "./zoning/zone";
+import { cellsSettled, stepCells } from "./zoning/cell-index";
+import { checkZoneCellsPayload, planZoneCells, zoneCellsIfValid } from "./zoning/zone";
 import { NO_JOURNALS, journalLostZones, journalPaint } from "./zoning/zone-undo";
 
 /**
@@ -211,6 +211,9 @@ const Undo: CommandDef = {
  */
 const ZoneCells: CommandDef = {
   validate: (state, command) => {
+    // A command the step will hold is checked in full when it applies.
+    // Checking the cells now would walk the rest of the change in one go.
+    if (waitsForCells(state, command)) return checkZoneCellsPayload(command.payload);
     const result = planZoneCells(state, command.payload);
     return result.ok ? null : result.reason;
   },
@@ -306,6 +309,25 @@ function copyPayload(payload: unknown): unknown {
 }
 
 /**
+ * Commands that read which cells are open, and so would walk the whole of a
+ * change of roads still settling in one go, far past the tick budget (M2
+ * review, #147): painting zoning reads the open cells, and clearing a
+ * building reads its lot's columns.
+ */
+const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding"]);
+
+/**
+ * Whether the step holds `command`, with every command queued behind it,
+ * until the cells settle on `state.cellsReadyAt`. From state alone, so a
+ * replay applies it on the tick it was logged. A paused game has no tick to
+ * wait for and applies it at once, walking whatever is left: nothing moves
+ * while paused, so the walk holds nothing up.
+ */
+export function waitsForCells(state: SimState, command: Pick<Command, "type">): boolean {
+  return CELL_READERS.has(command.type) && state.speed !== 0 && !cellsSettled(state);
+}
+
+/**
  * Most commands the queue holds before `submit` refuses more. One step must
  * not apply more than a log page, or entries would leave live state before
  * the host reads them after that step.
@@ -349,7 +371,9 @@ export function enqueue(state: SimState, command: Command): void {
  * The zoning cells are brought up to date with the roads before the first
  * command and after each one (zoning/cell-index.ts), so the cells of a
  * removed road are read before it goes. A big change settles over the next
- * few ticks (`stepCells`). The buildings follow each time
+ * few ticks (`stepCells`). A command that reads the cells while one does
+ * waits for it, and the commands behind it wait too, in order
+ * (`waitsForCells`): they stay queued for a later step. The buildings follow each time
  * (buildings/upkeep.ts): the ones whose ground went are removed on the
  * command's tick, and the ones a new road blocks once the cells settle.
  */
@@ -361,7 +385,12 @@ export function applyPending(state: SimState): DroppedCommand[] {
     stepCells(state);
     keepBuildings(state);
   }
-  for (const command of queue) {
+  for (let at = 0; at < queue.length; at++) {
+    const command = queue[at] as Command;
+    if (waitsForCells(state, command)) {
+      state.pending = queue.slice(at);
+      break;
+    }
     const def = commandDef(command);
     let reason: string | null;
     if (typeof def === "string") reason = def;

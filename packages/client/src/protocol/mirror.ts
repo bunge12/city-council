@@ -366,8 +366,10 @@ export class SimMirror {
     this.homeTally = homes;
     state.tick = delta.tick;
     state.speed = delta.speed;
-    // Any step drains the host's queue, so queued commands from the
-    // snapshot have now been applied or dropped.
+    // The copy does not follow the host's queue past a snapshot: a step
+    // applies or drops what is queued, or holds it while the cells settle
+    // (the sim's waitsForCells), and the log and the dropped list say which.
+    // The copy's queue only matters for the seqs a snapshot carries.
     if (delta.steps > 0) state.pending = [];
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);

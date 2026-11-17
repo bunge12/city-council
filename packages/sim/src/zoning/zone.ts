@@ -181,6 +181,12 @@ function gather(state: SimState, parsed: Parsed): Int32Array {
 
 const NOTHING = "no cell would change: nothing open lies under the rectangles, or it is zoned this way already";
 
+/** Why a ZoneCells payload is refused whatever the city holds, or null. Reads no cells. */
+export function checkZoneCellsPayload(payload: unknown): string | null {
+  const parsed = parse(payload);
+  return typeof parsed === "string" ? parsed : null;
+}
+
 /**
  * What a ZoneCells command with this payload would do to `state`, or why it
  * would be refused. Changes nothing a player set. For the command itself

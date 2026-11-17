@@ -493,6 +493,8 @@ describe("the building index across changes of roads", () => {
     const state = createState(SEED);
     for (const z of [4500, 4600, 4700]) ok(state, road([4150, z], [4650, z]));
     for (const x of [4200, 4400, 4600]) ok(state, road([x, 4450], [x, 4750]));
+    // A stroke waits for the streets' cells to settle (M2 review, #147).
+    while (!cellsSettled(state)) step(state);
     const zones = ["residential", "commercial", "office", "industrial", "mixed"];
     const rng = seedRng(106);
     for (let i = 0; i < 6; i++) {

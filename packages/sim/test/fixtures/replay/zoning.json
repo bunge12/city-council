@@ -1,5 +1,5 @@
 {
-  "description": "Roads and zoning on seed 2026. p1 builds a street and both players zone a strip each side of it. p2 lays a street grid, and both zone over it while its cells are still settling. A street cut through the first strip and a stroke over it land in one tick. A stroke of two crossed rectangles while paused, a clear, a rectangle at the size cap, and a bulldoze of a zoned piece of the first street.",
+  "description": "Roads and zoning on seed 2026. p1 builds a street and both players zone a strip each side of it. p2 lays a street grid, and both zone over it while its cells are still settling: the strokes wait for the cells to settle on tick 7 (M2 review, #147), and a street cut through the first strip and a stroke over it, sent on tick 6, wait behind them and land on tick 7 too. A stroke of two crossed rectangles while paused, a clear, a rectangle at the size cap, and a bulldoze of a zoned piece of the first street.",
   "seed": 2026,
   "untilTick": 20,
   "log": [
@@ -90,7 +90,7 @@
       }
     },
     {
-      "tick": 4,
+      "tick": 7,
       "seq": 5,
       "playerId": "p1",
       "type": "ZoneCells",
@@ -113,7 +113,7 @@
       }
     },
     {
-      "tick": 4,
+      "tick": 7,
       "seq": 6,
       "playerId": "p2",
       "type": "ZoneCells",
@@ -136,7 +136,7 @@
       }
     },
     {
-      "tick": 6,
+      "tick": 7,
       "seq": 7,
       "playerId": "p1",
       "type": "BuildRoad",
@@ -153,7 +153,7 @@
       }
     },
     {
-      "tick": 6,
+      "tick": 7,
       "seq": 8,
       "playerId": "p2",
       "type": "ZoneCells",
@@ -296,5 +296,5 @@
     }
   ],
   "balance": "5fe641d3f2f36eb1",
-  "hash": "6dc30622f8c521dd"
+  "hash": "85eeb760be822f21"
 }
