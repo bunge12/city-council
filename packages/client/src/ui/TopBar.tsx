@@ -1,8 +1,8 @@
 import { SPEEDS, gameDate, type Speed } from "@city-council/sim";
 import { PRESETS } from "../render/config";
 import { isPreset, presetLabel } from "../render/presets";
-import { formatGameDate } from "./format";
-import { useSaveStatus, useServices, useSim } from "./hooks";
+import { formatGameDate, formatHomesTitle } from "./format";
+import { useHomes, useSaveStatus, useServices, useSim } from "./hooks";
 import { toggleDebug, toggleLog, toggleMenu, useGraphics, useUi } from "./store";
 
 /** The graphics setting: Low, Balanced or High, kept in this browser. */
@@ -38,6 +38,7 @@ export function TopBar() {
   const canUndo = useSim((s) => s?.undo.some((r) => r.playerId === mirror.playerId) ?? false);
   const date = useSim((s) => (s ? formatGameDate(gameDate(s.tick)) : "-"));
   const speed = useSim((s) => s?.speed ?? null);
+  const homes = useHomes();
   const status = useSaveStatus();
   const city = !status ? "Loading…" : status.openElsewhere ? "No city open" : status.city.name;
   const menuOpen = useUi((s) => s.menuOpen);
@@ -49,6 +50,9 @@ export function TopBar() {
       <h1>City Council</h1>
       <span className="city-name" id="city-name">{city}</span>
       <span className="game-date" id="game-date" aria-label="Game date">{date}</span>
+      <span className="homes" id="homes" title={formatHomesTitle(homes)}>
+        Homes <span id="homes-count" data-capacity={homes?.capacity ?? ""}>{homes ? homes.count.toLocaleString("en-US") : "-"}</span>
+      </span>
       <div className="speeds" role="group" aria-label="Game speed">
         {SPEEDS.map((s) => (
           <button
