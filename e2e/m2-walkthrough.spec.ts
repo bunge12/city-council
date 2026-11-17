@@ -21,6 +21,8 @@ import {
   heightAt,
   replay,
   serialize,
+  step,
+  submit,
   syncCells,
   type SimState,
 } from "../packages/sim/src/index";
@@ -200,8 +202,12 @@ function walkthroughCity(): SimState {
     [[SHORE.x0, SHORE.z], [SHORE.x1, SHORE.z], "street"],
     [[SLOPE.x, SLOPE.z0], [SLOPE.x, SLOPE.z1], "street"],
   ]);
-  // Saved paused: nothing grows until the walkthrough presses a speed.
-  state.speed = 0;
+  // Saved paused: nothing grows until the walkthrough presses a speed. By
+  // a command, as a player pauses, so a replay of the log pauses too: a
+  // stroke applies at once while paused and waits for the cells while the
+  // game runs (M2 review, #147).
+  if (!submit(state, { seq: 1000, playerId: "fixture", type: "SetSpeed", payload: { speed: 0 } }).ok) throw new Error("pause refused");
+  step(state);
   return state;
 }
 
