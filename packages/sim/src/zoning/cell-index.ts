@@ -645,7 +645,7 @@ function fileSurface(index: CellIndex, seg: number, s: SegShape, add: boolean): 
 // ---- Walking one cell ----
 
 /** Whether any surface but segment `seg`'s own covers quad `q`, whose box is `box`. */
-function covered(index: CellIndex, seg: number, q: Float64Array, box: Float64Array): boolean {
+function covered(index: CellIndex, seg: number, q: Float64Array, box: Float64Array, skip?: ReadonlySet<number>): boolean {
   const minX = box[0] ?? 0;
   const minZ = box[1] ?? 0;
   const maxX = box[2] ?? 0;
@@ -660,7 +660,7 @@ function covered(index: CellIndex, seg: number, q: Float64Array, box: Float64Arr
       for (let e = list.heads[j * index.perSide + i] ?? -1; e >= 0; e = list.next[e] ?? -1) {
         const piece = list.keys[e] ?? 0;
         const other = Math.floor(piece / KEY_STRIDE);
-        if (other === seg) continue;
+        if (other === seg || skip?.has(other)) continue;
         const s = index.segs[other];
         const data = s?.data;
         if (!s || !data) continue;
@@ -2059,7 +2059,8 @@ const takenBox = new Float64Array(4);
  * surface covers that cell of theirs. For an undo, to refuse taking ground
  * that buildings stand on. Cells of the segments in `skip`, which the same
  * undo removes or changes, and cells on the same anchor as a returning
- * segment are left out. It does not check water and slope under the
+ * segment are left out, and their surfaces cover nothing. It does not
+ * check water and slope under the
  * returning cells, so it can name a cell such a cell would not in fact
  * take: it errs towards refusing. `index` must be settled. Changes nothing.
  */
@@ -2076,7 +2077,7 @@ export function openCellsTakenBy(index: CellIndex, segs: readonly ReturningSegme
       forOverlappingCells(
         index,
         piece,
-        Float64Array.from(takenBox),
+        takenBox,
         BIT_OPEN,
         (key) => {
           const other = segOfKey(key);
@@ -2092,13 +2093,13 @@ export function openCellsTakenBy(index: CellIndex, segs: readonly ReturningSegme
       // A fold, or a cell under a road, claims nothing.
       if (!isConvexQuad(takenQuad)) continue;
       quadBoxInto(takenQuad, takenBox);
-      const box = Float64Array.from(takenBox);
-      if (covered(index, seg.id, takenQuad, box)) continue;
+      // A road the same undo removes covers nothing once it applies.
+      if (covered(index, seg.id, takenQuad, takenBox, skip)) continue;
       const key = seg.id * KEY_STRIDE + local;
       forOverlappingCells(
         index,
         takenQuad,
-        box,
+        takenBox,
         BIT_OPEN,
         (other) => {
           const os = segOfKey(other);

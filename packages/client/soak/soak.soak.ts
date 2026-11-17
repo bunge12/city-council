@@ -471,7 +471,9 @@ test("soak: one hour of game time at 4x", async () => {
   // The live city and a replay of its full log from the seed must agree.
   const live = deserialize(host.snapshotBytes());
   const replayed = replay(SEED, host.fullLog, host.tick);
-  expect(hashState(replayed)).toBe(hashState(live.state));
+  // A command still waiting for the cells to settle (M2 review, #147) is in
+  // the live queue and not yet in the log, so the queue is left out.
+  expect(hashState(replayed)).toBe(hashState({ ...live.state, pending: [] }));
   expect(host.tick).toBe(TICKS);
   expect(host.fullLog.length).toBeGreaterThan(LOG_LIVE_LIMIT);
   // The page kept up with every road, cell and building change.

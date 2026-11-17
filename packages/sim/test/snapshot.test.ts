@@ -363,6 +363,7 @@ describe("committed snapshots", () => {
       buildings: fresh.buildings,
       // Saved on day 0, so the plan for that day a version 12 city grew by.
       growth: { quota: 1, day: 0, deadline: 1, free: 0, used: 0 },
+      cellReads: 0,
     });
   });
 
@@ -370,7 +371,7 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v2Fixture.hex));
     expect(header.stateVersion).toBe(2);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    const { roads, undo, connections, balance, cells, cellsReadyAt, buildings, growth, ...rest } = state;
+    const { roads, undo, connections, balance, cells, cellsReadyAt, buildings, growth, cellReads, ...rest } = state;
     const fresh = createState(state.seed);
     expect(roads).toEqual(fresh.roads);
     expect(connections).toEqual(fresh.connections);
@@ -380,6 +381,7 @@ describe("committed snapshots", () => {
     expect(cellsReadyAt).toBe(0);
     expect(buildings).toEqual(fresh.buildings);
     expect(growth).toEqual({ quota: 1, day: 0, deadline: 1, free: 0, used: 0 });
+    expect(cellReads).toBe(0);
     // Everything the version 2 save held comes back unchanged.
     expect(hashState({ ...rest, version: 2 })).toBe(v2Fixture.hash);
   });
@@ -394,7 +396,7 @@ describe("committed snapshots", () => {
     expect(Array.from(state.roads.segFree)).toEqual([]);
     expect(Array.from(state.roads.nodeFree)).toEqual([]);
     expect(checkConnections(state.connections, state.roads)).toBeNull();
-    expect(hashState(state)).toBe("f70a39f98941a2d5");
+    expect(hashState(state)).toBe("837c1f5f97e7223e");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
@@ -493,7 +495,8 @@ describe("committed snapshots", () => {
     // p2's bulldoze comes back with that number, then p1's upgrade is taken back.
     expect(submit(state, { seq: 1, playerId: "p2", type: "Undo", payload: {} })).toEqual({ ok: true });
     expect(submit(state, { seq: 2, playerId: "p1", type: "Undo", payload: {} })).toEqual({ ok: true });
-    step(state);
+    // Both read the cells, so they apply a tick apart (`cellCommandsPerTick`, M2 review #147).
+    while (state.pending.length > 0) step(state);
     expect(state.undo.map((r) => r.playerId)).toEqual(["p1", "p2"]);
     expect(net.segOrder[heldSeg ?? -1]).toBe(live.length);
     expect(checkRoadNetwork(net, heldIds(state.undo))).toBeNull();
@@ -557,12 +560,14 @@ describe("committed snapshots", () => {
     expect(submit(state, { seq: 2, playerId: "p1", type: "Undo", payload: {} })).toEqual({ ok: true });
   });
 
-  it("loads the version 14 fixture and migrates it to version 15, changing nothing but the version", () => {
+  it("loads the version 14 fixture and migrates it to version 15, adding only the version and a count of no cell commands", () => {
     const { state, header } = deserialize(fromHex(v14Fixture.hex));
     expect(header.stateVersion).toBe(14);
     expect(state.version).toBe(15);
     expect(hashState(state)).toBe(v15Fixture.hash);
-    expect(hashState({ ...state, version: 14 })).toBe(v14Fixture.hash);
+    const { cellReads, ...before } = state;
+    expect(cellReads).toBe(0);
+    expect(hashState({ ...before, version: 14 })).toBe(v14Fixture.hash);
     for (const record of state.undo) expect(record.stroke).toBeUndefined();
     expect(heldIds(state.undo)).toEqual(v14Fixture.held);
     expect(Array.from(state.connections)).toEqual(v14Fixture.connections);

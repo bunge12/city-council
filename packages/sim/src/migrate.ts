@@ -69,10 +69,12 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // 111). No record before it held any: a ZoneCells left none, and a
   // bulldozed road came back unzoned, as it still does for these.
   13: (old) => ({ ...old, version: 14, undo: ((old["undo"] ?? []) as Record<string, unknown>[]).map((record) => ({ ...record, zones: new Int32Array(0) })) }),
-  // Version 15 lets a ZoneCells undo record carry the id of the stroke it
-  // is a part of (M2 review, #147). It is optional, and no record before it
-  // had one: each part of a split stroke stays a step of its own.
-  14: (old) => ({ ...old, version: 15 }),
+  // Version 15 (M2 review, #147) lets a ZoneCells undo record carry the id
+  // of the stroke it is a part of. It is optional, and no record before it
+  // had one: each part of a split stroke stays a step of its own. It also
+  // adds `cellReads`, the cell commands applied this tick, which starts at
+  // none.
+  14: (old) => ({ ...old, version: 15, cellReads: 0 }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */

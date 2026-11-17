@@ -337,8 +337,8 @@ describe("ZoneCells", () => {
     // Its twin is saved and loaded with the strokes still waiting, which settles everything at once.
     const loaded = deserialize(serialize(cloneState(early))).state;
     while (early.log.at(-1)?.seq !== strokes[1]?.seq) step(early);
-    // They landed on the tick the cells settled, together and in order.
-    expect(early.log.slice(-2).map((e) => [e.seq, e.tick])).toEqual(strokes.map((c) => [c.seq, ready]));
+    // They landed from the tick the cells settled, in order, one a tick (`cellCommandsPerTick`).
+    expect(early.log.slice(-2).map((e) => [e.seq, e.tick])).toEqual(strokes.map((c, i) => [c.seq, ready + i]));
     while (loaded.tick < early.tick) step(loaded);
     expect(hashState(loaded)).toBe(hashState(early));
     // A third pauses first: with no tick to wait for, its strokes apply at once.
@@ -473,5 +473,22 @@ describe("replay fixture zoning", () => {
 
   it.each([2, 5, 7, 13])("matches a city saved and loaded at tick %d", (tick) => {
     expect(hashState(playLive(1, tick))).toBe(fixture.hash);
+  });
+});
+
+describe("pausing while a stroke waits (M2 review, #147)", () => {
+  it("applies the player's SetSpeed at once, and the stroke with it once paused", () => {
+    const state = createState(SEED);
+    ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4404 }, along: { x: 4680, z: 4404 }, across: { x: 4104, z: 4980 }, depth: 86, width: 86, type: "street" }));
+    const stroke = zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200)]);
+    const pause = command("SetSpeed", { speed: 0 });
+    expect(submit(state, stroke)).toEqual({ ok: true });
+    expect(submit(state, pause)).toEqual({ ok: true });
+    step(state);
+    expect(state.speed).toBe(0);
+    expect(state.pending.map((c) => c.seq)).toEqual([stroke.seq]);
+    // Paused, nothing waits: the next step paints.
+    step(state);
+    expect(state.log.at(-1)?.seq).toBe(stroke.seq);
   });
 });

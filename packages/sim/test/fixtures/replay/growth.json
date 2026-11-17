@@ -67,7 +67,7 @@
       }
     },
     {
-      "tick": 2,
+      "tick": 3,
       "seq": 4,
       "playerId": "p2",
       "type": "ZoneCells",
@@ -131,6 +131,6 @@
       }
     }
   ],
-  "balance": "5fe641d3f2f36eb1",
-  "hash": "f59544bfbfcd9232"
+  "balance": "5a8f897fecf31f48",
+  "hash": "8cc0c934f8aa0d64"
 }

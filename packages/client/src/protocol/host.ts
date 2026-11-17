@@ -340,6 +340,8 @@ export class SimHost {
       ...(dropped.length > 0 ? { dropped } : {}),
       rng: this.state.rng.slice(),
       growth: { ...this.state.growth },
+      cellReads: this.state.cellReads,
+      pending: this.state.pending.map((c) => ({ ...c })),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };

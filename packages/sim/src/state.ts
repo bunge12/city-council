@@ -78,6 +78,14 @@ export interface SimState {
    */
   cellsReadyAt: number;
   /**
+   * How many commands that read the cells (`readsCells` in commands.ts)
+   * applied on this tick while the game ran. At `cellCommandsPerTick` the
+   * rest wait for the next tick (M2 review, #147). In state, and reset when
+   * the tick advances, so a replay, which applies a tick's log in one step,
+   * agrees with a host that applied it over several paused steps.
+   */
+  cellReads: number;
+  /**
    * Every building, in flat arrays by id (buildings/buildings.ts). Which
    * building stands on each cell is derived (buildings/where.ts).
    */
@@ -128,6 +136,8 @@ export function createBareState(seed: number): SimState {
     cellsReadyAt: 0,
     buildings: createBuildings(),
     growth: createGrowth(),
+    // Last, where the version 15 migration puts it: the key order is the order a snapshot writes and the hash reads.
+    cellReads: 0,
   };
 }
 

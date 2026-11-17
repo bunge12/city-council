@@ -278,6 +278,8 @@ describe("BulldozeToolController", () => {
     // Another player clears it in the same step, first.
     void other.sendCommand("BulldozeBuilding", { buildings: [seen(copy(), house)] });
     tool.click({ kind: "building", id: house });
+    // One clear a tick (`cellCommandsPerTick`, M2 review #147): the player's is checked, and dropped, on the next.
+    await apply();
     await apply();
     expect(ui().bulldozeNote).toBe(BUILDING_CHANGED);
     expect(liveBuildings(copy())).toEqual(before.filter((id) => id !== house));

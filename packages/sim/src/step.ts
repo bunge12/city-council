@@ -63,5 +63,6 @@ export function step(state: SimState, timer?: SystemTimer): DroppedCommand[] {
     timed(timer, system.name, () => system.run(state));
   }
   state.tick += 1;
+  state.cellReads = 0;
   return dropped;
 }

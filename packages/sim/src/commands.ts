@@ -8,6 +8,7 @@ import { endJournal, reverseOps, startJournal, type NetworkOp } from "./roads/ne
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 import { applyUndo, hasUndo, planUndo, recordUndo, undoPutsRoadsBack } from "./undo";
+import { ZONING_BALANCE } from "./zoning/balance";
 import { cellsSettled, stepCells } from "./zoning/cell-index";
 import { checkZoneCellsPayload, planZoneCells, strokeOf, zoneCellsIfValid } from "./zoning/zone";
 import { NO_JOURNALS, journalLostZones, journalPaint } from "./zoning/zone-undo";
@@ -202,6 +203,14 @@ const Undo: CommandDef = {
     const result = planUndo(state, command.playerId);
     if (result.ok) applyUndo(state, result.indices);
   },
+  // Checking an undo that puts roads back costs about what applying it
+  // does, so the step plans it once.
+  applyIfValid: (state, command) => {
+    const result = planUndo(state, command.playerId);
+    if (!result.ok) return result.reason;
+    applyUndo(state, result.indices);
+    return null;
+  },
 };
 
 /**
@@ -322,6 +331,9 @@ function copyPayload(payload: unknown): unknown {
  */
 const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding"]);
 
+/** Commands that change nothing a waiting command depends on, so they never wait behind one: a player can still pause while their stroke waits. */
+const NEVER_WAIT: ReadonlySet<string> = new Set(["SetSpeed", "NoOp"]);
+
 /**
  * Whether the step holds `command`, with every later command of its
  * sender, until the cells settle on `state.cellsReadyAt`. Other players'
@@ -334,6 +346,16 @@ const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuildin
  */
 export function waitsForCells(state: SimState, command: Pick<Command, "type" | "playerId">): boolean {
   if (state.speed === 0 || cellsSettled(state)) return false;
+  return readsCells(state, command);
+}
+
+/**
+ * Whether `command` reads which cells are open: a stroke, a clear of
+ * buildings, or an undo that puts roads back. One step applies at most
+ * `cellCommandsPerTick` of them, so a backlog that built up while a change
+ * settled lands over several steps, not in one.
+ */
+function readsCells(state: SimState, command: Pick<Command, "type" | "playerId">): boolean {
   return CELL_READERS.has(command.type) || (command.type === "Undo" && undoPutsRoadsBack(state, command.playerId));
 }
 
@@ -399,7 +421,11 @@ export function applyPending(state: SimState): DroppedCommand[] {
   const waiting = new Set<string>();
   const held: Command[] = [];
   for (const command of queue) {
-    if (waiting.has(command.playerId) || waitsForCells(state, command)) {
+    // Past `cellCommandsPerTick` cell readers this tick, the rest wait for the next. Not while paused.
+    const reads = readsCells(state, command);
+    const counted = reads && state.speed !== 0;
+    const full = counted && state.cellReads >= ZONING_BALANCE.cellCommandsPerTick;
+    if ((waiting.has(command.playerId) && !NEVER_WAIT.has(command.type)) || full || waitsForCells(state, command)) {
       waiting.add(command.playerId);
       held.push(command);
       continue;
@@ -415,6 +441,8 @@ export function applyPending(state: SimState): DroppedCommand[] {
     if (reason !== null) {
       dropped.push({ seq: command.seq, playerId: command.playerId, type: command.type, reason });
     } else {
+      // Counted once applied, so a replay, which never sees a dropped command, counts the same.
+      if (counted) state.cellReads++;
       stepCells(state);
       keepBuildings(state);
       recordEntry(state, {

@@ -522,3 +522,17 @@ describe("undo of a stroke split over several commands (M2 review, #147)", () =>
     expect(zonedCount(state)).toBe(0);
   });
 });
+
+describe("undo of a stroke whose parts share a cell (M2 review, #147)", () => {
+  it("is refused whole when another player's command between two parts made both paint one cell", () => {
+    const state = street();
+    const part = (c: Command, stroke: number): Command => ({ ...c, payload: { ...(c.payload as object), stroke } });
+    ok(state, part(paint("residential", 1, 0, 8, 4), 12));
+    // p2 clears a corner of the first part; the second part paints over it again.
+    ok(state, paint("none", undefined, 0, 2, 2, "north", "p2"));
+    ok(state, part(paint("residential", 1, 0, 16, 4), 12));
+    const held = zones(state);
+    expect(refusal(state, undo())).toMatch(/rezoned/);
+    expect(zones(state)).toEqual(held);
+  });
+});

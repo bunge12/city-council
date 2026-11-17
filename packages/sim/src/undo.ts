@@ -150,20 +150,32 @@ function sameStroke(earlier: UndoRecord, later: UndoRecord): boolean {
 }
 
 /**
- * Places in `history` of `playerId`'s newest step: the newest record and,
- * for a part of a stroke, the parts before it, newest first. Empty when the
+ * `playerId`'s undo steps in `history`, oldest first, each the places of
+ * its records, oldest first. A step is one record, or the run of parts of
+ * one stroke, at most `UNDO_STEPS` of them, so a client that names one
+ * stroke on every command still gets a bounded step (M2 review, #147).
+ */
+function playerSteps(history: readonly UndoRecord[], playerId: string): number[][] {
+  const steps: number[][] = [];
+  let last: UndoRecord | undefined;
+  for (let i = 0; i < history.length; i++) {
+    const record = history[i];
+    if (record?.playerId !== playerId) continue;
+    const current = steps[steps.length - 1];
+    if (current && last && sameStroke(last, record) && current.length < UNDO_STEPS) current.push(i);
+    else steps.push([i]);
+    last = record;
+  }
+  return steps;
+}
+
+/**
+ * Places in `history` of `playerId`'s newest step, newest first: the newest
+ * record and, for a part of a stroke, the parts before it. Empty when the
  * player has nothing to undo.
  */
 function newestStep(history: readonly UndoRecord[], playerId: string): number[] {
-  const out: number[] = [];
-  for (let i = history.length - 1; i >= 0; i--) {
-    const record = history[i];
-    if (record?.playerId !== playerId) continue;
-    const last = out.length > 0 ? history[out[out.length - 1] as number] : undefined;
-    if (last && !sameStroke(record, last)) break;
-    out.push(i);
-  }
-  return out;
+  return [...(playerSteps(history, playerId).at(-1) ?? [])].reverse();
 }
 
 /**
@@ -172,18 +184,11 @@ function newestStep(history: readonly UndoRecord[], playerId: string): number[] 
  */
 export function recordUndo(state: SimState, record: UndoRecord): void {
   const history = [...state.undo, record];
-  const mine: number[] = [];
-  for (let i = 0; i < history.length; i++) if (history[i]?.playerId === record.playerId) mine.push(i);
-  // Where each of the player's steps starts, oldest first.
-  const starts: number[] = [];
-  for (let k = 0; k < mine.length; k++) {
-    const prev = k > 0 ? history[mine[k - 1] as number] : undefined;
-    if (!prev || !sameStroke(prev, history[mine[k] as number] as UndoRecord)) starts.push(k);
-  }
-  const over = starts.length - UNDO_STEPS;
+  const steps = playerSteps(history, record.playerId);
+  const over = steps.length - UNDO_STEPS;
   if (over > 0) {
-    // Forgets the oldest `over` steps: every record before the first step kept.
-    const goneIds = new Set(mine.slice(0, starts[over]));
+    // Forgets the oldest `over` steps, oldest record first.
+    const goneIds = new Set(steps.slice(0, over).flat());
     for (const i of goneIds) forget(state.roads, history[i] as UndoRecord);
     state.undo = history.filter((_, i) => !goneIds.has(i));
     return;
@@ -194,7 +199,7 @@ export function recordUndo(state: SimState, record: UndoRecord): void {
 /** Whether `playerId`'s next undo would put back roads its command removed, so it reads the cells (`takesBuiltGround`). */
 export function undoPutsRoadsBack(state: SimState, playerId: string): boolean {
   const record = state.undo[newestStep(state.undo, playerId)[0] ?? -1];
-  return record !== undefined && record.type !== ZONE_CELLS && returningSegments(record.ops).back.length > 0;
+  return record !== undefined && record.type !== ZONE_CELLS && returningSegments(state.roads, record.ops).back.length > 0;
 }
 
 /** Whether `playerId` has any record to undo, without checking it still applies. */
@@ -219,9 +224,20 @@ export function planUndo(state: SimState, playerId: string): UndoPlanResult {
     const reason = rehearse(state.roads, record.ops) ?? takesBuiltGround(state, record.ops);
     return reason === null ? { ok: true, index, indices } : { ok: false, reason };
   }
+  // The parts are taken back one after another, so they must not share a
+  // cell: one that does, as when another player's command between two parts
+  // changed a cell both painted, would find the cell changed by the time its
+  // turn came and be skipped (M2 review, #147). Refused whole instead.
+  const seen = new Set<number>();
   for (const i of indices) {
     const reason = checkPaint(state, state.undo[i] as UndoRecord);
     if (reason !== null) return { ok: false, reason };
+    if (indices.length === 1) break;
+    for (let k = 0; k < backCount; k++) {
+      const slot = backSlots[k] ?? 0;
+      if (seen.has(slot)) return { ok: false, reason: REZONED };
+      seen.add(slot);
+    }
   }
   return { ok: true, index, indices };
 }
@@ -247,14 +263,19 @@ export function applyUndo(state: SimState, indices: readonly number[]): void {
 
 /**
  * The segments the reverse of `ops` puts back: each one the command
- * removed that it had not added itself first. With the ids of every
- * segment the command touched, which the reverse removes or changes.
+ * removed that it had not added itself first, and each one it changed to
+ * another road type, as it was before, which can be wider. With the ids of
+ * every segment the command touched, which the reverse removes or changes.
  */
-function returningSegments(ops: readonly NetworkOp[]): { back: ReturningSegment[]; touched: Set<number> } {
+function returningSegments(net: RoadNetwork, ops: readonly NetworkOp[]): { back: ReturningSegment[]; touched: Set<number> } {
   const touched = new Set<number>();
   const back: ReturningSegment[] = [];
   for (const op of ops) {
     if (op.op === "removeSeg" && !touched.has(op.id)) back.push({ id: op.id, row: op.row, ax: op.ax, az: op.az, bx: op.bx, bz: op.bz });
+    if (op.op === "restyle" && op.from !== op.to && !touched.has(op.id) && isSegment(net, op.id)) {
+      const row = readSegment(net, op.id);
+      back.push({ id: op.id, row: { ...row, type: op.from }, ax: net.nodeX[row.a] ?? 0, az: net.nodeZ[row.a] ?? 0, bx: net.nodeX[row.b] ?? 0, bz: net.nodeZ[row.b] ?? 0 });
+    }
     if (op.op === "addSeg" || op.op === "removeSeg" || op.op === "restyle") touched.add(op.id);
   }
   return { back, touched };
@@ -271,7 +292,7 @@ function returningSegments(ops: readonly NetworkOp[]): { back: ReturningSegment[
  * they settle (commands.ts).
  */
 function takesBuiltGround(state: SimState, ops: readonly NetworkOp[]): string | null {
-  const { back, touched } = returningSegments(ops);
+  const { back, touched } = returningSegments(state.roads, ops);
   if (back.length === 0) return null;
   const keys = openCellsTakenBy(syncCells(state), back, touched);
   return keys.length > 0 && buildingsOnCells(state, keys, CELL_KEY_STRIDE).length > 0 ? BUILT_ON : null;

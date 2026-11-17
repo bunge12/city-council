@@ -83,6 +83,8 @@ describe("building deltas in the mirror", () => {
         buildings,
         rng: state.rng.slice(),
         growth: { ...state.growth },
+        cellReads: state.cellReads,
+        pending: [],
         steps: 0,
         timings: [],
       };

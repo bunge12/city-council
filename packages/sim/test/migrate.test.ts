@@ -18,6 +18,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 10) gone.push("cells", "cellsReadyAt");
   if (version < 11) gone.push("buildings");
   if (version < 13) gone.push("growth");
+  if (version < 15) gone.push("cellReads");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
   // Before version 14 a ZoneCells left no undo record and no record held zoning.
   if (version < 14 && Array.isArray(kept["undo"])) {
@@ -76,6 +77,7 @@ describe("migrateState", () => {
       cellsReadyAt: 0,
       buildings: fresh.buildings,
       growth: asMigrated(fresh).growth,
+      cellReads: 0,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -95,6 +97,7 @@ describe("migrateState", () => {
       cellsReadyAt: 0,
       buildings: fresh.buildings,
       growth: asMigrated(fresh).growth,
+      cellReads: 0,
     });
     expect(() => hashState(state)).not.toThrow();
   });

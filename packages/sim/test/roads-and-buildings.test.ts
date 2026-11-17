@@ -423,15 +423,16 @@ describe("BulldozeBuilding", () => {
     expect(submit(state, command("BulldozeBuilding", { buildings: many })).ok).toBe(false);
   });
 
-  it("drops a second clear of the same building in one tick, since the first changed it", () => {
+  it("drops a second clear of the same building, since the first changed it", () => {
     const { state, ids } = housed();
     const a = seen(state, ids[0] as number);
     const first = command("BulldozeBuilding", { buildings: [a] });
     const second = command("BulldozeBuilding", { buildings: [a] }, "p2");
     expect(submit(state, first)).toEqual({ ok: true });
     expect(submit(state, second)).toEqual({ ok: true });
-    const dropped = step(state);
-    expect(dropped).toEqual([{ seq: second.seq, playerId: "p2", type: "BulldozeBuilding", reason: BUILDING_CHANGED }]);
+    // One clear a tick (`cellCommandsPerTick`, M2 review #147): the second is checked on the next.
+    expect(step(state)).toEqual([]);
+    expect(step(state)).toEqual([{ seq: second.seq, playerId: "p2", type: "BulldozeBuilding", reason: BUILDING_CHANGED }]);
   });
 });
 
@@ -746,5 +747,24 @@ describe("undo of a bulldoze over ground built on since (M2 review, #147)", () =
     while (state.pending.length > 0) step(state);
     expect(state.log.at(-1)?.seq).toBe(undo.seq);
     expect(state.log.at(-1)?.tick).toBe(state.cellsReadyAt);
+  });
+});
+
+describe("undo of a narrowing over ground built on since (M2 review, #147)", () => {
+  it("is refused when the road's wider cells would take back ground a tower now stands on", () => {
+    const state = createState(SEED);
+    ok(state, road([4200, 4600], [4392, 4600], "avenue"));
+    // p2's street 108 m north: the avenue's deepest cells overlap its sixth row, and win it, being older.
+    ok(state, command("BuildRoad", { from: { x: 4200, z: 4492 }, to: { x: 4392, z: 4492 }, type: "street" }, "p2"));
+    const seg = cellAt(state, 4300, 4591)?.segment as number;
+    ok(state, command("UpgradeRoad", withEnds(state.roads, { segments: [seg], type: "street" })));
+    while (!cellsSettled(state)) step(state);
+    // A street's cells stop 4 m nearer: p2's sixth row is free, and p2 zones it R3.
+    ok(state, command("ZoneCells", { zone: "residential", density: 3, rects: [{ from: { x: 4202, z: 4521 }, to: { x: 4390, z: 4521 }, width: 46 }] }, "p2"));
+    const deep = (s: SimState) => live(s).filter((id) => (s.buildings.depth[id] ?? 0) === 6);
+    const until = state.tick + 60 * DAY;
+    while (state.tick < until && deep(state).length === 0) step(state);
+    expect(deep(state).length).toBeGreaterThan(0);
+    expect(submit(state, command("Undo", {}))).toEqual({ ok: false, reason: "Cannot undo: buildings now stand on ground that road would take back" });
   });
 });

@@ -1,5 +1,5 @@
 {
-  "description": "Roads and zoning on seed 2026. p1 builds a street and both players zone a strip each side of it. p2 lays a street grid, and both zone over it while its cells are still settling: the strokes wait for the cells to settle on tick 7 (M2 review, #147), and a street cut through the first strip and a stroke over it, sent on tick 6, wait behind them and land on tick 7 too. A stroke of two crossed rectangles while paused, a clear, a rectangle at the size cap, and a bulldoze of a zoned piece of the first street.",
+  "description": "Roads and zoning on seed 2026. p1 builds a street and both players zone a strip each side of it. p2 lays a street grid, and both zone over it while its cells are still settling: the strokes wait for the cells to settle on tick 7 (M2 review, #147), and a street cut through the first strip by p1 and a stroke over it by p2, sent on tick 6, wait behind their senders' strokes. One stroke a step applies (`cellCommandsPerTick`): p1's on tick 7 with the street, p2's two on ticks 8 and 9. A stroke of two crossed rectangles while paused, a clear, a rectangle at the size cap, and a bulldoze of a zoned piece of the first street.",
   "seed": 2026,
   "untilTick": 20,
   "log": [
@@ -44,7 +44,7 @@
       }
     },
     {
-      "tick": 1,
+      "tick": 2,
       "seq": 3,
       "playerId": "p2",
       "type": "ZoneCells",
@@ -114,6 +114,23 @@
     },
     {
       "tick": 7,
+      "seq": 7,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4296,
+          "z": 4500
+        },
+        "to": {
+          "x": 4296,
+          "z": 4704
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 8,
       "seq": 6,
       "playerId": "p2",
       "type": "ZoneCells",
@@ -136,24 +153,7 @@
       }
     },
     {
-      "tick": 7,
-      "seq": 7,
-      "playerId": "p1",
-      "type": "BuildRoad",
-      "payload": {
-        "from": {
-          "x": 4296,
-          "z": 4500
-        },
-        "to": {
-          "x": 4296,
-          "z": 4704
-        },
-        "type": "street"
-      }
-    },
-    {
-      "tick": 7,
+      "tick": 9,
       "seq": 8,
       "playerId": "p2",
       "type": "ZoneCells",
@@ -250,7 +250,7 @@
       }
     },
     {
-      "tick": 12,
+      "tick": 13,
       "seq": 13,
       "playerId": "p1",
       "type": "ZoneCells",
@@ -295,6 +295,6 @@
       }
     }
   ],
-  "balance": "5fe641d3f2f36eb1",
-  "hash": "85f58360be87f573"
+  "balance": "5a8f897fecf31f48",
+  "hash": "ae66d571967f125e"
 }
