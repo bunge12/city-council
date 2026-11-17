@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { CHUNKS_PER_SIDE } from "../packages/sim/src/index";
+import { CHUNKS_PER_SIDE, ZONING_BALANCE } from "../packages/sim/src/index";
 import { canvasShot, openCity, scaleCity, setPose, settle, type BuildingStats, type Form, type FormStats } from "./building-lod-helpers";
 import { frameTime, mb, memory } from "./measure";
 
@@ -8,12 +8,16 @@ import { frameTime, mb, memory } from "./measure";
 // the grower (growScaleCity). Frame time, draw calls, what each level of
 // detail drew and the tab's memory in each zoom band, at Low and at
 // Balanced, written to test-results/building-lod-report.json for the pull
-// request. CI runners have no GPU and draw in software, so the frame times
+// request. Since M2-17 it also checks the top bar's homes figure against the
+// town and times a save of it from the page, the snapshot and the write to
+// IndexedDB together. CI runners have no GPU and draw in software, so the frame times
 // only catch a gross regression; the numbers are the point.
 
 declare const window: {
   cityCouncil: {
     renderStatus(): { backend: string } | null;
+    saveNow(): Promise<{ lastSave: { tick: number } | null; saveError: string | null }>;
+    mirror: { state: { buildings: { flags: Uint8Array; zone: Uint8Array } } | null };
     view: Promise<{
       buildingStats(): BuildingStats | null;
       setPreset(preset: string): Promise<void>;
@@ -23,6 +27,7 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
+declare const performance: { now(): number };
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // A city of 30,000 segments and tens of thousands of buildings in software WebGL, about 2 fps on a CI runner.
@@ -35,6 +40,24 @@ test("frame time, draw calls and memory in each band, at Low and at Balanced", a
   await page.waitForFunction((n) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(n), town.buildings, { timeout: 300_000 });
   const backend = (await page.evaluate(() => window.cityCouncil.renderStatus()))?.backend ?? "none";
   const report: Record<string, unknown> = { backend, city: { ...city.counts, ...town, fileBytes: bytes.byteLength } };
+  // The top bar's homes (M2-18): every residential building of the town.
+  const residential = ZONING_BALANCE.zones.findIndex((z) => z.id === "residential") + 1;
+  const homes = city.state.buildings.zone.reduce((n, zone, id) => n + (city.state.buildings.flags[id] && zone === residential ? 1 : 0), 0);
+  await expect(page.locator("#homes-count")).toHaveText(homes.toLocaleString("en-US"));
+  // A save of the whole town from the page: the snapshot in the worker and the write to IndexedDB. The first compiles the code.
+  const saveMs: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    saveMs.push(
+      await page.evaluate(async () => {
+        const t0 = performance.now();
+        const status = await window.cityCouncil.saveNow();
+        if (status.saveError || !status.lastSave) throw new Error(status.saveError ?? "not saved");
+        return Math.round(performance.now() - t0);
+      }),
+    );
+  }
+  report["homes"] = homes;
+  report["saveMs"] = saveMs;
   for (const preset of ["low", "balanced"] as const) {
     await page.evaluate(async (p) => (await window.cityCouncil.view).setPreset(p), preset);
     expect(await page.evaluate(async () => (await window.cityCouncil.view).lighting().shadows)).toBe(preset !== "low");

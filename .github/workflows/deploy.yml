@@ -1,7 +1,7 @@
 name: Deploy
 
 # Publishes the built client to GitHub Pages on every push to main, then runs
-# the M0 and M1 walkthroughs against the public address.
+# the M0, M1 and M2 walkthroughs against the public address.
 #
 # One-time setup: in the repository settings, Pages, set Source to
 # "GitHub Actions".
@@ -56,8 +56,10 @@ jobs:
   walkthrough:
     needs: deploy
     runs-on: ubuntu-latest
-    # Both walkthroughs, one after the other, each on WebGPU and WebGL 2.
-    timeout-minutes: 30
+    # The three walkthroughs, one after the other, each on WebGPU and WebGL 2.
+    # M0 and M1 took up to 30 minutes, and M2 adds 10 to 20 more, or twice
+    # that when a test fails once and runs again.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -70,9 +72,9 @@ jobs:
       - name: Walkthrough against the public address
         env:
           PAGE_URL: ${{ needs.deploy.outputs.page_url }}
-        # One worker. With two, the M0 and M1 walkthroughs run side by side,
-        # software WebGPU in one takes the CPU from the other, and the M1
-        # walkthrough fails on steps that pass when it runs alone.
+        # One worker. With two, the walkthroughs run side by side, software
+        # WebGPU in one takes the CPU from the other, and the M1 walkthrough
+        # fails on steps that pass when it runs alone.
         run: BASE_URL="${PAGE_URL%/}/" xvfb-run -a pnpm e2e --project walkthrough --workers=1
       - uses: actions/upload-artifact@v4
         if: always()
