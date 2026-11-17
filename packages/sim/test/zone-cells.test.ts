@@ -352,17 +352,19 @@ describe("ZoneCells", () => {
     expect(zoned(early).length).toBeGreaterThan(500);
   });
 
-  it("holds the commands queued behind a waiting stroke, so they keep their order", () => {
+  it("holds the player's later strokes behind a waiting one, in order, and lets their road go on", () => {
     const state = createState(SEED);
     ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4404 }, along: { x: 4680, z: 4404 }, across: { x: 4104, z: 4980 }, depth: 86, width: 86, type: "street" }));
     const stroke = zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200)]);
     const street = road([4150, 4300], [4400, 4300]);
-    expect(submit(state, stroke)).toEqual({ ok: true });
-    expect(submit(state, street)).toEqual({ ok: true });
+    const again = zone("commercial", 2, [rect([4110, 4500], [4366, 4500], 100)]);
+    for (const c of [stroke, street, again]) expect(submit(state, c)).toEqual({ ok: true });
     step(state);
-    expect(state.pending.map((c) => c.seq)).toEqual([stroke.seq, street.seq]);
+    // The street names its own ground and goes on; the second stroke keeps its place behind the first.
+    expect(state.log.at(-1)?.seq).toBe(street.seq);
+    expect(state.pending.map((c) => c.seq)).toEqual([stroke.seq, again.seq]);
     while (state.pending.length > 0) step(state);
-    expect(state.log.slice(-2).map((e) => e.seq)).toEqual([stroke.seq, street.seq]);
+    expect(state.log.slice(-2).map((e) => e.seq)).toEqual([stroke.seq, again.seq]);
   });
 
   it("lets another player's commands go on while one player's stroke waits", () => {

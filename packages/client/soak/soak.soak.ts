@@ -62,9 +62,11 @@ import {
   ZONING_BALANCE,
   buildScaleCity,
   buildingCount,
+  cellsSettled,
   deserialize,
   hashState,
   replay,
+  step,
   type FromSimMessage,
 } from "@city-council/sim";
 import { expect, test } from "vitest";
@@ -257,6 +259,14 @@ test("soak: one hour of game time at 4x", async () => {
   };
   const { transport, inject, ask, received } = page;
   const scale = buildScaleCity();
+  // The generator lays its grids faster than any player, and leaves a walk
+  // of about 4,200 ticks of zoning cells behind. The hour starts once that
+  // has settled, as a player's city would be: strokes sent into a walk that
+  // long wait for it (M2 review, #147), and the backlog would measure the
+  // generator, not play. No command is sent meanwhile, so a replay of the
+  // log from the seed steps through the same ticks.
+  while (!cellsSettled(scale.state)) step(scale.state);
+  const startTick = scale.state.tick;
   const SEED = scale.state.seed;
   const host = new SimHost(scale.state, transport, clock);
   // The page asks for a snapshot as it starts; wait until it has one.
@@ -362,7 +372,7 @@ test("soak: one hour of game time at 4x", async () => {
   const heapStart = heapUsed();
   const wallStart = performance.now();
 
-  while (host.tick < TICKS) {
+  while (host.tick < startTick + TICKS) {
     const tick = host.tick;
     if (tick % NOOP_EVERY === 0 && tick !== lastNoOpTick) {
       command("NoOp", { note: `soak ${tick}` });
@@ -474,7 +484,7 @@ test("soak: one hour of game time at 4x", async () => {
   // A command still waiting for the cells to settle (M2 review, #147) is in
   // the live queue and not yet in the log, so the queue is left out.
   expect(hashState(replayed)).toBe(hashState({ ...live.state, pending: [] }));
-  expect(host.tick).toBe(TICKS);
+  expect(host.tick).toBe(startTick + TICKS);
   expect(host.fullLog.length).toBeGreaterThan(LOG_LIVE_LIMIT);
   // The page kept up with every road, cell and building change.
   const pageHashes = await ask<{ roads: string; cells: string; buildings: string; homes: number | null } | null>({ q: "hashes" });

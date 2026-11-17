@@ -374,7 +374,7 @@ export class SimMirror {
     state.speed = delta.speed;
     // The host's queue as it stands: what a step neither applied nor
     // dropped waits for the cells to settle (the sim's waitsForCells).
-    state.pending = delta.pending.map((c) => ({ ...c }));
+    if (delta.pending) state.pending = delta.pending.map((c) => ({ ...c }));
     state.cellReads = delta.cellReads;
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);

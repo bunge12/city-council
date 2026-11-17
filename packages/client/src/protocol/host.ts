@@ -96,6 +96,8 @@ export class SimHost {
   private sentSpeed: number;
   /** The undo history the last delta or snapshot reflected. The sim replaces it on every change. */
   private sentUndo: SimState["undo"];
+  /** Which commands the queue held when the last delta went out, as `queueKey` writes them. */
+  private sentQueue: string;
   private sentLogFrom: number;
   private stepsSinceDelta = 0;
   /**
@@ -147,6 +149,7 @@ export class SimHost {
     this.sentTick = state.tick;
     this.sentSpeed = state.speed;
     this.sentUndo = state.undo;
+    this.sentQueue = queueKey(state.pending);
     this.sentLogFrom = this.logCursor;
     this.lastPump = now();
     transport.onMessage((raw) => this.receive(raw));
@@ -316,6 +319,10 @@ export class SimHost {
       this.state.speed !== this.sentSpeed ||
       this.state.undo !== this.sentUndo;
     if (!changed) return;
+    // The queue only when it changed: a stroke waiting for the cells can sit
+    // there for many deltas, and copying it into each made garbage the
+    // collector then paid for inside a step.
+    const queue = queueKey(this.state.pending);
     // Only how the history changed: the whole of it, after fifty strokes
     // at the cap, was megabytes a delta (issue #155). The new records are
     // copied so the message holds none of the state's own objects.
@@ -341,7 +348,7 @@ export class SimHost {
       rng: this.state.rng.slice(),
       growth: { ...this.state.growth },
       cellReads: this.state.cellReads,
-      pending: this.state.pending.map((c) => ({ ...c })),
+      ...(queue !== this.sentQueue ? { pending: this.state.pending.map((c) => ({ ...c })) } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };
@@ -354,6 +361,7 @@ export class SimHost {
     this.sentTick = this.state.tick;
     this.sentSpeed = this.state.speed;
     this.sentUndo = this.state.undo;
+    this.sentQueue = queue;
     this.sentLogFrom += log.length;
     this.stepsSinceDelta = 0;
   }
@@ -414,4 +422,11 @@ export function typedArrayBuffers(value: unknown, found = new Set<ArrayBuffer>()
     for (const child of Object.values(value)) typedArrayBuffers(child, found);
   }
   return [...found];
+}
+
+/** The commands in a queue, by sender and seq, to tell whether it changed since a delta. */
+function queueKey(pending: readonly { playerId: string; seq: number }[]): string {
+  let key = "";
+  for (const c of pending) key += `${c.playerId.length}:${c.playerId}${c.seq},`;
+  return key;
 }

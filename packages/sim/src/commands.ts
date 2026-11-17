@@ -331,15 +331,24 @@ function copyPayload(payload: unknown): unknown {
  */
 const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding"]);
 
-/** Commands that change nothing a waiting command depends on, so they never wait behind one: a player can still pause while their stroke waits. */
-const NEVER_WAIT: ReadonlySet<string> = new Set(["SetSpeed", "NoOp"]);
+/**
+ * Commands that wait behind their sender's waiting command, so they keep
+ * their order with it: a stroke after a stroke, a clear after a clear, and
+ * an undo, which must take back the stroke the player just made and not the
+ * change before it. Anything else goes on: a road command, since a stroke
+ * names ground and paints whatever roads it finds when it applies, as it
+ * would after another player's road, and `SetSpeed` and `NoOp`, so a player
+ * can still pause. A backlog is then strokes, clears and undos, which apply
+ * at most `cellCommandsPerTick` a tick, and not road commands piled up
+ * behind them, which would all apply in one step (M2 review, #147).
+ */
+const WAIT_BEHIND: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding", "Undo"]);
 
 /**
- * Whether the step holds `command`, with every later command of its
- * sender, until the cells settle on `state.cellsReadyAt`. Other players'
- * commands go on: one player's stroke does not hold up everyone, and the
- * commands that pile up behind it, which all apply in one step once the
- * cells settle, are one player's. From state alone, so a
+ * Whether the step holds `command` until the cells settle on
+ * `state.cellsReadyAt`, with its sender's later strokes, clears and undos
+ * (`WAIT_BEHIND`). Other players' commands go on, so one player's stroke
+ * holds up no one else. From state alone, so a
  * replay applies it on the tick it was logged. A paused game has no tick to
  * wait for and applies it at once, walking whatever is left: nothing moves
  * while paused, so the walk holds nothing up.
@@ -404,8 +413,8 @@ export function enqueue(state: SimState, command: Command): void {
  * command and after each one (zoning/cell-index.ts), so the cells of a
  * removed road are read before it goes. A big change settles over the next
  * few ticks (`stepCells`). A command that reads the cells while one does
- * waits for it, and its sender's later commands wait too, in order
- * (`waitsForCells`): they stay queued for a later step. The buildings follow each time
+ * waits for it, and its sender's later strokes, clears and undos wait too,
+ * in order (`waitsForCells`): they stay queued for a later step. The buildings follow each time
  * (buildings/upkeep.ts): the ones whose ground went are removed on the
  * command's tick, and the ones a new road blocks once the cells settle.
  */
@@ -425,7 +434,7 @@ export function applyPending(state: SimState): DroppedCommand[] {
     const reads = readsCells(state, command);
     const counted = reads && state.speed !== 0;
     const full = counted && state.cellReads >= ZONING_BALANCE.cellCommandsPerTick;
-    if ((waiting.has(command.playerId) && !NEVER_WAIT.has(command.type)) || full || waitsForCells(state, command)) {
+    if ((waiting.has(command.playerId) && WAIT_BEHIND.has(command.type)) || full || waitsForCells(state, command)) {
       waiting.add(command.playerId);
       held.push(command);
       continue;

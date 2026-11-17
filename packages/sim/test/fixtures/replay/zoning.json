@@ -1,5 +1,5 @@
 {
-  "description": "Roads and zoning on seed 2026. p1 builds a street and both players zone a strip each side of it. p2 lays a street grid, and both zone over it while its cells are still settling: the strokes wait for the cells to settle on tick 7 (M2 review, #147), and a street cut through the first strip by p1 and a stroke over it by p2, sent on tick 6, wait behind their senders' strokes. One stroke a step applies (`cellCommandsPerTick`): p1's on tick 7 with the street, p2's two on ticks 8 and 9. A stroke of two crossed rectangles while paused, a clear, a rectangle at the size cap, and a bulldoze of a zoned piece of the first street.",
+  "description": "Roads and zoning on seed 2026. p1 builds a street and both players zone a strip each side of it. p2 lays a street grid, and both zone over it while its cells are still settling: the strokes wait for the cells to settle (M2 review, #147). A street cut through the first strip by p1 on tick 6 goes on, since a road command never waits behind a stroke, and its walk keeps the strokes waiting; p2's stroke over it, sent on tick 6, waits behind p2's first. One stroke a tick applies (`cellCommandsPerTick`): p1's on tick 8, p2's on tick 9, and p2's second while paused on tick 9. A stroke of two crossed rectangles while paused, a clear, a rectangle at the size cap, and a bulldoze of a zoned piece of the first street.",
   "seed": 2026,
   "untilTick": 20,
   "log": [
@@ -90,7 +90,24 @@
       }
     },
     {
-      "tick": 7,
+      "tick": 6,
+      "seq": 7,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4296,
+          "z": 4500
+        },
+        "to": {
+          "x": 4296,
+          "z": 4704
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 8,
       "seq": 5,
       "playerId": "p1",
       "type": "ZoneCells",
@@ -113,24 +130,7 @@
       }
     },
     {
-      "tick": 7,
-      "seq": 7,
-      "playerId": "p1",
-      "type": "BuildRoad",
-      "payload": {
-        "from": {
-          "x": 4296,
-          "z": 4500
-        },
-        "to": {
-          "x": 4296,
-          "z": 4704
-        },
-        "type": "street"
-      }
-    },
-    {
-      "tick": 8,
+      "tick": 9,
       "seq": 6,
       "playerId": "p2",
       "type": "ZoneCells",
@@ -154,6 +154,15 @@
     },
     {
       "tick": 9,
+      "seq": 9,
+      "playerId": "p1",
+      "type": "SetSpeed",
+      "payload": {
+        "speed": 0
+      }
+    },
+    {
+      "tick": 9,
       "seq": 8,
       "playerId": "p2",
       "type": "ZoneCells",
@@ -173,15 +182,6 @@
             "width": 4
           }
         ]
-      }
-    },
-    {
-      "tick": 9,
-      "seq": 9,
-      "playerId": "p1",
-      "type": "SetSpeed",
-      "payload": {
-        "speed": 0
       }
     },
     {
@@ -296,5 +296,5 @@
     }
   ],
   "balance": "5a8f897fecf31f48",
-  "hash": "ae66d571967f125e"
+  "hash": "9a2d319eb77199c6"
 }

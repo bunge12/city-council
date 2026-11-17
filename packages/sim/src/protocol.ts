@@ -107,14 +107,17 @@ export interface DeltaMessage {
    */
   growth: GrowthState;
   /**
-   * `cellReads` after the last step, and the commands still queued, which
-   * are the ones waiting for the cells to settle (M2 review, #147, protocol
-   * version 12). Always sent, like `rng`: a copy without them would hash
-   * differently from the sim, and would not know which of its seqs are
-   * still to come.
+   * `cellReads` after the last step, always sent, like `rng`: a copy
+   * without it would hash differently from the sim (M2 review, #147,
+   * protocol version 12).
    */
   cellReads: number;
-  pending: Command[];
+  /**
+   * The commands still queued, the ones waiting for the cells to settle,
+   * when the queue changed since the last delta. Left out otherwise: a
+   * stroke can wait through many deltas.
+   */
+  pending?: Command[];
   /** Steps the host ran since the previous delta, paused steps included. */
   steps: number;
   /** Per-system time of the most recent step, in `step` order. */

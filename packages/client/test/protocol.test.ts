@@ -120,7 +120,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(mirror.state?.tick).toBe(20 + MAX_CATCH_UP_STEPS);
   });
 
-  it("sends deltas only when something changed, carrying only tick, speed, the generator, the grower's plan, the cell count and queue, and new log", async () => {
+  it("sends deltas only when something changed, carrying only tick, speed, the generator, the grower's plan, the cell count and new log", async () => {
     const { mirror, run, received } = setup();
     await mirror.sendCommand("SetSpeed", { speed: 0 });
     run(100);
@@ -129,7 +129,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["cellReads", "growth", "log", "logFrom", "pending", "rng", "seq", "speed", "steps", "tick", "timings", "type", "v"].sort(),
+      ["cellReads", "growth", "log", "logFrom", "rng", "seq", "speed", "steps", "tick", "timings", "type", "v"].sort(),
     );
   });
 
