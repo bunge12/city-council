@@ -10,6 +10,7 @@ import {
   SnapshotError,
   captureState,
   createBareState,
+  createCaptureBuffers,
   createState,
   deserialize,
   fnv1a64,
@@ -26,6 +27,7 @@ import {
   submit,
   type LogEntry,
   type SimState,
+  type SnapshotBuffer,
 } from "../src/index";
 import v1Fixture from "./fixtures/snapshots/v1.json";
 import v2Fixture from "./fixtures/snapshots/v2.json";
@@ -701,6 +703,53 @@ describe("snapshots with a road network", () => {
     expect(hashState(state)).not.toBe(hash);
     expect(toHex(part.value)).toBe(before);
     expect(hashState(captured)).toBe(hash);
+  });
+
+  it("writes the same bytes into buffers kept from one save to the next (issue #158)", () => {
+    const state = withRoads();
+    const keep = createCaptureBuffers();
+    const into: SnapshotBuffer = { buffer: null };
+    const saveKept = (): Uint8Array => {
+      const steps = serializeDetachedSteps(captureState(state, keep), into);
+      for (;;) {
+        const part = steps.next();
+        if (part.done) return part.value;
+      }
+    };
+    const grow = (n: number): void => {
+      const r = state.roads;
+      for (let k = 0; k < n; k++) {
+        const a = addNode(r, 100 + k * 13, 200 + n, 1);
+        const b = addNode(r, 140 + k * 13, 260 + n, 2);
+        addSegment(r, a, b, { type: 0 });
+      }
+      submit(state, { seq: 1000 + n, playerId: "p1", type: "NoOp", payload: { note: "x".repeat(n * 7) } });
+      step(state);
+    };
+    const first = saveKept();
+    expect(toHex(first)).toBe(toHex(serializeDetached(state)));
+    const firstBuffer = into.buffer;
+    // The city grows past what the kept arrays and buffer hold, then a
+    // smaller change: each save matches a fresh one byte for byte, with
+    // nothing left over from the larger save before it.
+    for (const n of [1, 40, 2, 0, 300, 3]) {
+      grow(n);
+      const kept = saveKept();
+      expect(toHex(kept), `after growing by ${n}`).toBe(toHex(serializeDetached(state)));
+      expect(deserialize(kept, state.log.slice(0, state.logOffset)).state).toBeDefined();
+    }
+    // The buffers were reused, not made afresh each time.
+    expect(into.buffer).not.toBeNull();
+    expect(keep.arrays.size).toBeGreaterThan(5);
+    expect(firstBuffer).not.toBe(into.buffer);
+  });
+
+  it("a capture into kept buffers hashes as the state does", () => {
+    const state = withRoads();
+    const keep = createCaptureBuffers();
+    expect(hashState(captureState(state, keep))).toBe(hashState(state));
+    state.roads.nodeX[0] = 1234;
+    expect(hashState(captureState(state, keep))).toBe(hashState(state));
   });
 
   it("serialises, deserialises and hashes the same", () => {

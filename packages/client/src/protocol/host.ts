@@ -15,6 +15,7 @@ import {
   recordCellChanges,
   recordRoadChanges,
   captureState,
+  createCaptureBuffers,
   diffUndo,
   serialize,
   serializeDetached,
@@ -25,6 +26,7 @@ import {
   type DroppedCommand,
   type FromSimMessage,
   type LogEntry,
+  type SnapshotBuffer,
   type SnapshotSteps,
   type RoadChanges,
   type SimState,
@@ -96,6 +98,14 @@ export class SimHost {
   private sentUndo: SimState["undo"];
   private sentLogFrom: number;
   private stepsSinceDelta = 0;
+  /**
+   * What an autosave copies the city into and writes it out to, kept from
+   * one save to the next (issue #158). A save taken while another still
+   * holds them, before its `release`, uses fresh buffers as before.
+   */
+  private readonly captureBuffers = createCaptureBuffers();
+  private readonly saveBuffer: SnapshotBuffer = { buffer: null };
+  private saveBuffersHeld = false;
   private lastTimings: SystemTiming[] = [];
   /** Real time not yet turned into steps. */
   private owedMs = 0;
@@ -186,12 +196,26 @@ export class SimHost {
    * the save does not see it.
    */
   startSave(pagesStored: number): PendingSave {
-    const state = captureState(this.state);
+    // A large city's capture and bytes are tens of megabytes, and fresh ones
+    // every autosave make the collections that hold a tick up. So the save
+    // writes into buffers kept from the last one, unless that one has not
+    // been released yet.
+    const keep = !this.saveBuffersHeld;
+    let released = false;
+    const release = keep
+      ? () => {
+          if (released) return;
+          released = true;
+          this.saveBuffersHeld = false;
+        }
+      : () => undefined;
+    if (keep) this.saveBuffersHeld = true;
+    const state = captureState(this.state, keep ? this.captureBuffers : undefined);
     const { logOffset } = state;
     if (logOffset % LOG_PAGE_SIZE !== 0) {
-      return { steps: serializeSteps(state, this.fullLog.slice(0, logOffset)), pages: [], pageCount: 0 };
+      return { steps: serializeSteps(state, this.fullLog.slice(0, logOffset)), pages: [], pageCount: 0, release };
     }
-    return { steps: serializeDetachedSteps(state), ...this.logPages(pagesStored) };
+    return { steps: serializeDetachedSteps(state, keep ? this.saveBuffer : undefined), ...this.logPages(pagesStored), release };
   }
 
   /** The pages of entries that have left live state, from page `pagesStored` on, and how many there are in all. */
@@ -363,6 +387,12 @@ export interface PendingSave {
   steps: SnapshotSteps;
   pages: LogPageEntries[];
   pageCount: number;
+  /**
+   * Hands the save's buffers back to the host once its bytes are stored
+   * and nothing reads them any more. Until then the next save allocates
+   * buffers of its own. The bytes must not be read after this.
+   */
+  release(): void;
 }
 
 /** What `SimHost.saveBytes` returns. */

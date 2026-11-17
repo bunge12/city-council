@@ -404,8 +404,19 @@ export type SnapshotSteps = Generator<undefined, Uint8Array, undefined>;
  * bytes. `state` must not change until then. A host whose sim steps on
  * meanwhile passes a copy from `captureState`.
  */
-export function serializeDetachedSteps(state: SimState): SnapshotSteps {
-  return write(state, null);
+export function serializeDetachedSteps(state: SimState, into?: SnapshotBuffer): SnapshotSteps {
+  return write(state, null, into);
+}
+
+/**
+ * An output buffer a host keeps between saves (issue #158), so that writing
+ * a large city does not allocate a fresh buffer of its size every autosave.
+ * The bytes a save returns are then a view into it, valid until the next
+ * save written into the same buffer: the host must be done with them first.
+ * Not state.
+ */
+export interface SnapshotBuffer {
+  buffer: ArrayBuffer | null;
 }
 
 /** `serialize` a part at a time. See `serializeDetachedSteps`. */
@@ -428,7 +439,7 @@ function writeUnits(text: string, units: Uint16Array): void {
 // The parts are the stages that take time on a large city, each a fraction
 // of a tick on 30,000 segments (issue #83): find the typed arrays, write the
 // JSON text, lay out the bytes, take the checksum.
-function* write(state: SimState, pagedLog: readonly LogEntry[] | null): SnapshotSteps {
+function* write(state: SimState, pagedLog: readonly LogEntry[] | null, into?: SnapshotBuffer): SnapshotSteps {
   if (pagedLog !== null && pagedLog.length !== state.logOffset) {
     throw new RangeError(
       `serialize: pagedLog has ${pagedLog.length} entries but ${state.logOffset} have left live state`,
@@ -462,14 +473,25 @@ function* write(state: SimState, pagedLog: readonly LogEntry[] | null): Snapshot
   }
   if (bodyLength > 0xffffffff) throw new RangeError("serialize: snapshot is larger than 4 GB");
 
-  const out = new Uint8Array(HEADER_BYTES + bodyLength);
-  const view = new DataView(out.buffer);
+  const size = HEADER_BYTES + bodyLength;
+  let out: Uint8Array;
+  if (into) {
+    // A kept buffer holds the last save's bytes, so every byte this layout
+    // does not write, the header and the padding, is cleared as it goes.
+    if (!into.buffer || into.buffer.byteLength < size) into.buffer = new ArrayBuffer(Math.ceil((size * 1.25) / 8) * 8);
+    out = new Uint8Array(into.buffer, 0, size);
+    out.fill(0, 0, HEADER_BYTES);
+  } else {
+    out = new Uint8Array(size);
+  }
+  const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
   let at = HEADER_BYTES;
   for (const part of parts) {
     out[at++] = part.name.length;
     for (let i = 0; i < part.name.length; i++) out[at++] = part.name.charCodeAt(i);
     out[at++] = part.kind;
     view.setUint32(at, part.byteLength, true);
+    out.fill(0, at + 4, align8(at + 4));
     at = align8(at + 4);
     const { source } = part;
     if (typeof source === "string") {
@@ -479,6 +501,7 @@ function* write(state: SimState, pagedLog: readonly LogEntry[] | null): Snapshot
     } else {
       out.set(source, at);
     }
+    out.fill(0, at + part.byteLength, align8(at + part.byteLength));
     at = align8(at + part.byteLength);
   }
 
