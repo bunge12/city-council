@@ -7,9 +7,10 @@ import { bulldozeRoad, planBulldoze, planUpgrade, upgradeRoad } from "./roads/ed
 import { endJournal, reverseOps, startJournal, type NetworkOp } from "./roads/network";
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
-import { applyUndo, planUndo, recordUndo } from "./undo";
-import { stepCells } from "./zoning/cell-index";
-import { planZoneCells, zoneCellsIfValid } from "./zoning/zone";
+import { applyUndo, hasUndo, planUndo, recordUndo, undoPutsRoadsBack } from "./undo";
+import { ZONING_BALANCE } from "./zoning/balance";
+import { cellsSettled, stepCells } from "./zoning/cell-index";
+import { checkZoneCellsPayload, planZoneCells, strokeOf, zoneCellsIfValid } from "./zoning/zone";
 import { NO_JOURNALS, journalLostZones, journalPaint } from "./zoning/zone-undo";
 
 /**
@@ -193,12 +194,22 @@ const UpgradeRoad: CommandDef = {
  */
 const Undo: CommandDef = {
   validate: (state, command) => {
+    // A command the step will hold is checked in full when it applies.
+    if (waitsForCells(state, command)) return hasUndo(state, command.playerId) ? null : "Nothing to undo";
     const result = planUndo(state, command.playerId);
     return result.ok ? null : result.reason;
   },
   apply: (state, command) => {
     const result = planUndo(state, command.playerId);
-    if (result.ok) applyUndo(state, result.index);
+    if (result.ok) applyUndo(state, result.indices);
+  },
+  // Checking an undo that puts roads back costs about what applying it
+  // does, so the step plans it once.
+  applyIfValid: (state, command) => {
+    const result = planUndo(state, command.playerId);
+    if (!result.ok) return result.reason;
+    applyUndo(state, result.indices);
+    return null;
   },
 };
 
@@ -211,6 +222,9 @@ const Undo: CommandDef = {
  */
 const ZoneCells: CommandDef = {
   validate: (state, command) => {
+    // A command the step will hold is checked in full when it applies.
+    // Checking the cells now would walk the rest of the change in one go.
+    if (waitsForCells(state, command)) return checkZoneCellsPayload(command.payload);
     const result = planZoneCells(state, command.payload);
     return result.ok ? null : result.reason;
   },
@@ -228,7 +242,9 @@ function zoneCells(state: SimState, command: Command): string | null {
     painted = { zone, density };
   });
   if (reason === null) {
-    recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops: [], zones, painted });
+    const stroke = strokeOf(command.payload);
+    const record = { playerId: command.playerId, entry: logLength(state), type: command.type, ops: [], zones, painted };
+    recordUndo(state, stroke === undefined ? record : { ...record, stroke });
   }
   return reason;
 }
@@ -306,6 +322,53 @@ function copyPayload(payload: unknown): unknown {
 }
 
 /**
+ * Commands that read which cells are open, and so would walk the whole of a
+ * change of roads still settling in one go, far past the tick budget (M2
+ * review, #147): painting zoning reads the open cells, and clearing a
+ * building reads its lot's columns. An `Undo` whose record puts roads back
+ * reads what ground they would take, and waits too; any other undo does
+ * not.
+ */
+const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding"]);
+
+/**
+ * Commands that wait behind their sender's waiting command, so they keep
+ * their order with it: a stroke after a stroke, a clear after a clear, and
+ * an undo, which must take back the stroke the player just made and not the
+ * change before it. Anything else goes on: a road command, since a stroke
+ * names ground and paints whatever roads it finds when it applies, as it
+ * would after another player's road, and `SetSpeed` and `NoOp`, so a player
+ * can still pause. A backlog is then strokes, clears and undos, which apply
+ * at most `cellCommandsPerTick` a tick, and not road commands piled up
+ * behind them, which would all apply in one step (M2 review, #147).
+ */
+const WAIT_BEHIND: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding", "Undo"]);
+
+/**
+ * Whether the step holds `command` until the cells settle on
+ * `state.cellsReadyAt`, with its sender's later strokes, clears and undos
+ * (`WAIT_BEHIND`). Other players' commands go on, so one player's stroke
+ * holds up no one else. From state alone, so a
+ * replay applies it on the tick it was logged. A paused game has no tick to
+ * wait for and applies it at once, walking whatever is left: nothing moves
+ * while paused, so the walk holds nothing up.
+ */
+export function waitsForCells(state: SimState, command: Pick<Command, "type" | "playerId">): boolean {
+  if (state.speed === 0 || cellsSettled(state)) return false;
+  return readsCells(state, command);
+}
+
+/**
+ * Whether `command` reads which cells are open: a stroke, a clear of
+ * buildings, or an undo that puts roads back. One step applies at most
+ * `cellCommandsPerTick` of them, so a backlog that built up while a change
+ * settled lands over several steps, not in one.
+ */
+function readsCells(state: SimState, command: Pick<Command, "type" | "playerId">): boolean {
+  return CELL_READERS.has(command.type) || (command.type === "Undo" && undoPutsRoadsBack(state, command.playerId));
+}
+
+/**
  * Most commands the queue holds before `submit` refuses more. One step must
  * not apply more than a log page, or entries would leave live state before
  * the host reads them after that step.
@@ -349,7 +412,9 @@ export function enqueue(state: SimState, command: Command): void {
  * The zoning cells are brought up to date with the roads before the first
  * command and after each one (zoning/cell-index.ts), so the cells of a
  * removed road are read before it goes. A big change settles over the next
- * few ticks (`stepCells`). The buildings follow each time
+ * few ticks (`stepCells`). A command that reads the cells while one does
+ * waits for it, and its sender's later strokes, clears and undos wait too,
+ * in order (`waitsForCells`): they stay queued for a later step. The buildings follow each time
  * (buildings/upkeep.ts): the ones whose ground went are removed on the
  * command's tick, and the ones a new road blocks once the cells settle.
  */
@@ -361,7 +426,19 @@ export function applyPending(state: SimState): DroppedCommand[] {
     stepCells(state);
     keepBuildings(state);
   }
+  // Players with a command waiting for the cells, whose later commands wait behind it.
+  const waiting = new Set<string>();
+  const held: Command[] = [];
   for (const command of queue) {
+    // Past `cellCommandsPerTick` cell readers this tick, the rest wait for the next. Not while paused.
+    const reads = readsCells(state, command);
+    const counted = reads && state.speed !== 0;
+    const full = counted && state.cellReads >= ZONING_BALANCE.cellCommandsPerTick;
+    if ((waiting.has(command.playerId) && WAIT_BEHIND.has(command.type)) || full || waitsForCells(state, command)) {
+      waiting.add(command.playerId);
+      held.push(command);
+      continue;
+    }
     const def = commandDef(command);
     let reason: string | null;
     if (typeof def === "string") reason = def;
@@ -373,6 +450,8 @@ export function applyPending(state: SimState): DroppedCommand[] {
     if (reason !== null) {
       dropped.push({ seq: command.seq, playerId: command.playerId, type: command.type, reason });
     } else {
+      // Counted once applied, so a replay, which never sees a dropped command, counts the same.
+      if (counted) state.cellReads++;
       stepCells(state);
       keepBuildings(state);
       recordEntry(state, {
@@ -384,5 +463,6 @@ export function applyPending(state: SimState): DroppedCommand[] {
       });
     }
   }
+  state.pending = held;
   return dropped;
 }

@@ -295,6 +295,8 @@ export function growScaleCity(city: ScaleCity, target = SCALE_BUILDINGS): ScaleT
       groups.set(key, list);
     }
   }
+  // A stroke waits for the cells to settle, and submit checks only its shape until then.
+  while (!cellsSettled(state)) step(state);
   let seq = state.log.reduce((most, e) => Math.max(most, e.seq), 0);
   let zoneCommands = 0;
   for (const [key, rects] of [...groups].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {

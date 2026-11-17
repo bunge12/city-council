@@ -281,6 +281,7 @@ const zoneTool = new ZoneToolController({
   city: () => mirror.state,
   version: () => cityVersion,
   send: (payload) => sendCommand("ZoneCells", payload),
+  strokeId: () => mirror.upcomingSeq,
 });
 // However the zone tool is left, by its button or by picking another tool, it drops its stroke.
 useUi.subscribe((now, before) => {

@@ -27,6 +27,10 @@ const cases = [
   ["packages/sim/src/terrain/x.ts", "export const a = [Math.sqrt(2), Math.floor(1.5), Math.imul(3, 4)];", null],
   ["packages/sim/src/roads/x.ts", "export const a = Math.hypot(3, 4);", "no-restricted-properties"],
   ["packages/sim/src/roads/x.ts", "export const a = Math.random();", "no-restricted-properties"],
+  // Since the M2 review (#147) rule 6 covers all of the sim, not only terrain and roads.
+  ["packages/sim/src/zoning/x.ts", "export const a = (n: number) => n ** 2;", "no-restricted-syntax"],
+  ["packages/sim/src/buildings/x.ts", "export const a = Math.atan2(1, 2);", "no-restricted-properties"],
+  ["packages/sim/src/x.ts", "export const a = Math.pow(2, 3);", "no-restricted-properties"],
   ["packages/client/src/x.ts", 'import { simInfo } from "@city-council/sim";\nexport const a = [simInfo, Math.random()];', null],
   // Rules 2 and 8: UI components never import the writable state or code that writes it.
   ["packages/client/src/ui/x.tsx", 'import type { SimState } from "@city-council/sim";\nexport type A = SimState;', "no-restricted-imports"],

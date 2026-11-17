@@ -16,7 +16,7 @@ import { segmentOfSlot, type CellState } from "./cells";
  * A painted cell is kept as `segment * CELL_KEY_STRIDE + its place in the
  * segment's run`, so sorting the keys groups them by segment.
  */
-export const CELL_KEY_STRIDE = 2 ** 21;
+export const CELL_KEY_STRIDE = 2_097_152; // 2^21
 
 /** What changed since the last drain. */
 export interface CellChanges {

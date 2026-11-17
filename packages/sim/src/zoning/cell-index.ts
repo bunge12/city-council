@@ -58,6 +58,7 @@ import {
   readAnchor,
   segmentIdLimit,
   type RoadNetwork,
+  type SegmentRow,
 } from "../roads/network";
 import type { SimState } from "../state";
 import { terrainOf } from "../terrain/cache";
@@ -362,18 +363,31 @@ function shapeOf(net: RoadNetwork, id: number): SegShape | null {
   if (!isSegment(net, id)) return null;
   const a = net.segA[id] ?? 0;
   const b = net.segB[id] ?? 0;
-  const ax = net.nodeX[a] ?? 0;
-  const az = net.nodeZ[a] ?? 0;
-  const bx = net.nodeX[b] ?? 0;
-  const bz = net.nodeZ[b] ?? 0;
-  const cx = net.segCX[id] ?? 0;
-  const cz = net.segCZ[id] ?? 0;
-  const type = net.segType[id] ?? 0;
-  const network = net.segNetwork[id] ?? 0;
-  const levelA = net.segLevelA[id] ?? 0;
-  const levelB = net.segLevelB[id] ?? 0;
-  const length = net.segLength[id] ?? 0;
-  const anchor = readAnchor(net, id);
+  return shapeOfRow(
+    {
+      a,
+      b,
+      type: net.segType[id] ?? 0,
+      network: net.segNetwork[id] ?? 0,
+      levelA: net.segLevelA[id] ?? 0,
+      levelB: net.segLevelB[id] ?? 0,
+      flags: net.segFlags[id] ?? 0,
+      cx: net.segCX[id] ?? 0,
+      cz: net.segCZ[id] ?? 0,
+      length: net.segLength[id] ?? 0,
+      order: net.segOrder[id] ?? 0,
+      anchor: readAnchor(net, id),
+    },
+    net.nodeX[a] ?? 0,
+    net.nodeZ[a] ?? 0,
+    net.nodeX[b] ?? 0,
+    net.nodeZ[b] ?? 0,
+  );
+}
+
+/** The shape of a segment with row `row` between nodes at (ax, az) and (bx, bz), whether or not the network holds it now. */
+function shapeOfRow(row: SegmentRow, ax: number, az: number, bx: number, bz: number): SegShape {
+  const { a, b, cx, cz, type, network, levelA, levelB, length, anchor } = row;
   let places = 0;
   let from = 0;
   let reversed = false;
@@ -427,7 +441,7 @@ function shapeOf(net: RoadNetwork, id: number): SegShape | null {
     network,
     levelA,
     levelB,
-    order: net.segOrder[id] ?? 0,
+    order: row.order,
     length,
     half,
     straight,
@@ -631,7 +645,7 @@ function fileSurface(index: CellIndex, seg: number, s: SegShape, add: boolean): 
 // ---- Walking one cell ----
 
 /** Whether any surface but segment `seg`'s own covers quad `q`, whose box is `box`. */
-function covered(index: CellIndex, seg: number, q: Float64Array, box: Float64Array): boolean {
+function covered(index: CellIndex, seg: number, q: Float64Array, box: Float64Array, skip?: ReadonlySet<number>): boolean {
   const minX = box[0] ?? 0;
   const minZ = box[1] ?? 0;
   const maxX = box[2] ?? 0;
@@ -646,7 +660,7 @@ function covered(index: CellIndex, seg: number, q: Float64Array, box: Float64Arr
       for (let e = list.heads[j * index.perSide + i] ?? -1; e >= 0; e = list.next[e] ?? -1) {
         const piece = list.keys[e] ?? 0;
         const other = Math.floor(piece / KEY_STRIDE);
-        if (other === seg) continue;
+        if (other === seg || skip?.has(other)) continue;
         const s = index.segs[other];
         const data = s?.data;
         if (!s || !data) continue;
@@ -1855,8 +1869,12 @@ const edgeB = new Float64Array(4);
 
 /** Whether two edges as `columnEdge` writes them are one edge, inner to inner and outer to outer. */
 function sameEdge(p: Float64Array, q: Float64Array): boolean {
-  const d0 = ((p[0] ?? 0) - (q[0] ?? 0)) ** 2 + ((p[1] ?? 0) - (q[1] ?? 0)) ** 2;
-  const d1 = ((p[2] ?? 0) - (q[2] ?? 0)) ** 2 + ((p[3] ?? 0) - (q[3] ?? 0)) ** 2;
+  const ax = (p[0] ?? 0) - (q[0] ?? 0);
+  const az = (p[1] ?? 0) - (q[1] ?? 0);
+  const bx = (p[2] ?? 0) - (q[2] ?? 0);
+  const bz = (p[3] ?? 0) - (q[3] ?? 0);
+  const d0 = ax * ax + az * az;
+  const d1 = bx * bx + bz * bz;
   return d0 <= SAME_POINT_SQ && d1 <= SAME_POINT_SQ;
 }
 
@@ -2012,6 +2030,83 @@ export function openCellsUnder(index: CellIndex, net: RoadNetwork, segs: readonl
           if (isConvexQuad(quad)) out.add(key);
         },
         (key, seg) => out.has(key) || (index.segs[seg] ? anchorKeyOf(index.segs[seg] as SegShape) === anchor : true),
+      );
+    }
+  }
+  return [...out].sort((p, q) => p - q);
+}
+
+/** A segment an undo would put back: its row and where its two nodes stood, as the undo record keeps them. */
+export interface ReturningSegment {
+  id: number;
+  row: SegmentRow;
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+}
+
+// Scratch for `openCellsTakenBy`, apart from the buffers `forOverlappingCells` and `covered` use. Not state.
+const takenQuad = new Float64Array(8);
+const takenOther = new Float64Array(8);
+const takenBox = new Float64Array(4);
+
+/**
+ * The open cells that segments coming back would take from the roads there
+ * now (M2 review, #147): the cells under their surfaces, as
+ * `openCellsUnder` finds them, and the cells one of their own cells
+ * overlaps and claims first, by the claim order the walk uses, when no
+ * surface covers that cell of theirs. For an undo, to refuse taking ground
+ * that buildings stand on. Cells of the segments in `skip`, which the same
+ * undo removes or changes, and cells on the same anchor as a returning
+ * segment are left out, and their surfaces cover nothing. It does not
+ * check water and slope under the
+ * returning cells, so it can name a cell such a cell would not in fact
+ * take: it errs towards refusing. `index` must be settled. Changes nothing.
+ */
+export function openCellsTakenBy(index: CellIndex, segs: readonly ReturningSegment[], skip: ReadonlySet<number>): number[] {
+  const out = new Set<number>();
+  for (const seg of segs) {
+    const shape = shapeOfRow(seg.row, seg.ax, seg.az, seg.bx, seg.bz);
+    const anchor = anchorKeyOf(shape);
+    const leaveOut = (key: number, other: number) =>
+      out.has(key) || skip.has(other) || (index.segs[other] ? anchorKeyOf(index.segs[other] as SegShape) === anchor : true);
+    for (let k = 0; k < shape.pieces; k++) {
+      const piece = surfacePiece(shape, k);
+      quadBoxInto(piece, takenBox);
+      forOverlappingCells(
+        index,
+        piece,
+        takenBox,
+        BIT_OPEN,
+        (key) => {
+          const other = segOfKey(key);
+          cellQuad(index.segs[other] as SegShape, key - other * KEY_STRIDE, takenOther);
+          if (isConvexQuad(takenOther)) out.add(key);
+        },
+        leaveOut,
+      );
+    }
+    const count = shape.places * cellsPerPlace();
+    for (let local = 0; local < count; local++) {
+      cellQuad(shape, local, takenQuad);
+      // A fold, or a cell under a road, claims nothing.
+      if (!isConvexQuad(takenQuad)) continue;
+      quadBoxInto(takenQuad, takenBox);
+      // A road the same undo removes covers nothing once it applies.
+      if (covered(index, seg.id, takenQuad, takenBox, skip)) continue;
+      const key = seg.id * KEY_STRIDE + local;
+      forOverlappingCells(
+        index,
+        takenQuad,
+        takenBox,
+        BIT_OPEN,
+        (other) => {
+          const os = segOfKey(other);
+          const o = index.segs[os];
+          if (o && claimsBefore(shape, local, key, o, other - os * KEY_STRIDE, other)) out.add(other);
+        },
+        leaveOut,
       );
     }
   }

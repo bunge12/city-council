@@ -36,6 +36,8 @@ export interface ZoningBalance {
   settleFiledCellCost: number;
   /** The most rectangles one `ZoneCells` command may carry. */
   maxRectsPerCommand: number;
+  /** How many commands that read which cells are open one step applies; more wait for the next (M2 review, #147). */
+  cellCommandsPerTick: number;
   /** The longest side a `ZoneCells` rectangle may have, metres. */
   maxRectSide: number;
   /** The widest gap, metres, between the backs of two strips a through-lot may join (M2-14). */
@@ -75,6 +77,8 @@ export function checkZoningBalance(data: unknown): string[] {
     const cost = data[key];
     if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) errors.push(`${key} must be a number of cells walked, zero or more`);
   }
+  const perTick = data["cellCommandsPerTick"];
+  if (!Number.isSafeInteger(perTick) || (perTick as number) < 1) errors.push("cellCommandsPerTick must be a whole number of at least 1");
   const maxRects = data["maxRectsPerCommand"];
   if (!Number.isSafeInteger(maxRects) || (maxRects as number) < 1) errors.push("maxRectsPerCommand must be a whole number of at least 1");
   const maxSide = data["maxRectSide"];

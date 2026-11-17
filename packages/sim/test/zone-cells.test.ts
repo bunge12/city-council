@@ -10,6 +10,7 @@ import {
   cellStatuses,
   cellsInBox,
   cellsSettled,
+  cellsWalked,
   createState,
   deserialize,
   hashState,
@@ -307,7 +308,7 @@ describe("ZoneCells", () => {
     expect(whole.ok && whole.plan.cells.length).toBe(24);
   });
 
-  it("paints the same cells while a big change of roads is still settling", () => {
+  it("waits for a big change of roads to settle, and paints the same cells as a paused city (M2 review, #147)", () => {
     const grid = command("BuildRoadGrid", {
       origin: { x: 4104, z: 4404 },
       along: { x: 4680, z: 4404 },
@@ -320,30 +321,62 @@ describe("ZoneCells", () => {
       zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200), rect([4366, 4500], [4622, 4500], 200)]),
       zone("commercial", 3, [rect([4150, 4450], [4330, 4630], 120)]),
     ];
-    // One city zones in the ticks right after the grid, before its cells settle.
+    // One city zones in the tick right after the grid, before its cells settle.
     const early = createState(SEED);
     ok(early, grid);
     expect(cellsSettled(early)).toBe(false);
-    ok(early, strokes[0] as Command);
-    ok(early, strokes[1] as Command);
-    expect(cellsSettled(early)).toBe(false);
-    // Its twin is saved and loaded between the two, which settles everything at once.
-    const loaded = createState(SEED);
-    ok(loaded, grid);
-    ok(loaded, strokes[0] as Command);
-    const reloaded = deserialize(serialize(loaded)).state;
-    ok(reloaded, strokes[1] as Command);
-    expect(hashState(reloaded)).toBe(hashState(early));
-    // A third pauses first, so its cells finish their walk while the tick stands still.
+    const ready = early.cellsReadyAt;
+    for (const s of strokes) expect(submit(early, s)).toEqual({ ok: true });
+    // Accepting them walked none of the change: the shape of the payload is all submit checks.
+    expect(cellsWalked(early)).toBe(false);
+    // A malformed one is still refused at once.
+    expect(submit(early, zone("residential", 1, [])).ok).toBe(false);
+    step(early);
+    expect(early.log.at(-1)?.seq).toBe(grid.seq);
+    expect(early.pending.map((c) => c.seq)).toEqual(strokes.map((c) => c.seq));
+    // Its twin is saved and loaded with the strokes still waiting, which settles everything at once.
+    const loaded = deserialize(serialize(cloneState(early))).state;
+    while (early.log.at(-1)?.seq !== strokes[1]?.seq) step(early);
+    // They landed from the tick the cells settled, in order, one a tick (`cellCommandsPerTick`).
+    expect(early.log.slice(-2).map((e) => [e.seq, e.tick])).toEqual(strokes.map((c, i) => [c.seq, ready + i]));
+    while (loaded.tick < early.tick) step(loaded);
+    expect(hashState(loaded)).toBe(hashState(early));
+    // A third pauses first: with no tick to wait for, its strokes apply at once.
     const paused = createState(SEED);
     ok(paused, grid);
     ok(paused, command("SetSpeed", { speed: 0 }));
-    for (let i = 0; i < 40; i++) step(paused);
     ok(paused, strokes[0] as Command);
     ok(paused, strokes[1] as Command);
     expect(Array.from(paused.cells.zone)).toEqual(Array.from(early.cells.zone));
     expect(Array.from(paused.cells.density)).toEqual(Array.from(early.cells.density));
     expect(zoned(early).length).toBeGreaterThan(500);
+  });
+
+  it("holds the player's later strokes behind a waiting one, in order, and lets their road go on", () => {
+    const state = createState(SEED);
+    ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4404 }, along: { x: 4680, z: 4404 }, across: { x: 4104, z: 4980 }, depth: 86, width: 86, type: "street" }));
+    const stroke = zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200)]);
+    const street = road([4150, 4300], [4400, 4300]);
+    const again = zone("commercial", 2, [rect([4110, 4500], [4366, 4500], 100)]);
+    for (const c of [stroke, street, again]) expect(submit(state, c)).toEqual({ ok: true });
+    step(state);
+    // The street names its own ground and goes on; the second stroke keeps its place behind the first.
+    expect(state.log.at(-1)?.seq).toBe(street.seq);
+    expect(state.pending.map((c) => c.seq)).toEqual([stroke.seq, again.seq]);
+    while (state.pending.length > 0) step(state);
+    expect(state.log.slice(-2).map((e) => e.seq)).toEqual([stroke.seq, again.seq]);
+  });
+
+  it("lets another player's commands go on while one player's stroke waits", () => {
+    const state = createState(SEED);
+    ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4404 }, along: { x: 4680, z: 4404 }, across: { x: 4104, z: 4980 }, depth: 86, width: 86, type: "street" }));
+    const stroke = zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200)]);
+    const street = command("BuildRoad", { from: { x: 4150, z: 4300 }, to: { x: 4400, z: 4300 }, type: "street" }, "p2");
+    expect(submit(state, stroke)).toEqual({ ok: true });
+    expect(submit(state, street)).toEqual({ ok: true });
+    step(state);
+    expect(state.log.at(-1)?.seq).toBe(street.seq);
+    expect(state.pending.map((c) => c.seq)).toEqual([stroke.seq]);
   });
 });
 
@@ -442,5 +475,22 @@ describe("replay fixture zoning", () => {
 
   it.each([2, 5, 7, 13])("matches a city saved and loaded at tick %d", (tick) => {
     expect(hashState(playLive(1, tick))).toBe(fixture.hash);
+  });
+});
+
+describe("pausing while a stroke waits (M2 review, #147)", () => {
+  it("applies the player's SetSpeed at once, and the stroke with it once paused", () => {
+    const state = createState(SEED);
+    ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4404 }, along: { x: 4680, z: 4404 }, across: { x: 4104, z: 4980 }, depth: 86, width: 86, type: "street" }));
+    const stroke = zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200)]);
+    const pause = command("SetSpeed", { speed: 0 });
+    expect(submit(state, stroke)).toEqual({ ok: true });
+    expect(submit(state, pause)).toEqual({ ok: true });
+    step(state);
+    expect(state.speed).toBe(0);
+    expect(state.pending.map((c) => c.seq)).toEqual([stroke.seq]);
+    // Paused, nothing waits: the next step paints.
+    step(state);
+    expect(state.log.at(-1)?.seq).toBe(stroke.seq);
   });
 });

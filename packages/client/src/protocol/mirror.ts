@@ -66,7 +66,8 @@ export interface HostStats {
  * be in neither list. `buildingIds` names every building the delta
  * carried a row for, ascending, whether or not anything asked.
  * `steps` is how many sim steps the delta covers: after one or more, every
- * command the host had queued before it has been applied or dropped.
+ * command the host had queued before it has been applied or dropped, or is
+ * waiting for the cells to settle (the sim's `waitsForCells`).
  * Listeners run before `sendCommandSettled` resolves for the commands the
  * update settled.
  */
@@ -144,6 +145,11 @@ export class SimMirror {
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
+  }
+
+  /** The seq the next command this copy sends will carry. No earlier command of this player has it, even from before a reload. */
+  get upcomingSeq(): number {
+    return this.nextSeq;
   }
 
   /**
@@ -366,9 +372,10 @@ export class SimMirror {
     this.homeTally = homes;
     state.tick = delta.tick;
     state.speed = delta.speed;
-    // Any step drains the host's queue, so queued commands from the
-    // snapshot have now been applied or dropped.
-    if (delta.steps > 0) state.pending = [];
+    // The host's queue as it stands: what a step neither applied nor
+    // dropped waits for the cells to settle (the sim's waitsForCells).
+    if (delta.pending) state.pending = delta.pending.map((c) => ({ ...c }));
+    state.cellReads = delta.cellReads;
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
     state.growth = { ...delta.growth };
@@ -402,6 +409,12 @@ export class SimMirror {
   private skipSeqs(state: SimState): void {
     for (const command of [...state.log, ...state.pending]) {
       if (command.playerId === this.playerId && command.seq >= this.nextSeq) this.nextSeq = command.seq + 1;
+    }
+    // A stroke id is the seq of the stroke's first command (M2 review, #147).
+    // Its log entry can have left the live log while its undo record stays,
+    // and a new stroke must not take its id.
+    for (const record of state.undo) {
+      if (record.playerId === this.playerId && record.stroke !== undefined && record.stroke >= this.nextSeq) this.nextSeq = record.stroke + 1;
     }
   }
 

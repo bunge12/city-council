@@ -32,6 +32,7 @@ import {
   isBuilding,
   planBulldozeBuildings,
   previewBulldozeRoad,
+  seeBuilding,
   type BuildingInfo,
   type BuildingSeen,
   type CommandResult,
@@ -133,7 +134,7 @@ function roadPlan(world: BulldozeWorld, ids: readonly number[], seen: readonly u
 
 function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readonly unknown[]): BulldozePreview {
   const buildings = seen as readonly BuildingSeen[];
-  const payload = { buildings: buildings.map((b) => ({ id: b.id, segment: b.segment, side: b.side, place: b.place })) };
+  const payload = { buildings: buildings.map((b) => ({ id: b.id, segment: b.segment, side: b.side, place: b.place, builtAt: b.builtAt })) };
   const state = asState(world);
   const result = planBulldozeBuildings(state, payload);
   let residents = 0;
@@ -157,19 +158,13 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
   };
 }
 
-function seeBuilding(world: BulldozeWorld, id: number): BuildingSeen | null {
-  const b = world.state.buildings;
-  if (!isBuilding(b, id)) return null;
-  return { id, segment: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0 };
-}
-
 /** Every target kind, in pick order: where two are under the pointer, the earlier wins. */
 export const BULLDOZE_TARGETS: readonly BulldozeTargetKind[] = [
   {
     id: "building",
     label: "Buildings",
-    see: seeBuilding,
-    takes: (world, id) => seeBuilding(world, id) !== null,
+    see: (world, id) => seeBuilding(asState(world).buildings, id),
+    takes: (world, id) => isBuilding(asState(world).buildings, id),
     plan: buildingPlan,
   },
   {

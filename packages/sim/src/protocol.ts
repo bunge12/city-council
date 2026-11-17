@@ -13,7 +13,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 // ---- Client to sim ----
 
@@ -106,6 +106,18 @@ export interface DeltaMessage {
    * plan fell behind would hash differently from the sim.
    */
   growth: GrowthState;
+  /**
+   * `cellReads` after the last step, always sent, like `rng`: a copy
+   * without it would hash differently from the sim (M2 review, #147,
+   * protocol version 12).
+   */
+  cellReads: number;
+  /**
+   * The commands still queued, the ones waiting for the cells to settle,
+   * when the queue changed since the last delta. Left out otherwise: a
+   * stroke can wait through many deltas.
+   */
+  pending?: Command[];
   /** Steps the host ran since the previous delta, paused steps included. */
   steps: number;
   /** Per-system time of the most recent step, in `step` order. */

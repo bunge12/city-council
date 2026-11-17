@@ -10,7 +10,7 @@
 // after every message sent before them.
 
 import { parentPort } from "node:worker_threads";
-import { SEG_ALIVE, SEG_FIXED, buildingCount, hashState, segmentEnds, segmentTypeId } from "@city-council/sim";
+import { SEG_ALIVE, SEG_FIXED, buildingCount, hashState, seeBuilding, segmentEnds, segmentTypeId, type BuildingSeen, type BuildingState } from "@city-council/sim";
 import { countHomes } from "../src/protocol/homes";
 import { SimMirror } from "../src/protocol/mirror";
 import type { ClientTransport } from "../src/protocol/transport";
@@ -57,15 +57,16 @@ function segment(from: number): { seg: number; ends: number[][]; types: string[]
 }
 
 /** Up to `count` buildings standing, from an id the seed picks, as the player saw them. */
-function buildings(seed: number, count: number): { id: number; segment: number; side: number; place: number }[] {
+function buildings(seed: number, count: number): BuildingSeen[] {
   const b = mirror.state?.buildings;
   if (!b) return [];
   const limit = b.flags.length;
   const from = seed % Math.max(1, limit);
-  const seen: { id: number; segment: number; side: number; place: number }[] = [];
+  const seen: BuildingSeen[] = [];
   for (let k = 0; k < limit && seen.length < count; k++) {
     const id = (from + k) % limit;
-    if (b.flags[id]) seen.push({ id, segment: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0 });
+    const one = seeBuilding(b as BuildingState, id);
+    if (one) seen.push(one);
   }
   return seen;
 }

@@ -232,7 +232,7 @@ describe("a road that comes", () => {
     expectSound(state);
   });
 
-  it("clears the houses that grew where a bulldozed road was, when the bulldoze is undone", () => {
+  it("refuses to undo a bulldoze while houses stand where the road was, and undoes it once they are cleared (M2 review, #147)", () => {
     const state = street();
     // A street from the north meets this one at x 4296.
     ok(state, road([4296, 4450], [4296, 4600]));
@@ -247,6 +247,9 @@ describe("a road that comes", () => {
       return lo < 4296 + half && hi > 4296 - half;
     });
     expect(under.length).toBeGreaterThan(0);
+    expect(submit(state, command("Undo", {}, "p2"))).toEqual({ ok: false, reason: "Cannot undo: buildings now stand on ground that road would take back" });
+    const b = state.buildings;
+    ok(state, command("BulldozeBuilding", { buildings: under.map((id) => ({ id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id], builtAt: b.builtAt[id] })) }));
     ok(state, command("Undo", {}, "p2"));
     expect(live(state)).toEqual(ids.filter((id) => !under.includes(id)));
     expectSound(state);
@@ -334,7 +337,7 @@ describe("rezoning built land", () => {
     const until = state.tick + 3 * DAY;
     while (state.tick < until) step(state);
     expect(live(state)).toEqual([house]);
-    ok(state, command("BulldozeBuilding", { buildings: [{ id: house, segment: row.firstSeg, side: row.firstSide, place: row.firstPlace }] }));
+    ok(state, command("BulldozeBuilding", { buildings: [{ id: house, segment: row.firstSeg, side: row.firstSide, place: row.firstPlace, builtAt: row.builtAt }] }));
     expect(live(state)).toEqual([]);
     const later = state.tick + 3 * DAY;
     while (state.tick < later && live(state).length === 0) step(state);
@@ -351,7 +354,13 @@ describe("BulldozeBuilding", () => {
     zone(state, "residential", 1, 0, 8, 4);
     return { state, ids: fill(state) };
   }
-  const seen = (state: SimState, id: number) => ({ id, segment: state.buildings.firstSeg[id], side: state.buildings.firstSide[id], place: state.buildings.firstPlace[id] });
+  const seen = (state: SimState, id: number) => ({
+    id,
+    segment: state.buildings.firstSeg[id],
+    side: state.buildings.firstSide[id],
+    place: state.buildings.firstPlace[id],
+    builtAt: state.buildings.builtAt[id],
+  });
 
   it("removes the buildings it names and frees their ground at once", () => {
     const { state, ids } = housed();
@@ -382,6 +391,19 @@ describe("BulldozeBuilding", () => {
     expect(isBuilding(state.buildings, id)).toBe(true);
   });
 
+  it("refuses a building cleared and built again on the same lot under the same id (M2 review, #147)", () => {
+    const { state, ids } = housed();
+    const id = ids[0] as number;
+    const row = readBuilding(state.buildings, id);
+    const stale = seen(state, id);
+    ok(state, command("BulldozeBuilding", { buildings: [stale] }));
+    // The grower's next building on that lot takes the freed id and starts from the same first cell.
+    expect(addBuilding(state, row)).toBe(id);
+    expect(seen(state, id)).toEqual({ ...stale, builtAt: state.tick });
+    expect(submit(state, command("BulldozeBuilding", { buildings: [stale] }))).toEqual({ ok: false, reason: BUILDING_CHANGED });
+    expect(isBuilding(state.buildings, id)).toBe(true);
+  });
+
   it("refuses the whole command when one building of it changed", () => {
     const { state, ids } = housed();
     const [a, b] = ids as [number, number];
@@ -401,15 +423,16 @@ describe("BulldozeBuilding", () => {
     expect(submit(state, command("BulldozeBuilding", { buildings: many })).ok).toBe(false);
   });
 
-  it("drops a second clear of the same building in one tick, since the first changed it", () => {
+  it("drops a second clear of the same building, since the first changed it", () => {
     const { state, ids } = housed();
     const a = seen(state, ids[0] as number);
     const first = command("BulldozeBuilding", { buildings: [a] });
     const second = command("BulldozeBuilding", { buildings: [a] }, "p2");
     expect(submit(state, first)).toEqual({ ok: true });
     expect(submit(state, second)).toEqual({ ok: true });
-    const dropped = step(state);
-    expect(dropped).toEqual([{ seq: second.seq, playerId: "p2", type: "BulldozeBuilding", reason: BUILDING_CHANGED }]);
+    // One clear a tick (`cellCommandsPerTick`, M2 review #147): the second is checked on the next.
+    expect(step(state)).toEqual([]);
+    expect(step(state)).toEqual([{ seq: second.seq, playerId: "p2", type: "BulldozeBuilding", reason: BUILDING_CHANGED }]);
   });
 });
 
@@ -474,6 +497,8 @@ describe("the building index across changes of roads", () => {
     const state = createState(SEED);
     for (const z of [4500, 4600, 4700]) ok(state, road([4150, z], [4650, z]));
     for (const x of [4200, 4400, 4600]) ok(state, road([x, 4450], [x, 4750]));
+    // A stroke waits for the streets' cells to settle (M2 review, #147).
+    while (!cellsSettled(state)) step(state);
     const zones = ["residential", "commercial", "office", "industrial", "mixed"];
     const rng = seedRng(106);
     for (let i = 0; i < 6; i++) {
@@ -514,8 +539,9 @@ describe("the building index across changes of roads", () => {
  * growth, then p2 runs a street south from x 4296, which splits the first
  * one under the houses across it and clears the shops in its way. p1 clears
  * its lowest-numbered house with BulldozeBuilding, then runs a street north
- * from x 4248 through its houses. p2 bulldozes its street and undoes that,
- * which clears whatever grew on the ground meanwhile. Twenty-four days.
+ * from x 4248 through its houses. p2 bulldozes its street. Three days on
+ * its undo is refused, since shops grew on the ground meanwhile; p2 clears
+ * them and undoes. Twenty-four days.
  */
 function playSession(): SimState {
   const state = createState(SEED);
@@ -536,13 +562,33 @@ function playSession(): SimState {
   const north = live(state).filter((id) => state.buildings.firstSide[id] === 0 && state.buildings.zone[id] === 1);
   const house = north[0] as number;
   send("BulldozeBuilding", {
-    buildings: [{ id: house, segment: state.buildings.firstSeg[house], side: state.buildings.firstSide[house], place: state.buildings.firstPlace[house] }],
+    buildings: [
+      {
+        id: house,
+        segment: state.buildings.firstSeg[house],
+        side: state.buildings.firstSide[house],
+        place: state.buildings.firstPlace[house],
+        builtAt: state.buildings.builtAt[house],
+      },
+    ],
   });
   until(14 * DAY);
   send("BuildRoad", { from: { x: 4248, z: 4500 }, to: { x: 4248, z: 4600 }, type: "street" });
   until(16 * DAY);
   send("BulldozeRoad", withEnds(state.roads, { segments: [cellAt(state, 4303, 4680)?.segment as number] }), "p2");
   until(19 * DAY);
+  // Shops grew on p1's cells where the street was, so the undo would clear
+  // them, and it is refused (M2 review, #147). p2 clears them and undoes.
+  expect(submit(state, { seq: ++n, playerId: "p2", type: "Undo", payload: {} }).ok).toBe(false);
+  const half = halfWidth("street");
+  const inTheWay = live(state).filter((id) => {
+    const [lo, hi] = xRange(state, id);
+    return lo < 4296 + half && hi > 4296 - half && (buildingInfo(state, id)?.corners?.[1] ?? 0) > 4600;
+  });
+  expect(inTheWay.length).toBeGreaterThan(0);
+  const b = state.buildings;
+  send("BulldozeBuilding", { buildings: inTheWay.map((id) => ({ id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id], builtAt: b.builtAt[id] })) }, "p2");
+  until(19 * DAY + 1);
   send("Undo", {}, "p2");
   until(24 * DAY);
   return state;
@@ -579,8 +625,9 @@ describe("replay fixture roads-and-buildings", () => {
     expect(count(at(1301))).toBe(count(at(1300)) - 1);
     // The street north clears houses.
     expect(byZone(at(1401), 1)).toBeLessThan(byZone(at(1400), 1));
-    // The undo of the bulldoze clears what grew on its ground.
+    // The undo of the bulldoze waits for the shops on its ground to be cleared (M2 review, #147).
     expect(count(at(1901))).toBeLessThan(count(at(1900)));
+    expect(fixture.log.filter((e) => e.type === "Undo").map((e) => e.tick)).toEqual([1901]);
   });
 
   /** Replays the fixture, saving and loading the city at `at` and stepping on from the copy. */
@@ -650,5 +697,74 @@ describe("a client's copy", () => {
     check();
     ok(state, command("BulldozeRoad", { segments: [cellAt(state, 4230, 4591)?.segment as number] }));
     check();
+  });
+});
+
+describe("undo of a bulldoze over ground built on since (M2 review, #147)", () => {
+  /** p1's street at z 4600, bulldozed by p1, and p2's street 32 m north of it, inside the ground the first one's cells held. */
+  function bulldozedThenBuiltBeside(): SimState {
+    const state = street();
+    const seg = cellAt(state, 4300, 4591)?.segment as number;
+    ok(state, command("BulldozeRoad", withEnds(state.roads, { segments: [seg] })));
+    ok(state, command("BuildRoad", { from: { x: 4200, z: 4568 }, to: { x: 4392, z: 4568 }, type: "street" }, "p2"));
+    while (!cellsSettled(state)) step(state);
+    return state;
+  }
+
+  it("is refused when buildings stand on ground the street would take back", () => {
+    const state = bulldozedThenBuiltBeside();
+    // p2 zones the south side of its street, over where the first street and its cells were.
+    ok(state, command("ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4597 }, to: { x: 4390, z: 4597 }, width: 46 }] }, "p2"));
+    const until = state.tick + 20 * DAY;
+    while (state.tick < until && live(state).length === 0) step(state);
+    expect(live(state).length).toBeGreaterThan(0);
+    const before = hashState(state);
+    expect(submit(state, command("Undo", {}))).toEqual({ ok: false, reason: "Cannot undo: buildings now stand on ground that road would take back" });
+    expect(hashState(state)).toBe(before);
+    // Once p2's buildings there are cleared, the undo goes through.
+    const b = state.buildings;
+    const seen = live(state).map((id) => ({ id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id], builtAt: b.builtAt[id] }));
+    ok(state, command("BulldozeBuilding", { buildings: seen }, "p2"));
+    ok(state, command("Undo", {}));
+    expectSound(state);
+  });
+
+  it("goes through when only empty ground, or zoning, lies there", () => {
+    const state = bulldozedThenBuiltBeside();
+    ok(state, command("Undo", {}));
+    expect(cellAt(state, 4300, 4591)).not.toBeNull();
+    expectSound(state);
+  });
+
+  it("is held, not refused, while a change of roads settles, and checked once the cells settle", () => {
+    const state = bulldozedThenBuiltBeside();
+    ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4704 }, along: { x: 4680, z: 4704 }, across: { x: 4104, z: 4992 }, depth: 86, width: 86, type: "street" }, "p2"));
+    expect(cellsSettled(state)).toBe(false);
+    const undo = command("Undo", {});
+    expect(submit(state, undo)).toEqual({ ok: true });
+    step(state);
+    expect(state.pending.map((c) => c.seq)).toEqual([undo.seq]);
+    while (state.pending.length > 0) step(state);
+    expect(state.log.at(-1)?.seq).toBe(undo.seq);
+    expect(state.log.at(-1)?.tick).toBe(state.cellsReadyAt);
+  });
+});
+
+describe("undo of a narrowing over ground built on since (M2 review, #147)", () => {
+  it("is refused when the road's wider cells would take back ground a tower now stands on", () => {
+    const state = createState(SEED);
+    ok(state, road([4200, 4600], [4392, 4600], "avenue"));
+    // p2's street 108 m north: the avenue's deepest cells overlap its sixth row, and win it, being older.
+    ok(state, command("BuildRoad", { from: { x: 4200, z: 4492 }, to: { x: 4392, z: 4492 }, type: "street" }, "p2"));
+    const seg = cellAt(state, 4300, 4591)?.segment as number;
+    ok(state, command("UpgradeRoad", withEnds(state.roads, { segments: [seg], type: "street" })));
+    while (!cellsSettled(state)) step(state);
+    // A street's cells stop 4 m nearer: p2's sixth row is free, and p2 zones it R3.
+    ok(state, command("ZoneCells", { zone: "residential", density: 3, rects: [{ from: { x: 4202, z: 4521 }, to: { x: 4390, z: 4521 }, width: 46 }] }, "p2"));
+    const deep = (s: SimState) => live(s).filter((id) => (s.buildings.depth[id] ?? 0) === 6);
+    const until = state.tick + 60 * DAY;
+    while (state.tick < until && deep(state).length === 0) step(state);
+    expect(deep(state).length).toBeGreaterThan(0);
+    expect(submit(state, command("Undo", {}))).toEqual({ ok: false, reason: "Cannot undo: buildings now stand on ground that road would take back" });
   });
 });

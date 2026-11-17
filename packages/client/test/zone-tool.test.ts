@@ -216,6 +216,7 @@ describe("the controller", () => {
           answer = resolve;
         });
       },
+      strokeId: () => 41,
     });
     return { state, tool, sent, get: () => store, answer: (r: CommandResult) => answer(r) };
   }
@@ -237,6 +238,8 @@ describe("the controller", () => {
     expect(preview?.ok).toBe(true);
     tool.click(hover);
     expect(sent).toHaveLength(1);
+    // One command is the whole stroke: it needs no stroke id.
+    expect(sent[0]?.stroke).toBeUndefined();
     expect(get().zonePending).toHaveLength(1);
     // Applied by the sim, and the delta that carries it is in the copy: the mark goes.
     paint(state, sent);
@@ -268,6 +271,18 @@ describe("the controller", () => {
     expect(sent).toHaveLength(1);
     const plan = planZoneCells(state, sent[0]);
     expect(plan.ok && plan.plan.cells.length).toBe(11);
+  });
+
+  it("gives every command of a stroke too big for one the same stroke id, so one undo takes it all back", () => {
+    const { tool, sent } = setup();
+    tool.toggle();
+    tool.pickMode("brush");
+    tool.dragStart();
+    // Every other row back from the road, so no two cells of a column share a rectangle.
+    for (let x = 4204; x < 4392; x += 8) for (const z of [4591, 4575, 4559]) tool.brushOver(x, z);
+    tool.dragEnd();
+    expect(sent.length).toBeGreaterThan(1);
+    expect(sent.map((p) => p.stroke)).toEqual(sent.map(() => 41));
   });
 
   it("sends nothing for a second click on a stroke still on its way", () => {
