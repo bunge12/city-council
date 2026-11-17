@@ -19,6 +19,13 @@
 // messages, as the page does, and times the step that applies each command
 // on its own (issue M1-17).
 //
+// Since M2-17 it also zones, rezones and clears buildings on a cycle of its
+// own: a ZoneCells at the cap over a grid and the ground round it, a
+// rezone of half of that ground to another zone, and a BulldozeBuilding of
+// buildings the mirror shows standing. The grower builds on the zoning as
+// the hour goes on, so the idle steps carry its work, and its own time per
+// step is reported.
+//
 // The tick budget is checked per source of work: each road command type,
 // the steps that walk a slice of zoning cells, the idle steps (log paging
 // among them) and each autosave's slowest part. Each source may pass the
@@ -39,13 +46,16 @@ import { memoryUsage } from "node:process";
 import { performance } from "node:perf_hooks";
 import {
   CELLS_SYSTEM,
+  GROWER_SYSTEM,
   LOG_LIVE_LIMIT,
   PROTOCOL_VERSION,
   SCALE_SEGMENTS,
   SEG_ALIVE,
   SEG_FIXED,
   TICK_MS,
+  ZONING_BALANCE,
   buildScaleCity,
+  buildingCount,
   deserialize,
   hashState,
   replay,
@@ -55,6 +65,7 @@ import {
 } from "@city-council/sim";
 import { expect, test } from "vitest";
 import { PUMP_INTERVAL_MS, SimHost, type PendingSave } from "../src/protocol/host";
+import { countHomes } from "../src/protocol/homes";
 import { SimMirror } from "../src/protocol/mirror";
 import type { ClientTransport, HostTransport } from "../src/protocol/transport";
 import { AUTOSAVE_INTERVAL_MS } from "../src/save/config";
@@ -68,6 +79,13 @@ const NOOP_EVERY = 4;
 /** A road command every this many ticks, 900 over the run, offset from the NoOps. */
 const ROAD_EVERY = 40;
 const ROAD_CYCLE = ["BuildRoad", "BuildRoadGrid", "UpgradeRoad", "BulldozeRoad", "Undo", "BulldozeRoad"] as const;
+/** A zoning command every this many ticks, on ticks of their own between the road commands and the NoOps. */
+const ZONE_EVERY = 40;
+const ZONE_OFFSET = 30;
+const ZONE_CYCLE = ["ZoneCells", "ZoneCells", "BulldozeBuilding"] as const;
+const ZONES = ZONING_BALANCE.zones.map((z) => z.id);
+/** Buildings one BulldozeBuilding of the soak names. */
+const CLEAR_COUNT = 50;
 /** Grid lines of the scale city and of a grid at the cap: 7 lines each way, 96 m apart. */
 const LINE = 96;
 const SPAN = 6 * LINE;
@@ -140,6 +158,19 @@ function pickSegment(mirror: SimMirror, from: number): number | null {
     if ((flags & SEG_ALIVE) !== 0 && (flags & SEG_FIXED) === 0) return id;
   }
   return null;
+}
+
+/** Up to `count` buildings standing in the mirror's copy, from id `from` on, as the player saw them. */
+function pickBuildings(mirror: SimMirror, from: number, count: number): { id: number; segment: number; side: number; place: number }[] {
+  const b = mirror.state?.buildings;
+  if (!b) return [];
+  const seen: { id: number; segment: number; side: number; place: number }[] = [];
+  const limit = b.flags.length;
+  for (let k = 0; k < limit && seen.length < count; k++) {
+    const id = (from + k) % limit;
+    if (b.flags[id]) seen.push({ id, segment: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0 });
+  }
+  return seen;
 }
 
 function finishSave(save: PendingSave): Uint8Array {
@@ -250,13 +281,48 @@ test("soak: one hour of game time at 4x", () => {
         return [type, {}];
     }
   };
-  /** Step times of the steps that applied each road command type, and how many each sent and applied. */
+  /** The zoning command for the `n`th zoning slot: paint a grid and the ground round it, rezone half of it, or clear buildings. */
+  const zoneCommand = (n: number): [type: string, payload: unknown] | null => {
+    const type = ZONE_CYCLE[n % ZONE_CYCLE.length] ?? "ZoneCells";
+    const round = Math.floor(n / ZONE_CYCLE.length);
+    const g = scale.grids[(round * 13) % scale.grids.length] ?? { x: 0, z: 0 };
+    const side = ZONING_BALANCE.maxRectSide;
+    const perRow = Math.ceil(Math.sqrt(ZONING_BALANCE.maxRectsPerCommand));
+    /** Rectangles of the largest size, side by side in a square centred on the grid: as many as one command takes, or half. */
+    const square = (count: number) =>
+      Array.from({ length: count }, (_, k) => {
+        const x = g.x + SPAN / 2 - (perRow / 2) * side + (k % perRow) * side;
+        const z = g.z + SPAN / 2 - (perRow / 2) * side + Math.floor(k / perRow) * side + side / 2;
+        return { from: { x, z }, to: { x: x + side, z }, width: side };
+      });
+    if (type === "BulldozeBuilding") {
+      const buildings = pickBuildings(mirror, (n * 104_729) % Math.max(1, mirror.state?.buildings.flags.length ?? 1), CLEAR_COUNT);
+      return buildings.length > 0 ? [type, { buildings }] : null;
+    }
+    if (n % ZONE_CYCLE.length === 0) {
+      return [type, { zone: ZONES[round % ZONES.length], density: 1 + (round % 3), rects: square(ZONING_BALANCE.maxRectsPerCommand) }];
+    }
+    // The rezone: half the same ground, to the next zone at another density.
+    return [type, { zone: ZONES[(round + 1) % ZONES.length], density: 1 + ((round + 1) % 3), rects: square(ZONING_BALANCE.maxRectsPerCommand / 2) }];
+  };
+  /** Step times of the steps that applied each road and zoning command type, and how many each sent and applied. */
   const byCommand: Record<string, { sent: number; applied: number; ms: number[] }> = {};
-  for (const type of ROAD_CYCLE) byCommand[type] ??= { sent: 0, applied: 0, ms: [] };
+  for (const type of [...ROAD_CYCLE, ...ZONE_CYCLE]) byCommand[type] ??= { sent: 0, applied: 0, ms: [] };
   let roadSlot = 0;
   let lastRoadTick = -1;
-  /** The road command waiting for its step: its type and the log length before it. */
+  let zoneSlot = 0;
+  let lastZoneTick = -1;
+  /** The command waiting for its step: its type and the log length before it. */
   let waitingRoad: { type: string; logBefore: number } | null = null;
+  /** The grower's time in each step it ran in. */
+  const growerMs: number[] = [];
+  /**
+   * Sampled with the heap: buildings standing, and the top bar's homes
+   * counter (M2-18), which the mirror keeps from the deltas, beside the
+   * homes counted afresh from the mirror's rows.
+   */
+  const buildingsOverTime: { tick: number; buildings: number; homes: number }[] = [];
+  let homesMismatches = 0;
 
   const stepMs = new Float64Array(TICKS);
   let steps = 0;
@@ -289,6 +355,16 @@ test("soak: one hour of game time at 4x", () => {
         command(road[0], road[1]);
       }
     }
+    if (tick % ZONE_EVERY === ZONE_OFFSET && tick !== lastZoneTick) {
+      lastZoneTick = tick;
+      const zoning = zoneCommand(zoneSlot++);
+      if (zoning) {
+        const stats = byCommand[zoning[0]];
+        if (stats) stats.sent++;
+        waitingRoad = { type: zoning[0], logBefore: host.fullLog.length };
+        command(zoning[0], zoning[1]);
+      }
+    }
     offset += PUMP_INTERVAL_MS;
     const before = received.length;
     pumpStart = performance.now();
@@ -300,7 +376,10 @@ test("soak: one hour of game time at 4x", () => {
       const message = received[i];
       if (message?.type !== "delta" || message.steps === 0) continue;
       let total = 0;
-      for (const timing of message.timings) total += timing.ms;
+      for (const timing of message.timings) {
+        total += timing.ms;
+        if (timing.system === GROWER_SYSTEM) growerMs.push(timing.ms);
+      }
       if (steps < stepMs.length) stepMs[steps++] = total;
       // The first step after a road command was sent applies it, or drops
       // it when an earlier command that tick made it invalid.
@@ -343,6 +422,11 @@ test("soak: one hour of game time at 4x", () => {
     }
     if (host.tick % SAMPLE_EVERY === 0 && heap.at(-1)?.tick !== host.tick) {
       heap.push({ tick: host.tick, mb: mb(memoryUsage().heapUsed) });
+      if (mirror.state) {
+        const homes = mirror.homes?.count ?? -1;
+        if (homes !== countHomes(mirror.state.buildings).count) homesMismatches++;
+        buildingsOverTime.push({ tick: host.tick, buildings: buildingCount(mirror.state.buildings), homes });
+      }
     }
   }
   const wallMs = performance.now() - wallStart;
@@ -360,6 +444,7 @@ test("soak: one hour of game time at 4x", () => {
   // The mirror kept up with every road change.
   expect(hashState(mirror.state?.roads)).toBe(hashState(live.state.roads));
   expect(hashState(mirror.state?.cells)).toBe(hashState(live.state.cells));
+  expect(hashState(mirror.state?.buildings)).toBe(hashState(live.state.buildings));
 
   const sorted = stepMs.slice(0, steps).sort();
   const over = sorted.filter((t) => t > BUDGET_MS).length;
@@ -429,6 +514,23 @@ test("soak: one hour of game time at 4x", () => {
       // Every step over the budget, whatever the cause. Not checked: see checks.
       overBudget: over,
     },
+    grower: (() => {
+      const times = ascending(growerMs);
+      const most = buildingsOverTime.reduce((a, b) => Math.max(a, b.buildings), 0);
+      return {
+        steps: times.length,
+        p50Ms: ms(quantile(times, 0.5)),
+        p99Ms: ms(quantile(times, 0.99)),
+        maxMs: ms(times.at(-1) ?? 0),
+        buildingsAtEnd: buildingCount(live.state.buildings),
+        mostBuildings: most,
+        homesAtEnd: mirror.homes?.count ?? null,
+        mostHomes: buildingsOverTime.reduce((a, b) => Math.max(a, b.homes), 0),
+        homesMismatches,
+        // One sample every ten game minutes, for the shape of the growth.
+        buildingsOverTime: buildingsOverTime.filter((_, i) => i % 10 === 0),
+      };
+    })(),
     settleSteps: { count: settleSorted.length, p50: ms(quantile(settleSorted, 0.5)), p95: ms(quantile(settleSorted, 0.95)), max: ms(settleSorted.at(-1) ?? 0), overBudget: overOf(settleSorted) },
     idleSteps: { count: idleSorted.length, p99: ms(quantile(idleSorted, 0.99)), max: ms(idleSorted.at(-1) ?? 0), overBudget: overOf(idleSorted) },
     checks: checks.map((c) => ({ ...c, medianMs: ms(c.medianMs), maxMs: ms(c.maxMs) })),
@@ -469,6 +571,11 @@ test("soak: one hour of game time at 4x", () => {
     failed.map((c) => `${c.name}: ${c.overBudget} of ${c.steps} over, ${c.allowed} allowed, max ${ms(c.maxMs)} ms`),
     `sources that passed the ${BUDGET_MS} ms tick budget more often than a runner's pauses explain`,
   ).toEqual([]);
-  // Every kind of road command applied often enough to be measured.
+  // Every kind of road and zoning command applied often enough to be measured.
   for (const [type, c] of Object.entries(byCommand)) expect(c.applied, `${type} applied`).toBeGreaterThan(20);
+  // The grower built a town on the zoning, and the clearing took some of it away again.
+  expect(report.grower.mostBuildings, "buildings grown").toBeGreaterThan(10_000);
+  // The top bar's homes counter, kept from the deltas, never strayed from a count from scratch, and ends on the live city's.
+  expect(homesMismatches, "samples where the homes counter strayed").toBe(0);
+  expect(mirror.homes?.count).toBe(countHomes(live.state.buildings).count);
 });

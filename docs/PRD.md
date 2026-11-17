@@ -627,6 +627,8 @@ Measured on that city of 57,345 buildings in the development container's softwar
 
 **Before demand exists.** In M2 there are no pops yet. Buildings appear on zoned lots at a fixed rate and stand empty. Each one records the resident or job capacity its type and lot give it, so M3 can fill it without touching the building. Until then the top bar shows homes built in place of population.
 
+**Homes built in the top bar** (M2-18, issue 148). The top bar counts every standing building put up under residential zoning, whatever its type, so a rezoned house still counts and a mixed building does not. Its tooltip gives the residents those homes hold room for, as capacity. The count is the client's, from its read-only copy: in full when a snapshot replaces the copy, and after that from the rows each building delta overwrites and the rows it brings, so no update walks every building. The sim keeps no running total. In the soak's growing town the count kept from the deltas matched a count from scratch at every sample (M2-17).
+
 Removing a road removes its cells and their buildings. The pops inside are displaced and look for a new home or job.
 
 #### Art direction
