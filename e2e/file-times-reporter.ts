@@ -1,7 +1,7 @@
 // A Playwright reporter for CI logs. When a run starts it prints the
-// machine's CPU, and when it ends it prints how many seconds each spec file
-// took, on one line that scripts/e2e-timings.mjs reads back into
-// e2e/projects.json.
+// machine's CPU, it prints each failure as it happens, and when the run ends
+// it prints how many seconds each spec file took, on one line that
+// scripts/e2e-timings.mjs reads back into e2e/projects.json.
 //
 // GitHub's runners are not all the same speed. On 16 November 2026 the same
 // tests on the same runner image took 1.5 to 2 times as long on some runners
@@ -24,6 +24,12 @@ export default class FileTimesReporter implements Reporter {
 
   onTestEnd(test: TestCase, result: TestResult): void {
     const file = basename(test.location.file);
+    // The list reporter prints failures only when the run ends, so a runner
+    // cancelled at the job's time limit never shows why its tests failed.
+    if (result.status !== "passed" && result.status !== "skipped") {
+      const message = (result.error?.message ?? result.status).split("\n").slice(0, 6).join("\n    ");
+      console.log(`  ${result.status}: ${file} › ${test.title}${result.retry > 0 ? ` (retry #${result.retry})` : ""}\n    ${message}`);
+    }
     const into = result.retry === 0 ? this.seconds : this.retrySeconds;
     into[file] = (into[file] ?? 0) + result.duration / 1000;
   }

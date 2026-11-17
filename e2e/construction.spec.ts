@@ -113,21 +113,27 @@ const ground = groundAt(GRID.x, GRID.z);
 const DISTRICT: Vec3 = [GRID.x - 200, ground + 600, GRID.z + 650];
 const CLOSE: { position: Vec3; target: Vec3 } = { position: [GRID.x + 10, ground + 95, GRID.z + 150], target: [GRID.x + 10, ground + 4, GRID.z + 30] };
 
-// The two tests that run the city at 4x in the street band, with a canvas
-// grab of every frame, took 2.9 and 3.4 minutes on a CI runner when they
-// landed. On a slower runner the first took 4.8 minutes and the second ran
-// past six twice (issue #152). They get eight.
+// The tests that draw a few hundred buildings under construction in the
+// street band took two to four minutes on a CI runner when they landed, and
+// ran past six on slower ones (issue #152). They get eight.
+//
+// The two that run the city at 4x draw at Low. In software, at Balanced, a
+// frame of this street under construction takes seconds and the page falls
+// so far behind the worker that a pause sent at tick 128 landed at tick 4080.
+// Scaffolding draws the same at every preset; only the frame-time test is
+// about Balanced.
 const RUN_TIMEOUT = 480_000;
 /**
- * How long to wait for the frame that takes the scaffolding down once the
- * tick has passed the end of construction. The page can go several seconds
- * without a frame while it catches up on a burst of deltas at 4x.
+ * How long to wait for what changes on the next frame drawn: the scaffolding
+ * coming down once the tick has passed the end of construction, or the zoom
+ * band after a camera move. In software a frame of this street can take
+ * seconds, longer while the page catches up on a burst of deltas at 4x.
  */
 const FRAME_WAIT = 30_000;
 
 test("at 4x a new building's scaffolding goes up, the building rises inside it, and the scaffolding comes down", async ({ page }, testInfo) => {
   test.setTimeout(RUN_TIMEOUT);
-  await openCity(page, "?webgl&preset=balanced&debug", city.bytes);
+  await openCity(page, "?webgl&preset=low&debug", city.bytes);
   await setPose(page, CLOSE.position, CLOSE.target);
   await drawn(page, city.buildings);
   await settle(page);
@@ -200,7 +206,7 @@ test("pausing freezes a building half way up, and running again finishes it", as
   // Opened paused with every building half way through its rise.
   const age = Math.round(T * (CONSTRUCTION.scaffoldUp + (1 - CONSTRUCTION.scaffoldUp - CONSTRUCTION.scaffoldDown) / 2));
   const mid = newCity(age);
-  await openCity(page, "?webgl&preset=balanced", mid.bytes);
+  await openCity(page, "?webgl&preset=low", mid.bytes);
   await setPose(page, CLOSE.position, CLOSE.target);
   await drawn(page, mid.buildings);
   await settle(page);
@@ -219,7 +225,7 @@ test("pausing freezes a building half way up, and running again finishes it", as
     ["city", [GRID.x - 600, ground + 3200, GRID.z + 3600]],
   ] as const) {
     await setPose(page, [...position], [GRID.x, ground, GRID.z]);
-    await expect.poll(() => dataset(page, "zoomBand")).toBe(band);
+    await expect.poll(() => dataset(page, "zoomBand"), { timeout: FRAME_WAIT }).toBe(band);
     await settle(page);
     expect(await dataset(page, "scaffolds")).toBe("0");
     await attach(testInfo, `paused at age ${age}, ${band} band`, await canvasShot(page));
@@ -233,7 +239,7 @@ test("pausing freezes a building half way up, and running again finishes it", as
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 0 }))).toEqual({ ok: true });
   await attach(testInfo, "run on at 4x, finished", await canvasShot(page));
   await setPose(page, DISTRICT, [GRID.x, ground, GRID.z]);
-  await expect.poll(() => dataset(page, "zoomBand")).toBe("district");
+  await expect.poll(() => dataset(page, "zoomBand"), { timeout: FRAME_WAIT }).toBe("district");
   await settle(page);
   await attach(testInfo, "run on at 4x, finished, district band", await canvasShot(page));
 });
@@ -260,6 +266,7 @@ test("the state hash is the same with the animation and without it", async ({ pa
 });
 
 test("frame time with a few hundred buildings under construction, at Balanced", async ({ page }, testInfo) => {
+  test.setTimeout(RUN_TIMEOUT);
   const results: Record<string, number> = {};
   const far: { position: Vec3; target: Vec3 } = { position: [GRID.x - 60, ground + 210, GRID.z + 230], target: [GRID.x + 20, ground, GRID.z + 10] };
   // Every building mid-rise, under scaffolding. Paused, so a slow runner measures the same stage throughout: the stages are worked out per vertex every frame, running or not.
