@@ -30,6 +30,12 @@ export class Fnv64 {
   lo = OFFSET_LO;
   private readonly scratch = new DataView(new ArrayBuffer(8));
 
+  /** Starts again from the offset basis, so one hasher can be kept and reused. */
+  reset(): void {
+    this.hi = OFFSET_HI;
+    this.lo = OFFSET_LO;
+  }
+
   byte(b: number): void {
     const lo = (this.lo ^ (b & 0xff)) >>> 0;
     // (hi * 2^32 + lo) * (2^40 + 0x1b3) mod 2^64

@@ -61,10 +61,22 @@ export interface Journal {
   to: number;
 }
 
+// One hasher for every anchor: a stroke at the cap hashes about a thousand,
+// and a new hasher each time is garbage for the collector. Not state.
+const anchorHasher = new Fnv64();
+
 /** A 32-bit hash of a segment's cell anchor, from the bits of its eight numbers. */
 export function anchorHash(a: SegmentAnchor): number {
-  const h = new Fnv64();
-  for (const v of [a.ax, a.az, a.cx, a.cz, a.bx, a.bz, a.tA, a.tB]) h.f64(v);
+  const h = anchorHasher;
+  h.reset();
+  h.f64(a.ax);
+  h.f64(a.az);
+  h.f64(a.cx);
+  h.f64(a.cz);
+  h.f64(a.bx);
+  h.f64(a.bz);
+  h.f64(a.tA);
+  h.f64(a.tB);
   return h.lo | 0;
 }
 
@@ -117,58 +129,104 @@ export function forJournalCells(zones: Int32Array, journal: Journal, count: numb
   }
 }
 
-/** Appends a journal for `count` cells of segment `seg`, their zone and density read through `localIndex`. */
-function write(out: number[], seg: number, anchor: number, count: number, zoneAt: (local: number) => number, densityAt: (local: number) => number): void {
+// Where journals are written before they are copied out as a record's
+// array, and which cells of a segment a paint touched. Kept between calls,
+// so a stroke at the cap leaves no garbage but the record itself: as a
+// list of numbers and a mark array per segment it made a few megabytes,
+// and the collections that followed pushed the step past the tick budget
+// (issue #155). Not state.
+let journalBuf = new Int32Array(1 << 14);
+let journalLength = 0;
+let touched = new Uint8Array(0);
+
+/** Makes room for `more` numbers after the ones written. */
+function reserve(more: number): void {
+  if (journalLength + more <= journalBuf.length) return;
+  let size = journalBuf.length * 2;
+  while (size < journalLength + more) size *= 2;
+  const grown = new Int32Array(size);
+  grown.set(journalBuf.subarray(0, journalLength));
+  journalBuf = grown;
+}
+
+/**
+ * Appends a journal for the `count` cells of segment `seg` that start at
+ * `start` in `cells`. With `marks`, a cell whose mark is not 1 goes in as
+ * untouched.
+ */
+function write(seg: number, anchor: number, cells: CellState, start: number, count: number, marks: Uint8Array | null): void {
   const depth = ZONING_BALANCE.zoneDepthCells;
   const places = count / (2 * depth);
-  const head = out.length;
-  out.push(seg, anchor, 0);
+  const zones = cells.zone;
+  const densities = cells.density;
+  // At worst every cell starts a run of its own.
+  reserve(3 + count * 3);
+  const buf = journalBuf;
+  let at = journalLength;
+  const head = at;
+  buf[at++] = seg;
+  buf[at++] = anchor;
+  buf[at++] = 0;
+  let runs = 0;
+  let run = -1;
+  let runZone = -1;
+  let runDensity = -1;
   for (let side = 0; side < 2; side++) {
     for (let d = 0; d < depth; d++) {
       for (let place = 0; place < places; place++) {
         const local = localIndex(side, place, d);
-        const zone = zoneAt(local);
-        const density = densityAt(local);
-        const last = out.length - 3;
-        if (last > head && out[last + 1] === zone && out[last + 2] === density) out[last] = (out[last] ?? 0) + 1;
-        else {
-          out.push(1, zone, density);
-          out[head + 2] = (out[head + 2] ?? 0) + 1;
+        let zone = ZONE_UNTOUCHED;
+        let density = 0;
+        if (marks === null || marks[local] === 1) {
+          zone = zones[start + local] ?? ZONE_NONE;
+          density = densities[start + local] ?? DENSITY_NONE;
         }
+        if (run >= 0 && zone === runZone && density === runDensity) {
+          buf[run] = (buf[run] ?? 0) + 1;
+          continue;
+        }
+        run = at;
+        runZone = zone;
+        runDensity = density;
+        buf[at++] = 1;
+        buf[at++] = zone;
+        buf[at++] = density;
+        runs++;
       }
     }
   }
+  buf[head + 2] = runs;
+  journalLength = at;
+}
+
+/** The journals written since `journalLength` was last set to 0, as an array of their own. */
+function written(): Int32Array {
+  return journalLength === 0 ? NO_JOURNALS : journalBuf.slice(0, journalLength);
 }
 
 /**
  * The journals of a ZoneCells about to paint the cells at `slots` of
- * `cells`: what each held. Read before the paint.
+ * `cells`: what each held. Read before the paint. `slots` go up.
  */
-export function journalPaint(net: RoadNetwork, cells: CellState, slots: readonly number[]): Int32Array {
-  const sorted = Int32Array.from(slots).sort();
-  const out: number[] = [];
+export function journalPaint(net: RoadNetwork, cells: CellState, slots: Int32Array): Int32Array {
+  journalLength = 0;
   const offset = cells.offset;
   let seg = 0;
   let i = 0;
-  while (i < sorted.length) {
-    const slot = sorted[i] ?? 0;
+  while (i < slots.length) {
+    const slot = slots[i] ?? 0;
     // The segment whose run holds the slot. Slots go up, so so does it.
     while ((offset[seg + 1] ?? 0) <= slot) seg++;
     const start = offset[seg] ?? 0;
     const count = (offset[seg + 1] ?? 0) - start;
-    const touched = new Uint8Array(count);
-    for (; i < sorted.length && (sorted[i] ?? 0) < start + count; i++) touched[(sorted[i] ?? 0) - start] = 1;
-    write(
-      out,
-      seg,
-      anchorHash(readAnchor(net, seg)),
-      count,
-      (local) => (touched[local] === 1 ? (cells.zone[start + local] ?? 0) : ZONE_UNTOUCHED),
-      (local) => (touched[local] === 1 ? (cells.density[start + local] ?? 0) : 0),
-    );
+    if (touched.length < count) touched = new Uint8Array(Math.max(count, touched.length * 2));
+    const first = i;
+    for (; i < slots.length && (slots[i] ?? 0) < start + count; i++) touched[(slots[i] ?? 0) - start] = 1;
+    write(seg, anchorHash(readAnchor(net, seg)), cells, start, count, touched);
+    for (let k = first; k < i; k++) touched[(slots[k] ?? 0) - start] = 0;
     seg++;
   }
-  return Int32Array.from(out);
+  return written();
 }
 
 /**
@@ -219,19 +277,12 @@ export function journalLostZones(net: RoadNetwork, cells: CellState, ops: readon
   const curveKey = (a: SegmentAnchor, order: number) => `${order},${a.ax},${a.az},${a.cx},${a.cz},${a.bx},${a.bz}`;
   const carried = new Set<string>();
   for (const op of ops) if (op.op === "addSeg") carried.add(curveKey(op.row.anchor, op.row.order));
-  const out: number[] = [];
+  journalLength = 0;
   for (const { seg, anchor, order, start, count } of lost) {
     if (carried.has(curveKey(anchor, order))) continue;
-    write(
-      out,
-      seg,
-      anchorHash(anchor),
-      count,
-      (local) => cells.zone[start + local] ?? ZONE_NONE,
-      (local) => cells.density[start + local] ?? DENSITY_NONE,
-    );
+    write(seg, anchorHash(anchor), cells, start, count, null);
   }
-  return out.length === 0 ? NO_JOURNALS : Int32Array.from(out);
+  return written();
 }
 
 /** Whether `zone` and `density` are a value a cell can hold: both set, or both not. */

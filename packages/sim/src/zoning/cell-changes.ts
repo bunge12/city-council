@@ -10,7 +10,7 @@
 // read when the delta is built (delta.ts).
 
 import type { RoadNetwork } from "../roads/network";
-import type { CellState } from "./cells";
+import { segmentOfSlot, type CellState } from "./cells";
 
 /**
  * A painted cell is kept as `segment * CELL_KEY_STRIDE + its place in the
@@ -22,11 +22,27 @@ export const CELL_KEY_STRIDE = 2 ** 21;
 export interface CellChanges {
   /** Segment ids whose cells were laid out again. */
   relaid: Set<number>;
-  /** Keys of cells a command painted. */
-  painted: Set<number>;
+  /**
+   * Keys of cells a command painted, in no order, a cell painted twice
+   * maybe listed twice. A view on the recorder's buffer: read it before
+   * the cells change again.
+   */
+  painted: Float64Array;
 }
 
-const recorders = new WeakMap<RoadNetwork, CellChanges>();
+/**
+ * The painted cells as a list of keys, not a set: a stroke at the cap
+ * paints tens of thousands of cells, and a set of keys past 2^31 boxes
+ * every one, which on the scale city was megabytes of garbage a stroke
+ * (issue #155). Repeats are dropped when the list fills, and by the delta.
+ */
+interface Recorder {
+  relaid: Set<number>;
+  painted: Float64Array;
+  paintedCount: number;
+}
+
+const recorders = new WeakMap<RoadNetwork, Recorder>();
 
 /**
  * Starts recording changes to the cells along `net`, if nothing is yet.
@@ -34,7 +50,7 @@ const recorders = new WeakMap<RoadNetwork, CellChanges>();
  * snapshot for those.
  */
 export function recordCellChangesOf(net: RoadNetwork): void {
-  if (!recorders.has(net)) recorders.set(net, { relaid: new Set(), painted: new Set() });
+  if (!recorders.has(net)) recorders.set(net, { relaid: new Set(), painted: new Float64Array(1024), paintedCount: 0 });
 }
 
 /** Notes that the cells of segments `ids` were laid out again. */
@@ -44,32 +60,50 @@ export function noteCellsRelaid(net: RoadNetwork, ids: readonly { id: number }[]
   for (const { id } of ids) rec.relaid.add(id);
 }
 
+/** Sorts the recorder's keys and drops repeats, in place. */
+function compact(rec: Recorder): void {
+  const keys = rec.painted.subarray(0, rec.paintedCount).sort();
+  let n = 0;
+  for (let i = 0; i < keys.length; i++) if (n === 0 || keys[i] !== keys[n - 1]) keys[n++] = keys[i] ?? 0;
+  rec.paintedCount = n;
+}
+
+/** Makes room for `more` keys, dropping repeats first when the list is full. */
+function room(rec: Recorder, more: number): void {
+  if (rec.paintedCount + more <= rec.painted.length) return;
+  compact(rec);
+  // Grown only once repeats are gone, so the list stays within twice the cells painted.
+  if (rec.paintedCount + more <= rec.painted.length / 2) return;
+  let size = rec.painted.length * 2;
+  while (size < rec.paintedCount + more) size *= 2;
+  const grown = new Float64Array(size);
+  grown.set(rec.painted.subarray(0, rec.paintedCount));
+  rec.painted = grown;
+}
+
 /** Notes that a command painted the cells at `slots` of `cells.zone`. */
-export function noteCellsPainted(net: RoadNetwork, cells: CellState, slots: readonly number[]): void {
+export function noteCellsPainted(net: RoadNetwork, cells: CellState, slots: ArrayLike<number>): void {
   const rec = recorders.get(net);
   if (!rec) return;
+  room(rec, slots.length);
   const offset = cells.offset;
-  const last = offset.length - 1;
-  for (const slot of slots) {
-    // The last segment whose run starts at or before the slot. Segments
-    // with no cells share a start with the next one, so take the last.
-    let lo = 0;
-    let hi = last;
-    while (hi - lo > 1) {
-      const mid = (lo + hi) >> 1;
-      if ((offset[mid] ?? 0) <= slot) lo = mid;
-      else hi = mid;
-    }
-    rec.painted.add(lo * CELL_KEY_STRIDE + (slot - (offset[lo] ?? 0)));
+  const painted = rec.painted;
+  let n = rec.paintedCount;
+  let seg = -1;
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i] ?? 0;
+    seg = segmentOfSlot(offset, slot, seg);
+    painted[n++] = seg * CELL_KEY_STRIDE + (slot - (offset[seg] ?? 0));
   }
+  rec.paintedCount = n;
 }
 
 /** What changed since the last drain, and clears it. Null if nothing did or nothing is recording. */
 export function drainCellChanges(net: RoadNetwork): CellChanges | null {
   const rec = recorders.get(net);
-  if (!rec || (rec.relaid.size === 0 && rec.painted.size === 0)) return null;
-  const out = { relaid: rec.relaid, painted: rec.painted };
+  if (!rec || (rec.relaid.size === 0 && rec.paintedCount === 0)) return null;
+  const out = { relaid: rec.relaid, painted: rec.painted.subarray(0, rec.paintedCount) };
   rec.relaid = new Set();
-  rec.painted = new Set();
+  rec.paintedCount = 0;
   return out;
 }

@@ -5,6 +5,7 @@ import {
   applyBuildingDelta,
   applyCellDelta,
   applyRoadDelta,
+  applyUndoDelta,
   buildingInfo,
   buildingOnSlot,
   buildingsInChunk,
@@ -317,6 +318,12 @@ export class SimMirror {
       this.outOfStep();
       return;
     }
+    // The undo history is checked before anything changes, and set with the rest below.
+    const undo = delta.undo ? applyUndoDelta(state.undo, delta.undo) : null;
+    if (typeof undo === "string") {
+      this.outOfStep();
+      return;
+    }
     // Roads first: a delta whose rows do not fit the copy changes nothing.
     let roadChunks: readonly number[] = [];
     let roadNodes: readonly number[] = [];
@@ -362,7 +369,7 @@ export class SimMirror {
     // Any step drains the host's queue, so queued commands from the
     // snapshot have now been applied or dropped.
     if (delta.steps > 0) state.pending = [];
-    if (delta.undo) state.undo = delta.undo;
+    if (undo) state.undo = undo;
     state.rng.set(delta.rng);
     state.growth = { ...delta.growth };
     for (const entry of delta.log) state.log.push(entry);

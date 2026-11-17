@@ -15,6 +15,7 @@ import {
   recordCellChanges,
   recordRoadChanges,
   captureState,
+  diffUndo,
   serialize,
   serializeDetached,
   serializeDetachedSteps,
@@ -30,8 +31,16 @@ import {
   type SystemTimer,
   type SystemTiming,
   type ToSimMessage,
+  type UndoDelta,
+  type UndoRecord,
 } from "@city-council/sim";
 import type { HostTransport } from "./transport";
+
+/** How the history went from `sent` to `now`, with the new records copied out of state. */
+function undoDelta(sent: readonly UndoRecord[], now: readonly UndoRecord[]): UndoDelta {
+  const { kept, added } = diffUndo(sent, now);
+  return { kept, added: structuredClone(added) };
+}
 
 /**
  * Most steps one `pump` runs. After a stall, such as a background tab or a
@@ -283,7 +292,10 @@ export class SimHost {
       this.state.speed !== this.sentSpeed ||
       this.state.undo !== this.sentUndo;
     if (!changed) return;
-    const undo = this.state.undo !== this.sentUndo ? structuredClone(this.state.undo) : undefined;
+    // Only how the history changed: the whole of it, after fifty strokes
+    // at the cap, was megabytes a delta (issue #155). The new records are
+    // copied so the message holds none of the state's own objects.
+    const undo = this.state.undo !== this.sentUndo ? undoDelta(this.sentUndo, this.state.undo) : undefined;
     const log = this.unsent;
     const dropped = this.unsentDropped;
     // Rows are read now, after every step since the last delta, so an id
@@ -307,8 +319,8 @@ export class SimHost {
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };
-    // The rows are fresh arrays, so a worker can move them.
-    this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings }));
+    // The rows and the undo delta are fresh arrays, so a worker can move them.
+    this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings, undo }));
     this.deltaSeq++;
     this.unsent = [];
     this.unsentDropped = [];

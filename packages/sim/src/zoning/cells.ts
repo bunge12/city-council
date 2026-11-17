@@ -97,6 +97,24 @@ export function cellCountOf(net: RoadNetwork, seg: number): number {
   return placesAlong(net, seg) * cellsPerPlace();
 }
 
+/**
+ * The segment whose run in `offset` holds `slot`: the last one whose run
+ * starts at or before it, since segments with no cells share a start with
+ * the next one. `hint` is a segment to try first, such as the one the slot
+ * before was in, so slots that come segment by segment cost one look each.
+ */
+export function segmentOfSlot(offset: Int32Array, slot: number, hint = -1): number {
+  if (hint >= 0 && (offset[hint] ?? 0) <= slot && slot < (offset[hint + 1] ?? 0)) return hint;
+  let lo = 0;
+  let hi = offset.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if ((offset[mid] ?? 0) <= slot) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
 /** Where a cell sits in its segment's run, from its name. */
 export function localIndex(side: number, place: number, depth: number): number {
   const d = ZONING_BALANCE.zoneDepthCells;

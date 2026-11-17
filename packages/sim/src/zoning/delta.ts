@@ -69,19 +69,28 @@ export function drainCellDelta(state: SimState): CellDelta | null {
   const runOf = (seg: number) => (cells.offset[seg + 1] ?? 0) - (cells.offset[seg] ?? 0);
   // An id past the limit was taken back by an undo: its cells went with it.
   const relaid = Int32Array.from([...changes.relaid].filter((seg) => seg < limit)).sort();
-  const keys: number[] = [];
+  let room = changes.painted.length;
+  for (const seg of relaid) room += runOf(seg);
+  const keys = new Float64Array(room);
+  let n = 0;
   for (const seg of relaid) {
     const start = cells.offset[seg] ?? 0;
     const run = runOf(seg);
-    for (let local = 0; local < run; local++) if (cells.zone[start + local] !== ZONE_NONE) keys.push(seg * CELL_KEY_STRIDE + local);
+    for (let local = 0; local < run; local++) if (cells.zone[start + local] !== ZONE_NONE) keys[n++] = seg * CELL_KEY_STRIDE + local;
   }
-  for (const key of changes.painted) {
+  const painted = changes.painted;
+  for (let i = 0; i < painted.length; i++) {
+    const key = painted[i] ?? 0;
     const seg = Math.floor(key / CELL_KEY_STRIDE);
     // Painted, then laid out again: the segment's whole run is above.
     if (seg >= limit || changes.relaid.has(seg) || key - seg * CELL_KEY_STRIDE >= runOf(seg)) continue;
-    keys.push(key);
+    keys[n++] = key;
   }
-  const sorted = Float64Array.from(keys).sort();
+  // A cell painted twice is listed twice: once is enough.
+  const all = keys.subarray(0, n).sort();
+  let unique = 0;
+  for (let i = 0; i < all.length; i++) if (unique === 0 || all[i] !== all[unique - 1]) all[unique++] = all[i] ?? 0;
+  const sorted = all.subarray(0, unique);
   const segIds: number[] = [];
   const segStart: number[] = [];
   const local = new Int32Array(sorted.length);

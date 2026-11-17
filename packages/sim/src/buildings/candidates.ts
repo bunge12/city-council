@@ -31,7 +31,7 @@ import type { SimState } from "../state";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { CELL_OPEN, type CellIndex, type Column } from "../zoning/cell-index";
-import { ZONE_NONE, type CellRef } from "../zoning/cells";
+import { ZONE_NONE, segmentOfSlot, type CellRef } from "../zoning/cells";
 
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
 /** Segments per counted block. */
@@ -65,26 +65,16 @@ const live = new WeakMap<BuildingState, Candidates>();
  */
 export type OnCell = () => readonly (Int32Array | null)[];
 
-/** The last segment whose run starts at or before `slot`: segments with no cells share a start with the next one. */
-function segmentOfSlot(offset: Int32Array, slot: number): number {
-  let lo = 0;
-  let hi = offset.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if ((offset[mid] ?? 0) <= slot) lo = mid;
-    else hi = mid;
-  }
-  return lo;
-}
-
 /** Notes that a command painted the cells at `slots` of `state.cells.zone`. Only front cells matter. */
-export function noteFrontCells(state: SimState, slots: Iterable<number>): void {
+export function noteFrontCells(state: SimState, slots: ArrayLike<number>): void {
   const c = live.get(state.buildings);
   if (!c) return;
   const offset = state.cells.offset;
-  for (const slot of slots) {
+  let seg = -1;
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i] ?? 0;
     if (slot % DEPTH !== 0) continue;
-    const seg = segmentOfSlot(offset, slot);
+    seg = segmentOfSlot(offset, slot, seg);
     c.fronts.add(seg * CELL_KEY_STRIDE + (slot - (offset[seg] ?? 0)) / DEPTH);
   }
 }

@@ -123,20 +123,22 @@ function parse(payload: unknown): Parsed | string {
 // gathered, so a cell under two rectangles is listed once. Cleared again
 // before `gather` returns. Not state.
 let listed = new Uint8Array(0);
+// Scratch for the list itself, kept between commands so a stroke at the cap
+// grows no list of its own (issue #155). Not state.
+let found = new Int32Array(1 << 12);
 
 /**
  * Where every cell the command would change sits in the zone and density
- * arrays, in no order a caller may rely on: the open cells with their
- * centre inside a rectangle whose zone or density is not already the one
- * asked for.
+ * arrays, ascending: the open cells with their centre inside a rectangle
+ * whose zone or density is not already the one asked for.
  */
-function gather(state: SimState, parsed: Parsed): number[] {
+function gather(state: SimState, parsed: Parsed): Int32Array {
   const index = syncCells(state);
   const cells = state.cells;
   const { zone, density, rects } = parsed;
   if (listed.length < cells.zone.length) listed = new Uint8Array(cells.zone.length);
   const marks = listed;
-  const out: number[] = [];
+  let count = 0;
   for (let at = 0; at < rects.length; at += RECT_FLOATS) {
     const fx = rects[at] ?? 0;
     const fz = rects[at + 1] ?? 0;
@@ -164,11 +166,17 @@ function gather(state: SimState, parsed: Parsed): number[] {
       const across = px * dz - pz * dx;
       if (across * across > reach2) return;
       marks[slot] = 1;
-      out.push(slot);
+      if (count === found.length) {
+        const grown = new Int32Array(found.length * 2);
+        grown.set(found);
+        found = grown;
+      }
+      found[count++] = slot;
     });
   }
-  for (const slot of out) marks[slot] = 0;
-  return out;
+  const out = found.slice(0, count);
+  for (let i = 0; i < count; i++) marks[out[i] ?? 0] = 0;
+  return out.sort();
 }
 
 const NOTHING = "no cell would change: nothing open lies under the rectangles, or it is zoned this way already";
@@ -183,20 +191,20 @@ export function planZoneCells(state: SimState, payload: unknown): ZonePlanResult
   if (typeof parsed === "string") return { ok: false, reason: parsed };
   const slots = gather(state, parsed);
   if (slots.length === 0) return { ok: false, reason: NOTHING };
-  return { ok: true, plan: { zone: parsed.zone, density: parsed.density, cells: Int32Array.from(slots).sort() } };
+  return { ok: true, plan: { zone: parsed.zone, density: parsed.density, cells: slots } };
 }
 
 /**
  * Plans and paints in one pass, as the step does: null once painted, or the
  * reason, with the city as it was. Refuses exactly what `planZoneCells`
  * refuses and changes exactly the cells it lists. `before`, when given, is
- * called with the cells it is about to paint and the zone and density they
- * get, while they still hold what they had, for the undo record.
+ * called with the cells it is about to paint, ascending, and the zone and
+ * density they get, while they still hold what they had, for the undo record.
  */
 export function zoneCellsIfValid(
   state: SimState,
   payload: unknown,
-  before?: (slots: readonly number[], zone: number, density: number) => void,
+  before?: (slots: Int32Array, zone: number, density: number) => void,
 ): string | null {
   const parsed = parse(payload);
   if (typeof parsed === "string") return parsed;
@@ -204,7 +212,8 @@ export function zoneCellsIfValid(
   if (slots.length === 0) return NOTHING;
   before?.(slots, parsed.zone, parsed.density);
   const { zone, density } = state.cells;
-  for (const slot of slots) {
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i] ?? 0;
     zone[slot] = parsed.zone;
     density[slot] = parsed.density;
   }
