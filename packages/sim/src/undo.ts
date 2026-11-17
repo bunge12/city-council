@@ -30,11 +30,11 @@ import type { SimState } from "./state";
 import { noteFrontCells } from "./buildings/candidates";
 import { noteCellsPainted } from "./zoning/cell-changes";
 import { laidOutCells, readyCells, restoreZones } from "./zoning/cell-index";
-import { DENSITY_NONE, ZONE_NONE } from "./zoning/cells";
+import { ZONING_BALANCE } from "./zoning/balance";
+import { DENSITY_NONE, ZONE_NONE, localIndex } from "./zoning/cells";
 import {
   ZONE_UNTOUCHED,
   checkJournals,
-  forJournalCells,
   isZoneValue,
   journalCells,
   journalFits,
@@ -175,55 +175,90 @@ export function applyUndo(state: SimState, index: number): void {
   state.undo = state.undo.filter((_, i) => i !== index);
 }
 
+// What an undo of a paint puts back: the slot of each cell and the zone
+// and density it gets, gathered while the record is checked. Kept between
+// undos, so taking back a stroke at the cap grows no lists (issue #155).
+// Not state.
+let backSlots = new Int32Array(1 << 12);
+let backValues = new Uint8Array(2 << 12);
+let backCount = 0;
+
+/** Makes room for `more` cells after the ones gathered. */
+function backRoom(more: number): void {
+  if (backCount + more <= backSlots.length) return;
+  let size = backSlots.length * 2;
+  while (size < backCount + more) size *= 2;
+  const slots = new Int32Array(size);
+  slots.set(backSlots.subarray(0, backCount));
+  const values = new Uint8Array(size * 2);
+  values.set(backValues.subarray(0, backCount * 2));
+  backSlots = slots;
+  backValues = values;
+}
+
 /**
- * Calls `visit` with the slot in `state.cells` of each cell a ZoneCells
- * record changed, and what it held before. Returns why the record no
- * longer applies, or null: a segment it painted is gone or is not the road
- * it was, or a cell no longer holds what it painted.
+ * Gathers the slot in `state.cells` of each cell a ZoneCells record
+ * changed, and what it held before, into the buffers above. Returns why
+ * the record no longer applies, or null: a segment it painted is gone or
+ * is not the road it was, or a cell no longer holds what it painted.
  */
-function forPainted(state: SimState, record: UndoRecord, visit: ((slot: number, zone: number, density: number) => void) | null): string | null {
+function gatherPainted(state: SimState, record: UndoRecord): string | null {
   // The cells laid out for the roads as they are, which can replace `state.cells`.
   laidOutCells(state);
   const cells = state.cells;
   const painted = record.painted ?? { zone: ZONE_NONE, density: DENSITY_NONE };
-  for (const journal of readJournals(record.zones)) {
+  const zones = record.zones;
+  const depth = ZONING_BALANCE.zoneDepthCells;
+  backCount = 0;
+  for (const journal of readJournals(zones)) {
     if (!journalFits(state.roads, journal)) return ROAD_GONE;
     const start = cells.offset[journal.seg] ?? 0;
     const count = (cells.offset[journal.seg + 1] ?? 0) - start;
-    if (journalCells(record.zones, journal) !== count) return ROAD_GONE;
-    let reason: string | null = null;
-    forJournalCells(record.zones, journal, count, (local, zone, density) => {
-      if (zone === ZONE_UNTOUCHED || reason !== null) return;
-      const slot = start + local;
-      if (cells.zone[slot] !== painted.zone || cells.density[slot] !== painted.density) reason = REZONED;
-      else visit?.(slot, zone, density);
-    });
-    if (reason !== null) return reason;
+    if (journalCells(zones, journal) !== count) return ROAD_GONE;
+    backRoom(count);
+    // The runs in the order they were written: side, depth, place along the road (zoning/zone-undo.ts).
+    const places = count / (2 * depth);
+    let at = journal.from;
+    let left = zones[at] ?? 0;
+    for (let side = 0; side < 2; side++) {
+      for (let d = 0; d < depth; d++) {
+        for (let place = 0; place < places; place++) {
+          while (left === 0) {
+            at += 3;
+            if (at >= journal.to) return ROAD_GONE;
+            left = zones[at] ?? 0;
+          }
+          left--;
+          const zone = zones[at + 1] ?? 0;
+          if (zone === ZONE_UNTOUCHED) continue;
+          const slot = start + localIndex(side, place, d);
+          if (cells.zone[slot] !== painted.zone || cells.density[slot] !== painted.density) return REZONED;
+          backSlots[backCount] = slot;
+          backValues[backCount * 2] = zone;
+          backValues[backCount * 2 + 1] = zones[at + 2] ?? 0;
+          backCount++;
+        }
+      }
+    }
   }
   return null;
 }
 
 /** Why a ZoneCells record can no longer be undone, or null. */
 function checkPaint(state: SimState, record: UndoRecord): string | null {
-  return forPainted(state, record, null);
+  return gatherPainted(state, record);
 }
 
 /** Puts back what a ZoneCells record's cells held. Only after `checkPaint` passed. */
 function unpaint(state: SimState, record: UndoRecord): void {
-  const slots: number[] = [];
-  const zones: number[] = [];
-  const densities: number[] = [];
-  forPainted(state, record, (slot, zone, density) => {
-    slots.push(slot);
-    zones.push(zone);
-    densities.push(density);
-  });
+  if (gatherPainted(state, record) !== null) return;
   const cells = state.cells;
-  for (let i = 0; i < slots.length; i++) {
-    const slot = slots[i] ?? 0;
-    cells.zone[slot] = zones[i] ?? ZONE_NONE;
-    cells.density[slot] = densities[i] ?? DENSITY_NONE;
+  for (let i = 0; i < backCount; i++) {
+    const slot = backSlots[i] ?? 0;
+    cells.zone[slot] = backValues[i * 2] ?? ZONE_NONE;
+    cells.density[slot] = backValues[i * 2 + 1] ?? DENSITY_NONE;
   }
+  const slots = backSlots.subarray(0, backCount);
   noteCellsPainted(state.roads, cells, slots);
   noteFrontCells(state, slots);
 }
@@ -422,4 +457,51 @@ export function checkUndoHistory(value: unknown): string | null {
     }
   }
   return null;
+}
+
+/**
+ * How the undo history changed between two deltas (issue #155). The
+ * history only changes by records added at the end and records dropped
+ * from anywhere, and a record is never changed in place, so a copy that
+ * held the history before needs only which of its records stay and the
+ * new ones. Sending the whole history instead cost a host megabytes a
+ * stroke once it held fifty strokes at the cap.
+ */
+export interface UndoDelta {
+  /** Places in the history before of the records still in it, ascending. They come first, in this order. */
+  kept: Int32Array;
+  /** The records new since, after those, oldest first. */
+  added: UndoRecord[];
+}
+
+/**
+ * The change from history `before` to history `after`, by record identity:
+ * the longest run at the start of `after` of records from `before`, in
+ * their order there, and everything after that as new.
+ */
+export function diffUndo(before: readonly UndoRecord[], after: readonly UndoRecord[]): UndoDelta {
+  const place = new Map<UndoRecord, number>();
+  for (let i = 0; i < before.length; i++) place.set(before[i] as UndoRecord, i);
+  const kept: number[] = [];
+  let i = 0;
+  for (; i < after.length; i++) {
+    const at = place.get(after[i] as UndoRecord);
+    if (at === undefined || (kept.length > 0 && at <= (kept[kept.length - 1] ?? -1))) break;
+    kept.push(at);
+  }
+  return { kept: Int32Array.from(kept), added: after.slice(i) };
+}
+
+/** The history `delta` gives from `before`, or why it cannot belong to it. */
+export function applyUndoDelta(before: readonly UndoRecord[], delta: UndoDelta): UndoRecord[] | string {
+  const { kept, added } = delta;
+  if (!(kept instanceof Int32Array) || !Array.isArray(added)) return "the undo delta is not a list of kept places and added records";
+  const out: UndoRecord[] = [];
+  for (let i = 0; i < kept.length; i++) {
+    const at = kept[i] ?? -1;
+    if (at < 0 || at >= before.length || (i > 0 && at <= (kept[i - 1] ?? -1))) return "the undo delta keeps a record the copy does not have";
+    out.push(before[at] as UndoRecord);
+  }
+  for (const record of added) out.push(record);
+  return out;
 }

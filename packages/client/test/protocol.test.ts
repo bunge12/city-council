@@ -393,7 +393,7 @@ describe("road deltas", () => {
     await mirror.sendCommand("BuildRoad", road([4200, 4500], [4600, 4500]));
     tick();
     const deltas = () => received.filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
-    expect(deltas().some((d) => d.undo?.length === 1)).toBe(true);
+    expect(deltas().some((d) => d.undo?.added.length === 1 && d.undo.kept.length === 0)).toBe(true);
     expect(mirror.state?.undo.map((r) => r.playerId)).toEqual(["p1"]);
     const before = deltas().length;
     tick();
@@ -403,6 +403,28 @@ describe("road deltas", () => {
     expect(mirror.state?.undo).toEqual([]);
     expect(mirror.state?.roads.segFlags.length).toBe(0);
     expect(await mirror.sendCommand("Undo")).toEqual({ ok: false, reason: "Nothing to undo" });
+  });
+
+  it("sends the records the history kept by place and only the new ones whole", async () => {
+    const { mirror, received, tick } = roadSetup();
+    const deltas = () => received.filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    await mirror.sendCommand("BuildRoad", road([4200, 4500], [4600, 4500]));
+    tick();
+    const first = mirror.state?.undo[0];
+    let before = deltas().length;
+    await mirror.sendCommand("BuildRoad", road([4200, 4700], [4600, 4700]));
+    tick();
+    const built = deltas().slice(before).flatMap((d) => (d.undo ? [d.undo] : []));
+    expect(built.map((u) => [[...u.kept], u.added.length])).toEqual([[[0], 1]]);
+    // The copy keeps its own record object for the one it already had.
+    expect(mirror.state?.undo[0]).toBe(first);
+    expect(mirror.state?.undo.length).toBe(2);
+    before = deltas().length;
+    expect(await mirror.sendCommand("Undo")).toEqual({ ok: true });
+    tick();
+    const undone = deltas().slice(before).flatMap((d) => (d.undo ? [d.undo] : []));
+    expect(undone.map((u) => [[...u.kept], u.added.length])).toEqual([[[0], 0]]);
+    expect(mirror.state?.undo).toEqual([first]);
   });
 
   it("carries the whole network in a snapshot", async () => {

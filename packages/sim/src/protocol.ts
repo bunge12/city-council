@@ -9,11 +9,11 @@ import type { Command, CommandResult, DroppedCommand } from "./commands";
 import type { LogEntry } from "./log";
 import type { RoadDelta } from "./roads/delta";
 import type { SimState, Speed } from "./state";
-import type { UndoRecord } from "./undo";
+import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 // ---- Client to sim ----
 
@@ -81,8 +81,12 @@ export interface DeltaMessage {
   cells?: CellDelta;
   /** Buildings added or removed, as whole rows. Left out when none was. Applied after `cells`. */
   buildings?: BuildingDelta;
-  /** The whole undo history, when it changed. Left out otherwise. */
-  undo?: UndoRecord[];
+  /**
+   * How the undo history changed since the last delta or snapshot, when it
+   * did: the records it kept and the ones added (undo.ts). Left out
+   * otherwise.
+   */
+  undo?: UndoDelta;
   /**
    * Commands accepted into the queue that a step then dropped, with why,
    * for every player. Left out when none was. Together with `log` it
