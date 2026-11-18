@@ -122,7 +122,15 @@ const CLOSE: { position: Vec3; target: Vec3 } = { position: [GRID.x + 10, ground
 // so far behind the worker that a pause sent at tick 128 landed at tick 4080.
 // Scaffolding draws the same at every preset; only the frame-time test is
 // about Balanced.
+//
+// They also draw at a quarter of the pixels. #202's glass made a frame of
+// this street dearer in software, and on the slowest runners (EPYC 7763) the
+// pause test ran past eight minutes on both attempts. At 640 x 400 it takes
+// half as long. The bands, counts and still-picture check do not depend on
+// the size; the frame-time test keeps 1280 x 800 so its figure stays
+// comparable.
 const RUN_TIMEOUT = 480_000;
+const RUN_VIEWPORT = { width: 640, height: 400 };
 /**
  * How long to wait for what changes on the next frame drawn: the scaffolding
  * coming down once the tick has passed the end of construction, or the zoom
@@ -133,6 +141,7 @@ const FRAME_WAIT = 30_000;
 
 test("at 4x a new building's scaffolding goes up, the building rises inside it, and the scaffolding comes down", async ({ page }, testInfo) => {
   test.setTimeout(RUN_TIMEOUT);
+  await page.setViewportSize(RUN_VIEWPORT);
   await openCity(page, "?webgl&preset=low&debug", city.bytes);
   await setPose(page, CLOSE.position, CLOSE.target);
   await drawn(page, city.buildings);
@@ -203,6 +212,7 @@ test("at 4x a new building's scaffolding goes up, the building rises inside it, 
 
 test("pausing freezes a building half way up, and running again finishes it", async ({ page }, testInfo) => {
   test.setTimeout(RUN_TIMEOUT);
+  await page.setViewportSize(RUN_VIEWPORT);
   // Opened paused with every building half way through its rise.
   const age = Math.round(T * (CONSTRUCTION.scaffoldUp + (1 - CONSTRUCTION.scaffoldUp - CONSTRUCTION.scaffoldDown) / 2));
   const mid = newCity(age);
