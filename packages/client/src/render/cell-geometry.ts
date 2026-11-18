@@ -166,7 +166,8 @@ export function buildCityCells(
   /** Each drawn cell's palette offset, or -1 for one not drawn. */
   const colour = new Int32Array(n).fill(-1);
   const at = (k: number, c: number) => [corners[k * 8 + c * 2] ?? 0, corners[k * 8 + c * 2 + 1] ?? 0] as const;
-  const edge = (a: readonly [number, number], b: readonly [number, number]) => `${a[0]},${a[1]},${b[0]},${b[1]}`;
+  /** Cells are found by their inner start corner, and an edge matches only when its outer corner matches too. */
+  const key = (p: readonly [number, number]) => `${p[0]},${p[1]}`;
   const byStart = new Map<string, number>();
   /** The ground under each drawn cell's end corners, inner and outer, sampled once. */
   const ground = new Float64Array(n * 2);
@@ -181,7 +182,7 @@ export function buildCityCells(
     colour[k] = ((z - 1) * densities + d - 1) * 3;
     cells++;
     // Corners run inner start, inner end, outer end, outer start.
-    byStart.set(edge(at(k, 0), at(k, 3)), k);
+    byStart.set(key(at(k, 0)), k);
     ground[k * 2] = height(...at(k, 1));
     ground[k * 2 + 1] = height(...at(k, 2));
   }
@@ -190,8 +191,11 @@ export function buildCityCells(
   const hasPrev = new Uint8Array(n);
   for (let k = 0; k < n; k++) {
     if ((colour[k] ?? -1) < 0) continue;
-    const j = byStart.get(edge(at(k, 1), at(k, 2)));
+    const j = byStart.get(key(at(k, 1)));
     if (j === undefined || j === k || colour[j] !== colour[k]) continue;
+    const outer = at(k, 2);
+    const start = at(j, 3);
+    if (outer[0] !== start[0] || outer[1] !== start[1]) continue;
     next[k] = j;
     hasPrev[j] = 1;
   }
