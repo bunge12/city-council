@@ -130,7 +130,21 @@ export interface SwitchReply {
   result: { ok: true; city: CityMeta } | { ok: false; error: string };
 }
 
-export type FromSaver = StatusMessage | ExportReply | ImportReply | SwitchReply;
+/**
+ * Worker to page: the seed of the city the worker is opening, sent before
+ * the worker generates its terrain. Terrain is rebuilt from the seed on each
+ * side, so the page starts its own copy now instead of after the snapshot,
+ * and the two run at once (#203). A new city that replaces a save that
+ * could not be opened sends a second one.
+ */
+export interface OpeningMessage {
+  channel: typeof SAVES_CHANNEL;
+  type: "opening";
+  seed: number;
+  requestId: null;
+}
+
+export type FromSaver = StatusMessage | ExportReply | ImportReply | SwitchReply | OpeningMessage;
 
 export type PageSaveTransport = SimTransport<ToSaver, FromSaver>;
 export type WorkerSaveTransport = SimTransport<FromSaver, unknown>;

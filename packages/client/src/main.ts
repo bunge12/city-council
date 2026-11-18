@@ -10,6 +10,7 @@ import {
   heightAt,
   replay,
   snapToGrid,
+  terrainOf,
   ZONING_BALANCE,
   type Block,
   type BuildingInfo,
@@ -92,6 +93,25 @@ saves.subscribe((status) => {
   if (!switching) setTabCity(status.city.id);
   // Nothing runs in this tab, so show the menu that offers another city.
   if (status.openElsewhere && !useUi.getState().menuOpen) useUi.setState({ menuOpen: true });
+});
+
+/** Milliseconds this page took to generate each seed's terrain, for the render status. */
+const terrainMs = new Map<number, number>();
+
+/** The terrain for `seed` from the sim's cache, timed the first time this page generates it. */
+function pageTerrain(seed: number): Terrain {
+  const start = performance.now();
+  const terrain = terrainOf(seed);
+  if (!terrainMs.has(seed)) terrainMs.set(seed, performance.now() - start);
+  return terrain;
+}
+
+// The worker says which seed it is opening before it generates that city's
+// terrain. Generating the page's copy now runs it alongside the worker's,
+// where waiting for the snapshot would run the two one after the other
+// (#203). The map drawn later and the mirror's cell index read the cached copy.
+saves.onOpening((seed) => {
+  if (!mirror.state) pageTerrain(seed);
 });
 
 /** Saves now and resolves with the worker's status after the write. */
@@ -380,6 +400,7 @@ function metres(hit: { x: number; y: number; z: number } | null): string {
 interface RenderStatus {
   backend: View["backend"];
   seed: number;
+  /** Milliseconds this page spent generating the terrain, whenever it did: on the worker's word of the seed, or when the snapshot came. */
   terrainMs: number;
   buildMs: number;
   /** Milliseconds from navigation start to the first frame with terrain. */
@@ -498,8 +519,9 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     const state = mirror.state;
     if (!state || state.seed === shownSeed) return;
     shownSeed = state.seed;
-    const t0 = performance.now();
-    const terrain = generateTerrain(state.seed);
+    // The sim's cache, so the mirror's cell index and the tools read this
+    // map and do not generate their own (#203).
+    const terrain = pageTerrain(state.seed);
     shownTerrain = terrain;
     const t1 = performance.now();
     view.showTerrain(terrain);
@@ -518,7 +540,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
       status = {
         backend: view.backend,
         seed: state.seed,
-        terrainMs: t1 - t0,
+        terrainMs: terrainMs.get(state.seed) ?? 0,
         buildMs: t2 - t1,
         readyMs: performance.now(),
       };

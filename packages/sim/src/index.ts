@@ -57,6 +57,7 @@ export {
   slopeAt,
 } from "./terrain/terrain";
 export type { Terrain, TerrainBalance } from "./terrain/terrain";
+export { terrainOf } from "./terrain/cache";
 export { ZONING_BALANCE, checkZoningBalance } from "./zoning/balance";
 export type { DensityBalance, ZoneBalance, ZoningBalance } from "./zoning/balance";
 export { CELL_LEFT, CELL_RIGHT, DENSITY_NONE, ZONE_NONE, cellCountOf, cellSlot, placesAlong } from "./zoning/cells";

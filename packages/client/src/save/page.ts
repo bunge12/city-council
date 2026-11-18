@@ -14,6 +14,7 @@ import {
 } from "./channel";
 
 type Listener = (status: SaveStatus) => void;
+type OpeningListener = (seed: number) => void;
 
 export class SaveClient {
   private readonly transport: PageSaveTransport;
@@ -21,6 +22,7 @@ export class SaveClient {
   private nextRequest = 1;
   private readonly waiting = new Map<number, (message: FromSaver) => void>();
   private readonly listeners = new Set<Listener>();
+  private readonly openingListeners = new Set<OpeningListener>();
 
   constructor(transport: PageSaveTransport) {
     this.transport = transport;
@@ -29,6 +31,7 @@ export class SaveClient {
         this.current = message.status;
         for (const listener of this.listeners) listener(message.status);
       }
+      if (message.type === "opening") for (const listener of this.openingListeners) listener(message.seed);
       if (message.requestId !== null) {
         this.waiting.get(message.requestId)?.(message);
         this.waiting.delete(message.requestId);
@@ -44,6 +47,12 @@ export class SaveClient {
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
+  }
+
+  /** Called with the seed of each city the worker starts to open, before its snapshot. */
+  onOpening(listener: OpeningListener): () => void {
+    this.openingListeners.add(listener);
+    return () => void this.openingListeners.delete(listener);
   }
 
   /** Asks the worker to save now. Resolves with the status after the write. */
