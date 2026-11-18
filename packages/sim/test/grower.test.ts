@@ -3,6 +3,7 @@ import {
   BUILDINGS_BALANCE,
   BUILDING_TYPES,
   GROWER_SYSTEM,
+  cellAt,
   SYSTEMS,
   TIME_BALANCE,
   ZONING_BALANCE,
@@ -26,6 +27,7 @@ import { submit } from "./seen-ends";
 import { removeBuilding } from "../src/buildings/buildings";
 import { candidateSets } from "../src/buildings/candidates";
 import { grow } from "../src/buildings/grower";
+import { freeFrontage } from "../src/buildings/lots";
 import { segmentBuildings } from "../src/buildings/where";
 import { nextInt, seedRng } from "../src/rng";
 import { isSegment } from "../src/roads/network";
@@ -293,6 +295,100 @@ describe("density 2 and 3 strips", () => {
   });
 });
 
+describe("building from an end of the free frontage (issue 194)", () => {
+  /** The places along the street a building's lot covers. A street is one segment, so they are consecutive. */
+  function placesOf(b: BuildingRow): number[] {
+    const step = b.dir === 0 ? 1 : -1;
+    return Array.from({ length: b.width }, (_, i) => b.firstPlace + i * step);
+  }
+
+  /** The north side's free places among `zoned`: not under a building. */
+  function freePlaces(state: SimState, zoned: readonly number[]): number[] {
+    const built = new Set(buildings(state).flatMap(placesOf));
+    return zoned.filter((p) => !built.has(p));
+  }
+
+  /** Steps until a building comes or goes, up to `days`. False if none did. */
+  function stepToNextBuilding(state: SimState, days: number): boolean {
+    const count = buildings(state).length;
+    const until = state.tick + days * DAY;
+    while (state.tick < until) {
+      step(state);
+      if (buildings(state).length !== count) return true;
+    }
+    return false;
+  }
+
+  it("finds the ends of the free frontage, the nearer first and toward node A on a tie", () => {
+    const state = street();
+    zone(state, "office", 3, 5, 7, 6);
+    const front = cellAt(state, 4200 + CELL * 7 + CELL / 2, 4595 - CELL / 2);
+    if (!front) throw new Error("no cell north of the street");
+    const at = (place: number) => freeFrontage(state, { ...front, place, depth: 0 });
+    const ends = (place: number) => at(place).ends.map((r) => r.place);
+    expect(at(7).width).toBe(7);
+    expect(ends(7)).toEqual([5, 11]);
+    expect(ends(10)).toEqual([11, 5]);
+    expect(ends(8)).toEqual([5, 11]);
+    expect(ends(5)).toEqual([5, 11]);
+    // Unzoned ground has no frontage.
+    expect(ends(3)).toEqual([]);
+    // Other zoning ends a run: a cell of it on its own is both its ends.
+    zone(state, "commercial", 1, 8, 1, 6);
+    expect(ends(7)).toEqual([7, 5]);
+    expect(at(7).width).toBe(3);
+    expect(ends(8)).toEqual([8]);
+    expect(at(8).width).toBe(1);
+  });
+
+  it("fills a 7 x 6 O3 lot with no cell left over, whatever the draw", () => {
+    const zoned = [5, 6, 7, 8, 9, 10, 11];
+    for (let seed = 1; seed <= 12; seed++) {
+      const state = street();
+      zone(state, "office", 3, 5, 7, 6);
+      state.rng.set(seedRng(seed));
+      runDays(state, 30);
+      const widths = buildings(state).map((b) => b.width).sort();
+      // Office types on one strip are 3, 4 or 5, or 6 wide: 7 is 3 + 4.
+      expect(widths, `seed ${seed}`).toEqual([3, 4]);
+      expect(freePlaces(state, zoned), `seed ${seed}`).toEqual([]);
+    }
+  });
+
+  it("puts the first building on a 7 x 6 O3 lot against one end, whatever the draw", () => {
+    const zoned = [5, 6, 7, 8, 9, 10, 11];
+    for (let seed = 1; seed <= 12; seed++) {
+      const state = street();
+      zone(state, "office", 3, 5, 7, 6);
+      state.rng.set(seedRng(seed));
+      expect(stepToNextBuilding(state, 10)).toBe(true);
+      const [first] = buildings(state);
+      if (!first) throw new Error("nothing grew");
+      const covers = placesOf(first);
+      expect(covers.includes(5) || covers.includes(11), `seed ${seed}: places ${covers.join(", ")}`).toBe(true);
+      // What is left is one piece, not a gap either side.
+      const free = freePlaces(state, zoned);
+      expect(free.length === 0 || (free.at(-1) as number) - (free[0] as number) === free.length - 1).toBe(true);
+    }
+  });
+
+  it("keeps the free frontage of a long strip in one piece as it fills", () => {
+    const zoned = Array.from({ length: 24 }, (_, p) => p);
+    for (const [zoneId, density] of [["residential", 1], ["residential", 2], ["commercial", 2], ["industrial", 3]] as const) {
+      const state = street();
+      zone(state, zoneId, density, 0, 24, 6);
+      let grew = 0;
+      while (stepToNextBuilding(state, 10)) {
+        grew++;
+        const free = freePlaces(state, zoned);
+        if (free.length === 0) break;
+        expect((free.at(-1) as number) - (free[0] as number), `${zoneId} ${density}: free places ${free.join(", ")}`).toBe(free.length - 1);
+      }
+      expect(grew).toBeGreaterThan(2);
+    }
+  });
+});
+
 describe("the grower and state", () => {
   it("waits for a change of roads to settle", () => {
     const state = street();
@@ -457,8 +553,11 @@ describe("the pace and the frontage", () => {
     expect(freeFrontCells(ten)).toBe(10 * freeFrontCells(one));
     const oneDays = daysToFill(one, 2 * fillDays);
     const tenDays = daysToFill(ten, 2 * fillDays);
+    // One street builds at the floor of one a day, so its days are its
+    // buildings. Built from the ends of the frontage (issue 194), it leaves
+    // fewer one-cell gaps and fills with fewer, wider buildings: 21 days.
     for (const days of [oneDays, tenDays]) {
-      expect(days).toBeGreaterThan(0.7 * fillDays);
+      expect(days).toBeGreaterThan(0.6 * fillDays);
       expect(days).toBeLessThan(1.2 * fillDays);
     }
     expect(buildings(ten).length).toBeGreaterThan(8 * buildings(one).length);

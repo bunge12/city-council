@@ -536,10 +536,10 @@ describe("the building index across changes of roads", () => {
  * live, picking what to clear from the city as it is then, as a player
  * would. On seed 2026: p1 builds a street, zones R1 four deep along its
  * north side and p2 C1 three deep along its south side. Twelve days of
- * growth, then p2 runs a street south from x 4296, which splits the first
+ * growth, then p2 runs a street south from x 4336, which splits the first
  * one under the houses across it and clears the shops in its way. p1 clears
  * its lowest-numbered house with BulldozeBuilding, then runs a street north
- * from x 4248 through its houses. p2 bulldozes its street. Three days on
+ * from x 4280 through its houses. p2 bulldozes its street. Six days on
  * its undo is refused, since shops grew on the ground meanwhile; p2 clears
  * them and undoes. Twenty-four days.
  */
@@ -557,7 +557,7 @@ function playSession(): SimState {
   send("ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4579 }, to: { x: 4390, z: 4579 }, width: 28 }] });
   send("ZoneCells", { zone: "commercial", density: 1, rects: [{ from: { x: 4202, z: 4617 }, to: { x: 4390, z: 4617 }, width: 20 }] }, "p2");
   until(12 * DAY);
-  send("BuildRoad", { from: { x: 4296, z: 4600 }, to: { x: 4296, z: 4700 }, type: "street" }, "p2");
+  send("BuildRoad", { from: { x: 4336, z: 4600 }, to: { x: 4336, z: 4700 }, type: "street" }, "p2");
   until(13 * DAY);
   const north = live(state).filter((id) => state.buildings.firstSide[id] === 0 && state.buildings.zone[id] === 1);
   const house = north[0] as number;
@@ -573,22 +573,22 @@ function playSession(): SimState {
     ],
   });
   until(14 * DAY);
-  send("BuildRoad", { from: { x: 4248, z: 4500 }, to: { x: 4248, z: 4600 }, type: "street" });
+  send("BuildRoad", { from: { x: 4280, z: 4500 }, to: { x: 4280, z: 4600 }, type: "street" });
   until(16 * DAY);
-  send("BulldozeRoad", withEnds(state.roads, { segments: [cellAt(state, 4303, 4680)?.segment as number] }), "p2");
-  until(19 * DAY);
+  send("BulldozeRoad", withEnds(state.roads, { segments: [cellAt(state, 4343, 4680)?.segment as number] }), "p2");
+  until(22 * DAY);
   // Shops grew on p1's cells where the street was, so the undo would clear
   // them, and it is refused (M2 review, #147). p2 clears them and undoes.
   expect(submit(state, { seq: ++n, playerId: "p2", type: "Undo", payload: {} }).ok).toBe(false);
   const half = halfWidth("street");
   const inTheWay = live(state).filter((id) => {
     const [lo, hi] = xRange(state, id);
-    return lo < 4296 + half && hi > 4296 - half && (buildingInfo(state, id)?.corners?.[1] ?? 0) > 4600;
+    return lo < 4336 + half && hi > 4336 - half && (buildingInfo(state, id)?.corners?.[1] ?? 0) > 4600;
   });
   expect(inTheWay.length).toBeGreaterThan(0);
   const b = state.buildings;
   send("BulldozeBuilding", { buildings: inTheWay.map((id) => ({ id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id], builtAt: b.builtAt[id] })) }, "p2");
-  until(19 * DAY + 1);
+  until(22 * DAY + 1);
   send("Undo", {}, "p2");
   until(24 * DAY);
   return state;
@@ -626,8 +626,8 @@ describe("replay fixture roads-and-buildings", () => {
     // The street north clears houses.
     expect(byZone(at(1401), 1)).toBeLessThan(byZone(at(1400), 1));
     // The undo of the bulldoze waits for the shops on its ground to be cleared (M2 review, #147).
-    expect(count(at(1901))).toBeLessThan(count(at(1900)));
-    expect(fixture.log.filter((e) => e.type === "Undo").map((e) => e.tick)).toEqual([1901]);
+    expect(count(at(2201))).toBeLessThan(count(at(2200)));
+    expect(fixture.log.filter((e) => e.type === "Undo").map((e) => e.tick)).toEqual([2201]);
   });
 
   /** Replays the fixture, saving and loading the city at `at` and stepping on from the copy. */
@@ -645,7 +645,7 @@ describe("replay fixture roads-and-buildings", () => {
     return state;
   }
 
-  it.each([600, 1201, 1350, 1601, 1901, 2100])("hashes the same saved and loaded at tick %d", (at) => {
+  it.each([600, 1201, 1350, 1601, 2100, 2201])("hashes the same saved and loaded at tick %d", (at) => {
     expect(hashState(replaySavedAt(at))).toBe(fixture.hash);
   });
 

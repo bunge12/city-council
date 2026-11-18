@@ -134,6 +134,89 @@ export type LotOptions =
     }
   | Extract<LotResult, { ok: false }>;
 
+/** The free frontage a cell lies on: its two ends and how many columns it runs. */
+export interface Frontage {
+  /** The front cells at its ends, the nearer first; one when it is one column, none when it has no end. */
+  ends: CellRef[];
+  /** Columns from end to end; 0 when it has no end, Infinity when it runs on past `FRONTAGE_REACH` either way. */
+  width: number;
+}
+
+/**
+ * How many columns `freeFrontage` walks each way before it gives up on an
+ * end, about a kilometre of 8 m cells. It bounds the walk on every grower
+ * draw. A long free run with no end that near builds as it did before
+ * issue 194, at the drawn cell, or at the one end in reach. A limit of
+ * the walk, not a rate or a price, so it is not in the balance files.
+ */
+export const FRONTAGE_REACH = 128;
+
+/**
+ * The free frontage `ref` lies on (issue 194): the run of free front cells
+ * of `ref`'s zone and density along its strip, walked the way lots run
+ * (`nextColumn`), so it runs on across a segment's end where a lot would.
+ * Each end is the last such cell before something else: the strip's end at
+ * a junction or a road's end, a building, ground of another zone or
+ * density, or a blocked cell. The nearer end comes first, and of two the
+ * same distance away, the one toward node A. An end further than
+ * `FRONTAGE_REACH` columns away is not found. A run that closes on itself
+ * has no end, and unzoned ground no frontage. Settles cells as `findLot`
+ * does, with the same caution for systems. Read only.
+ *
+ * The grower builds from an end, so a building stands against whatever
+ * ends the run and the free ground it leaves stays in one piece.
+ */
+export function freeFrontage(state: SimState, ref: CellRef): Frontage {
+  const none: Frontage = { ends: [], width: 0 };
+  const index = syncCells(state);
+  const cells = state.cells;
+  const slot = cellSlot(state.roads, cells, { ...ref, depth: 0 });
+  if (slot < 0) return none;
+  const zone = cells.zone[slot] ?? ZONE_NONE;
+  const density = cells.density[slot] ?? 0;
+  if (zone === ZONE_NONE) return none;
+  const onCell = segmentBuildings(state);
+  const free = (col: Column): boolean => {
+    if (columnStatus(index, col, 0) !== CELL_OPEN) return false;
+    const local = localIndex(col.side, col.place, 0);
+    const at = (cells.offset[col.seg] ?? 0) + local;
+    return cells.zone[at] === zone && cells.density[at] === density && (onCell[col.seg]?.[local] ?? NO_BUILDING) === NO_BUILDING;
+  };
+  const start: Column = { seg: ref.segment, side: ref.side, place: ref.place, dir: 0 };
+  if (!free(start)) return none;
+  const key = (col: Column): number => col.seg * CELL_KEY_STRIDE + localIndex(col.side, col.place, 0);
+  const seen = new Set<number>([key(start)]);
+  /**
+   * The last free column walking `dir` from the start and how many steps
+   * on, with `open` set when the walk stopped at `FRONTAGE_REACH` and no
+   * end; null if the walk comes round again.
+   */
+  const walk = (dir: number): { col: Column; steps: number; open: boolean } | null => {
+    let col: Column = { ...start, dir };
+    let steps = 0;
+    for (let next = nextColumn(index, col); next !== null && free(next); next = nextColumn(index, col)) {
+      if (steps === FRONTAGE_REACH) return { col, steps, open: true };
+      const k = key(next);
+      if (seen.has(k)) return null;
+      seen.add(k);
+      col = next;
+      steps++;
+    }
+    return { col, steps, open: false };
+  };
+  const towardA = walk(1);
+  if (!towardA) return none;
+  const towardB = walk(0);
+  if (!towardB) return none;
+  const asRef = (col: Column): CellRef => ({ segment: col.seg, side: col.side, place: col.place, depth: 0 });
+  const found = [towardA, towardB].filter((w) => !w.open);
+  if (found.length < 2) return { ends: found.map((w) => asRef(w.col)), width: Infinity };
+  const width = towardA.steps + towardB.steps + 1;
+  if (width === 1) return { ends: [asRef(start)], width };
+  const [near, far] = towardA.steps <= towardB.steps ? [towardA, towardB] : [towardB, towardA];
+  return { ends: [asRef(near.col), asRef(far.col)], width };
+}
+
 /**
  * The largest lot holding the cell `ref` names that fits a building type,
  * and the type; or why none does. Settles any change of roads first, as

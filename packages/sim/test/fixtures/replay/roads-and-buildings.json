@@ -1,9 +1,9 @@
 {
-  "description": "Roads and buildings on seed 2026. p1 builds a street and zones R1 four deep along its north side; p2 zones C1 three deep along its south side. After twelve days of growth p2 runs a street south from x 4296, which splits the first street under the houses across it and clears the shops in its way. p1 clears its lowest-numbered house with BulldozeBuilding, named on the piece the split moved it to, then runs a street north from x 4248 through its houses. p2 bulldozes its street. Three days later its undo is refused, since shops grew where the street was (M2 review, #147); p2 clears them and undoes. Twenty-four game days.",
+  "description": "Roads and buildings on seed 2026. p1 builds a street and zones R1 four deep along its north side; p2 zones C1 three deep along its south side. After twelve days of growth p2 runs a street south from x 4336, which splits the first street under the houses across it and clears the shops in its way. p1 clears its lowest-numbered house with BulldozeBuilding, named on the piece the split moved it to, then runs a street north from x 4280 through its houses. p2 bulldozes its street. Six days later its undo is refused, since shops grew where the street was (M2 review, #147); p2 clears them and undoes. Twenty-four game days.",
   "seed": 2026,
   "untilTick": 2400,
   "balance": "5a8f897fecf31f48",
-  "hash": "2dece642360c90f5",
+  "hash": "08db542c01def285",
   "log": [
     {
       "tick": 0,
@@ -75,11 +75,11 @@
       "type": "BuildRoad",
       "payload": {
         "from": {
-          "x": 4296,
+          "x": 4336,
           "z": 4600
         },
         "to": {
-          "x": 4296,
+          "x": 4336,
           "z": 4700
         },
         "type": "street"
@@ -96,7 +96,7 @@
             "id": 0,
             "segment": 2,
             "side": 0,
-            "place": 7,
+            "place": 0,
             "builtAt": 99
           }
         ]
@@ -109,11 +109,11 @@
       "type": "BuildRoad",
       "payload": {
         "from": {
-          "x": 4248,
+          "x": 4280,
           "z": 4500
         },
         "to": {
-          "x": 4248,
+          "x": 4280,
           "z": 4600
         },
         "type": "street"
@@ -130,9 +130,9 @@
         ],
         "ends": [
           [
-            4296,
+            4336,
             4600,
-            4296,
+            4336,
             4700
           ]
         ],
@@ -142,24 +142,24 @@
       }
     },
     {
-      "tick": 1900,
+      "tick": 2200,
       "seq": 9,
       "playerId": "p2",
       "type": "BulldozeBuilding",
       "payload": {
         "buildings": [
           {
-            "id": 13,
+            "id": 17,
             "segment": 5,
             "side": 1,
-            "place": 4,
-            "builtAt": 1699
+            "place": 6,
+            "builtAt": 2099
           }
         ]
       }
     },
     {
-      "tick": 1901,
+      "tick": 2201,
       "seq": 10,
       "playerId": "p2",
       "type": "Undo",
