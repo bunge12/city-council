@@ -8,7 +8,7 @@ Play the current build at <https://bunge12.github.io/city-council/>. It is redep
 
 ## Where it stands
 
-It is early. You can lay out a road network on a generated map, but nothing grows on it yet.
+It is early. You can lay out a road network on a generated map, zone the land along it and watch buildings go up. Nobody lives in them yet.
 
 M0, the foundation, is done:
 
@@ -29,7 +29,16 @@ M1, road networks, is done:
 - Blocks enclosed by roads, found and outlined in the debug panel
 - A scale check on a generated network of 30,000 segments
 
-M2, zoning and buildings, is next. The player paints five zones at three densities on cells along the roads, and buildings appear on them. It also brings lighting, shadows, three graphics presets and the first building models. The spec is [docs/milestones/M2.md](docs/milestones/M2.md) and the work is in the [issues labelled M2](https://github.com/bunge12/city-council/issues?q=is%3Aissue+label%3AM2).
+M2, zoning and buildings, is done:
+
+- Five zones at three densities, painted on 8 m cells along the roads
+- Buildings that grow on zoned lots, from houses and corner stores to towers, malls and factories, with their own models and colours
+- Rezoning that leaves standing buildings in place, and a bulldozer for roads and buildings
+- Lighting, shadows and three graphics presets: Low, Balanced and High
+- Three levels of detail for buildings, by how far out the camera is
+- A scale check on that network grown out to 57,000 buildings
+
+M3, demand, is next. People move into the buildings, take jobs and leave when there are none, and four demand bars decide what grows. It also brings a first land value, the population count with its history, and the first sound. The spec is [docs/milestones/M3.md](docs/milestones/M3.md) and the work is in the [issues labelled M3](https://github.com/bunge12/city-council/issues?q=is%3Aissue+label%3AM3).
 
 ## Roadmap
 
@@ -39,8 +48,8 @@ Twelve milestones, built in order. There are no dates. The full table, with the 
 | --- | --- | --- |
 | M0 | Foundation and terrain | Done |
 | M1 | Road networks | Done |
-| M2 | Zoning and buildings | Next |
-| M3 | Demand | |
+| M2 | Zoning and buildings | Done |
+| M3 | Demand | Next |
 | M4 | Economy | |
 | M5 | Traffic | |
 | M6 | Public transport: buses | |
@@ -87,8 +96,8 @@ The whole plan rests on one rule. `sim` takes commands and produces state, and i
 ## Read more
 
 - The plan and every design decision: [docs/PRD.md](docs/PRD.md)
-- The next milestone: [docs/milestones/M2.md](docs/milestones/M2.md)
-- The ones before it: [M1](docs/milestones/M1.md) and [M0](docs/milestones/M0.md)
+- The next milestone: [docs/milestones/M3.md](docs/milestones/M3.md)
+- The ones before it: [M2](docs/milestones/M2.md), [M1](docs/milestones/M1.md) and [M0](docs/milestones/M0.md)
 - How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 MIT licensed.

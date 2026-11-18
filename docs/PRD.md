@@ -167,7 +167,7 @@ Your list put Map & Zoning first. I split it. With free-form roads, zoning cells
 | M0 ✓ | Foundation and terrain | none | A seeded map renders with camera controls. The sim runs in a worker, accepts a no-op command, and the state saves and reloads from IndexedDB. |
 | M1 ✓ | Road networks | M0 | Draw straight and curved roads that snap and form intersections. Delete and upgrade work. Undo works. A pathfinder returns a route between any two connected points. Blocks enclosed by roads are detected. Angle guides hold a road at 90 degrees, and the grid tool lays out a block grid in one action. Roads at different levels cross without forming an intersection. Rail (tram, subway, heavy rail) should be kept in mind so road tools can be reused when rail is going to be implemented. |
 | M2 ✓ | Zoning and buildings | M1 | Paint R, C, I, O, and M on cells along roads. Buildings appear on zoned cells at a fixed rate and disappear when the road is removed. Each zone can have a level 1-3 which indicates density & impact. Three graphics presets exist, and buildings set the default look. |
-| M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. Population shows in the top bar and its history is graphed. Pops turn over at a steady yearly rate. |
+| M3 | Demand | M2 | Growth follows four demand bars for residential, commercial, office and industrial. Pops move in, take jobs, and leave when there are none. An all-residential city stalls. Each cell builds at the density it is zoned for. A first land value orders which lots fill. Population shows in the top bar and its history is graphed. Pops turn over at a steady yearly rate. The tools make sounds. |
 | M4 | Economy | M3 | Taxes, upkeep and construction costs hit one treasury. A monthly budget panel balances. Running out of money blocks building. Allow borrowing. Demolishing an occupied building charges compensation. Property and business taxes and development charges work. The first population milestones unlock density 2 and pay grants. City Hall can be placed, and clicking it opens the budget. |
 | M5 | Traffic | M3 | Commutes load onto roads. A traffic overlay shows congested segments. Widening a road or adding a bypass visibly changes the overlay. Long commutes lower demand. Decorative cars visualize the traffic levels. Assignment stays inside its time budget on a 500,000 resident test city. Roads can be raised and lowered, with ramps, overpasses and tunnels, so a highway interchange can be built. |
 | M6 | Public transport: buses | M5 | Draw a bus line with stops. Pops choose it when it beats driving. Road volume on the parallel route drops. Fares show in the budget. Bike lanes on a street shift short trips from cars to cycling. Pedestrians walk to stops and shops at street zoom. |
@@ -175,7 +175,7 @@ Your list put Map & Zoning first. I split it. With free-form roads, zoning cells
 | M8 | Services | M4, M5 | Clinics, schools, childcare, fire and police have capacity and network coverage. Parks and recreation raise satisfaction and land value within walking distance. Each changes a number the player can see, such as health, education level or the share of parents who work. |
 | M9 | Utilities | M8 | Power, water and sewage plants are placed on the map and add capacity, with no grid to draw. A shortage lowers demand across the city. Pollution from plants feeds land value and satisfaction. |
 | M10 | Multiplayer | M4 minimum | Two browsers edit one city through a server. Roles work. A third player joins mid-game and sees the same city. The project owner moves a local city online. No accounts or payments yet. |
-| M11 | Polish and launch | all | Tutorial, sound, the remaining six landmarks, a performance pass against the targets above at 500,000 residents, public link. |
+| M11 | Polish and launch | all | Tutorial, music and the final sound mix, the remaining six landmarks, a performance pass against the targets above at 500,000 residents, public link. |
 
 M10 is listed late but it can start any time after M4. I would run a short spike right after M1. Host the sim in a Node process, connect two tabs and draw roads together. It costs a few days and tells us early if any sim rule broke the architecture.
 
@@ -1324,6 +1324,42 @@ These are not milestones of their own. Each module adds its piece.
 - **Balance data in files.** Costs, capacities and weights live in JSON, not in code, so tuning does not need a developer.
 - **Scale checkpoints.** Each milestone from M3 on is measured on generated test cities of 50,000, 200,000 and 500,000 residents before it closes.
 
+### Sound
+
+Sound is built in three steps, each when the thing it describes exists.
+
+| When | What |
+| --- | --- |
+| Start of M3 | The audio engine, volume settings, and interface sounds for the tools already built |
+| M5 to M8 | Ambient layers, each added by the module that creates its source |
+| M11 | Music, if any, and the final mix |
+
+**Interface sounds.** Short cues for placing a road, painting a zone, bulldozing, a rejected action, money spent, and a milestone reached. They make the tools feel responsive, which is why they come early.
+
+**Ambience.** What you hear follows what is on screen and how far out the camera is.
+
+| Layer | Heard when | Arrives in |
+| --- | --- | --- |
+| Wind and open air | Always, strongest in the city zoom band | M3 |
+| Construction | A building goes up in view | M3 |
+| Traffic | Roads in view carry cars, louder with volume and congestion | M5 |
+| Industry | Factories in view | M5 |
+| Buses, trams and trains | One passes in view | M6, M7 |
+| Street life | Pedestrians in view, most in dense and mixed districts | M6 |
+| Birds and leaves | Parks and natural areas in view | M8 |
+| Water | Shoreline in view | M8 |
+| City hum | The district zoom band, scaled by how dense the view is | M5 |
+
+At street zoom the layers are distinct and placed left or right by where their source sits on screen. Pulling out blends them into the hum, and at city zoom only wind and a faint hum remain.
+
+How it is built:
+
+- **In the client only.** Sound never touches the sim, so it cannot affect replays or a shared city. Each player hears their own view.
+- **Web Audio.** Browsers block audio until the player first clicks, so sound starts on the first interaction.
+- **A small number of voices.** A cap on how many sounds play at once keeps the cost low.
+- **Settings.** Separate volumes for interface, ambience and music, and a mute. The choice is remembered.
+- **Generated in code where that is good enough.** Interface cues and simple layers such as wind, hum and traffic are synthesised, which keeps them MIT and the download small. Layers that synthesis does badly, such as birds and voices, would need recordings under a licence that allows it.
+
 ### After v1
 
 Policies and districts fit the name. A council vote on a tax change or a large spend would be a good multiplayer feature once the base game holds up. Also on the list are construction that takes time and is paid in stages, a visible day and night cycle, a European building theme, subscriptions and billing, garbage collection, terraforming, freight rail, ferries and airports, a region of several cities, and real-world maps.
@@ -1510,6 +1546,8 @@ The repo is MIT licensed, the same licence three.js uses. It is the simplest for
 - [x] Jobs per building for commercial, office, industrial and mixed. Decided at the M2 close-out: the review's table, tuned in play. See "Jobs per building" under M2.
 - [ ] Are the proposed lot sizes for each housing type right? See the table under M2. The same goes for the commercial, office, industrial and mixed types M2-09 proposed in the table after it. With zoning six cells deep, no R1 or M1 type reaches the 6th row back from the road and no C1 or O1 type the 5th or 6th, so those rows stay empty. The overlay does not hatch them (see "Lot marks" under M2).
 - [x] Which machines are the reference for Low and Balanced? Decided at the M2 close-out (#147), as classes rather than named computers: for Low, a laptop of about 2019 with integrated graphics (Intel UHD 620 class) and 8 GB of memory; for Balanced, an Apple M1 laptop or a desktop with a GTX 1660 class card. Frame times on those classes are taken whenever such a machine is to hand; until then they are recorded on the CI machine, and every number names the machine it came from.
+- [ ] Does the game have music? Generated ambient music is possible but hard to make good. No music with strong ambience is a fair v1.
+- [ ] May sound use recordings under a free licence, or must it all be generated in code like the models?
 - [ ] How large may a command's payload be? Nothing limits it today. The sim refuses a payload that is not plain JSON, but one of any size is accepted, logged and kept in every save and city file from then on. That is fine while the only sender is the player's own page. It needs a byte cap in `validateCommand` before a server takes commands from other people, so settle the number by the two-tab spike.
 
 ## Sources
