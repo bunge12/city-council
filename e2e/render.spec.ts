@@ -43,8 +43,9 @@ for (const { name, url, backend } of [
   test(`the whole map renders in chunks (${name})`, async ({ page }, testInfo) => {
     const status = await ready(page, url);
     expect(status.backend).toMatch(backend);
-    // M0 exit test: the map is on screen within 5 seconds of opening the page.
-    expect(status.readyMs).toBeLessThan(5000);
+    // readyMs is printed below, not held to the M0 exit test's 5 seconds. This
+    // is a headless copy of walkthrough.spec.ts step 1 without the throttled
+    // line, and on a slow CI runner it left 1.7 times headroom (issue #154).
     // A new city opens on an outside connection (issue M1-16). Look at the whole map.
     await setCamera(page, WHOLE_MAP.position, WHOLE_MAP.target);
     await expect(page.locator("#render-backend")).toHaveText(status.backend === "webgpu" ? "WebGPU" : "WebGL 2");

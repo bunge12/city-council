@@ -57,6 +57,15 @@ const MAP_METRES = 12_000;
 const CHUNKS = 24 * 24;
 /** M0 exit test step 1: the map is on screen within this long of opening the page. */
 const LOAD_BUDGET_MS = 5000;
+/**
+ * Whether step 1 holds the cold load to LOAD_BUDGET_MS. Pull request CI sets
+ * E2E_LOAD_BUDGET=report: there the slowest runners leave the WebGL 2 load
+ * about 1.3 times under the budget, less than the spread between runners, so
+ * a failure would say more about the machine than the code (issue #154). The
+ * deploy and nightly runs against the public address, and local runs, hold
+ * it. A load over the budget in report mode is printed and annotated.
+ */
+const ENFORCE_LOAD_BUDGET = process.env["E2E_LOAD_BUDGET"] !== "report";
 /** The page's sky colour, 0xb7cfe0. */
 const SKY = [0xb7, 0xcf, 0xe0] as const;
 /**
@@ -196,11 +205,17 @@ for (const variant of [
       expect(lods.reduce((a, b) => a + b, 0)).toBe(CHUNKS);
       // Measured from navigation start in the page, and from the test's own
       // clock around the navigation. Both must be inside the budget.
-      expect(load.readyMs).toBeLessThan(LOAD_BUDGET_MS);
-      expect(load.wallMs).toBeLessThan(LOAD_BUDGET_MS);
       const note = `cold load on 25 Mbit/s, 20 ms: map ready at ${load.readyMs.toFixed(0)} ms in the page, ${load.wallMs} ms around the navigation (${render?.backend}, seed ${opened.city.seed})`;
       info.annotations.push({ type: "cold load", description: note });
       console.log(`${variant.name}: ${note}`);
+      if (ENFORCE_LOAD_BUDGET) {
+        expect(load.readyMs).toBeLessThan(LOAD_BUDGET_MS);
+        expect(load.wallMs).toBeLessThan(LOAD_BUDGET_MS);
+      } else if (Math.max(load.readyMs, load.wallMs) >= LOAD_BUDGET_MS) {
+        const over = `cold load over the ${LOAD_BUDGET_MS} ms budget, reported only (E2E_LOAD_BUDGET=report)`;
+        info.annotations.push({ type: "over budget", description: over });
+        console.log(`${variant.name}: ${over}`);
+      }
 
       // A new city opens on an outside connection (issue M1-16). From here
       // on the walkthrough looks at the whole map, as M0 did.

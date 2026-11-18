@@ -140,9 +140,10 @@ test("the same forest edge at each preset: no shadows, shadows near the camera, 
     await page.goto(`/?${query}preset=${preset}`);
     const status = await ready(page);
     testInfo.annotations.push({ type: `${preset} backend`, description: status.backend });
-    // The M0 number: the map is on screen within 5 seconds, whatever the preset.
-    // The first frame is lit as Low and waits for no shadow shaders.
-    expect(status.readyMs, `${preset}: first frame with terrain`).toBeLessThan(5000);
+    // The first frame is lit as Low and waits for no shadow shaders, so it
+    // comes as soon at every preset. Printed, not held to the M0 exit test's
+    // 5 seconds: walkthrough.spec.ts step 1 is that test (issue #154).
+    console.log(`${preset}: first frame with terrain at ${status.readyMs.toFixed(0)} ms (${status.backend})`);
     await presetSettled(page);
     await expect(page.locator("#graphics-preset")).toHaveValue(preset);
     target = await lookAtForestEdge(page, 60, 120);
