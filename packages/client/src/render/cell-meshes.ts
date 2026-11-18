@@ -13,7 +13,12 @@
 //
 // Zoom bands (PRD, "Zoom bands"): the street and district bands show each
 // cell's lines; the city band shows flat colour with no lines, so an
-// unzoned cell, which is only an outline, is not drawn there.
+// unzoned cell, which is only an outline, is not drawn there. Every chunk is
+// in view from city height, so the city band has meshes of its own (issue
+// #133): a quad per straight run of zoned cells of one colour
+// (cell-geometry.ts, `buildCityCells`), made with the chunk's detailed mesh
+// from the same read of the mirror, and the runs of `CELLS.cityGroup` ×
+// `cityGroup` chunks joined into one mesh.
 //
 // Free zoned ground where no building type fits (issue M2-15) is hatched
 // with diagonal stripes in the street and district bands. The marks come
@@ -23,11 +28,11 @@
 // so the colours are the same at every graphics preset and match the legend.
 // The renderer reads the mirror; it never writes it.
 
-import { attribute, cameraPosition, float, fract, fwidth, max, min, mix, positionLocal, sRGBTransferEOTF, step, uniform, vec3, vec4 } from "three/tsl";
+import { attribute, cameraPosition, float, fract, fwidth, max, min, mix, positionLocal, sRGBTransferEOTF, step, vec3, vec4 } from "three/tsl";
 import { BufferAttribute, BufferGeometry, DoubleSide, Group, Mesh, MeshBasicNodeMaterial, type Object3D } from "three/webgpu";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE, type ChunkCellShapes } from "@city-council/sim";
 import type { ZoomBand } from "../camera/zoom-band";
-import { buildCellChunk, type CellArrays } from "./cell-geometry";
+import { buildCellChunk, buildCityCells, type CellArrays, type CityCellArrays } from "./cell-geometry";
 import { CELLS } from "./config";
 
 /** Where the overlay reads cells from: the mirror's copy of state. */
@@ -53,6 +58,9 @@ export interface CellStats {
   unzoned: number;
   /** Zoned cells hatched because no building type fits there. */
   marked: number;
+  /** The city band's quads, each a run of zoned cells, and its meshes, each a group of chunks. */
+  cityRuns: number;
+  cityGroups: number;
   /** Chunks waiting to be built. */
   pending: number;
   /**
@@ -87,9 +95,8 @@ export interface CellLayer {
 /** Furthest a vertex moves in the shader, in metres, so frustum culling allows for it. */
 const SHADER_REACH = 20;
 
-/** The overlay's material, and the uniform that is 1 where cells show their lines and 0 in the city band. */
-function overlayMaterial() {
-  const lines = uniform(1);
+/** The overlay's material in the street and district bands, with each cell's lines. */
+function overlayMaterial(): MeshBasicNodeMaterial {
   const m = new MeshBasicNodeMaterial();
   m.name = "zoning cells";
   const distance = cameraPosition.distance(positionLocal);
@@ -100,7 +107,7 @@ function overlayMaterial() {
   // never more than a share of a cell drawn only a few pixels wide.
   const reach = min(fwidth(at).mul(CELLS.linePx), float(CELLS.lineMaxShare));
   const edge = min(at, at.oneMinus());
-  const line = max(step(edge.x, reach.x), step(edge.y, reach.y)).mul(lines);
+  const line = max(step(edge.x, reach.x), step(edge.y, reach.y));
   // A zoned cell's lines are a darker shade of it. An unzoned cell is its outline alone.
   const zoned = fill.a;
   // The colours are sRGB bytes, as the config writes them. The renderer works in linear light.
@@ -110,14 +117,77 @@ function overlayMaterial() {
   const mark = attribute<"float">("cellMark", "float");
   const stripe = step(fract(positionLocal.x.add(positionLocal.z).div(CELLS.noLot.stripeMetres)), float(CELLS.noLot.stripeShare));
   const hatch = sRGBTransferEOTF(vec3(...hexRgb(CELLS.noLot.colour))) as unknown as typeof fill.rgb;
-  const colour = mix(shaded, hatch, stripe.mul(mark).mul(lines).mul(line.oneMinus()));
+  const colour = mix(shaded, hatch, stripe.mul(mark).mul(line.oneMinus()));
   m.colorNode = vec4(colour, max(zoned, line));
   m.alphaTest = 0.5;
   m.side = DoubleSide;
   m.polygonOffset = true;
   m.polygonOffsetFactor = -1;
   m.polygonOffsetUnits = -1;
-  return { material: m, lines };
+  return m;
+}
+
+/** The overlay's material in the city band: flat colour, lifted as the detailed cells are. */
+function cityMaterial(): MeshBasicNodeMaterial {
+  const m = new MeshBasicNodeMaterial();
+  m.name = "zoning cells, city band";
+  const distance = cameraPosition.distance(positionLocal);
+  m.positionNode = positionLocal.add(vec3(0, distance.mul(CELLS.lift.perMetre).add(CELLS.lift.base), 0));
+  const fill = attribute<"vec4">("cellFill", "vec4");
+  m.colorNode = vec4(sRGBTransferEOTF(fill.rgb) as unknown as typeof fill.rgb, 1);
+  m.side = DoubleSide;
+  m.polygonOffset = true;
+  m.polygonOffsetFactor = -1;
+  m.polygonOffsetUnits = -1;
+  return m;
+}
+
+/** Chunks a side of a city band group, and groups a side of the map. */
+const CITY_GROUP = CELLS.cityGroup;
+const CITY_GROUPS_PER_SIDE = Math.ceil(CHUNKS_PER_SIDE / CITY_GROUP);
+
+/** The city band group chunk `c` is drawn in. */
+export function cityGroupOf(c: number): number {
+  const ci = c % CHUNKS_PER_SIDE;
+  const cj = (c - ci) / CHUNKS_PER_SIDE;
+  return Math.floor(cj / CITY_GROUP) * CITY_GROUPS_PER_SIDE + Math.floor(ci / CITY_GROUP);
+}
+
+/** The chunks of city band group `g`. */
+function chunksOfGroup(g: number): number[] {
+  const gi = g % CITY_GROUPS_PER_SIDE;
+  const gj = (g - gi) / CITY_GROUPS_PER_SIDE;
+  const out: number[] = [];
+  for (let cj = gj * CITY_GROUP; cj < Math.min(CHUNKS_PER_SIDE, (gj + 1) * CITY_GROUP); cj++) {
+    for (let ci = gi * CITY_GROUP; ci < Math.min(CHUNKS_PER_SIDE, (gi + 1) * CITY_GROUP); ci++) out.push(cj * CHUNKS_PER_SIDE + ci);
+  }
+  return out;
+}
+
+/** Several chunks' city band runs as one geometry, or null for none. */
+function cityGeometryOf(parts: readonly CityCellArrays[]): BufferGeometry | null {
+  let runs = 0;
+  for (const p of parts) runs += p.runs;
+  if (runs === 0) return null;
+  const positions = new Float32Array(runs * 12);
+  const fills = new Uint8Array(runs * 16);
+  const indices = runs * 4 > 0xffff ? new Uint32Array(runs * 6) : new Uint16Array(runs * 6);
+  let v = 0;
+  let i = 0;
+  for (const p of parts) {
+    positions.set(p.positions, v * 3);
+    fills.set(p.fills, v * 4);
+    for (let k = 0; k < p.indices.length; k++) indices[i + k] = v + (p.indices[k] ?? 0);
+    v += p.runs * 4;
+    i += p.indices.length;
+  }
+  const g = new BufferGeometry();
+  g.setAttribute("position", new BufferAttribute(positions, 3));
+  g.setAttribute("cellFill", new BufferAttribute(fills, 4, true));
+  g.setIndex(new BufferAttribute(indices, 1));
+  g.computeBoundingSphere();
+  if (g.boundingSphere) g.boundingSphere.radius += SHADER_REACH;
+  return g;
 }
 
 /** Chunk `c` and the up to eight chunks around it. */
@@ -161,13 +231,28 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
   root.name = "zoning cells";
   root.visible = false;
   parent.add(root);
-  const { material, lines } = overlayMaterial();
+  /** The street and district bands' meshes, one per chunk, and the city band's, one per group of chunks. */
+  const detail = new Group();
+  detail.name = "zoning cells by chunk";
+  const city = new Group();
+  city.name = "zoning cells, city band";
+  city.visible = false;
+  root.add(detail, city);
+  const material = overlayMaterial();
+  const coarse = cityMaterial();
   const chunks: (ChunkMesh | null)[] = new Array<ChunkMesh | null>(CHUNKS_PER_SIDE * CHUNKS_PER_SIDE).fill(null);
+  /** Each chunk's city band runs, kept to join into its group's mesh. */
+  const cityParts: (CityCellArrays | null)[] = new Array<CityCellArrays | null>(chunks.length).fill(null);
+  const cityMeshes = new Map<number, Mesh>();
+  /** Groups whose mesh is to be joined again from their chunks' runs. */
+  const cityDirty = new Set<number>();
   /** Chunks that changed while the overlay was hidden, or every chunk before it was first built. */
   const dirty = new Set<number>(chunks.keys());
-  let stats: CellStats = { visible: false, chunks: 0, zoned: 0, unzoned: 0, marked: 0, pending: dirty.size, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0 };
+  let stats: CellStats = { visible: false, chunks: 0, zoned: 0, unzoned: 0, marked: 0, cityRuns: 0, cityGroups: 0, pending: dirty.size, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0 };
 
   function clear(c: number): void {
+    if (cityParts[c]) cityDirty.add(cityGroupOf(c));
+    cityParts[c] = null;
     const old = chunks[c];
     if (!old) return;
     old.mesh.removeFromParent();
@@ -175,12 +260,48 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     chunks[c] = null;
   }
 
+  function clearGroup(g: number): void {
+    const old = cityMeshes.get(g);
+    if (!old) return;
+    old.removeFromParent();
+    old.geometry.dispose();
+    cityMeshes.delete(g);
+  }
+
+  /** Joins a group's runs into its city band mesh again. */
+  function buildGroup(g: number): void {
+    clearGroup(g);
+    const parts: CityCellArrays[] = [];
+    for (const c of chunksOfGroup(g)) {
+      const p = cityParts[c];
+      if (p) parts.push(p);
+    }
+    const geometry = cityGeometryOf(parts);
+    if (!geometry) return;
+    const mesh = new Mesh(geometry, coarse);
+    const gi = g % CITY_GROUPS_PER_SIDE;
+    mesh.name = `city cells ${gi},${(g - gi) / CITY_GROUPS_PER_SIDE}`;
+    mesh.matrixAutoUpdate = false;
+    mesh.renderOrder = 1.5;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.userData["runs"] = parts.reduce((n, p) => n + p.runs, 0);
+    city.add(mesh);
+    cityMeshes.set(g, mesh);
+  }
+
   function build(c: number): void {
     clear(c);
     const shapes = source.shapes(c);
     const cells = source.cells();
     if (!shapes || !cells || shapes.slots.length === 0) return;
-    const arrays = buildCellChunk(shapes, cells.zone, cells.density, height, source.built?.() ?? null, source.marks?.(c) ?? null);
+    const built = source.built?.() ?? null;
+    const runs = buildCityCells(shapes, cells.zone, cells.density, height, built);
+    if (runs.runs > 0) {
+      cityParts[c] = runs;
+      cityDirty.add(cityGroupOf(c));
+    }
+    const arrays = buildCellChunk(shapes, cells.zone, cells.density, height, built, source.marks?.(c) ?? null);
     const geometry = geometryOf(arrays);
     if (!geometry) return;
     const mesh = new Mesh(geometry, material);
@@ -190,7 +311,7 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     mesh.renderOrder = 1.5;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
-    root.add(mesh);
+    detail.add(mesh);
     chunks[c] = { mesh, zoned: arrays.zoned, unzoned: arrays.unzoned, marked: arrays.marked };
   }
 
@@ -198,7 +319,7 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
   let batch = 0;
   let batchMs = 0;
 
-  function count(): Pick<CellStats, "chunks" | "zoned" | "unzoned" | "marked"> {
+  function count(): Pick<CellStats, "chunks" | "zoned" | "unzoned" | "marked" | "cityRuns" | "cityGroups"> {
     let n = 0;
     let zoned = 0;
     let unzoned = 0;
@@ -210,7 +331,9 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
       unzoned += c.unzoned;
       marked += c.marked;
     }
-    return { chunks: n, zoned, unzoned, marked };
+    let cityRuns = 0;
+    for (const m of cityMeshes.values()) cityRuns += Number(m.userData["runs"] ?? 0);
+    return { chunks: n, zoned, unzoned, marked, cityRuns, cityGroups: cityMeshes.size };
   }
 
   /**
@@ -234,6 +357,9 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
       build(c);
       built++;
     }
+    // Joining a group's runs is cheap beside reading a chunk: every group a built chunk touched is joined again in the same frame, so the two bands never disagree.
+    for (const g of cityDirty) buildGroup(g);
+    cityDirty.clear();
     batch += built;
     batchMs += performance.now() - start;
     stats = { ...stats, ...count(), pending: dirty.size, totalRebuilt: stats.totalRebuilt + built };
@@ -263,13 +389,16 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     },
     update,
     setBand(band) {
-      lines.value = band === "city" ? 0 : 1;
+      detail.visible = band !== "city";
+      city.visible = band === "city";
     },
     stats: () => stats,
     dispose() {
       for (let c = 0; c < chunks.length; c++) clear(c);
+      for (const g of [...cityMeshes.keys()]) clearGroup(g);
       root.removeFromParent();
       material.dispose();
+      coarse.dispose();
     },
   };
 }
