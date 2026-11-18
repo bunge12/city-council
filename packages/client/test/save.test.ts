@@ -21,6 +21,7 @@ import { SAVES_CHANNEL, parseSaveRequest, type FromSaver, type SaveStatus } from
 import { cityFileName, cityNameFromFile, uniqueCityName, wantsExportReminder } from "../src/save/city-file";
 import { NEW_CITY_SEED } from "../src/save/config";
 import { openLatestCity } from "../src/save/load";
+import { SaveClient } from "../src/save/page";
 import { cityFromWorkerName, cityLockName, claimCity, workerName, type LockManagerLike } from "../src/save/lock";
 import { Saver } from "../src/save/saver";
 import { CityStore, type CityMeta } from "../src/save/store";
@@ -169,6 +170,49 @@ describe("openLatestCity", () => {
     expect(city.id).not.toBe("a");
     expect(city.problem).toMatch(/Could not open "a"\. This save is damaged/);
     expect(await store.read("a")).toEqual(before);
+  });
+
+  // The page generates its terrain from this seed while the worker does (#203).
+  describe("names the seed it opens before the city is made", () => {
+    it("for a new city", async () => {
+      const seeds: number[] = [];
+      const city = await openLatestCity(await openStore(), nextId, null, (seed) => seeds.push(seed));
+      expect(seeds).toEqual([NEW_CITY_SEED]);
+      expect(city.state.seed).toBe(NEW_CITY_SEED);
+    });
+
+    it("for a saved city, from its listing", async () => {
+      const store = await openStore();
+      await store.save({ ...meta("a", 10, 1), seed: 9 }, snapshotAt(10, 9));
+      const seeds: number[] = [];
+      const city = await openLatestCity(store, nextId, null, (seed) => seeds.push(seed));
+      expect(seeds).toEqual([9]);
+      expect(city.state.seed).toBe(9);
+    });
+
+    it("for both cities when a save cannot be opened and a new one starts", async () => {
+      const store = await openStore();
+      await store.save({ ...meta("a", 10, 1), seed: 9 }, damaged(snapshotAt(10, 9)));
+      const seeds: number[] = [];
+      const city = await openLatestCity(store, nextId, null, (seed) => seeds.push(seed));
+      expect(city.from).toBe("new city");
+      expect(seeds).toEqual([9, NEW_CITY_SEED]);
+    });
+  });
+});
+
+describe("SaveClient", () => {
+  it("hands each opening seed to its listeners, and does not take it for a status", () => {
+    const saves = pair<FromSaver>();
+    const client = new SaveClient(saves.page);
+    const seeds: number[] = [];
+    const statuses: SaveStatus[] = [];
+    client.onOpening((seed) => seeds.push(seed));
+    client.subscribe((status) => statuses.push(status));
+    saves.worker.send({ channel: SAVES_CHANNEL, type: "opening", seed: 42, requestId: null });
+    expect(seeds).toEqual([42]);
+    expect(statuses).toEqual([]);
+    expect(client.status).toBeNull();
   });
 });
 

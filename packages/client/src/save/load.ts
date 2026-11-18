@@ -34,8 +34,15 @@ function reason(error: unknown): string {
 
 const randomId = (): string => crypto.randomUUID();
 
+/**
+ * Told the seed of the city about to open, before its terrain is generated,
+ * so the page can generate its own copy at the same time (#203).
+ */
+export type OpeningSeed = (seed: number) => void;
+
 /** A new city under a fresh id, with a message saying why if there is one. */
-export function newCityFallback(problem: string | null, makeId: () => string = randomId): OpenedCity {
+export function newCityFallback(problem: string | null, makeId: () => string = randomId, opening: OpeningSeed = () => undefined): OpenedCity {
+  opening(NEW_CITY_SEED);
   return {
     id: makeId(),
     name: NEW_CITY_NAME,
@@ -62,14 +69,15 @@ export async function openLatestCity(
   store: CityStore,
   makeId: () => string = randomId,
   preferredId: string | null = null,
+  opening: OpeningSeed = () => undefined,
 ): Promise<OpenedCity> {
   const cities = await store.list();
   const preferred = preferredId === null ? undefined : cities.find((c) => c.id === preferredId);
-  if (preferred) return openCity(store, preferred, makeId);
+  if (preferred) return openCity(store, preferred, makeId, opening);
   // Ties go to the most recently saved, which `list` puts first.
   const meta = cities.reduce<CityMeta | undefined>((best, c) => (!best || lastOpened(c) > lastOpened(best) ? c : best), undefined);
-  if (!meta) return newCityFallback(null, makeId);
-  return openCity(store, meta, makeId);
+  if (!meta) return newCityFallback(null, makeId, opening);
+  return openCity(store, meta, makeId, opening);
 }
 
 interface Decoded {
@@ -102,10 +110,12 @@ async function decode(store: CityStore, id: string, bytes: Uint8Array): Promise<
   return { state: snapshot.state, pagedLog, logPagesStored: count };
 }
 
-async function openCity(store: CityStore, meta: CityMeta, makeId: () => string): Promise<OpenedCity> {
+async function openCity(store: CityStore, meta: CityMeta, makeId: () => string, opening: OpeningSeed): Promise<OpenedCity> {
+  // The host generates the terrain once the save is decoded (prepareDerived).
+  opening(meta.seed);
   const left = `"${meta.name}" was left as it is, and a new city was started.`;
   const snapshots = await store.read(meta.id);
-  if (!snapshots) return newCityFallback(`The save of "${meta.name}" is missing. ${left}`, makeId);
+  if (!snapshots) return newCityFallback(`The save of "${meta.name}" is missing. ${left}`, makeId, opening);
   const opened = (snapshot: Decoded, from: LoadedFrom, problem: string | null) => ({
     id: meta.id,
     name: meta.name,
@@ -117,7 +127,7 @@ async function openCity(store: CityStore, meta: CityMeta, makeId: () => string):
     return opened(await decode(store, meta.id, snapshots.latest), "latest save", null);
   } catch (error) {
     if (error instanceof SnapshotError && error.code === "newer-version") {
-      return newCityFallback(`Could not open "${meta.name}". ${error.message} ${left}`, makeId);
+      return newCityFallback(`Could not open "${meta.name}". ${error.message} ${left}`, makeId, opening);
     }
     const latestProblem = reason(error);
     if (snapshots.previous) {
@@ -134,9 +144,10 @@ async function openCity(store: CityStore, meta: CityMeta, makeId: () => string):
           `Could not open "${meta.name}". ${latestProblem} The save before it could not be used either. ` +
             `${reason(previousError)} ${left}`,
           makeId,
+          opening,
         );
       }
     }
-    return newCityFallback(`Could not open "${meta.name}". ${latestProblem} ${left}`, makeId);
+    return newCityFallback(`Could not open "${meta.name}". ${latestProblem} ${left}`, makeId, opening);
   }
 }

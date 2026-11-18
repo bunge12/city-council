@@ -2,7 +2,7 @@
 // worker's clock and saves it on an interval and when the page asks. City
 // file downloads and imports go through the saver too.
 import { AUTOSAVE_INTERVAL_MS } from "../save/config";
-import { isSaveMessage } from "../save/channel";
+import { SAVES_CHANNEL, isSaveMessage, type FromSaver } from "../save/channel";
 import { newCityFallback, openLatestCity, type OpenedCity } from "../save/load";
 import { cityFromWorkerName, claimCity } from "../save/lock";
 import { Saver } from "../save/saver";
@@ -15,18 +15,19 @@ const port = self as unknown as MessagePortLike;
 // The page asks for a snapshot as soon as it starts, before the save has
 // loaded. Hold its messages until the host and saver are listening.
 const simTransport = bufferUntilListening(portTransport(port, (data) => !isSaveMessage(data)));
-const saveTransport = bufferUntilListening(portTransport(port, isSaveMessage));
+const saveTransport = bufferUntilListening(portTransport<FromSaver, unknown>(port, isSaveMessage));
 
 async function start(): Promise<void> {
   let store: CityStore | null = null;
   let storeError: string | undefined;
   let city: OpenedCity;
+  const opening = (seed: number): void => saveTransport.send({ channel: SAVES_CHANNEL, type: "opening", seed, requestId: null });
   try {
     store = await CityStore.open();
-    city = await openLatestCity(store, undefined, cityFromWorkerName(self.name));
+    city = await openLatestCity(store, undefined, cityFromWorkerName(self.name), opening);
   } catch (error) {
     storeError = `saved cities could not be opened (${error instanceof Error ? error.message : String(error)})`;
-    city = newCityFallback(`Saved cities could not be opened, so a new city was started. ${storeError}.`);
+    city = newCityFallback(`Saved cities could not be opened, so a new city was started. ${storeError}.`, undefined, opening);
   }
 
   // One tab per city: without the lock this worker hosts nothing, and the
