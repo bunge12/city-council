@@ -27,7 +27,7 @@ The player is someone who likes Cities: Skylines and wants to build a city with 
 
 **Readable over realistic.** Every number the sim produces must be explainable in an overlay or a tooltip. We prefer a simple model the player can reason about to an accurate one they cannot.
 
-**Built for a browser tab.** The game has to load fast, run on a laptop with integrated graphics, and survive a refresh. That rules out per-citizen simulation and pushes us toward pops and aggregate flows.
+**Built for a browser tab.** The game has to open without a long wait, run on a laptop with integrated graphics, and survive a refresh. That rules out per-citizen simulation and pushes us toward pops and aggregate flows.
 
 **Co-op by default.** Every feature is designed as if multiple people were editing the same city, even before multiplayer ships. That means no hidden local state, no actions that only make sense for one cursor, and an activity log from day one.
 
@@ -68,17 +68,29 @@ v1 is done when two people can open a link, build a working city of 500,000 resi
 
 ### Proposed targets
 
-These are starting numbers to tune, not measurements.
+These are starting numbers to tune, not measurements. The buildable map is 12 km × 12 km.
+
+The targets come in two kinds, and they are held differently (#197). In a shared city every player waits on the slowest tick and on the round trip of an edit, so the sim and multiplayer targets are hard. No client feature may be paid for with sim time, and a system over its share of the tick is fixed before the next module starts. The client targets are softer. Most games, native or in a browser, take 15 seconds to a minute to open a large world behind a loading screen, and a 500,000 resident city with sound, demand and transport may need the same. That is acceptable as long as the game stays playable on the weakest reference machine once it is open. A client target that is missed gets an issue, not a stop.
+
+Sim and multiplayer, hard:
 
 | Area | Target |
 | --- | --- |
-| Frame rate | At 500,000 residents, 30 fps minimum on a 2022 laptop with integrated graphics at the Low preset, and 60 fps at Balanced on a recent laptop |
-| Cold load | Under 5 s to an interactive map on broadband, with detail still filling in after that |
-| Map size | 12 km × 12 km buildable area |
-| Sim tick | 10 ticks per second at 1x speed, under 20 ms of worker time per tick |
-| Players per city | 8 editing at once |
+| Sim tick | 10 ticks per second at 1x speed, under 20 ms of worker time per tick at 500,000 residents |
 | Edit latency | A placed road is visible to other players within 250 ms |
-| Save size | Under 10 MB compressed for a 500,000 resident city |
+| Players per city | 8 editing at once |
+| Save size | Under 10 MB compressed for a 500,000 resident city. A player who joins downloads it |
+
+Client, soft:
+
+| Area | Target |
+| --- | --- |
+| Frame rate | At 500,000 residents, 30 fps minimum at Low on the Low reference class, and 60 fps at Balanced on the Balanced class. The classes are under the open questions |
+| New city | Under 5 s from opening the page to an interactive map on broadband, with detail still filling in after that. Measured at about 1 s since M0, and the walkthrough holds it |
+| Opening a large city | A saved, loaded or joined city of 500,000 residents is interactive within 30 s on broadband on the Low class, behind a loading screen that shows progress |
+| Tab memory | About 500 MB at 500,000 residents |
+
+Frame rate and memory are what keep weaker machines playable, so they are not traded for looks. Heavier visuals go in Balanced or High (see "Graphics presets"). Load time is what may grow as the game gets richer.
 
 ## Business model
 
@@ -1422,7 +1434,7 @@ Three things can blow the budget, and each has a known answer.
 - **Traffic assignment.** It grows with the number of origin and destination pairs. Group buildings into traffic zones, re-route only affected pairs, and run it in its own worker thread.
 - **State transfer.** Sending the whole city to the main thread every tick would stall it. Send deltas for what changed, and share large read-only buffers with the renderer where the browser allows it.
 
-The debug panel from M0 shows per-system tick time. A system that exceeds its share of the 20 ms tick budget gets fixed before the next module starts.
+The debug panel from M0 shows per-system tick time. A system that exceeds its share of the 20 ms tick budget gets fixed before the next module starts. Load time does not block a milestone in the same way: a city that opens slower than its target gets an issue.
 
 ### What 500,000 residents changes
 
@@ -1431,7 +1443,7 @@ A city ten times larger does not need a different architecture, but four parts h
 - **The map is chunked.** The 12 km map is cut into chunks of about 500 m. Rendering, spatial lookups, dirty tracking and network deltas all work per chunk. Only chunks near the camera hold full geometry.
 - **Buildings have levels of detail.** Near the camera a building is an instanced mesh with a facade. Within a couple of kilometres it is the same model without its small parts, merged per chunk, and beyond that a plain box. Cars, trains and street detail are drawn only near the camera.
 - **Slow systems run off the tick.** Traffic assignment, land value and coverage each run in a background worker on a copy of the data they need, and post results back. Each job starts on a set tick and its result is applied on a set later tick, waiting if the worker has not finished. A replay then gives the same city however fast the machine is. The tick itself only moves pops, grows buildings and counts money.
-- **Joining streams the city.** A late joiner gets the chunks around their camera first and the rest in the background, so a large city opens in seconds and not after one long download.
+- **Joining loads the city behind the loading screen.** A player who joins downloads the whole snapshot, under 10 MB compressed, which takes a few seconds on broadband, and opens it the way a local save opens. Until #197 the plan was to stream the chunks around their camera first and the rest after, so a large city opened in seconds. With up to 30 s allowed to open a large city, that is kept in reserve for if the M10 spike finds a join misses the target.
 
 Memory is the quiet limit. Budget about 500 MB for the tab at full size and track it in the soak test.
 
@@ -1467,7 +1479,9 @@ The game picks a preset on first run from a short benchmark, and the player can 
 
 Two rules keep the presets honest. Every visual feature states which preset turns it on, so nothing expensive lands in Low by accident. And no preset changes the sim, so players on different presets in one shared city see the same city.
 
-Loading follows one rule, which is to show something fast and then refine. Terrain appears first, buildings fill in by chunk from the camera outward, and costlier shaders compile in the background and switch on when ready.
+Loading follows one rule: the page shows progress at once and never sits blank or frozen. A new city needs no loading screen. Terrain appears first, buildings fill in by chunk from the camera outward, and costlier shaders compile in the background and switch on when ready. A large city may take longer to open (see "Proposed targets"). Then a loading screen with a progress bar covers reading the snapshot, building the derived structures and the meshes for the start view. Whatever the start view does not need, such as distant chunks and the costlier shaders, still fills in after the city is interactive. The loading screen is no reason to wait on work that could run in the background, and it changes nothing in the sim.
+
+No loading screen exists yet. M3-20 records how long each scale city takes to open. The first that takes more than about 2 s gets an issue for the screen, and one over 30 s gets an issue of its own.
 
 How it works since M2-02:
 

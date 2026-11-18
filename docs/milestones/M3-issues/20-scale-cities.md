@@ -29,7 +29,7 @@ Three generated cities exist to measure every milestone on from here. See "Scale
 - [ ] The bench records, for each city: pops, buildings, snapshot size, the time per system and the worst tick over two game days. The table is in the pull request
 - [ ] Anything over its share of the 20 ms tick has an issue
 - [ ] The soak run passes on the 200,000 city, or the pull request says what stops it and links the issue
-- [ ] The three city files load in the browser, with the load time of each in the pull request
+- [ ] The three city files load in the browser, with the load time of each in the pull request against "Opening a large city" under "Proposed targets" in the PRD. If any takes more than about 2 s, there is an issue for a loading screen, and any over 30 s has an issue of its own
 
 ## Notes
 
