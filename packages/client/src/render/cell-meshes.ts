@@ -43,8 +43,8 @@ export interface CellSource {
   cells(): { zone: ArrayLike<number>; density: ArrayLike<number> } | null;
   /** By the same slots, the building on each cell or -1, or null for none at all. Cells with a building are not drawn. */
   built?(): ArrayLike<number> | null;
-  /** By the order of `shapes(chunk)`, 1 for a cell where no building type fits, hatched. Null for none. */
-  marks?(chunk: number): ArrayLike<number> | null;
+  /** By the order of `shapes`, which `shapes(chunk)` just gave, 1 for a cell where no building type fits, hatched. Null for none. */
+  marks?(chunk: number, shapes: ChunkCellShapes): ArrayLike<number> | null;
 }
 
 /** What the overlay reports, for the debug panel and tests. */
@@ -72,6 +72,18 @@ export interface CellStats {
   lastRebuilt: number;
   totalRebuilt: number;
   lastBuildMs: number;
+  /**
+   * The time the first chunk the layer built spent on its lot marks, and
+   * the first frame that built chunks spent on them (issue #164). Each pays
+   * once for indexes the sim builds on first use, on the mirror: the cell
+   * index on the first frame (issue #163), the block index on the first
+   * lot marks.
+   */
+  firstMarksMs: number;
+  firstFrameMs: number;
+  /** The longest any later chunk's lot marks took, and any later frame spent building chunks. All four start again on `reset`. */
+  slowestMarksMs: number;
+  slowestFrameMs: number;
 }
 
 export interface CellLayer {
@@ -248,7 +260,7 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
   const cityDirty = new Set<number>();
   /** Chunks that changed while the overlay was hidden, or every chunk before it was first built. */
   const dirty = new Set<number>(chunks.keys());
-  let stats: CellStats = { visible: false, chunks: 0, zoned: 0, unzoned: 0, marked: 0, cityRuns: 0, cityGroups: 0, pending: dirty.size, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0 };
+  let stats: CellStats = { visible: false, chunks: 0, zoned: 0, unzoned: 0, marked: 0, cityRuns: 0, cityGroups: 0, pending: dirty.size, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0, firstMarksMs: 0, firstFrameMs: 0, slowestMarksMs: 0, slowestFrameMs: 0 };
 
   function clear(c: number): void {
     if (cityParts[c]) cityDirty.add(cityGroupOf(c));
@@ -290,6 +302,10 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     cityMeshes.set(g, mesh);
   }
 
+  /** Whether no chunk has been built since the layer was made or reset, so the next chunk and frame are the first. */
+  let firstMarks = true;
+  let firstFrame = true;
+
   function build(c: number): void {
     clear(c);
     const shapes = source.shapes(c);
@@ -301,7 +317,13 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
       cityParts[c] = runs;
       cityDirty.add(cityGroupOf(c));
     }
-    const arrays = buildCellChunk(shapes, cells.zone, cells.density, height, built, source.marks?.(c) ?? null);
+    const marksStart = performance.now();
+    const marks = source.marks?.(c, shapes) ?? null;
+    const marksMs = performance.now() - marksStart;
+    if (firstMarks) stats = { ...stats, firstMarksMs: marksMs };
+    else if (marksMs > stats.slowestMarksMs) stats = { ...stats, slowestMarksMs: marksMs };
+    firstMarks = false;
+    const arrays = buildCellChunk(shapes, cells.zone, cells.density, height, built, marks);
     const geometry = geometryOf(arrays);
     if (!geometry) return;
     const mesh = new Mesh(geometry, material);
@@ -360,9 +382,12 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     // Joining a group's runs is cheap beside reading a chunk: every group a built chunk touched is joined again in the same frame, so the two bands never disagree.
     for (const g of cityDirty) buildGroup(g);
     cityDirty.clear();
+    const frameMs = performance.now() - start;
     batch += built;
-    batchMs += performance.now() - start;
-    stats = { ...stats, ...count(), pending: dirty.size, totalRebuilt: stats.totalRebuilt + built };
+    batchMs += frameMs;
+    const times = firstFrame ? { firstFrameMs: frameMs } : { slowestFrameMs: Math.max(stats.slowestFrameMs, frameMs) };
+    firstFrame = false;
+    stats = { ...stats, ...count(), ...times, pending: dirty.size, totalRebuilt: stats.totalRebuilt + built };
     if (dirty.size === 0) {
       stats = { ...stats, lastRebuilt: batch, lastBuildMs: batchMs };
       batch = 0;
@@ -371,6 +396,10 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
   }
 
   function markAll(): void {
+    // A snapshot is a new copy of state, whose indexes are built again on first use.
+    firstMarks = true;
+    firstFrame = true;
+    stats = { ...stats, firstMarksMs: 0, firstFrameMs: 0, slowestMarksMs: 0, slowestFrameMs: 0 };
     for (let c = 0; c < chunks.length; c++) dirty.add(c);
     stats = { ...stats, pending: dirty.size };
   }

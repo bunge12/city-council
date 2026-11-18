@@ -139,6 +139,8 @@ const chunks = Array.from({ length: CHUNKS_PER_SIDE * CHUNKS_PER_SIDE }, (_, c) 
   .map((e) => e.c);
 let nextChunk = 0;
 const chunk = (): number => chunks[(nextChunk = (nextChunk + 1) % chunks.length)] ?? 0;
+/** Those chunks' cells as the overlay reads them for a mesh, which it hands on to `lotMarksInChunk` (issue #164). */
+const chunkShapes = new Map(chunks.map((c) => [c, cellShapesInChunk(state, c)]));
 
 const liveBuildings: number[] = [];
 for (let id = 0; id < state.buildings.flags.length; id++) if (state.buildings.flags[id]) liveBuildings.push(id);
@@ -260,7 +262,10 @@ test("the M2 scale town", async ({ bench, annotate }) => {
     },
     "cellsInChunk, a built chunk's cells": () => void cellsInChunk(state, chunk()),
     "cellShapesInChunk, a built chunk's cell corners for the overlay": () => void cellShapesInChunk(state, chunk()),
-    "lotMarksInChunk, a built chunk's lot marks for the overlay": () => void lotMarksInChunk(state, chunk()),
+    "lotMarksInChunk, a built chunk's lot marks for the overlay, from the cells read for its mesh": () => {
+      const c = chunk();
+      lotMarksInChunk(state, c, chunkShapes.get(c));
+    },
     "lotMarkAt, why one cell has no building": () => void lotMarkAt(state, front()),
     "findLot, the lot the grower would take at a cell": () => void findLot(state, front()),
     "lotOptions, every lot that fits at a cell": () => void lotOptions(state, front()),

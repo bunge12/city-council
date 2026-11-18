@@ -19,9 +19,14 @@ interface CellStats {
   chunks: number;
   zoned: number;
   unzoned: number;
+  marked: number;
   lastRebuilt: number;
   totalRebuilt: number;
   lastBuildMs: number;
+  firstMarksMs: number;
+  firstFrameMs: number;
+  slowestMarksMs: number;
+  slowestFrameMs: number;
 }
 declare const window: {
   cityCouncil: {
@@ -359,22 +364,42 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   }
   const city = zonedScaleCity(30_000);
   const backend = await openCity(page, query, "Thirty thousand zoned", city.bytes);
-  // The gaps between frames while it fills in: the longest is how long the page stood still.
-  await page.evaluate(() => {
+  // The overlay goes on in the district band, and the camera pans across
+  // the band while it fills in (issue #164). Every free zoned cell is ground
+  // the lot finder has to look at, and the zones change from one segment to
+  // the next, so there are marks all over. The gaps between frames: the
+  // longest is how long the page stood still.
+  const district = poses.find((p) => p.band === "district");
+  if (!district) throw new Error("no district pose");
+  await setPose(page, district.position, district.target);
+  await frameTime(page, 3);
+  await page.evaluate(async ([position, target]) => {
     const w = window as unknown as { gaps: number[]; recording: boolean };
+    const { rig } = await window.cityCouncil.camera;
     w.gaps = [];
     w.recording = true;
     let last = performance.now();
+    let frame = 0;
     const tick = () => {
       const now = performance.now();
       w.gaps.push(now - last);
       last = now;
+      // 4 km east and back, 40 m a frame, over its first 200 frames.
+      if (frame <= 200) {
+        const dx = 40 * (frame < 100 ? frame : 200 - frame);
+        rig.setPose([position[0] - 2000 + dx, position[1], position[2]], [target[0] - 2000 + dx, target[1], target[2]]);
+      }
+      frame++;
       if (w.recording) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
-  });
+  }, [district.position, district.target] as const);
   const start = Date.now();
-  await overlayOn(page);
+  await page.locator("#view").focus();
+  await page.keyboard.press("k");
+  await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe("true");
+  // Slower than `cellsBuilt` allows: the pan's frames build terrain and trees as well.
+  await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 300_000 });
   const firstShowMs = Date.now() - start;
   const gaps = await page.evaluate(() => {
     const w = window as unknown as { gaps: number[]; recording: boolean };
@@ -384,6 +409,7 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   const longestFramesMs = gaps.slice(0, 3).map((g) => Math.round(g));
   const stats = await cellStats(page);
   expect(stats.zoned).toBe(city.zoned);
+  expect(stats.marked, "cells hatched").toBeGreaterThan(0);
   const overlay: Record<string, number> = {};
   for (const { band, position, target } of poses) {
     await setPose(page, position, target);
@@ -392,7 +418,24 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
     overlay[band] = await frameTime(page, 20);
     await attach(testInfo, `30,000 segments, every cell zoned, ${band} band`, await canvasShot(page));
   }
-  const report = { backend, zonedCells: stats.zoned, unzonedCells: stats.unzoned, chunks: stats.chunks, buildMs: stats.lastBuildMs, firstShowMs, longestFramesMs, framesWhileFilling: gaps.length, plainFrameMs: plain, overlayFrameMs: overlay };
+  const report = {
+    backend,
+    zonedCells: stats.zoned,
+    unzonedCells: stats.unzoned,
+    markedCells: stats.marked,
+    chunks: stats.chunks,
+    buildMs: stats.lastBuildMs,
+    // The first chunk and frame build indexes on the mirror once (CellStats), apart from the rest.
+    firstChunkMarksMs: Math.round(stats.firstMarksMs * 100) / 100,
+    firstOverlayFrameMs: Math.round(stats.firstFrameMs * 100) / 100,
+    slowestChunkMarksMs: Math.round(stats.slowestMarksMs * 100) / 100,
+    slowestOverlayFrameMs: Math.round(stats.slowestFrameMs * 100) / 100,
+    firstShowMs,
+    longestFramesMs,
+    framesWhileFilling: gaps.length,
+    plainFrameMs: plain,
+    overlayFrameMs: overlay,
+  };
   console.log(`30,000 segments, every cell zoned: ${JSON.stringify(report)}`);
   await testInfo.attach("frame times", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
   // As with the roads' scale check (roads.spec.ts): a machine with a GPU
@@ -400,4 +443,7 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   // catches a gross regression, such as one mesh per cell. The numbers are
   // logged above either way.
   for (const { band } of poses) expect(overlay[band] ?? Infinity).toBeLessThan(Math.max(1000 / 55, (plain[band] ?? 0) * 3));
+  // Issue #164: no chunk's lot marks take a frame at 60 fps. They took 50 to 90 ms on the densest chunks here before.
+  // About 2 ms on the development container, so the bound only catches the old cost coming back, not a slow runner.
+  expect(stats.slowestMarksMs).toBeLessThan(16);
 });
