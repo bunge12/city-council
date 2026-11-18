@@ -1,5 +1,5 @@
 {
-  "_about": "Which spec files each Playwright project runs, read by playwright.config.ts and by scripts/e2e-shard.mjs, which deals the chromium project's files out to CI runners. `walkthrough` is a pattern of file names; the rest are lists of them. The chromium project runs every other spec file. `seconds` is how long each chromium file took on a CI runner with one worker, first attempts only, as e2e/file-times-reporter.ts prints them at the end of each runner's log. They come from CI run 43977997350 (16 November 2026), and construction.spec.ts, whose runner was cancelled there, from run 43984776649 (17 November 2026), its first with the 4x tests at Low. building-looks.spec.ts is from run 44334181956 (18 November 2026), on an EPYC 9V45, the fastest runner type. Runners are not all the same speed (issue #152), so a figure is only good to a factor of about two. To bring them up to date, pipe a CI run's logs into `node scripts/e2e-timings.mjs --write` and say here which run they came from. The shard script balances the runners by them. A file not listed counts as `defaultSeconds`.",
+  "_about": "Which spec files each Playwright project runs, read by playwright.config.ts and by scripts/e2e-shard.mjs, which deals the chromium project's files out to CI runners. `walkthrough` is a pattern of file names; the rest are lists of them. The chromium project runs every other spec file. `seconds` is how long each chromium file took on a CI runner with one worker, first attempts only, as e2e/file-times-reporter.ts prints them at the end of each runner's log. They come from CI run 43977997350 (16 November 2026), and construction.spec.ts, whose runner was cancelled there, from run 43984776649 (17 November 2026), its first with the 4x tests at Low. building-looks.spec.ts is from run 44334181956 (18 November 2026), on an EPYC 9V45, the fastest runner type. Runners are not all the same speed (issue #152), so a figure is only good to a factor of about two. To bring them up to date, pipe a CI run's logs into `node scripts/e2e-timings.mjs --write` and say here which run they came from. The shard script balances the runners by them. A file not listed counts as `defaultSeconds`. building-lod-scale.spec.ts, building-lod-scale-balanced.spec.ts and building-lod-overlay.spec.ts are estimates until a CI run times them: issue #217 split the first into the three, and they are their seconds in the development container, times 1.15, the ratio of its time for the old file to a Xeon 8573C runner's.",
   "walkthrough": "walkthrough\\.spec\\.ts$",
   "roads": [
     "roads.spec.ts",
@@ -11,7 +11,9 @@
     "blocks.spec.ts": 34,
     "bridges.spec.ts": 62,
     "building-lod-memory.spec.ts": 241,
-    "building-lod-scale.spec.ts": 617,
+    "building-lod-overlay.spec.ts": 220,
+    "building-lod-scale-balanced.spec.ts": 255,
+    "building-lod-scale.spec.ts": 230,
     "building-lod.spec.ts": 179,
     "building-looks.spec.ts": 255,
     "bulldozer.spec.ts": 106,
