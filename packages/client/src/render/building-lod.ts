@@ -18,7 +18,10 @@
 //   and roof colours, all of a chunk's in one mesh. Chunks further out in
 //   the street and district bands, where a building is a few pixels.
 // - flat: each building a flat block on the ground, coloured by its zone
-//   and density, all of a chunk's in one mesh. The city band.
+//   and density. The city band, where every chunk is in view, so the
+//   blocks of `BUILDINGS.flatGroup` × `flatGroup` chunks share one mesh
+//   (issue #133) and each vertex carries its chunk's slot in the group, by
+//   which the shader reads that chunk's fade.
 //
 // A chunk going from one form to another shows both for `fadeSeconds`,
 // the new one dithered in as the old one dithers out on the pixels it
@@ -28,6 +31,7 @@
 import type { ZoomBand } from "../camera/zoom-band";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "@city-council/sim";
 import { SURFACE, type ModelArrays } from "../theme/model";
+import { BUILDINGS } from "./config";
 
 export type BuildingForm = "full" | "simple" | "box" | "flat";
 
@@ -40,6 +44,41 @@ export function formFor(band: ZoomBand, near: boolean, mid: boolean): BuildingFo
   if (band === "city") return "flat";
   if (band === "street" && near) return "full";
   return mid ? "simple" : "box";
+}
+
+/** Chunks a side of a group of flat blocks, chunks in one, and groups a side of the map. */
+export const FLAT_GROUP = BUILDINGS.flatGroup;
+export const FLAT_SLOTS = FLAT_GROUP * FLAT_GROUP;
+export const FLAT_GROUPS_PER_SIDE = Math.ceil(CHUNKS_PER_SIDE / FLAT_GROUP);
+
+/** The group of flat blocks chunk `c` is drawn in, numbered row by row as chunks are. */
+export function flatGroupOf(c: number): number {
+  const ci = c % CHUNKS_PER_SIDE;
+  const cj = (c - ci) / CHUNKS_PER_SIDE;
+  return Math.floor(cj / FLAT_GROUP) * FLAT_GROUPS_PER_SIDE + Math.floor(ci / FLAT_GROUP);
+}
+
+/** Chunk `c`'s slot in its group, 0 to `FLAT_SLOTS - 1`, row by row. */
+export function flatSlotOf(c: number): number {
+  const ci = c % CHUNKS_PER_SIDE;
+  const cj = (c - ci) / CHUNKS_PER_SIDE;
+  return (cj % FLAT_GROUP) * FLAT_GROUP + (ci % FLAT_GROUP);
+}
+
+/**
+ * The slot attribute of a group's merged blocks: for each run of items in
+ * `runs`, in order, `count` items of four vertices each, all in `slot`.
+ */
+export function flatSlots(runs: readonly { slot: number; count: number }[]): Float32Array {
+  let n = 0;
+  for (const r of runs) n += r.count * 4;
+  const out = new Float32Array(n);
+  let at = 0;
+  for (const r of runs) {
+    out.fill(r.slot, at, at + r.count * 4);
+    at += r.count * 4;
+  }
+  return out;
 }
 
 /** Metres from (x, z) to the nearest point of chunk `c`'s square. */
@@ -388,7 +427,7 @@ export function mergeBoxes(items: readonly MergedItem[]): MergedArrays {
 }
 
 /**
- * One chunk's buildings as flat blocks, merged: each the footprint of its
+ * Buildings as flat blocks, merged: each the footprint of its
  * box, at the highest ground under its lot, in its `flat` colour. Wound to
  * face up.
  */

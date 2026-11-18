@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { CHUNKS_PER_SIDE, ZONING_BALANCE } from "../packages/sim/src/index";
 import { canvasShot, openCity, scaleCity, setPose, settle, type BuildingStats, type Form, type FormStats } from "./building-lod-helpers";
 import { frameTime, mb, memory } from "./measure";
+import { BUILDINGS } from "../packages/client/src/render/config";
 
 // Issue M2-13: the M1 scale city filled with buildings through commands and
 // the grower (growScaleCity). Frame time, draw calls, what each level of
@@ -10,7 +11,8 @@ import { frameTime, mb, memory } from "./measure";
 // Balanced, written to test-results/building-lod-report.json for the pull
 // request. Since M2-17 it also checks the top bar's homes figure against the
 // town and times a save of it from the page, the snapshot and the write to
-// IndexedDB together. CI runners have no GPU and draw in software, so the frame times
+// IndexedDB together. Since issue #133 it also measures the city band with
+// the zoning overlay on, and counts the meshes each layer shows. CI runners have no GPU and draw in software, so the frame times
 // only catch a gross regression; the numbers are the point.
 
 declare const window: {
@@ -23,9 +25,18 @@ declare const window: {
       setPreset(preset: string): Promise<void>;
       lighting(): { preset: string; shadows: boolean };
       renderer: { info: { render: { drawCalls: number; triangles: number } } };
+      scene: SceneNode;
+      cellStats(): unknown;
     }>;
   };
 };
+/** Just enough of a three.js object to walk the scene. */
+interface SceneNode {
+  name: string;
+  visible: boolean;
+  isMesh?: boolean;
+  children: SceneNode[];
+}
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 declare const performance: { now(): number };
 
@@ -70,14 +81,48 @@ test("frame time, draw calls and memory in each band, at Low and at Balanced", a
       const info = await page.evaluate(async () => {
         const view = await window.cityCouncil.view;
         const s = view.buildingStats();
-        return { draws: view.renderer.info.render.drawCalls, triangles: view.renderer.info.render.triangles, forms: s?.forms, mergedBytes: s?.mergedBytes };
+        // Meshes shown, by the layer they belong to: the scene's child they are under, its name without chunk numbers. Not culled to the view, so an upper bound on draw calls.
+        const meshes: Record<string, number> = {};
+        const walk = (node: SceneNode, layer: string) => {
+          if (!node.visible) return;
+          if (node.isMesh) meshes[layer] = (meshes[layer] ?? 0) + 1;
+          for (const child of node.children) walk(child, layer);
+        };
+        for (const child of view.scene.children) walk(child, child.name.replace(/[\d,\s]+$/, "") || "unnamed");
+        return { draws: view.renderer.info.render.drawCalls, triangles: view.renderer.info.render.triangles, forms: s?.forms, mergedBytes: s?.mergedBytes, meshes };
       });
       // The heap leaves out typed-array storage, so the merged meshes' geometry is reported on its own.
       const merged = { simpleMb: mb(info.mergedBytes?.simple ?? 0), boxMb: mb(info.mergedBytes?.box ?? 0), flatMb: mb(info.mergedBytes?.flat ?? 0) };
-      bands[band] = { frameMs, drawCalls: info.draws, triangles: info.triangles, forms: info.forms, memoryMb: { ...(await memory(page)), merged } };
+      bands[band] = { frameMs, drawCalls: info.draws, triangles: info.triangles, meshesByLayer: info.meshes, forms: info.forms, memoryMb: { ...(await memory(page)), merged } };
       await canvasShot(page, testInfo, `scale city with buildings, ${band} band, ${preset}`);
     }
     report[preset] = bands;
+  }
+  // The zoning overlay over the whole town in the city band, at Low (issue #133): every cell zoned, the built ones hidden under their blocks.
+  await page.evaluate(async () => (await window.cityCouncil.view).setPreset("low"));
+  const cityPose = BANDS.find((b) => b.band === "city");
+  if (cityPose) {
+    await setPose(page, cityPose.position, cityPose.target);
+    await settle(page, 300_000);
+    await page.locator("#view").focus();
+    await page.keyboard.press("k");
+    await page.waitForFunction(() => document.body.dataset["zoningOverlay"] === "true");
+    await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 300_000 });
+    await settle(page, 300_000);
+    const frameMs = Math.round((await frameTime(page, 30)) * 10) / 10;
+    const info = await page.evaluate(async () => {
+      const view = await window.cityCouncil.view;
+      const meshes: Record<string, number> = {};
+      const walk = (node: SceneNode, layer: string) => {
+        if (!node.visible) return;
+        if (node.isMesh) meshes[layer] = (meshes[layer] ?? 0) + 1;
+        for (const child of node.children) walk(child, layer);
+      };
+      for (const child of view.scene.children) walk(child, child.name.replace(/[\d,\s]+$/, "") || "unnamed");
+      return { draws: view.renderer.info.render.drawCalls, triangles: view.renderer.info.render.triangles, meshes, cells: view.cellStats() };
+    });
+    report["cityOverlay"] = { frameMs, drawCalls: info.draws, triangles: info.triangles, meshesByLayer: info.meshes, cells: info.cells };
+    await canvasShot(page, testInfo, "scale city with buildings, city band, low, zoning overlay");
   }
   console.log(`M2-13 scale city with buildings: ${JSON.stringify(report, null, 2)}`);
   mkdirSync("test-results", { recursive: true });
@@ -90,7 +135,8 @@ test("frame time, draw calls and memory in each band, at Low and at Balanced", a
     expect(bands["city"]?.forms.full.buildings).toBe(0);
     expect(bands["city"]?.forms.simple.meshes).toBe(0);
     expect(bands["city"]?.forms.box.meshes).toBe(0);
-    expect(bands["city"]?.forms.flat.meshes).toBeLessThanOrEqual(CHUNKS_PER_SIDE * CHUNKS_PER_SIDE);
+    // Flat blocks are merged by groups of chunks (issue #133): 36 meshes at most on the 12 km map.
+    expect(bands["city"]?.forms.flat.meshes).toBeLessThanOrEqual(Math.ceil(CHUNKS_PER_SIDE / BUILDINGS.flatGroup) ** 2);
     // The PRD budgets 500 MB for the tab at full size.
     const m = bands["city"]?.memoryMb;
     expect((m?.pageMb ?? 0) + (m?.workerMb ?? 0) + (m?.merged.simpleMb ?? 0) + (m?.merged.boxMb ?? 0) + (m?.merged.flatMb ?? 0)).toBeLessThan(500);

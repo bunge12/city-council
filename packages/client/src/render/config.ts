@@ -494,6 +494,21 @@ export const CELLS = {
    * as turning the overlay on over a whole city, is spread over frames.
    */
   buildBudgetMs: 6,
+  /**
+   * The city band draws the overlay coarser (issue #133): no lines, no
+   * unzoned cells, one quad per straight run of cells of one colour along a
+   * road, and one mesh per `cityGroup` × `cityGroup` chunks. Two cells join
+   * a run when they share an edge and the run's sides turn by less than
+   * `runTurn`, the sine of the angle, so a run on a curve breaks before it
+   * cuts the corner by more than a few centimetres. A run is at most
+   * `runMaxCells` long, and breaks where the ground under a joint between
+   * two of its cells stands more than `runSag` metres above the straight
+   * quad, so a run over a rise does not sink into the terrain.
+   */
+  cityGroup: 4,
+  runTurn: 1e-4,
+  runMaxCells: 16,
+  runSag: 0.25,
 } as const;
 
 /**
@@ -513,6 +528,11 @@ export const CELLS = {
  * `fadeSeconds`. The flat blocks are lifted in the shader by
  * `flatLift`, as the zoning cells are by `CELLS.lift` but a little higher,
  * so a block lies over the cells and the terrain at every distance.
+ *
+ * The city band shows every chunk at once, so its flat blocks are merged
+ * into one mesh per `flatGroup` × `flatGroup` chunks (issue #133), not one
+ * per chunk: 36 meshes on the 12 km map, not 576. Each chunk keeps its own
+ * fade inside the group's mesh.
  */
 export const BUILDINGS = {
   buildBudgetMs: 4,
@@ -522,6 +542,7 @@ export const BUILDINGS = {
   simpleHysteresis: 250,
   fadeSeconds: 0.35,
   flatLift: { base: 0.4, perMetre: 0.0012 },
+  flatGroup: 4,
   /** What the simple form leaves out of a model, in metres (theme/model.ts, `simplify`). */
   simplify: { minSpan: 1.5, minSize: 3, keepHeight: 6 },
 } as const;

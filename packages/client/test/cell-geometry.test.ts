@@ -13,7 +13,7 @@ import {
   submit,
   type ChunkCellShapes,
 } from "@city-council/sim";
-import { buildCellChunk, cellColour } from "../src/render/cell-geometry";
+import { buildCellChunk, buildCityCells, cellColour } from "../src/render/cell-geometry";
 import { CELLS } from "../src/render/config";
 
 const flat = () => 10;
@@ -90,6 +90,124 @@ describe("cell chunk geometry", () => {
     road(2, [4300, 4500], [4300, 4700]);
     const after = buildCellChunk(cellShapesInChunk(state, chunk), state.cells.zone, state.cells.density, flat);
     expect(after.unzoned).toBeLessThan(before.unzoned + (200 / ZONING_BALANCE.cellSize) * 2 * ZONING_BALANCE.zoneDepthCells);
+  });
+});
+
+/**
+ * A row of cells along +x, each `CELL` wide and deep, in the order given,
+ * so a test can hand them over shuffled as the sim's buckets may. Cell k
+ * spans x from 8k to 8k + 8, at slot k.
+ */
+function row(order: readonly number[], at: (k: number) => { x0: number; x1: number; z0: number; z1: number } = (k) => ({ x0: k * 8, x1: k * 8 + 8, z0: 0, z1: 0 })): ChunkCellShapes {
+  const n = order.length;
+  const corners = new Float64Array(n * 8);
+  order.forEach((k, i) => {
+    const { x0, x1, z0, z1 } = at(k);
+    // Inner start, inner end, outer end, outer start.
+    corners.set([x0, z0, x1, z1, x1, z1 + 8, x0, z0 + 8], i * 8);
+  });
+  return { slots: Int32Array.from(order), statuses: new Uint8Array(n).fill(CELL_OPEN), corners };
+}
+
+/** The x of each run's start and end, sorted. */
+function spans(g: ReturnType<typeof buildCityCells>): [number, number][] {
+  const out: [number, number][] = [];
+  for (let r = 0; r < g.runs; r++) out.push([g.positions[r * 12] ?? 0, g.positions[r * 12 + 3] ?? 0]);
+  return out.sort((a, b) => a[0] - b[0]);
+}
+
+describe("the city band's cells (issue #133)", () => {
+  const shuffled = [3, 0, 4, 1, 2];
+  const zones = (n: number, z = 1) => new Array<number>(n).fill(z);
+
+  it("joins a straight row of cells of one colour into one quad, in whatever order they come", () => {
+    const g = buildCityCells(row(shuffled), zones(5), zones(5, 2), flat);
+    expect(g.runs).toBe(1);
+    expect(g.cells).toBe(5);
+    expect(spans(g)).toEqual([[0, 40]]);
+    // The quad's corners are the first cell's start edge and the last one's end edge, on the ground, in the cells' colour.
+    expect(Array.from(g.positions)).toEqual([0, 10, 0, 40, 10, 0, 40, 10, 8, 0, 10, 8]);
+    const hex = CELLS.zones["residential"]?.[1] ?? 0;
+    expect(Array.from(g.fills.subarray(0, 4))).toEqual([(hex >> 16) & 255, (hex >> 8) & 255, hex & 255, 255]);
+  });
+
+  it("breaks a run where the colour changes, and draws no unzoned cell or cell under a building", () => {
+    expect(spans(buildCityCells(row(shuffled), [1, 1, 2, 1, 1], zones(5), flat))).toEqual([
+      [0, 16],
+      [16, 24],
+      [24, 40],
+    ]);
+    expect(spans(buildCityCells(row(shuffled), [1, 1, 1, 1, 1], [1, 1, 2, 1, 1], flat))).toHaveLength(3);
+    const gap = buildCityCells(row(shuffled), [1, 1, 0, 1, 1], zones(5), flat);
+    expect(spans(gap)).toEqual([
+      [0, 16],
+      [24, 40],
+    ]);
+    expect(gap.cells).toBe(4);
+    const built = buildCityCells(row(shuffled), zones(5), zones(5), flat, Int32Array.of(-1, 9, -1, -1, -1));
+    expect(spans(built)).toEqual([
+      [0, 8],
+      [16, 40],
+    ]);
+    expect(buildCityCells(row(shuffled), zones(5, 0), zones(5, 0), flat).runs).toBe(0);
+  });
+
+  it("joins no cells that only touch, or that are blocked", () => {
+    // A gap of a centimetre between cells 1 and 2: their edges are not the same edge.
+    const apart = buildCityCells(
+      row(shuffled, (k) => ({ x0: k * 8 + (k >= 2 ? 0.01 : 0), x1: k * 8 + 8 + (k >= 2 ? 0.01 : 0), z0: 0, z1: 0 })),
+      zones(5),
+      zones(5),
+      flat,
+    );
+    expect(apart.runs).toBe(2);
+    const shapes = row(shuffled);
+    shapes.statuses[shuffled.indexOf(2)] = CELL_ROAD;
+    expect(buildCityCells(shapes, zones(5), zones(5), flat).runs).toBe(2);
+  });
+
+  it("breaks a run where the road turns, so a quad never cuts a curve's corner", () => {
+    // Cells 3 and 4 turn off the line by a twentieth of a radian.
+    const bend = (k: number) => (k <= 2 ? 0 : (k - 2) * 8 * 0.05);
+    const g = buildCityCells(row(shuffled, (k) => ({ x0: k * 8, x1: k * 8 + 8, z0: bend(k), z1: bend(k + 1) })), zones(5), zones(5), flat);
+    // Cells 0 to 2 are straight; cell 2's end edge leans, so it starts the turn: each turning cell is a quad of its own.
+    expect(g.runs).toBeGreaterThan(1);
+    expect(g.cells).toBe(5);
+    expect(spans(g)[0]).toEqual([0, 16]);
+  });
+
+  it("keeps a run at most `runMaxCells` long, and breaks it where the ground under a joint rises above it", () => {
+    const n = CELLS.runMaxCells + 4;
+    const all = Array.from({ length: n }, (_, k) => k);
+    expect(spans(buildCityCells(row(all), zones(n), zones(n), flat))).toEqual([
+      [0, CELLS.runMaxCells * 8],
+      [CELLS.runMaxCells * 8, n * 8],
+    ]);
+    // A rise of a metre under the joint at x = 16: a run from 0 may end there but not pass it.
+    const rise = (x: number) => (x === 16 ? 1 : 0);
+    expect(spans(buildCityCells(row(shuffled), zones(5), zones(5), rise))).toEqual([
+      [0, 16],
+      [16, 40],
+    ]);
+    // An even slope is under the quad everywhere: one run.
+    expect(buildCityCells(row(shuffled), zones(5), zones(5), (x) => x / 4).runs).toBe(1);
+  });
+
+  it("draws a real zoned street's cells in a few runs, covering every zoned cell", () => {
+    const state = createState(2026);
+    const r = submit(state, { seq: 1, playerId: "p", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } });
+    expect(r.ok).toBe(true);
+    step(state);
+    const chunk = Math.floor(4600 / CHUNK_SIZE) * CHUNKS_PER_SIDE + Math.floor(4300 / CHUNK_SIZE);
+    const zone = new Uint8Array(state.cells.zone.length).fill(1);
+    const density = new Uint8Array(state.cells.zone.length).fill(1);
+    const shapes = cellShapesInChunk(state, chunk);
+    const detailed = buildCellChunk(shapes, zone, density, flat);
+    const city = buildCityCells(shapes, zone, density, flat);
+    expect(city.cells).toBe(detailed.zoned);
+    // A straight street: a run per side and row of depth, each at most `runMaxCells` long.
+    const places = 192 / ZONING_BALANCE.cellSize;
+    expect(city.runs).toBeLessThanOrEqual(2 * ZONING_BALANCE.zoneDepthCells * Math.ceil(places / CELLS.runMaxCells));
   });
 });
 

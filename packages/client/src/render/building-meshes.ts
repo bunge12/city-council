@@ -13,7 +13,11 @@
 //   chunk, in the simple form's vertex format and material. Chunks further
 //   out in the street and district bands.
 // - flat: a flat block on the ground per building, coloured by its zone and
-//   density, one mesh per chunk. The city band.
+//   density. The city band, where every chunk is in view, so the blocks of
+//   `BUILDINGS.flatGroup` × `flatGroup` chunks share one mesh (issue #133),
+//   built again when a building in any of them changes. Each chunk still
+//   fades on its own: its vertices carry its slot in the group, and the
+//   mesh carries a fade per slot.
 // A chunk changing form fades from one to the next, dithered, so nothing
 // pops.
 //
@@ -65,9 +69,14 @@ import type { Ray } from "../camera/pick";
 import { rayBoxDistance, type PickBox } from "./building-pick";
 import { placeLot, type Placement } from "./building-place";
 import {
+  FLAT_GROUPS_PER_SIDE,
+  FLAT_SLOTS,
   chunkDistance,
   draws,
   fadeOf,
+  flatGroupOf,
+  flatSlotOf,
+  flatSlots,
   formFor,
   isNear,
   mergeBoxes,
@@ -327,6 +336,21 @@ function objectFade() {
 }
 
 /**
+ * A group of flat blocks' fade, per vertex: the fade of the chunk in the
+ * vertex's slot, from the fades the mesh drawn carries in `userData.fades`.
+ */
+function slotFade(slot: Node<"float">): Node<"float"> {
+  const at = (k: number) =>
+    uniform(1).onObjectUpdate(({ object }) => {
+      const f = ((object as Object3D | null)?.userData["fades"] as ArrayLike<number> | undefined)?.[k];
+      return typeof f === "number" ? f : 1;
+    });
+  let f: Node<"float"> = at(FLAT_SLOTS - 1);
+  for (let k = FLAT_SLOTS - 2; k >= 0; k--) f = select(slot.lessThan(k + 0.5), at(k), f);
+  return f;
+}
+
+/**
  * The simple form's material: lit as the full models are, each vertex in
  * its surface's colour, with the same window pattern drawn from where it is
  * on its facade (building-lod.ts, `mergeModels`).
@@ -364,7 +388,7 @@ function flatMaterial(tick: Node<"float"> | null): MeshBasicNodeMaterial {
   const distance = cameraPosition.distance(positionLocal);
   m.positionNode = positionLocal.add(vec3(0, distance.mul(BUILDINGS.flatLift.perMetre).add(BUILDINGS.flatLift.base), 0));
   m.colorNode = vec4(sRGBTransferEOTF(fill.rgb) as unknown as typeof fill.rgb, 1);
-  const shown = kept(objectFade()).greaterThan(0.5);
+  const shown = kept(varying(slotFade(attribute<"float">("mergedSlot", "float")))).greaterThan(0.5);
   // A block has no height to rise by: one under construction dithers in over the stage its building rises in.
   m.maskNode = tick ? shown.and(dither().lessThan(varying(riseNode(tick, attribute<"vec3">("mergedRise", "vec3").x)).sub(1e-4))) : shown;
   m.polygonOffset = true;
@@ -437,21 +461,42 @@ interface Chunk {
   full: boolean;
   /** The fade number its instances were last written with. */
   fullFade: number;
-  /** Each merged form's mesh, whether it has been built, and whether a building changed since. */
-  mesh: Record<Merged, Mesh | null>;
-  built: Record<Merged, boolean>;
-  stale: Record<Merged, boolean>;
+  /** Each form merged per chunk: its mesh, whether it has been built, and whether a building changed since. */
+  mesh: Record<PerChunk, Mesh | null>;
+  built: Record<PerChunk, boolean>;
+  stale: Record<PerChunk, boolean>;
   /**
    * For a merged mesh built with a building under construction in it, the
    * tick the last of them finishes on, else 0. The mesh is built again then,
    * without the construction attribute.
    */
-  rising: Record<Merged, number>;
+  rising: Record<PerChunk, number>;
+  /** The group its flat blocks are drawn in, and its slot there. */
+  group: FlatGroup;
+  slot: number;
 }
 
-/** The forms drawn as one mesh per chunk. */
+/**
+ * The flat blocks of a group of chunks, in one mesh: as a chunk's merged
+ * forms, whether it has been built, whether a building in any of its
+ * chunks changed since, and the tick its last building under construction
+ * finishes on. `fades` is each slot's fade, which the material reads.
+ */
+interface FlatGroup {
+  id: number;
+  chunks: Set<number>;
+  mesh: Mesh | null;
+  built: boolean;
+  stale: boolean;
+  rising: number;
+  fades: Float32Array;
+}
+
+/** The merged forms, and those merged per chunk. Flat blocks are merged per group of chunks. */
 type Merged = "simple" | "box" | "flat";
+type PerChunk = "simple" | "box";
 const MERGED: readonly Merged[] = ["simple", "box", "flat"];
+const PER_CHUNK: readonly PerChunk[] = ["simple", "box"];
 const MERGED_NAMES: Record<Merged, string> = { simple: "simple buildings", box: "building boxes", flat: "building blocks" };
 
 function sameCorners(a: readonly number[], b: ArrayLike<number>): boolean {
@@ -518,6 +563,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   /** Drawn buildings by the chunks their lots' corners are in. */
   const byLotChunk = new Map<number, Set<number>>();
   const chunks = new Map<number, Chunk>();
+  const groups = new Map<number, FlatGroup>();
   /** Chunks waiting, and whether each is to be rebuilt or only brought up to date. */
   const dirty = new Map<number, "rebuild" | "apply">();
   let lotChunks = new Set<number>();
@@ -581,10 +627,11 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     radius: 0,
   };
   const warmSimple = mergedMesh("warm-up simple buildings", warmMerged, "simple");
-  const warmFlat = mergedMesh("warm-up blocks", { ...warmMerged, normals: null, facades: null }, "flat");
+  const warmSlots = new Float32Array(3);
+  const warmFlat = mergedMesh("warm-up blocks", { ...warmMerged, normals: null, facades: null, slots: warmSlots }, "flat");
   const warmRise = new Float32Array(9);
   const warmRisingSimple = mergedMesh("warm-up rising simple buildings", { ...warmMerged, rise: warmRise }, "simple");
-  const warmRisingFlat = mergedMesh("warm-up rising blocks", { ...warmMerged, normals: null, facades: null, rise: warmRise }, "flat");
+  const warmRisingFlat = mergedMesh("warm-up rising blocks", { ...warmMerged, normals: null, facades: null, rise: warmRise, slots: warmSlots }, "flat");
   const warmScaffold = scaffoldMeshFor(1);
   warmScaffold.mesh.name = "warm-up scaffolding";
   warmScaffold.mesh.setMatrixAt(0, new Matrix4().makeScale(0, 0, 0));
@@ -655,13 +702,14 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     return { mesh, sizes, builts, fades, ids: new Int32Array(capacity).fill(-1), count: 0 };
   }
 
-  function mergedMesh(name: string, a: MergedArrays & { rise?: Float32Array | null }, form: Merged): Mesh {
+  function mergedMesh(name: string, a: MergedArrays & { rise?: Float32Array | null; slots?: Float32Array }, form: Merged): Mesh {
     const g = new BufferGeometry();
     g.setAttribute("position", new BufferAttribute(a.positions, 3));
     if (a.normals) g.setAttribute("normal", new BufferAttribute(a.normals, 4, true));
     g.setAttribute("mergedColour", new BufferAttribute(a.colours, 4, true));
     if (a.facades) g.setAttribute("mergedFacade", new BufferAttribute(a.facades, 2));
     if (a.rise) g.setAttribute("mergedRise", new BufferAttribute(a.rise, 3));
+    if (a.slots) g.setAttribute("mergedSlot", new BufferAttribute(a.slots, 1));
     g.setIndex(new BufferAttribute(a.indices, 1));
     // The flat form is lifted in the shader: the sphere allows for it.
     g.boundingSphere = new Sphere(new Vector3(...a.centre), a.radius + (form === "flat" ? 40 : 0));
@@ -907,9 +955,20 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     }
   }
 
+  function groupAt(g: number): FlatGroup {
+    let group = groups.get(g);
+    if (!group) {
+      group = { id: g, chunks: new Set(), mesh: null, built: false, stale: false, rising: 0, fades: new Float32Array(FLAT_SLOTS) };
+      groups.set(g, group);
+    }
+    return group;
+  }
+
   function chunkAt(c: number): Chunk {
     let ch = chunks.get(c);
     if (!ch) {
+      const group = groupAt(flatGroupOf(c));
+      group.chunks.add(c);
       ch = {
         ids: new Set(),
         fade: { shown: null, next: null, t: 0 },
@@ -917,10 +976,12 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         mid: false,
         full: false,
         fullFade: 0,
-        mesh: { simple: null, box: null, flat: null },
-        built: { simple: false, box: false, flat: false },
-        stale: { simple: false, box: false, flat: false },
-        rising: { simple: 0, box: 0, flat: 0 },
+        mesh: { simple: null, box: null },
+        built: { simple: false, box: false },
+        stale: { simple: false, box: false },
+        rising: { simple: 0, box: 0 },
+        group,
+        slot: flatSlotOf(c),
       };
       chunks.set(c, ch);
     }
@@ -930,7 +991,16 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   /** A building in chunk `c` came, went or moved: its merged forms are out of date. */
   function staleChunk(c: number): void {
     const ch = chunkAt(c);
-    for (const form of MERGED) ch.stale[form] = true;
+    for (const form of PER_CHUNK) ch.stale[form] = true;
+    ch.group.stale = true;
+  }
+
+  /** Whether a chunk's merged form has been built, and whether a building changed since: for flat blocks, its group's. */
+  function builtOf(ch: Chunk, form: Merged): boolean {
+    return form === "flat" ? ch.group.built : ch.built[form];
+  }
+  function staleOf(ch: Chunk, form: Merged): boolean {
+    return form === "flat" ? ch.group.stale : ch.stale[form];
   }
 
   /** Brings a building's instance in line with its chunk: one while the chunk is drawn in full, none otherwise. */
@@ -1077,7 +1147,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   }
 
   /** Frees a chunk's merged mesh for `form`: it is built again before it is drawn. */
-  function dropMerged(ch: Chunk, form: Merged): void {
+  function dropMerged(ch: Chunk, form: PerChunk): void {
     ch.built[form] = false;
     ch.rising[form] = 0;
     const mesh = ch.mesh[form];
@@ -1088,14 +1158,71 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     ch.mesh[form] = null;
   }
 
-  /** Builds a chunk's merged mesh for `form` from its buildings as they are now. */
+  /** Frees a group's mesh of flat blocks. */
+  function dropGroup(group: FlatGroup): void {
+    group.built = false;
+    group.rising = 0;
+    const mesh = group.mesh;
+    if (!mesh) return;
+    mergedBytes.flat -= Number(mesh.userData["bytes"] ?? 0);
+    mesh.removeFromParent();
+    mesh.geometry.dispose();
+    group.mesh = null;
+  }
+
+  /** Whether any chunk of a group draws flat blocks. */
+  function groupDrawn(group: FlatGroup): boolean {
+    for (const f of group.fades) if (f > 0) return true;
+    return false;
+  }
+
+  /** Builds a group's mesh of flat blocks from the buildings of its chunks as they are now. */
+  function buildGroup(group: FlatGroup): void {
+    dropGroup(group);
+    const items: MergedItem[] = [];
+    const runs: { slot: number; count: number }[] = [];
+    for (const c of [...group.chunks].sort((a, b) => a - b)) {
+      const ch = chunks.get(c);
+      if (!ch) continue;
+      const own = itemsOf(ch);
+      for (const item of own) items.push(item);
+      runs.push({ slot: ch.slot, count: own.length });
+    }
+    if (items.length > 0) {
+      const arrays = mergeFlats(items);
+      const slots = flatSlots(runs);
+      let until = 0;
+      for (const item of items) if (underConstruction(item.built ?? LONG_AGO, now)) until = Math.max(until, finishedAt(item.built ?? LONG_AGO));
+      const rise = until > 0 ? mergedRise(items, arrays.positions, "flat") : null;
+      group.rising = until;
+      const gi = group.id % FLAT_GROUPS_PER_SIDE;
+      const gj = (group.id - gi) / FLAT_GROUPS_PER_SIDE;
+      const mesh = mergedMesh(`${MERGED_NAMES.flat} ${gi},${gj}`, { ...arrays, rise, slots }, "flat");
+      const bytes = arrays.positions.byteLength + arrays.colours.byteLength + arrays.indices.byteLength + slots.byteLength + (rise?.byteLength ?? 0);
+      mesh.userData["bytes"] = bytes;
+      mesh.userData["fades"] = group.fades;
+      mergedBytes.flat += bytes;
+      mesh.visible = groupDrawn(group);
+      root.add(mesh);
+      group.mesh = mesh;
+    }
+    group.built = true;
+    group.stale = false;
+    merged++;
+  }
+
+  /** Builds a chunk's merged mesh for `form` from its buildings as they are now: for flat blocks, its group's. */
   function buildMerged(c: number, ch: Chunk, form: Merged): void {
+    if (form === "flat") {
+      buildGroup(ch.group);
+      return;
+    }
     dropMerged(ch, form);
     const items = itemsOf(ch);
     if (items.length > 0) {
       const ci = c % CHUNKS_PER_SIDE;
       const cj = (c - ci) / CHUNKS_PER_SIDE;
-      const arrays = form === "simple" ? mergeModels(items, theme.fixed) : form === "box" ? mergeBoxes(items) : mergeFlats(items);
+      const arrays = form === "simple" ? mergeModels(items, theme.fixed) : mergeBoxes(items);
       // Only a chunk with a building under construction carries the attribute it rises by, so a finished city costs nothing more.
       let until = 0;
       for (const item of items) if (underConstruction(item.built ?? LONG_AGO, now)) until = Math.max(until, finishedAt(item.built ?? LONG_AGO));
@@ -1128,6 +1255,11 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     return true;
   }
 
+  /** Whether a merged form needs building for a chunk: never built, or a building changed since. A group built this frame for another of its chunks does not. */
+  function unbuilt(ch: Chunk, form: Merged): boolean {
+    return !builtOf(ch, form) || staleOf(ch, form);
+  }
+
   /** Gives every building in a chunk an instance, so it can be drawn in full. */
   function fill(ch: Chunk): void {
     ch.full = true;
@@ -1153,17 +1285,19 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
    */
   function ready(ch: Chunk, form: BuildingForm): boolean {
     if (form === "full") return ch.full;
-    return ch.built[form] && (!ch.stale[form] || draws(ch.fade, form));
+    return builtOf(ch, form) && (!staleOf(ch, form) || draws(ch.fade, form));
   }
 
   /** Writes a chunk's fade into its merged meshes and, when it changed, into its instances. */
   function showFade(ch: Chunk): void {
-    for (const form of MERGED) {
+    for (const form of PER_CHUNK) {
       const mesh = ch.mesh[form];
       if (!mesh) continue;
       mesh.visible = draws(ch.fade, form);
       mesh.userData["fade"] = fadeOf(ch.fade, form);
     }
+    // The group's mesh is shown while any of its chunks draws it: see `forms`.
+    ch.group.fades[ch.slot] = fadeOf(ch.fade, "flat");
     const f = fadeOf(ch.fade, "full");
     if (f === ch.fullFade) return;
     ch.fullFade = f;
@@ -1185,15 +1319,22 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     const needs: { c: number; ch: Chunk; d: number; form: BuildingForm }[] = [];
     for (const [c, ch] of chunks) {
       if (ch.ids.size === 0) {
-        // Every building gone: nothing left to draw or fade.
+        // Every building gone: nothing left to draw or fade. Its blocks leave its group's mesh at once, and the group is built again without them.
         free(ch);
-        for (const form of MERGED) dropMerged(ch, form);
+        for (const form of PER_CHUNK) dropMerged(ch, form);
+        ch.group.fades[ch.slot] = 0;
+        ch.group.stale = true;
+        ch.group.chunks.delete(c);
+        if (ch.group.chunks.size === 0) {
+          dropGroup(ch.group);
+          groups.delete(ch.group.id);
+        }
         chunks.delete(c);
         continue;
       }
       // A drawn merged mesh whose buildings have all finished is built again, plain. One not drawn keeps
       // the rising material, which draws them finished, until something else builds it again.
-      for (const form of MERGED) {
+      for (const form of PER_CHUNK) {
         if (ch.rising[form] > 0 && now >= ch.rising[form]) {
           ch.rising[form] = 0;
           if (draws(ch.fade, form)) ch.stale[form] = true;
@@ -1204,11 +1345,18 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       const want = formFor(view.band, ch.near, ch.mid);
       const d = chunkDistance(c, camera.x, camera.z);
       if (!ready(ch, want)) needs.push({ c, ch, d, form: want });
-      else if (want !== "full" && ch.stale[want]) needs.push({ c, ch, d, form: want });
+      else if (want !== "full" && staleOf(ch, want)) needs.push({ c, ch, d, form: want });
+    }
+    for (const group of groups.values()) {
+      if (group.rising > 0 && now >= group.rising) {
+        group.rising = 0;
+        if (groupDrawn(group)) group.stale = true;
+      }
     }
     needs.sort((a, b) => a.d - b.d || a.c - b.c);
     let done = 0;
     for (const n of needs) {
+      if (n.form !== "full" && !unbuilt(n.ch, n.form)) continue;
       if (done > 0 && performance.now() - start >= budgetMs) break;
       if (n.form === "full") fill(n.ch);
       else buildMerged(n.c, n.ch, n.form);
@@ -1223,22 +1371,24 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       // A chunk filled for a fade that never started, because another was under way and then the camera left, is freed too.
       if (ch.full && !draws(ch.fade, "full") && (released === "full" || want !== "full")) free(ch);
       // A merged form the chunk no longer keeps is freed once it is not drawn.
-      for (const form of MERGED) if (ch.built[form] && !keeps(ch, form) && !draws(ch.fade, form)) dropMerged(ch, form);
+      for (const form of PER_CHUNK) if (ch.built[form] && !keeps(ch, form) && !draws(ch.fade, form)) dropMerged(ch, form);
       showFade(ch);
       if (ch.fade.shown !== shownBefore) formChanges++;
       if (ch.fade.next !== null) fading++;
       else if (ch.fade.shown !== want) waiting++;
     }
+    for (const group of groups.values()) if (group.mesh) group.mesh.visible = groupDrawn(group);
     // With time left, the merged forms a chunk keeps but does not draw are built ahead, or again if a building changed, nearest first, so a zoom finds them ready.
     if (performance.now() - start < budgetMs) {
       const ahead: { c: number; ch: Chunk; d: number; form: Merged }[] = [];
       for (const [c, ch] of chunks) {
         const d = chunkDistance(c, camera.x, camera.z);
         // The city band draws neither simple buildings nor boxes: they are built when a zoom in wants them, not ahead.
-        for (const form of MERGED) if ((form === "flat" || view.band !== "city") && keeps(ch, form) && (!ch.built[form] || ch.stale[form])) ahead.push({ c, ch, d, form });
+        for (const form of MERGED) if ((form === "flat" || view.band !== "city") && keeps(ch, form) && unbuilt(ch, form)) ahead.push({ c, ch, d, form });
       }
       ahead.sort((a, b) => a.d - b.d || a.c - b.c || (a.form < b.form ? -1 : 1));
       for (const a of ahead) {
+        if (!unbuilt(a.ch, a.form)) continue;
         if (performance.now() - start >= budgetMs) break;
         buildMerged(a.c, a.ch, a.form);
       }
@@ -1254,18 +1404,25 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       out.full.meshes++;
       out.full.buildings += m.count;
     }
+    const inView = (mesh: Mesh | null): boolean => {
+      if (!mesh?.visible) return false;
+      const bs = mesh.geometry.boundingSphere;
+      return !frustum || !bs || frustum.intersectsSphere(sphere.copy(bs));
+    };
     for (const ch of chunks.values()) {
       if (draws(ch.fade, "full")) out.full.chunks++;
-      for (const form of MERGED) {
-        const mesh = ch.mesh[form];
-        if (!mesh?.visible) continue;
-        const bs = mesh.geometry.boundingSphere;
-        if (frustum && bs && !frustum.intersectsSphere(sphere.copy(bs))) continue;
+      for (const form of PER_CHUNK) {
+        if (!inView(ch.mesh[form])) continue;
         out[form].chunks++;
         out[form].meshes++;
         out[form].buildings += ch.ids.size;
       }
+      if (draws(ch.fade, "flat") && inView(ch.group.mesh)) {
+        out.flat.chunks++;
+        out.flat.buildings += ch.ids.size;
+      }
     }
+    for (const group of groups.values()) if (inView(group.mesh)) out.flat.meshes++;
     return out;
   }
 
@@ -1431,8 +1588,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         m.mesh?.dispose();
       }
       for (const ch of chunks.values()) {
-        for (const form of MERGED) dropMerged(ch, form);
+        for (const form of PER_CHUNK) dropMerged(ch, form);
       }
+      for (const group of groups.values()) dropGroup(group);
       root.removeFromParent();
       material.dispose();
       simples.dispose();
