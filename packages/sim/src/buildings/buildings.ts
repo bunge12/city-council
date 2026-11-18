@@ -314,17 +314,20 @@ export function removeBuilding(state: SimState, id: number): void {
 /**
  * Removes buildings `ids`, in that order, as `removeBuilding` does each: the
  * free list ends with them in that order. Throws, changing nothing, if any
- * is not a live building or is named twice. One pass for the lot, so
- * clearing thousands does not copy the free list once per building (issue
- * #162).
+ * is not a live building or is named twice. One pass for the lot, so a
+ * clear of thousands catches the building index up once, not once a
+ * building (issue #162).
  */
 export function removeBuildings(state: SimState, ids: readonly number[]): void {
   const b = state.buildings;
-  const named = new Uint8Array(b.flags.length);
+  // Only a list can name one twice; the upkeep removes one at a time.
+  const named = ids.length > 1 ? new Uint8Array(b.flags.length) : null;
   for (const id of ids) {
     if (!isBuilding(b, id)) throw new RangeError(`building ${id} does not exist`);
-    if (named[id]) throw new RangeError(`building ${id} is named twice`);
-    named[id] = 1;
+    if (named) {
+      if (named[id]) throw new RangeError(`building ${id} is named twice`);
+      named[id] = 1;
+    }
   }
   if (ids.length === 0) return;
   // The columns each was filed on, which a lot a change of roads took may
