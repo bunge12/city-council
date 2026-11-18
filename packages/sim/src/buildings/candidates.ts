@@ -51,8 +51,16 @@ interface Candidates {
   count: number;
   /** Segments to look at again whole. */
   segs: Set<number>;
-  /** Front cells to look at again, as `segment * CELL_KEY_STRIDE + column`. */
-  fronts: Set<number>;
+  /**
+   * Front cells to look at again, as `segment * CELL_KEY_STRIDE + column`.
+   * A plain list, not a set: the keys are past the small integers a set
+   * hashes cheaply, and a command that clears thousands of buildings notes
+   * tens of thousands (issue #162). A key listed twice is looked at twice,
+   * which changes nothing. `noteFront` keeps it from growing without bound.
+   */
+  fronts: number[];
+  /** How long `fronts` may grow before `noteFront` drops its repeats: `MOST_FRONTS`, or twice what the last drop left. */
+  frontsCap: number;
 }
 
 const live = new WeakMap<BuildingState, Candidates>();
@@ -75,15 +83,42 @@ export function noteFrontCells(state: SimState, slots: ArrayLike<number>): void 
     const slot = slots[i] ?? 0;
     if (slot % DEPTH !== 0) continue;
     seg = segmentOfSlot(offset, slot, seg);
-    c.fronts.add(seg * CELL_KEY_STRIDE + (slot - (offset[seg] ?? 0)) / DEPTH);
+    noteFront(c, seg * CELL_KEY_STRIDE + (slot - (offset[seg] ?? 0)) / DEPTH);
   }
+}
+
+/** Front-cell keys `fronts` may hold before `noteFront` drops the repeats. */
+const MOST_FRONTS = 1 << 20;
+
+/**
+ * Lists front cell `key` to look at again. Commands made while paused note
+ * cells with no grower tick to look at them, so past `frontsCap` the list
+ * keeps one of each key. Which keys it holds is what counts, not their order.
+ * A city with more distinct front cells than `MOST_FRONTS` keeps more than
+ * that after the drop, so the cap then doubles from what was left, and the
+ * sorts stay a fixed share of the notes.
+ */
+function noteFront(c: Candidates, key: number): void {
+  c.fronts.push(key);
+  if (c.fronts.length <= c.frontsCap) return;
+  const sorted = Float64Array.from(c.fronts).sort();
+  c.fronts.length = 0;
+  for (let i = 0; i < sorted.length; i++) if (i === 0 || sorted[i] !== sorted[i - 1]) c.fronts.push(sorted[i] ?? 0);
+  c.frontsCap = Math.max(MOST_FRONTS, 2 * c.fronts.length);
 }
 
 /** Notes that a building came or went on these columns. */
 export function noteColumns(state: SimState, cols: readonly Column[]): void {
   const c = live.get(state.buildings);
   if (!c) return;
-  for (const col of cols) c.fronts.add(col.seg * CELL_KEY_STRIDE + col.place * 2 + col.side);
+  for (const col of cols) noteFront(c, col.seg * CELL_KEY_STRIDE + col.place * 2 + col.side);
+}
+
+/** Notes that a building came or went on these columns, each as `segment * CELL_KEY_STRIDE + column`. */
+export function noteFrontColumns(state: SimState, keys: readonly number[]): void {
+  const c = live.get(state.buildings);
+  if (!c) return;
+  for (const key of keys) noteFront(c, key);
 }
 
 /** Whether column `col` of segment `seg` is a candidate, with the cells as they are now: 1 or 0. */
@@ -191,7 +226,8 @@ function build(state: SimState, index: CellIndex, onCell: OnCell): Candidates {
     blocks: new Int32Array(Math.ceil(limit / BLOCK)),
     count: 0,
     segs: new Set(),
-    fronts: new Set(),
+    fronts: [],
+    frontsCap: MOST_FRONTS,
   };
   for (let seg = 0; seg < limit; seg++) refreshSegment(c, state, onCell, seg);
   return c;
@@ -206,7 +242,7 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
   let c = live.get(state.buildings);
   // Nearly every call, from a grower draw: nothing noted since the last, so nothing to allocate (issue 166).
   const watch = index.watch;
-  if (c && c.index === index && c.segs.size === 0 && c.fronts.size === 0 && (!watch || (watch.segs.size === 0 && watch.nodes.size === 0 && watch.fronts.size === 0))) return c;
+  if (c && c.index === index && c.segs.size === 0 && c.fronts.length === 0 && (!watch || (watch.segs.size === 0 && watch.nodes.size === 0 && watch.fronts.size === 0))) return c;
   let found: readonly (Int32Array | null)[] | null = null;
   const onCell = (): readonly (Int32Array | null)[] => (found ??= ask());
   if (!c || c.index !== index) {
@@ -218,20 +254,25 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
   if (watch) {
     for (const seg of watch.segs) c.segs.add(seg);
     for (const node of watch.nodes) segmentsNear(c.index, state.roads, node, c.segs);
-    for (const key of watch.fronts) c.fronts.add(key);
+    for (const key of watch.fronts) noteFront(c, key);
     watch.segs.clear();
     watch.nodes.clear();
     watch.fronts.clear();
   }
-  if (c.segs.size === 0 && c.fronts.size === 0) return c;
+  if (c.segs.size === 0 && c.fronts.length === 0) return c;
   fit(c, index.segs.length);
   for (const seg of c.segs) refreshSegment(c, state, onCell, seg);
-  for (const key of c.fronts) {
+  // In key order, so each segment's columns are looked at together, and once.
+  const keys = Float64Array.from(c.fronts).sort();
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i] ?? 0;
+    if (i > 0 && key === keys[i - 1]) continue;
     const seg = Math.floor(key / CELL_KEY_STRIDE);
     if (!c.segs.has(seg)) refreshColumn(c, state, onCell, seg, key - seg * CELL_KEY_STRIDE);
   }
   c.segs.clear();
-  c.fronts.clear();
+  c.fronts.length = 0;
+  c.frontsCap = MOST_FRONTS;
   return c;
 }
 
@@ -289,6 +330,11 @@ function expectSameCounts(kept: Candidates, fresh: Candidates): void {
     total += sum;
   }
   if (total !== kept.count || kept.count !== fresh.count) throw new Error(`kept ${kept.count} (${total} by block), fresh ${fresh.count}`);
+}
+
+/** How many front-cell keys wait to be looked at again, repeats included. For tests. */
+export function frontsWaiting(state: SimState): number {
+  return live.get(state.buildings)?.fronts.length ?? 0;
 }
 
 /** Drops the kept candidates, so the next use builds them afresh. For benches and tests. */

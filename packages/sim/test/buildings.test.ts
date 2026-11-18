@@ -35,8 +35,10 @@ import {
   type SimState,
 } from "../src/index";
 import buildingsJson from "../balance/buildings.json";
-import { addBuilding, removeBuilding } from "../src/buildings/buildings";
-import { cellBuildings } from "../src/buildings/where";
+import { BUILDING_ARRAYS, addBuilding, removeBuilding, removeBuildings } from "../src/buildings/buildings";
+import { candidateSets, frontsWaiting, noteFrontColumns } from "../src/buildings/candidates";
+import { cellBuildings, segmentBuildings } from "../src/buildings/where";
+import { CELL_KEY_STRIDE } from "../src/zoning/cell-changes";
 import { nextInt, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
 import { nextColumn, syncCells } from "../src/zoning/cell-index";
@@ -460,6 +462,84 @@ describe("buildings in state", () => {
     expect(state.buildings.free).toHaveLength(0);
     expect(deserialize(serialize(state)).state.buildings).toEqual(state.buildings);
   });
+
+  /** A street with six houses along its north side, and the grower's candidates kept, so they follow each removal. */
+  function row(): { state: SimState; ids: number[] } {
+    const state = street();
+    zoneNorth(state, "residential", 2, 0, 24, 6);
+    const ids = [0, 4, 8, 12, 16, 20].map((p) => build(state, lotAt(state, north(p, 0))));
+    candidateSets(state, syncCells(state), () => segmentBuildings(state));
+    return { state, ids };
+  }
+  const candidatesOf = (state: SimState) => candidateSets(state, syncCells(state), () => segmentBuildings(state));
+
+  it("removes many buildings at once as it would one at a time (issue #162)", () => {
+    const one = row();
+    const many = row();
+    const gone = [1, 2, 4].map((i) => many.ids[i] as number);
+    for (const id of gone) removeBuilding(one.state, id);
+    removeBuildings(many.state, gone);
+    expect(many.state.buildings).toEqual(one.state.buildings);
+    expect(Array.from(many.state.buildings.free)).toEqual(gone);
+    expect(cellBuildings(many.state)).toEqual(cellBuildings(one.state));
+    const { kept, fresh } = candidatesOf(many.state);
+    expect(kept).toEqual(fresh);
+    expect(kept).toEqual(candidatesOf(one.state).kept);
+    expect(kept.length).toBeGreaterThan(candidatesOf(row().state).kept.length);
+  });
+
+  it("refuses, changing nothing, a removal that names a building twice or one that is not there", () => {
+    const { state, ids } = row();
+    const before = cloneState(state);
+    const [a, b] = ids as [number, number];
+    expect(() => removeBuildings(state, [a, b, a])).toThrow(`building ${a} is named twice`);
+    expect(() => removeBuildings(state, [a, 99])).toThrow("building 99 does not exist");
+    expect(state.buildings).toEqual(before.buildings);
+    expect(cellBuildings(state)).toEqual(cellBuildings(before));
+    removeBuildings(state, []);
+    expect(state.buildings).toEqual(before.buildings);
+  });
+
+  it("clears every field of a removed building's row", () => {
+    const { state, ids } = built();
+    const id = ids[1] as number;
+    const arrays = state.buildings as unknown as Record<string, { [i: number]: number }>;
+    // Every field set, so a field the removal forgot would show.
+    for (const key of BUILDING_ARRAYS) (arrays[key] as { [i: number]: number })[id] = 1;
+    removeBuildings(state, [id]);
+    for (const key of BUILDING_ARRAYS) expect(arrays[key]?.[id], key).toBe(0);
+  });
+
+  it("keeps the grower's candidates right through more notes than it keeps repeats of", () => {
+    const { state, ids } = row();
+    const seg = refAt(state, north(0, 0)).segment;
+    // Each front column on the north side named again and again, as strokes made while paused would.
+    const keys: number[] = [];
+    for (let i = 0; i < (1 << 20) + 1000; i++) keys.push(seg * CELL_KEY_STRIDE + (i % 24) * 2 + CELL_LEFT);
+    noteFrontColumns(state, keys);
+    // The repeats went: 48 front columns, a few noted since the drop.
+    expect(frontsWaiting(state)).toBeLessThan(2000);
+    removeBuildings(state, [ids[0] as number]);
+    const { kept, fresh } = candidatesOf(state);
+    expect(kept).toEqual(fresh);
+    expect(frontsWaiting(state)).toBe(0);
+  });
+
+  it("drops repeats now and then, not on every note, when a city has more front cells than the cap", () => {
+    const { state } = row();
+    // More distinct keys than the cap, on segment ids the city does not have, so looking at them changes nothing.
+    // Dropping repeats on every note past the cap would sort a million keys a million times, and the test would time out.
+    const far = state.roads.segA.length + 10;
+    const distinct = (1 << 20) + (1 << 19);
+    const keys: number[] = [];
+    for (let i = 0; i < distinct; i++) keys.push((far + (i >> 10)) * CELL_KEY_STRIDE + (i & 1023));
+    noteFrontColumns(state, keys);
+    noteFrontColumns(state, keys.slice(0, 1 << 19));
+    expect(frontsWaiting(state)).toBeGreaterThanOrEqual(distinct);
+    expect(frontsWaiting(state)).toBeLessThanOrEqual(distinct + (1 << 19));
+    const { kept, fresh } = candidatesOf(state);
+    expect(kept).toEqual(fresh);
+  }, 20_000);
 
   it("refuses a save whose buildings are malformed", () => {
     const { state } = built();

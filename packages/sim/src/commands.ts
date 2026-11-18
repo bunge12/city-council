@@ -266,6 +266,13 @@ const BulldozeBuilding: CommandDef = {
     const result = planBulldozeBuildings(state, command.payload);
     if (result.ok) bulldozeBuildings(state, result.ids);
   },
+  // Checking 5,000 buildings costs as much as clearing them, so the step does it once (issue #162).
+  applyIfValid: (state, command) => {
+    const result = planBulldozeBuildings(state, command.payload);
+    if (!result.ok) return result.reason;
+    bulldozeBuildings(state, result.ids);
+    return null;
+  },
 };
 
 /** Every command type the sim accepts, by name. */
@@ -289,8 +296,15 @@ export function validateCommand(state: SimState, command: Command): CommandResul
   return reason === null ? { ok: true } : { ok: false, reason };
 }
 
-/** The definition of a command's type, or why the command is malformed whatever the state. */
-function commandDef(command: Command): CommandDef | string {
+/**
+ * The definition of a command's type, or why the command is malformed
+ * whatever the state. `checkPayload` false skips proving the payload is
+ * plain JSON, for a queued command: `enqueue` made its payload by a JSON
+ * round trip, and a save's queue decodes to a plain tree. The proof writes
+ * the whole payload out, 2 ms for a `BulldozeBuilding` at its cap, which
+ * the step need not pay again (issue #162).
+ */
+function commandDef(command: Command, checkPayload = true): CommandDef | string {
   if (!Number.isSafeInteger(command.seq) || command.seq < 0) return "seq must be a non-negative integer";
   if (typeof command.playerId !== "string" || command.playerId === "") return "playerId is required";
   // A host passes on whatever a port or socket delivered, so `type` may be
@@ -299,7 +313,7 @@ function commandDef(command: Command): CommandDef | string {
   if (typeof command.type !== "string") return "type must be a string";
   const def = Object.hasOwn(COMMANDS, command.type) ? COMMANDS[command.type] : undefined;
   if (!def) return `unknown command type "${command.type}"`;
-  if (!isJsonSafe(command.payload)) return "payload must be plain JSON data";
+  if (checkPayload && !isJsonSafe(command.payload)) return "payload must be plain JSON data";
   return def;
 }
 
@@ -441,7 +455,7 @@ export function applyPending(state: SimState): DroppedCommand[] {
       held.push(command);
       continue;
     }
-    const def = commandDef(command);
+    const def = commandDef(command, false);
     let reason: string | null;
     if (typeof def === "string") reason = def;
     else if (def.applyIfValid) reason = def.applyIfValid(state, command);
