@@ -26,3 +26,19 @@ export function tintFor(id: number, palette: Palette): { wall: number; roof: num
   const trim = palette.trim[(h >>> 21) % palette.trim.length] ?? 0;
   return { wall, roof, trim };
 }
+
+/** How many window styles a facade comes in, and how many glass seeds each: a building's look is one of `STYLES * SEEDS`. */
+export const STYLES = 4;
+export const SEEDS = 7;
+/** Looks a building can have. A look fits in a byte beside the facade's kind (building-lod.ts, `mergeModels`). */
+export const LOOKS = STYLES * SEEDS;
+
+/**
+ * Building `id`'s look (issue #137): the shape of its windows, `look %
+ * STYLES`, and the seed its panes vary by and its glass tint is picked
+ * with, `floor(look / STYLES)`. From the id alone, as its colours are, but
+ * hashed apart from them, so a look does not go with a wall colour.
+ */
+export function lookFor(id: number): number {
+  return hashId(id ^ 0x5bd1e995) % LOOKS;
+}

@@ -20,9 +20,10 @@ const PAIRS = ZONING_BALANCE.zones.length * DENSITIES;
 /**
  * Zones every open cell of `state`, each side of each segment to its full
  * depth with the next of the fifteen zone and density pairs, starting at
- * pair `from`.
+ * pair `from`, or with the next of `pairs` when given: a pair is
+ * `zone index * densities + density - 1`.
  */
-export function zoneSides(state: SimState, from = 0): void {
+export function zoneSides(state: SimState, from = 0, pairs?: readonly number[]): void {
   syncCells(state);
   const status = cellStatuses(state);
   const { offset, zone, density } = state.cells;
@@ -32,7 +33,7 @@ export function zoneSides(state: SimState, from = 0): void {
     const end = offset[seg + 1] ?? 0;
     if (end === start) continue;
     for (const s of [0, 1]) {
-      const p = pair++ % PAIRS;
+      const p = pairs ? (pairs[pair++ % pairs.length] ?? 0) : pair++ % PAIRS;
       for (let i = start; i < end; i++) {
         if ((Math.floor((i - start) / DEPTH) & 1) !== s || status[i] !== CELL_OPEN) continue;
         zone[i] = 1 + Math.floor(p / DENSITIES);
@@ -101,6 +102,23 @@ export function builtFixtureCity(): { bytes: Buffer; state: SimState; counts: nu
   const counts = buildEverySide(state);
   finishConstruction(state);
   // Saved paused: a building the grower adds during a test would change the counts and the screenshots.
+  state.speed = 0;
+  return { bytes: Buffer.from(serialize(state)), state, counts, buildings: buildingCount(state.buildings) };
+}
+
+/** The zone and density pairs of a downtown: residential, commercial, office and mixed, all at the top density. */
+const DOWNTOWN = ["residential", "commercial", "office", "mixed"].map((id) => ZONING_BALANCE.zones.findIndex((z) => z.id === id) * DENSITIES + DENSITIES - 1);
+
+/**
+ * The road fixture zoned as a downtown (issue #137): every side at the top
+ * density of a zone that builds towers, with buildings along every side,
+ * so towers, slabs and podiums of every model stand side by side.
+ */
+export function downtownFixtureCity(): { bytes: Buffer; state: SimState; counts: number[]; buildings: number } {
+  const { state } = fixtureCity();
+  zoneSides(state, 0, DOWNTOWN);
+  const counts = buildEverySide(state);
+  finishConstruction(state);
   state.speed = 0;
   return { bytes: Buffer.from(serialize(state)), state, counts, buildings: buildingCount(state.buildings) };
 }

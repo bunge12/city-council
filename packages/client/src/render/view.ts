@@ -33,7 +33,7 @@ import type { Preset } from "./presets";
 import { neighbourhood, type RoadNet } from "./road-geometry";
 import { NORTH_AMERICAN } from "../theme/north-american";
 import { createRoadLayer, type RoadLayer, type RoadStats } from "./road-meshes";
-import { buildChunk, chunkCentre, chunksPerSide } from "./terrain-chunks";
+import { buildChunk, chunkCentre, chunksPerSide, surfaceHeightAt } from "./terrain-chunks";
 import { SURFACE_HEIGHT_ATTRIBUTE, createTerrainMaterial } from "./terrain-material";
 
 export type Backend = "webgpu" | "webgl2";
@@ -240,7 +240,8 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     const cells = cellSource ? createCellLayer(scene, cellSource, (x, z) => heightAt(terrain, x, z)) : null;
     cells?.setBand(band);
     cells?.setVisible(cellsVisible);
-    const buildings = buildingSource ? createBuildingLayer(scene, buildingSource, NORTH_AMERICAN, (x, z) => heightAt(terrain, x, z)) : null;
+    // Buildings stand on the ground as the nearest terrain draws it, so it never comes up through a wall.
+    const buildings = buildingSource ? createBuildingLayer(scene, buildingSource, NORTH_AMERICAN, (x, z) => surfaceHeightAt(terrain, x, z, TERRAIN_LODS[0]?.segments ?? 32)) : null;
     buildingsLayer = buildings;
 
     terrainRoot = {

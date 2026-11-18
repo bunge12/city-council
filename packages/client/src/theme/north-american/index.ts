@@ -54,5 +54,11 @@ export const NORTH_AMERICAN: Theme = {
     const family = (palettes.types as Record<string, string | undefined>)[typeId];
     return (family && FAMILIES.get(family)) || FALLBACK;
   },
-  fixed: { glass: hex(palettes.fixed.glass), paving: hex(palettes.fixed.paving) },
+  fixed: {
+    glass: hex(palettes.fixed.glass),
+    glassTints: palettes.fixed.glassTints.map(hex),
+    sky: hex(palettes.fixed.sky),
+    blinds: hex(palettes.fixed.blinds),
+    paving: hex(palettes.fixed.paving),
+  },
 };

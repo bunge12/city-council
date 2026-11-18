@@ -37,7 +37,7 @@
 //
 // The renderer reads the mirror; it never writes it.
 
-import { attribute, dot, floor, fract, mix, mod, positionGeometry, positionLocal, cameraPosition, screenCoordinate, select, sRGBTransferEOTF, step, uniform, varying, vec2, vec3, vec4 } from "three/tsl";
+import { attribute, clamp, dot, floor, fract, fwidth, max, mix, mod, positionGeometry, positionLocal, cameraPosition, screenCoordinate, select, smoothstep, sRGBTransferEOTF, step, uniform, varying, vec2, vec3, vec4 } from "three/tsl";
 import {
   BufferAttribute,
   BufferGeometry,
@@ -73,6 +73,7 @@ import {
   mergeBoxes,
   mergeFlats,
   mergeModels,
+  KINDS,
   mergedRise,
   modelExtent,
   stepFade,
@@ -82,9 +83,9 @@ import {
   type MergedArrays,
   type MergedItem,
 } from "./building-lod";
-import { MASK_GRASS, MASK_SIDE, MASK_TREES } from "./road-geometry";
+import { MASK_GRASS, MASK_SIDE, MASK_TREES, ringDistance } from "./road-geometry";
 import { BUILDINGS, CELLS, CONSTRUCTION, ROADS } from "./config";
-import { tintFor } from "./building-tint";
+import { STYLES, lookFor, tintFor } from "./building-tint";
 import { LONG_AGO, finishedAt, riseNode, rising, scaffoldGeometry, scaffoldMaterial, tickUniform, underConstruction } from "./construction";
 
 /** Where the layer reads buildings from: the mirror's copy of state. */
@@ -176,9 +177,10 @@ export interface BuildingLayer {
    */
   update(camera: { x: number; z: number }, budgetMs: number, view?: BuildingView): void;
   /**
-   * The chunks holding a corner of a lot that a building came onto or left
-   * since the last call. A lot can reach over a chunk line, so the zoning
-   * overlay redraws these as well as the lot's own chunk.
+   * The chunks a lot that a building came onto or left since the last call
+   * reaches, with the ground round it kept clear of trees. A lot can reach
+   * over a chunk line, so the zoning overlay and the decoration redraw these
+   * as well as the lot's own chunk.
    */
   takeLotChunks(): number[];
   /**
@@ -239,11 +241,10 @@ function linear(hex: number) {
   return uniform(new Vector3(c.r, c.g, c.b));
 }
 
-/** 1 where u is in [u0, u1] and v in [v0, v1], else 0. */
-function inside(u: Node<"float">, v: Node<"float">, u0: number, u1: number, v0: number, v1: number) {
-  return step(u0, u).mul(step(u, u1)).mul(step(v0, v)).mul(step(v, v1));
+/** 1 where u is in [r.x, r.y] and v in [r.z, r.w], else 0. */
+function insideRect(u: Node<"float">, v: Node<"float">, r: Node<"vec4">) {
+  return step(r.x, u).mul(step(u, r.y)).mul(step(r.z, v)).mul(step(v, r.w));
 }
-
 /**
  * 1 where a pixel of a form with fade number `fade` (building-lod.ts,
  * `fadeOf`) is drawn and 0 where it is not, by a dither value fixed to the
@@ -261,26 +262,138 @@ function dither() {
   return fract(fract(dot(floor(screenCoordinate.xy), vec2(0.06711056, 0.00583715))).mul(52.9829189));
 }
 
+/** A pane's place in its window bay, as u0, u1, v0, v1 in the bay, for each of the four window styles. */
+type Rects = readonly [readonly number[], readonly number[], readonly number[], readonly number[]];
+
 /**
- * A wall's colour with its pattern drawn on: `kind` is the vertex's
- * `FACADE`, `along` where it is along the wall in windows with the lot's
- * stretch taken out, and `up` how high in floors. Loading and garage doors
- * are a darker shade of the wall; every other opening is glass.
+ * The panes of each `FACADE` in its four styles (issue #137). Windows:
+ * square, tall and narrow, wide, and in pairs, drawn on the bay folded in
+ * two. Storefronts: tall panes, panes under a band of wall, panes in
+ * deeper frames, and all glass. Curtain walls: a grid, bands of wall at
+ * each floor, deep fins, and thin frames. Ribbons: deep, tall, narrow and
+ * low. Doors have one shape.
  */
-function patterned(colour: Node<"vec3">, glass: Node<"vec3">, kind: Node<"float">, along: Node<"float">, up: Node<"float">) {
-  const u = fract(along.add(0.5));
+const PANES: Record<"windows" | "storefront" | "curtain" | "doors" | "bands", Rects> = {
+  windows: [
+    [0.27, 0.73, 0.32, 0.8],
+    [0.35, 0.65, 0.2, 0.84],
+    [0.14, 0.86, 0.36, 0.76],
+    [0.2, 0.8, 0.3, 0.8],
+  ],
+  storefront: [
+    [0.05, 0.95, 0.06, 0.78],
+    [0.05, 0.95, 0.06, 0.6],
+    [0.1, 0.9, 0.06, 0.72],
+    [0.04, 0.96, 0.06, 0.82],
+  ],
+  curtain: [
+    [0.05, 0.95, 0.05, 0.95],
+    [0.04, 0.96, 0.3, 0.97],
+    [0.14, 0.86, 0.02, 0.98],
+    [0.03, 0.97, 0.03, 0.97],
+  ],
+  doors: [
+    [0.1, 0.9, 0, 0.82],
+    [0.1, 0.9, 0, 0.82],
+    [0.1, 0.9, 0, 0.82],
+    [0.1, 0.9, 0, 0.82],
+  ],
+  bands: [
+    [0.02, 0.98, 0.34, 0.8],
+    [0.02, 0.98, 0.28, 0.86],
+    [0.05, 0.95, 0.38, 0.78],
+    [0.02, 0.98, 0.3, 0.72],
+  ],
+};
+
+/** One of four values by `style`, 0 to 3. */
+function byStyle(style: Node<"float">, rects: Rects): Node<"vec4"> {
+  const [a, b, c, d] = rects.map((r) => vec4(r[0] ?? 0, r[1] ?? 0, r[2] ?? 0, r[3] ?? 0)) as unknown as [Node<"vec4">, Node<"vec4">, Node<"vec4">, Node<"vec4">];
+  return select(style.lessThan(0.5), a, select(style.lessThan(1.5), b, select(style.lessThan(2.5), c, d)));
+}
+
+/**
+ * A number in [0, 1) from a window's place, by multiplies and fractions
+ * alone: a hash through `sin` bands into visible swirls where GPUs round
+ * it. Drawn and never stored, so it may still differ a little from one GPU
+ * to the next.
+ */
+function hash2(p: Node<"vec2">) {
+  const a = fract(vec3(p.x, p.y, p.x).mul(0.1031));
+  const b = a.add(dot(a, a.yzx.add(33.33)));
+  return fract(b.x.add(b.y).mul(b.z));
+}
+
+/** The glass colours a pattern needs, linear. */
+interface GlassColours {
+  /** One per seed in turn. */
+  tints: Node<"vec3">[];
+  sky: Node<"vec3">;
+  blinds: Node<"vec3">;
+}
+
+function glassColours(theme: Theme): GlassColours {
+  const tints = theme.fixed.glassTints.length > 0 ? theme.fixed.glassTints : [theme.fixed.glass];
+  return { tints: tints.map(linear), sky: linear(theme.fixed.sky), blinds: linear(theme.fixed.blinds) };
+}
+
+/**
+ * A wall's colour with its pattern drawn on, and the light its glass
+ * reflects: `kind` is the vertex's `FACADE`, `along` where it is along the
+ * wall in windows with the lot's stretch taken out, `up` how high in
+ * floors, and `look` the building's look (building-tint.ts, `lookFor`).
+ * Loading and garage doors are a darker shade of the wall; every other
+ * opening is glass.
+ *
+ * Glass is drawn so it never reads as asphalt (issue #137): each building's
+ * windows take one of the theme's glass tints, each pane a little lighter
+ * or darker than the next, lighter again towards its top where it reflects
+ * the sky, and a few panes with a blind part way down. The reflection is
+ * emitted, not lit, so windows on a wall in shadow still show.
+ */
+function patterned(colour: Node<"vec3">, glass: GlassColours, kind: Node<"float">, along: Node<"float">, up: Node<"float">, look: Node<"float">) {
+  // Whole numbers first: the look reaches the fragment a hair either side
+  // of its value, and a floor on it then flips from pixel to pixel.
+  const whole = floor(look.add(0.5));
+  const seed = floor(whole.add(0.5).div(STYLES));
+  const style = whole.sub(seed.mul(STYLES));
+  const bay = along.add(0.5);
+  // Paired windows are the window bay folded in two.
+  const u = fract(select(kind.lessThan(1.5).and(style.greaterThan(2.5)), bay.mul(2), bay));
   const v = fract(up);
-  const pane = select(
-    kind.lessThan(0.5),
-    0,
-    select(
-      kind.lessThan(1.5),
-      inside(u, v, 0.27, 0.73, 0.32, 0.8),
-      select(kind.lessThan(2.5), inside(u, v, 0.05, 0.95, 0.06, 0.78), select(kind.lessThan(3.5), inside(u, v, 0.05, 0.95, 0.05, 0.95), inside(u, v, 0.1, 0.9, 0, 0.82))),
-    ),
+  const rect = select(
+    kind.lessThan(1.5),
+    byStyle(style, PANES.windows),
+    select(kind.lessThan(2.5), byStyle(style, PANES.storefront), select(kind.lessThan(3.5), byStyle(style, PANES.curtain), select(kind.lessThan(4.5), byStyle(style, PANES.doors), byStyle(style, PANES.bands)))),
   );
-  const opening = select(kind.greaterThan(3.5), colour.mul(0.6), glass);
-  return mix(colour, opening, pane);
+  // Where a window bay or a floor comes to less than a couple of pixels, the
+  // panes fade to the share of the wall they cover, so a far facade has no
+  // moiré.
+  const blur = smoothstep(0.25, 0.6, max(fwidth(bay), fwidth(up)));
+  const cover = rect.y.sub(rect.x).mul(rect.w.sub(rect.z));
+  const pane = select(kind.lessThan(0.5), 0, mix(insideRect(u, v, rect), cover, blur));
+  // Each pane's shade, and whether it has a blind, from where it is and the building's seed.
+  const cell = vec2(floor(bay), floor(up)).add(vec2(seed.mul(17.3), seed.mul(5.9)));
+  const shade = hash2(cell);
+  const blind = hash2(cell.add(vec2(41.7, 13.1)));
+  // How far up the pane, 0 at its sill and 1 at its head.
+  const high = clamp(v.sub(rect.z).div(rect.w.sub(rect.z)), 0, 1);
+  let tint = glass.tints[0] as Node<"vec3">;
+  const pick = seed.sub(floor(seed.add(0.5).div(glass.tints.length)).mul(glass.tints.length));
+  for (let k = 1; k < glass.tints.length; k++) tint = select(pick.greaterThan(k - 0.5), glass.tints[k] as Node<"vec3">, tint);
+  const lit = tint.mul(shade.mul(BUILDINGS.glass.variation).add(1 - BUILDINGS.glass.variation / 2));
+  const reflected = mix(lit, glass.sky, high.mul(high).mul(BUILDINGS.glass.skyMix));
+  // Fewer blinds behind a glass wall, where a pane is a whole storey.
+  const share = select(kind.greaterThan(2.5).and(kind.lessThan(3.5)), BUILDINGS.glass.blindShare / 3, BUILDINGS.glass.blindShare);
+  const drawn = step(share.oneMinus(), blind).mul(step(fract(blind.mul(7)).mul(0.5).add(0.3), high.oneMinus()).oneMinus());
+  const paneColour = mix(reflected, glass.blinds, drawn.mul(0.85));
+  const door = kind.greaterThan(3.5).and(kind.lessThan(4.5));
+  const opening = select(door, colour.mul(0.6), paneColour);
+  const glassy = select(door, 0, pane);
+  return {
+    colour: mix(colour, opening, pane),
+    emissive: glass.sky.mul(glassy.mul(drawn.oneMinus()).mul(high.mul(0.6).add(0.4)).mul(BUILDINGS.glass.reflection)),
+  };
 }
 
 /**
@@ -294,7 +407,8 @@ function buildingMaterial(theme: Theme, tick: Node<"float">): MeshLambertNodeMat
   m.name = "buildings";
   const surface = attribute<"float">("buildingSurface", "float");
   const facade = attribute<"vec4">("buildingFacade", "vec4");
-  const tint = attribute<"vec3">("buildingTint", "vec3");
+  // The wall, roof and trim colours, packed, and the building's look.
+  const tint = attribute<"vec4">("buildingTint", "vec4");
   const stretch = attribute<"vec2">("buildingScale", "vec2");
   const fade = varying(attribute<"float">("buildingFade", "float"));
   // When the building was built, how tall its model is above the ground, and where the bottom of its foundations is, for its construction (construction.ts).
@@ -310,7 +424,9 @@ function buildingMaterial(theme: Theme, tick: Node<"float">): MeshLambertNodeMat
   const colour = select(surface.lessThan(0.5), wall, select(surface.lessThan(1.5), roof, select(surface.lessThan(2.5), trim, select(surface.lessThan(3.5), glass, pave))));
   // Windows along the wall, in the lot's metres: the stretch of this instance along the wall's axis is taken out.
   const along = facade.x.mul(select(facade.z.lessThan(0.5), stretch.x, stretch.y));
-  m.colorNode = patterned(colour, glass, facade.w, along, facade.y);
+  const pattern = patterned(colour, glassColours(theme), facade.w, along, facade.y, tint.w);
+  m.colorNode = pattern.colour;
+  m.emissiveNode = pattern.emissive;
   // After the instance's matrix, which turns about y only, so down is down.
   m.positionNode = positionLocal.sub(vec3(0, rise.sink, 0));
   // A mask and not an opacity: three.js reads it in the shadow pass too, so a fading form's shadow fades with it.
@@ -337,7 +453,12 @@ function simpleMaterial(theme: Theme, tick: Node<"float"> | null): MeshLambertNo
   const fill = attribute<"vec4">("mergedColour", "vec4");
   const facade = attribute<"vec2">("mergedFacade", "vec2");
   const colour = sRGBTransferEOTF(fill.rgb) as unknown as typeof fill.rgb;
-  m.colorNode = patterned(colour, linear(theme.fixed.glass), fill.a.mul(255), facade.x, facade.y);
+  // The alpha byte holds the facade's kind and the building's look (building-lod.ts, `mergeModels`).
+  const packedKind = floor(fill.a.mul(255).add(0.5));
+  const look = floor(packedKind.add(0.5).div(KINDS));
+  const pattern = patterned(colour, glassColours(theme), packedKind.sub(look.mul(KINDS)), facade.x, facade.y, look);
+  m.colorNode = pattern.colour;
+  m.emissiveNode = pattern.emissive;
   const shown = kept(objectFade()).greaterThan(0.5);
   if (!tick) {
     m.maskNode = shown;
@@ -409,11 +530,13 @@ interface Placed {
   chunk: number;
   /** What the building is: its model and the row fields that decide where and how it is drawn. */
   sig: string;
-  /** Corner chunks of its lot. */
+  /** Chunks its lot, and the ground round it kept clear of trees, reach. */
   lotChunks: number[];
   /** Its lot's corners, as the mirror gave them. */
   corners: number[];
   tint: { wall: number; roof: number; trim: number };
+  /** Its look: the shape of its windows and the shade of its glass. */
+  look: number;
   place: Placement;
   /** The model's stretch along the road and back from it. */
   sx: number;
@@ -483,9 +606,15 @@ function chunkOf(x: number, z: number): number {
   return cj * CHUNKS_PER_SIDE + ci;
 }
 
+/** The chunks a lot reaches, with the ground round it kept clear of trees. */
 function cornerChunks(corners: ArrayLike<number>): number[] {
   const out = new Set<number>();
-  for (let k = 0; k < 4; k++) out.add(chunkOf(corners[k * 2] ?? 0, corners[k * 2 + 1] ?? 0));
+  const pad = BUILDINGS.treeClearance;
+  for (let k = 0; k < 4; k++) {
+    const x = corners[k * 2] ?? 0;
+    const z = corners[k * 2 + 1] ?? 0;
+    for (const [dx, dz] of [[0, 0], [-pad, -pad], [pad, -pad], [-pad, pad], [pad, pad]] as const) out.add(chunkOf(x + dx, z + dz));
+  }
   return [...out];
 }
 
@@ -619,7 +748,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   }
 
   function meshFor(key: string, arrays: ModelArrays, capacity: number): { mesh: InstancedMesh; tints: InstancedBufferAttribute; scales: InstancedBufferAttribute; fades: InstancedBufferAttribute; builts: InstancedBufferAttribute } {
-    const tints = new InstancedBufferAttribute(new Float32Array(capacity * 3), 3).setUsage(DynamicDrawUsage);
+    const tints = new InstancedBufferAttribute(new Float32Array(capacity * 4), 4).setUsage(DynamicDrawUsage);
     const scales = new InstancedBufferAttribute(new Float32Array(capacity * 2), 2).setUsage(DynamicDrawUsage);
     const fades = new InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1).setUsage(DynamicDrawUsage);
     const builts = new InstancedBufferAttribute(new Float32Array(capacity * 3).fill(LONG_AGO), 3).setUsage(DynamicDrawUsage);
@@ -756,7 +885,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   function touched(m: Model, slot: number): void {
     if (!m.mesh || !m.tints || !m.scales || !m.fades || !m.builts) return;
     dirtyRange(m.mesh.instanceMatrix, slot * 16, 16);
-    dirtyRange(m.tints, slot * 3, 3);
+    dirtyRange(m.tints, slot * 4, 4);
     dirtyRange(m.scales, slot * 2, 2);
     dirtyRange(m.fades, slot, 1);
     dirtyRange(m.builts, slot * 3, 3);
@@ -771,7 +900,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     size.set(p.sx, 1, p.sz);
     matrix.compose(position, turn, size);
     m.mesh.setMatrixAt(p.slot, matrix);
-    m.tints.setXYZ(p.slot, packed(p.tint.wall), packed(p.tint.roof), packed(p.tint.trim));
+    m.tints.setXYZW(p.slot, packed(p.tint.wall), packed(p.tint.roof), packed(p.tint.trim), p.look);
     m.scales.setXY(p.slot, p.sx, p.sz);
     m.fades.setX(p.slot, chunkAt(p.chunk).fullFade);
     m.builts.setXYZ(p.slot, p.builtAt, m.extent.maxY, m.extent.minY);
@@ -803,7 +932,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     if (p.slot !== last) {
       const moved = m.ids[last] ?? -1;
       m.mesh.instanceMatrix.array.copyWithin(p.slot * 16, last * 16, last * 16 + 16);
-      m.tints.array.copyWithin(p.slot * 3, last * 3, last * 3 + 3);
+      m.tints.array.copyWithin(p.slot * 4, last * 4, last * 4 + 4);
       m.scales.array.copyWithin(p.slot * 2, last * 2, last * 2 + 2);
       m.fades.array.copyWithin(p.slot, last, last + 1);
       m.builts.array.copyWithin(p.slot * 3, last * 3, last * 3 + 3);
@@ -981,7 +1110,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     const corners = info.corners ? [...info.corners] : [];
     const lots = cornerChunks(corners);
     fileLot(info.id, lots);
-    const p: Placed = { id: info.id, model, slot: -1, chunk, sig, lotChunks: lots, corners, tint, place, ...placeInfo(info, place), flat: flatColour(info.type), builtAt: info.builtAt, scaffold: -1 };
+    const p: Placed = { id: info.id, model, slot: -1, chunk, sig, lotChunks: lots, corners, tint, look: lookFor(info.id), place, ...placeInfo(info, place), flat: flatColour(info.type), builtAt: info.builtAt, scaffold: -1 };
     placed.set(info.id, p);
     if (underConstruction(p.builtAt, now)) young.add(p);
     chunkAt(chunk).ids.add(info.id);
@@ -1068,6 +1197,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         wall: p.tint.wall,
         roof: p.tint.roof,
         trim: p.tint.trim,
+        look: p.look,
         flat: p.flat,
         built: p.builtAt,
         height: p.model.extent.maxY,
@@ -1357,18 +1487,25 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       const x0 = ci * CHUNK_SIZE;
       const z0 = cj * CHUNK_SIZE;
       const mask = new Uint8Array(MASK_SIDE * MASK_SIDE);
+      // Grass stays off the lot, and trees off the ground round it too, so no crown reaches a wall (issue #137).
+      // A cell is clear of trees when any point of it could be within the clearance.
+      const reach = BUILDINGS.treeClearance + (cell * Math.SQRT2) / 2;
       for (const id of ids) {
         const q = placed.get(id)?.corners;
         if (!q || q.length < 8) continue;
         const xs = [q[0] ?? 0, q[2] ?? 0, q[4] ?? 0, q[6] ?? 0];
         const zs = [q[1] ?? 0, q[3] ?? 0, q[5] ?? 0, q[7] ?? 0];
-        const i0 = Math.max(0, Math.floor((Math.min(...xs) - x0) / cell));
-        const i1 = Math.min(MASK_SIDE - 1, Math.floor((Math.max(...xs) - x0) / cell));
-        const j0 = Math.max(0, Math.floor((Math.min(...zs) - z0) / cell));
-        const j1 = Math.min(MASK_SIDE - 1, Math.floor((Math.max(...zs) - z0) / cell));
+        const i0 = Math.max(0, Math.floor((Math.min(...xs) - reach - x0) / cell));
+        const i1 = Math.min(MASK_SIDE - 1, Math.floor((Math.max(...xs) + reach - x0) / cell));
+        const j0 = Math.max(0, Math.floor((Math.min(...zs) - reach - z0) / cell));
+        const j1 = Math.min(MASK_SIDE - 1, Math.floor((Math.max(...zs) + reach - z0) / cell));
         for (let j = j0; j <= j1; j++) {
           for (let i = i0; i <= i1; i++) {
-            if (inQuad(q, x0 + (i + 0.5) * cell, z0 + (j + 0.5) * cell)) mask[j * MASK_SIDE + i] = MASK_TREES | MASK_GRASS;
+            const x = x0 + (i + 0.5) * cell;
+            const z = z0 + (j + 0.5) * cell;
+            const m = j * MASK_SIDE + i;
+            if (inQuad(q, x, z)) mask[m] = MASK_TREES | MASK_GRASS;
+            else if (ringDistance(q, x, z) <= reach) mask[m] = (mask[m] ?? 0) | MASK_TREES;
           }
         }
       }

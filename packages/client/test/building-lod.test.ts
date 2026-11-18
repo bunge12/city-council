@@ -4,7 +4,8 @@
 import { describe, expect, it } from "vitest";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "@city-council/sim";
 import { Matrix4, Quaternion, Vector3 } from "three";
-import { chunkDistance, draws, fadeOf, formFor, isNear, mergeBoxes, mergeFlats, mergeModels, modelExtent, stepFade, type ChunkFade, type MergedItem } from "../src/render/building-lod";
+import { KINDS, chunkDistance, draws, fadeOf, formFor, isNear, mergeBoxes, mergeFlats, mergeModels, modelExtent, stepFade, type ChunkFade, type MergedItem } from "../src/render/building-lod";
+import { LOOKS } from "../src/render/building-tint";
 import { FACADE, ModelBuilder, SURFACE, simplify } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
 import { tower } from "../src/theme/north-american/generators";
@@ -170,6 +171,19 @@ describe("merged geometry", () => {
       expect(a.facades?.[v * 2 + 1]).toBeCloseTo(model.facades[v * 4 + 1] ?? 0, 5);
     }
     expect([...a.colours.slice(0, 4)]).toEqual([0x11, 0x22, 0x33, FACADE.windows]);
+  });
+
+  it("packs the building's look beside each vertex's facade kind, in one byte (issue #137)", () => {
+    const look = LOOKS - 1;
+    const a = mergeModels([{ ...item(0.7), look }], fixed);
+    for (let v = 0; v < model.surfaces.length; v++) {
+      const byte = a.colours[v * 4 + 3] ?? 0;
+      expect(byte % KINDS).toBe(model.facades[v * 4 + 3]);
+      expect(Math.floor(byte / KINDS)).toBe(look);
+    }
+    // The largest kind and look still fit.
+    expect(Math.max(...Object.values(FACADE)) + KINDS * (LOOKS - 1)).toBeLessThan(256);
+    expect(Math.max(...Object.values(FACADE))).toBeLessThan(KINDS);
   });
 
   for (const angle of [0, 0.7, Math.PI / 2, 2.5]) {

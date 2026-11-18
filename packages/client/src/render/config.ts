@@ -524,6 +524,21 @@ export const BUILDINGS = {
   flatLift: { base: 0.4, perMetre: 0.0012 },
   /** What the simple form leaves out of a model, in metres (theme/model.ts, `simplify`). */
   simplify: { minSpan: 1.5, minSize: 3, keepHeight: 6 },
+  /**
+   * How windows draw their glass (issue #137, building-meshes.ts,
+   * `patterned`): each pane's shade varies by up to `variation` of its
+   * tint, the top of a pane takes up to `skyMix` of the sky's colour,
+   * `blindShare` of panes have a blind part way down, a third as many in a
+   * curtain wall, and the glass gives
+   * off `reflection` of the sky's colour whatever light falls on the wall.
+   */
+  glass: { variation: 0.3, skyMix: 0.35, blindShare: 0.08, reflection: 0.16 },
+  /**
+   * Metres round a building's lot kept clear of trees, so no crown pokes
+   * through a wall or a roof (issue #137): the widest crown, 0.3 of the
+   * tallest tree's height (decor-meshes.ts), with some to spare.
+   */
+  treeClearance: 5,
 } as const;
 
 /**

@@ -33,6 +33,13 @@ function facade(kind: FacadeKind, spacing: number, floor: number): Facade {
   return { kind, spacing, floor };
 }
 
+/** The walls of an upper floor: windows `spacing` metres apart, a glass curtain wall, or ribbons of glass. */
+function facadeOf(kind: "windows" | "curtain" | "bands", spacing: number, storey: number): Facade {
+  if (kind === "curtain") return facade(FACADE.curtain, 1.6, storey);
+  if (kind === "bands") return facade(FACADE.bands, 1.5, storey);
+  return facade(FACADE.windows, spacing, storey);
+}
+
 /** The base a building stands on, under x0..x1, z0..z1. */
 function base(b: ModelBuilder, x0: number, x1: number, z0: number, z1: number): void {
   b.box(x0, x1, -BASE_DEPTH, BASE_TOP, z0, z1, TRIM, TRIM);
@@ -91,7 +98,8 @@ export function house(lot: Lot, v: HouseVariant): ModelArrays {
     b.box(p1 - 0.2, p1, BASE_TOP, 2.6, z1 + 1.6, z1 + 1.8, TRIM, null);
   }
   if (garage) {
-    const g0 = x1 + 0.2;
+    // Clear of the house by more than the garage's eave, so its gable end does not lie on the house's wall.
+    const g0 = x1 + 0.3;
     const g1 = g0 + 3.6;
     const gz0 = z1 - 6.5;
     base(b, g0, g1, gz0, z1);
@@ -139,12 +147,14 @@ export function row(lot: Lot, v: RowVariant): ModelArrays {
     base(b, a, c, z0, uz1);
     if (v.shops) {
       b.box(a, c, BASE_TOP, BASE_TOP + ground, z0, uz1, WALL, null, facade(FACADE.storefront, Math.min(each, 6), ground));
-      b.box(a - 0.1, c + 0.1, BASE_TOP + ground - 0.35, BASE_TOP + ground, z0, uz1 + 0.5, TRIM, TRIM);
+      // The fascia wraps the unit, so none of its faces lies on a wall of storefronts.
+      b.box(a - 0.1, c + 0.1, BASE_TOP + ground - 0.35, BASE_TOP + ground, z0 - 0.1, uz1 + 0.5, TRIM, TRIM);
       if (v.floors > 1) b.box(a, c, BASE_TOP + ground, top, z0, uz1, WALL, null, facade(FACADE.windows, v.spacing, 3));
     } else {
       b.box(a, c, BASE_TOP, top, z0, uz1, WALL, null, facade(FACADE.windows, v.spacing, 3));
     }
-    if (v.roof === "gable") b.gable(a, c, z0, uz1, top, Math.min(each, uz1 - z0) * 0.42, false, ROOF, WALL, 0.2);
+    // No eave along the row: a unit's eave would hang over its neighbour's slope and leave a slit to see into the roof through.
+    if (v.roof === "gable") b.gable(a, c, z0, uz1, top, Math.min(each, uz1 - z0) * 0.42, false, ROOF, WALL, 0);
     else flatRoof(b, a, c, z0, uz1, top, 0.2);
     if (!v.shops) b.box(a + each * 0.2, a + each * 0.2 + 1.4, -BASE_DEPTH, BASE_TOP + 0.2, uz1, uz1 + 1.2, TRIM, TRIM);
   }
@@ -156,7 +166,7 @@ export interface BlockVariant {
   /** What stands at street level. */
   ground: "storefront" | "windows" | "lobby";
   /** The walls above it. */
-  upper: "windows" | "curtain";
+  upper: "windows" | "curtain" | "bands";
   roof: "flat" | "gable" | "hip";
   /** Metres between windows. */
   spacing: number;
@@ -171,6 +181,8 @@ export interface BlockVariant {
   plant: boolean;
   /** Paving between the building and the road. */
   forecourt: boolean;
+  /** Top floors set back from the front and sides, behind a terrace, 0 for none. Flat roofs only. */
+  setback?: number;
 }
 
 /** One block of several floors: apartments, shops, offices, a main street block. */
@@ -187,18 +199,29 @@ export function block(lot: Lot, v: BlockVariant): ModelArrays {
   const groundFacade = v.ground === "windows" ? facade(FACADE.windows, v.spacing, v.storey) : facade(v.ground === "lobby" ? FACADE.curtain : FACADE.storefront, 5, groundH);
   b.box(x0, x1, BASE_TOP, BASE_TOP + groundH, z0, z1, WALL, null, groundFacade);
   if (v.ground === "storefront") b.box(x0 - 0.1, x1 + 0.1, BASE_TOP + groundH - 0.45, BASE_TOP + groundH, z1, z1 + 1.2, TRIM, TRIM);
-  if (v.floors > 1) {
-    const upper = v.upper === "curtain" ? facade(FACADE.curtain, 1.6, v.storey) : facade(FACADE.windows, v.spacing, v.storey);
-    b.box(x0, x1, BASE_TOP + groundH, top, z0, z1, WALL, null, upper);
+  const upper = facadeOf(v.upper, v.spacing, v.storey);
+  // The top floors set back keep at least one floor in front of them.
+  const back = v.roof === "flat" ? Math.max(0, Math.min(v.setback ?? 0, v.floors - 2)) : 0;
+  const lowTop = top - back * v.storey;
+  if (v.floors > 1) b.box(x0, x1, BASE_TOP + groundH, lowTop, z0, z1, WALL, null, upper);
+  // The outline of the top floors, and the height of their roof.
+  let [r0, r1, q0, q1, roofY] = [x0, x1, z0, z1, top];
+  if (back > 0) {
+    const inset = Math.min(3, (x1 - x0) * 0.15, (z1 - z0) * 0.2);
+    flatRoof(b, x0, x1, z0, z1, lowTop, 0.25);
+    [r0, r1, q0, q1, roofY] = [x0 + inset, x1 - inset, z0 + inset * 0.5, z1 - inset, top + 0.4];
+    b.box(r0, r1, lowTop + 0.4, roofY, q0, q1, WALL, null, upper);
   }
   const rise = Math.min(x1 - x0, z1 - z0) * 0.3;
   if (v.roof === "gable") b.gable(x0, x1, z0, z1, top, rise, true, ROOF, WALL);
   else if (v.roof === "hip") b.hip(x0, x1, z0, z1, top, rise, ROOF);
-  else flatRoof(b, x0, x1, z0, z1, top);
+  else flatRoof(b, r0, r1, q0, q1, roofY);
   if (v.plant && v.roof === "flat") {
-    const w = (x1 - x0) * 0.3;
-    const d = (z1 - z0) * 0.3;
-    plantRoom(b, -w / 2, w / 2, (z0 + z1) / 2 - d / 2, (z0 + z1) / 2 + d / 2, top + 0.4, 2.6);
+    const w = (r1 - r0) * 0.3;
+    const d = (q1 - q0) * 0.3;
+    const xm = (r0 + r1) / 2;
+    const zm = (q0 + q1) / 2;
+    plantRoom(b, xm - w / 2, xm + w / 2, zm - d / 2, zm + d / 2, roofY + 0.4, 2.6);
   }
   if (v.forecourt) paving(b, x0, x1, z1, lot.d / 2);
   return b.build();
@@ -213,10 +236,16 @@ export interface TowerVariant {
   /** Share of the podium's width and depth the tower takes. */
   share: number;
   curtain: boolean;
+  /** Ribbons of glass along each floor, where `curtain` is false. */
+  bands?: boolean;
   spacing: number;
   storey: number;
-  /** What tops the tower. */
-  crown: "flat" | "step" | "mast";
+  /** What tops the tower: a flat roof with a plant room, a narrower top storey, a mast, or a pyramid. */
+  crown: "flat" | "step" | "mast" | "pyramid";
+  /** Times the tower steps in on its way up, 0 to 2. */
+  setbacks?: number;
+  /** Two slabs side by side, one shorter than the other, in place of one shaft. */
+  split?: boolean;
 }
 
 /** A tower, alone on its lot or on a podium. */
@@ -248,16 +277,53 @@ export function tower(lot: Lot, v: TowerVariant): ModelArrays {
   const t1 = tw / 2;
   const u0 = tz - td / 2;
   const u1 = tz + td / 2;
-  const top = y + v.floors * v.storey;
-  const walls = v.curtain ? facade(FACADE.curtain, 1.6, v.storey) : facade(FACADE.windows, v.spacing, v.storey);
-  b.box(t0, t1, y, top, u0, u1, WALL, null, walls);
-  if (v.crown === "step") {
-    b.box(t0 + 1.2, t1 - 1.2, top, top + v.storey * 1.5, u0 + 1.2, u1 - 1.2, TRIM, null, facade(FACADE.windows, v.spacing, v.storey));
-    flatRoof(b, t0 + 1.2, t1 - 1.2, u0 + 1.2, u1 - 1.2, top + v.storey * 1.5 + 0.3, 0.25);
+  const walls = facadeOf(v.curtain ? "curtain" : v.bands ? "bands" : "windows", v.spacing, v.storey);
+  // The outline of the shaft's top, which the crown stands on, and its height.
+  let [r0, r1, q0, q1] = [t0, t1, u0, u1];
+  let top = y + v.floors * v.storey;
+  if (v.split) {
+    // The shorter slab beside the tall one, a little shallower.
+    const xm = t0 + tw * 0.56;
+    const low = y + Math.max(2, Math.round(v.floors * 0.6)) * v.storey;
+    const inset = td * 0.08;
+    b.box(xm, t1, y, low, u0 + inset, u1 - inset, WALL, null, walls);
+    flatRoof(b, xm, t1, u0 + inset, u1 - inset, low + 0.2, 0.3);
+    b.box(t0, xm, y, top, u0, u1, WALL, null, walls);
+    r1 = xm;
   } else {
-    flatRoof(b, t0, t1, u0, u1, top + 0.2, 0.3);
-    plantRoom(b, t0 + tw * 0.3, t1 - tw * 0.3, u0 + td * 0.3, u1 - td * 0.3, top + 0.6, 3);
-    if (v.crown === "mast") b.prism(0, tz, 0.4, top + 3.6, top + 3.6 + Math.max(8, v.floors * 0.6), 6, TRIM, TRIM);
+    // Each tier but the last is about a fifth of the floors less, then steps in.
+    const tiers = Math.max(0, Math.min(2, v.setbacks ?? 0)) + 1;
+    let floors = v.floors;
+    let at = y;
+    for (let k = 0; k < tiers; k++) {
+      const last = k === tiers - 1;
+      const these = last ? floors : Math.min(floors - 1, Math.max(2, Math.round(v.floors * (k === 0 ? 1 - 0.22 * (tiers - 1) : 0.22))));
+      floors -= these;
+      b.box(r0, r1, at, at + these * v.storey, q0, q1, WALL, null, walls);
+      at += these * v.storey;
+      if (last) break;
+      flatRoof(b, r0, r1, q0, q1, at + 0.2, 0.3);
+      at += 0.6;
+      const ix = (r1 - r0) * 0.13;
+      const iz = (q1 - q0) * 0.13;
+      [r0, r1, q0, q1] = [r0 + ix, r1 - ix, q0 + iz, q1 - iz];
+    }
+    top = at;
+  }
+  const rw = r1 - r0;
+  const rd = q1 - q0;
+  const xm = (r0 + r1) / 2;
+  const zm = (q0 + q1) / 2;
+  // Every crown closes the shaft's top: a roof the camera cannot see past.
+  flatRoof(b, r0, r1, q0, q1, top + 0.2, 0.3);
+  if (v.crown === "step") {
+    b.box(r0 + 1.2, r1 - 1.2, top + 0.6, top + 0.6 + v.storey * 1.5, q0 + 1.2, q1 - 1.2, TRIM, null, facade(FACADE.windows, v.spacing, v.storey));
+    flatRoof(b, r0 + 1.2, r1 - 1.2, q0 + 1.2, q1 - 1.2, top + 0.6 + v.storey * 1.5 + 0.3, 0.25);
+  } else if (v.crown === "pyramid") {
+    b.hip(r0, r1, q0, q1, top + 0.6, Math.min(rw, rd) * 0.45, ROOF, 0);
+  } else {
+    plantRoom(b, r0 + rw * 0.3, r1 - rw * 0.3, q0 + rd * 0.3, q1 - rd * 0.3, top + 0.6, 3);
+    if (v.crown === "mast") b.prism(xm, zm, 0.4, top + 3.6, top + 3.6 + Math.max(8, v.floors * 0.6), 6, TRIM, TRIM);
   }
   return b.build();
 }
@@ -268,7 +334,7 @@ export interface ShedVariant {
   /** Share of the lot's depth the building takes. */
   cover: number;
   /** What its front wall shows. */
-  front: "storefront" | "doors" | "windows" | "curtain";
+  front: "storefront" | "doors" | "windows" | "curtain" | "bands";
   /** Paving: a car park in front, or a yard beside the building. */
   lot: "front" | "yard" | "none";
   /** A small office block at the front corner. */
@@ -294,7 +360,9 @@ export function shed(lot: Lot, v: ShedVariant): ModelArrays {
         ? facade(FACADE.doors, 6, v.height)
         : v.front === "curtain"
           ? facade(FACADE.curtain, 1.8, 3.8)
-          : facade(FACADE.windows, 4, 4);
+          : v.front === "bands"
+            ? facade(FACADE.bands, 1.8, 3.8)
+            : facade(FACADE.windows, 4, 4);
   b.box(x0, x1, BASE_TOP, top, z0, z1, WALL, null, frontFacade);
   if (v.roof === "gable") b.gable(x0, x1, z0, z1, top, Math.min(x1 - x0, z1 - z0) * 0.12, false, ROOF, WALL, 0.3);
   else if (v.roof === "saw") {
@@ -327,10 +395,12 @@ export function shed(lot: Lot, v: ShedVariant): ModelArrays {
     }
   } else flatRoof(b, x0, x1, z0, z1, top, 0.3);
   if (v.office) {
+    // It stands proud of the shed's side and its cornice, so its windows are not drawn on the plane of the shed's doors or trim.
     const ow = Math.min(12, (x1 - x0) * 0.4);
-    base(b, x0, x0 + ow, z1, z1 + 1);
-    b.box(x0, x0 + ow, BASE_TOP, BASE_TOP + 7.6, z1 - 6, z1 + 1, WALL, null, facade(FACADE.windows, 2.6, 3.8));
-    flatRoof(b, x0, x0 + ow, z1 - 6, z1 + 1, BASE_TOP + 7.8, 0.2);
+    const o0 = x0 - 0.5;
+    base(b, o0, x0 + ow, z1, z1 + 1);
+    b.box(o0, x0 + ow, BASE_TOP, BASE_TOP + 7.6, z1 - 6, z1 + 1, WALL, null, facade(FACADE.windows, 2.6, 3.8));
+    flatRoof(b, o0, x0 + ow, z1 - 6, z1 + 1, BASE_TOP + 7.8, 0.2);
   }
   for (let k = 0; k < v.chimneys; k++) {
     const cx = x1 - 3 - k * 4;
@@ -411,16 +481,19 @@ const B = (
   ground: BlockVariant["ground"],
   roof: BlockVariant["roof"],
   more: Partial<BlockVariant> = {},
-): BlockVariant => ({ floors, ground, roof, upper: "windows", spacing: 3, storey: 3.1, front: 3, side: 1, cover: 0.85, plant: true, forecourt: false, ...more });
+): BlockVariant => ({ floors, ground, roof, upper: "windows", spacing: 3, storey: 3.1, front: 3, side: 1, cover: 0.85, plant: true, forecourt: false, setback: 0, ...more });
 const T = (floors: number, podium: number, share: number, more: Partial<TowerVariant> = {}): TowerVariant => ({
   floors,
   podium,
   share,
   shops: false,
   curtain: false,
+  bands: false,
   spacing: 3,
   storey: 3.2,
   crown: "flat",
+  setbacks: 0,
+  split: false,
   ...more,
 });
 const S = (height: number, roof: ShedVariant["roof"], front: ShedVariant["front"], lot: ShedVariant["lot"], more: Partial<ShedVariant> = {}): ShedVariant => ({
@@ -437,67 +510,144 @@ const S = (height: number, roof: ShedVariant["roof"], front: ShedVariant["front"
 /** Every type's generator, by the type's id in `buildings.json`. */
 export const GENERATORS: Readonly<Record<string, { generate: Generator; models: number }>> = {
   // Residential.
-  "single-family-home": of(house, [H(2, "gable", true, true), H(1, "hip", false, true, 7), H(2, "side-gable", true, false, 5), H(1, "gable", true, false, 6, 2.6)]),
-  plex: of(row, [R(2, 8, "gable", false), R(3, 12, "flat", false, false, 5, 3), R(2, 12, "gable", true, false, 5)]),
-  townhomes: of(row, [R(3, 6, "flat", true), R(2, 6, "gable", true, false, 3.5), R(3, 7, "gable", false, false, 4, 2.6)]),
+  "single-family-home": of(house, [
+    H(2, "gable", true, true),
+    H(1, "hip", false, true, 7),
+    H(2, "side-gable", true, false, 5),
+    H(1, "gable", true, false, 6, 2.6),
+    H(2, "hip", true, true, 6, 3.6),
+    H(1, "side-gable", false, true, 8, 2.8),
+  ]),
+  plex: of(row, [R(2, 8, "gable", false), R(3, 12, "flat", false, false, 5, 3), R(2, 12, "gable", true, false, 5), R(2, 10, "gable", true, false, 6, 3.4)]),
+  townhomes: of(row, [R(3, 6, "flat", true), R(2, 6, "gable", true, false, 3.5), R(3, 7, "gable", false, false, 4, 2.6), R(3, 5.5, "flat", false, false, 3, 2.4)]),
   apartments: of(block, [
     B(4, "windows", "flat", { front: 5, cover: 0.7 }),
     B(6, "lobby", "flat", { front: 6, cover: 0.7, spacing: 3.4 }),
     B(3, "windows", "hip", { front: 5, cover: 0.65, spacing: 2.8 }),
+    B(5, "windows", "flat", { front: 5, cover: 0.7, upper: "bands" }),
+    B(6, "lobby", "flat", { front: 6, cover: 0.7, spacing: 2.8, setback: 1 }),
   ]),
-  "low-tower": of(tower, [T(12, 0, 1, { spacing: 3.2 }), T(10, 2, 0.75, { crown: "step" }), T(14, 0, 1, { curtain: true })]),
-  "high-tower": of(tower, [T(26, 3, 0.6, { curtain: true, crown: "mast" }), T(22, 2, 0.65, { crown: "step", spacing: 3.4 }), T(30, 0, 1, { curtain: true })]),
+  "low-tower": of(tower, [
+    T(12, 0, 1, { spacing: 3.2 }),
+    T(10, 2, 0.75, { crown: "step" }),
+    T(14, 0, 1, { curtain: true }),
+    T(12, 0, 1, { setbacks: 1, spacing: 2.8 }),
+    T(11, 2, 0.7, { bands: true, crown: "pyramid" }),
+  ]),
+  "high-tower": of(tower, [
+    T(26, 3, 0.6, { curtain: true, crown: "mast" }),
+    T(22, 2, 0.65, { crown: "step", spacing: 3.4 }),
+    T(30, 0, 1, { curtain: true }),
+    T(28, 2, 0.6, { curtain: true, setbacks: 2 }),
+    T(24, 0, 1, { split: true, spacing: 3 }),
+  ]),
 
   // Commercial.
-  "corner-store": of(block, [B(1, "storefront", "flat", { front: 2, plant: false }), B(2, "storefront", "flat", { front: 1.5, plant: false }), B(1, "storefront", "gable", { front: 3 })]),
+  "corner-store": of(block, [
+    B(1, "storefront", "flat", { front: 2, plant: false }),
+    B(2, "storefront", "flat", { front: 1.5, plant: false }),
+    B(1, "storefront", "gable", { front: 3 }),
+    B(2, "storefront", "hip", { front: 2 }),
+  ]),
   restaurant: of(block, [B(1, "storefront", "gable", { front: 4, cover: 0.6 }), B(2, "storefront", "flat", { front: 2, cover: 0.7, plant: false }), B(1, "storefront", "hip", { front: 5, cover: 0.55, forecourt: true })]),
-  "shop-row": of(row, [R(1, 6, "flat", false, true, 2), R(2, 7, "flat", true, true, 2), R(1, 8, "gable", false, true, 3)]),
-  "retail-block": of(block, [B(2, "storefront", "flat", { front: 2 }), B(3, "storefront", "flat", { front: 2, spacing: 4 }), B(2, "storefront", "flat", { front: 6, forecourt: true })]),
+  "shop-row": of(row, [R(1, 6, "flat", false, true, 2), R(2, 7, "flat", true, true, 2), R(1, 8, "gable", false, true, 3), R(2, 6, "gable", true, true, 2)]),
+  "retail-block": of(block, [
+    B(2, "storefront", "flat", { front: 2 }),
+    B(3, "storefront", "flat", { front: 2, spacing: 4 }),
+    B(2, "storefront", "flat", { front: 6, forecourt: true }),
+    B(3, "storefront", "flat", { front: 2, upper: "bands" }),
+  ]),
   "small-office-park": of(shed, [
     S(7.6, "flat", "curtain", "front", { cover: 0.7 }),
     S(8, "flat", "windows", "front", { cover: 0.75 }),
     S(4, "flat", "curtain", "front", { cover: 0.7 }),
+    S(8, "flat", "bands", "front", { cover: 0.75 }),
   ]),
   "strip-mall": of(shed, [S(5, "flat", "storefront", "front"), S(6, "flat", "storefront", "front", { cover: 0.95 }), S(5, "gable", "storefront", "front")]),
   "small-mall": of(shed, [S(9, "flat", "storefront", "front", { cover: 0.85 }), S(10, "flat", "curtain", "front", { cover: 0.9 }), S(8, "gable", "storefront", "front")]),
-  "retail-podium": of(tower, [T(6, 2, 0.7, { shops: true }), T(8, 2, 0.6, { shops: true, curtain: true }), T(5, 3, 0.75, { shops: true, crown: "step" })]),
+  "retail-podium": of(tower, [T(6, 2, 0.7, { shops: true }), T(8, 2, 0.6, { shops: true, curtain: true }), T(5, 3, 0.75, { shops: true, crown: "step" }), T(6, 2, 0.7, { shops: true, bands: true })]),
   "department-store": of(block, [
     B(5, "storefront", "flat", { front: 2, storey: 4.2, spacing: 5, cover: 0.95 }),
     B(4, "storefront", "flat", { front: 2, storey: 4.5, upper: "curtain", cover: 0.95 }),
     B(6, "storefront", "flat", { front: 3, storey: 4, spacing: 4, cover: 0.9 }),
+    B(5, "storefront", "flat", { front: 2, storey: 4.2, upper: "bands", cover: 0.95 }),
   ]),
   "big-box-store": of(shed, [S(9, "flat", "storefront", "front", { cover: 0.9 }), S(8, "flat", "doors", "front"), S(10, "gable", "storefront", "front")]),
   "shopping-centre": of(shed, [S(14, "flat", "storefront", "front"), S(12, "flat", "curtain", "front"), S(16, "saw", "storefront", "front")]),
 
   // Office.
-  "converted-house-office": of(house, [H(2, "gable", true, false, 7), H(2, "hip", true, true, 6), H(2, "side-gable", false, false, 5)]),
+  "converted-house-office": of(house, [H(2, "gable", true, false, 7), H(2, "hip", true, true, 6), H(2, "side-gable", false, false, 5), H(2, "gable", false, true, 6, 2.8)]),
   "low-office-block": of(block, [
     B(2, "lobby", "flat", { front: 6, forecourt: true, storey: 3.8 }),
     B(3, "windows", "flat", { front: 5, storey: 3.8, spacing: 3.5 }),
     B(2, "windows", "hip", { front: 6, storey: 3.8 }),
+    B(3, "lobby", "flat", { front: 5, storey: 3.8, upper: "bands", forecourt: true }),
   ]),
-  "office-pavilion": of(shed, [S(8, "flat", "curtain", "front", { cover: 0.8 }), S(4.5, "flat", "curtain", "front"), S(8, "flat", "windows", "front", { cover: 0.85 })]),
+  "office-pavilion": of(shed, [
+    S(8, "flat", "curtain", "front", { cover: 0.8 }),
+    S(4.5, "flat", "curtain", "front"),
+    S(8, "flat", "windows", "front", { cover: 0.85 }),
+    S(7.6, "flat", "bands", "front", { cover: 0.8 }),
+  ]),
   "mid-rise-office": of(block, [
     B(6, "lobby", "flat", { storey: 3.8, upper: "curtain" }),
     B(5, "lobby", "flat", { storey: 3.8, spacing: 3.6 }),
     B(7, "lobby", "flat", { storey: 3.8, spacing: 2.4 }),
+    B(6, "lobby", "flat", { storey: 3.8, upper: "bands" }),
+    B(8, "lobby", "flat", { storey: 3.8, spacing: 3, setback: 2 }),
   ]),
   "office-slab": of(block, [
     B(8, "lobby", "flat", { storey: 3.8, upper: "curtain", front: 5, forecourt: true }),
     B(7, "lobby", "flat", { storey: 3.8, spacing: 3, front: 4 }),
     B(9, "lobby", "flat", { storey: 3.8, spacing: 2.2, front: 6, forecourt: true }),
+    B(10, "lobby", "flat", { storey: 3.8, upper: "bands", front: 5, forecourt: true }),
+    B(9, "lobby", "flat", { storey: 3.8, upper: "curtain", front: 4, setback: 2 }),
   ]),
-  "mid-rise-office-tower": of(tower, [T(10, 0, 1, { curtain: true, storey: 3.8 }), T(9, 1, 0.8, { storey: 3.8, spacing: 2.6 }), T(12, 0, 1, { storey: 3.8, crown: "step" })]),
-  "slim-office-tower": of(tower, [T(18, 0, 1, { curtain: true, storey: 3.8 }), T(16, 0, 1, { storey: 3.8, crown: "step", spacing: 2.4 }), T(20, 0, 1, { curtain: true, crown: "mast", storey: 3.8 })]),
-  "office-tower": of(tower, [T(24, 2, 0.7, { curtain: true, storey: 3.8 }), T(20, 0, 1, { storey: 3.8, spacing: 2.6, crown: "step" }), T(28, 2, 0.65, { curtain: true, storey: 3.8, crown: "mast" })]),
-  "tall-office-tower": of(tower, [T(40, 3, 0.6, { curtain: true, storey: 3.8, crown: "mast" }), T(34, 3, 0.62, { curtain: true, storey: 3.8, crown: "step" }), T(44, 2, 0.55, { storey: 3.8, spacing: 2.2 })]),
+  "mid-rise-office-tower": of(tower, [
+    T(10, 0, 1, { curtain: true, storey: 3.8 }),
+    T(9, 1, 0.8, { storey: 3.8, spacing: 2.6 }),
+    T(12, 0, 1, { storey: 3.8, crown: "step" }),
+    T(11, 0, 1, { storey: 3.8, bands: true, crown: "pyramid" }),
+    T(12, 1, 0.8, { storey: 3.8, curtain: true, split: true }),
+  ]),
+  "slim-office-tower": of(tower, [
+    T(18, 0, 1, { curtain: true, storey: 3.8 }),
+    T(16, 0, 1, { storey: 3.8, crown: "step", spacing: 2.4 }),
+    T(20, 0, 1, { curtain: true, crown: "mast", storey: 3.8 }),
+    T(19, 0, 1, { storey: 3.8, bands: true, setbacks: 1 }),
+    T(17, 0, 1, { storey: 3.8, curtain: true, crown: "pyramid" }),
+  ]),
+  "office-tower": of(tower, [
+    T(24, 2, 0.7, { curtain: true, storey: 3.8 }),
+    T(20, 0, 1, { storey: 3.8, spacing: 2.6, crown: "step" }),
+    T(28, 2, 0.65, { curtain: true, storey: 3.8, crown: "mast" }),
+    T(26, 2, 0.7, { curtain: true, storey: 3.8, setbacks: 2, crown: "mast" }),
+    T(22, 0, 1, { storey: 3.8, bands: true, split: true }),
+  ]),
+  "tall-office-tower": of(tower, [
+    T(40, 3, 0.6, { curtain: true, storey: 3.8, crown: "mast" }),
+    T(34, 3, 0.62, { curtain: true, storey: 3.8, crown: "step" }),
+    T(44, 2, 0.55, { storey: 3.8, spacing: 2.2 }),
+    T(42, 3, 0.6, { curtain: true, storey: 3.8, setbacks: 2, crown: "pyramid" }),
+    T(38, 2, 0.62, { storey: 3.8, bands: true, split: true }),
+  ]),
 
   // Industrial.
-  workshop: of(shed, [S(5, "gable", "doors", "none", { cover: 0.8 }), S(4.5, "flat", "doors", "none"), S(6, "saw", "doors", "none", { cover: 0.85 })]),
+  workshop: of(shed, [S(5, "gable", "doors", "none", { cover: 0.8 }), S(4.5, "flat", "doors", "none"), S(6, "saw", "doors", "none", { cover: 0.85 }), S(5.5, "gable", "doors", "yard", { cover: 0.6 })]),
   "yard-depot": of(shed, [S(5, "flat", "doors", "yard", { cover: 0.4 }), S(6, "gable", "doors", "yard", { cover: 0.5 }), S(4, "flat", "windows", "yard", { cover: 0.35 })]),
-  "small-factory": of(shed, [S(7, "saw", "doors", "none", { office: true }), S(8, "flat", "doors", "none", { chimneys: 1 }), S(7, "gable", "doors", "yard", { cover: 0.85, chimneys: 1 })]),
-  "light-industrial-unit": of(shed, [S(6, "flat", "doors", "none", { office: true, cover: 0.8 }), S(7, "gable", "doors", "none"), S(6, "flat", "windows", "front", { cover: 0.8 })]),
-  warehouse: of(shed, [S(10, "flat", "doors", "none"), S(11, "gable", "doors", "none", { cover: 0.85 }), S(9, "flat", "doors", "yard", { office: true })]),
+  "small-factory": of(shed, [
+    S(7, "saw", "doors", "none", { office: true }),
+    S(8, "flat", "doors", "none", { chimneys: 1 }),
+    S(7, "gable", "doors", "yard", { cover: 0.85, chimneys: 1 }),
+    S(8, "flat", "doors", "yard", { chimneys: 2, office: true }),
+  ]),
+  "light-industrial-unit": of(shed, [
+    S(6, "flat", "doors", "none", { office: true, cover: 0.8 }),
+    S(7, "gable", "doors", "none"),
+    S(6, "flat", "windows", "front", { cover: 0.8 }),
+    S(7, "flat", "bands", "front", { cover: 0.75 }),
+  ]),
+  warehouse: of(shed, [S(10, "flat", "doors", "none"), S(11, "gable", "doors", "none", { cover: 0.85 }), S(9, "flat", "doors", "yard", { office: true }), S(12, "saw", "doors", "none", { office: true })]),
   "medium-factory": of(shed, [S(11, "saw", "doors", "yard", { chimneys: 2, office: true }), S(12, "flat", "doors", "none", { chimneys: 1 }), S(10, "gable", "doors", "yard", { chimneys: 2 })]),
   "tank-farm": of(tanks, [
     { across: 2, back: 3, height: 12, hall: 0, chimneys: 0 },
@@ -519,12 +669,39 @@ export const GENERATORS: Readonly<Record<string, { generate: Generator; models: 
     B(4, "storefront", "flat", { front: 1, side: 0.3, cover: 0.7, spacing: 2.6 }),
     B(3, "storefront", "flat", { front: 1.5, side: 0.5, cover: 0.8, spacing: 3.6 }),
   ]),
-  "walk-up-over-shops": of(block, [B(4, "storefront", "flat", { front: 1 }), B(5, "storefront", "flat", { front: 1, spacing: 2.6 }), B(4, "storefront", "hip", { front: 1.5 })]),
-  "mixed-mid-rise": of(block, [B(7, "storefront", "flat", { front: 1 }), B(6, "storefront", "flat", { front: 1.5, upper: "curtain" }), B(8, "storefront", "flat", { front: 1, spacing: 2.8 })]),
-  "perimeter-block": of(block, [B(6, "storefront", "flat", { front: 1, side: 0.5, cover: 0.9 }), B(5, "storefront", "hip", { front: 1, side: 0.5 }), B(7, "storefront", "flat", { front: 1, side: 0.5, spacing: 2.6 })]),
-  "mixed-slab": of(tower, [T(12, 2, 0.7, { shops: true }), T(14, 2, 0.65, { shops: true, curtain: true }), T(10, 3, 0.75, { shops: true, crown: "step" })]),
-  "podium-tower": of(tower, [T(16, 3, 0.6, { shops: true }), T(18, 3, 0.55, { shops: true, curtain: true }), T(14, 2, 0.65, { shops: true, crown: "step" })]),
-  "tall-podium-tower": of(tower, [T(30, 4, 0.55, { shops: true, curtain: true, crown: "mast" }), T(26, 3, 0.6, { shops: true, crown: "step" }), T(34, 4, 0.5, { shops: true, curtain: true })]),
+  "walk-up-over-shops": of(block, [
+    B(4, "storefront", "flat", { front: 1 }),
+    B(5, "storefront", "flat", { front: 1, spacing: 2.6 }),
+    B(4, "storefront", "hip", { front: 1.5 }),
+    B(5, "storefront", "gable", { front: 1, spacing: 3.2 }),
+  ]),
+  "mixed-mid-rise": of(block, [
+    B(7, "storefront", "flat", { front: 1 }),
+    B(6, "storefront", "flat", { front: 1.5, upper: "curtain" }),
+    B(8, "storefront", "flat", { front: 1, spacing: 2.8 }),
+    B(7, "storefront", "flat", { front: 1, setback: 2 }),
+    B(6, "storefront", "flat", { front: 1, upper: "bands" }),
+  ]),
+  "perimeter-block": of(block, [
+    B(6, "storefront", "flat", { front: 1, side: 0.5, cover: 0.9 }),
+    B(5, "storefront", "hip", { front: 1, side: 0.5 }),
+    B(7, "storefront", "flat", { front: 1, side: 0.5, spacing: 2.6 }),
+    B(6, "storefront", "flat", { front: 1, side: 0.5, cover: 0.9, setback: 1 }),
+  ]),
+  "mixed-slab": of(tower, [T(12, 2, 0.7, { shops: true }), T(14, 2, 0.65, { shops: true, curtain: true }), T(10, 3, 0.75, { shops: true, crown: "step" }), T(12, 2, 0.7, { shops: true, bands: true, setbacks: 1 })]),
+  "podium-tower": of(tower, [
+    T(16, 3, 0.6, { shops: true }),
+    T(18, 3, 0.55, { shops: true, curtain: true }),
+    T(14, 2, 0.65, { shops: true, crown: "step" }),
+    T(17, 3, 0.6, { shops: true, curtain: true, crown: "pyramid" }),
+  ]),
+  "tall-podium-tower": of(tower, [
+    T(30, 4, 0.55, { shops: true, curtain: true, crown: "mast" }),
+    T(26, 3, 0.6, { shops: true, crown: "step" }),
+    T(34, 4, 0.5, { shops: true, curtain: true }),
+    T(28, 4, 0.55, { shops: true, setbacks: 2, crown: "mast" }),
+    T(32, 3, 0.6, { shops: true, curtain: true, split: true }),
+  ]),
 
   // Through-lots (M2-14): a lot across a whole block, from one road to the
   // next, up to 96 m square. The car park or yard faces the front road.

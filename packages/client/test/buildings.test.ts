@@ -6,7 +6,7 @@ import { BUILDING_TYPES, CHUNKS_PER_SIDE, CHUNK_SIZE, ZONING_BALANCE, type Build
 import { createBuildingLayer, type BuildingSource } from "../src/render/building-meshes";
 import { placeLot } from "../src/render/building-place";
 import { hashId, tintFor } from "../src/render/building-tint";
-import { MASK_SIDE, MASK_TREES } from "../src/render/road-geometry";
+import { MASK_GRASS, MASK_SIDE, MASK_TREES } from "../src/render/road-geometry";
 import { BUILDINGS, CELLS, CONSTRUCTION, ROADS } from "../src/render/config";
 import { FACADE, SURFACE } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
@@ -293,22 +293,28 @@ describe("the building layer", () => {
     b.dispose();
   });
 
-  it("keeps decoration off the lots it draws, and says which chunks they touch", () => {
+  it("keeps decoration off the lots it draws and trees off the ground round them, and says which chunks they touch", () => {
     const { source, put } = fakeSource();
     const chunk = put(1, 4004, 4004);
     const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
     expect(layer.lotMask(chunk)).toBeNull();
     layer.reset();
     settle(layer);
-    expect(layer.takeLotChunks()).toEqual([chunk]);
+    // The lot is 4 m from the chunk lines at x = 4000 and z = 4000, inside the trees' clearance, so the chunks over them are named too.
+    expect(BUILDINGS.treeClearance).toBeGreaterThan(4);
+    expect(layer.takeLotChunks().sort((a, b) => a - b)).toEqual([chunk - CHUNKS_PER_SIDE - 1, chunk - CHUNKS_PER_SIDE, chunk - 1, chunk]);
     expect(layer.takeLotChunks()).toEqual([]);
+    expect(layer.lotMask(chunk - 1)).not.toBeNull();
     const mask = layer.lotMask(chunk);
     expect(mask).not.toBeNull();
     const ci = chunk % CHUNKS_PER_SIDE;
     const cj = Math.floor(chunk / CHUNKS_PER_SIDE);
     const at = (x: number, z: number) => mask?.[Math.floor((z - cj * CHUNK_SIZE) / ROADS.maskCell) * MASK_SIDE + Math.floor((x - ci * CHUNK_SIZE) / ROADS.maskCell)] ?? 0;
     expect(at(4010, 4010) & MASK_TREES).toBe(MASK_TREES);
-    expect(at(4030, 4010)).toBe(0);
+    expect(at(4010, 4010) & MASK_GRASS).toBe(MASK_GRASS);
+    // The lot ends at x = 4020. Just past it, a tree's crown would reach the building (issue #137): no trees there, but grass.
+    expect(at(4023, 4010)).toBe(MASK_TREES);
+    expect(at(4020 + BUILDINGS.treeClearance + 3, 4010)).toBe(0);
     layer.dispose();
   });
 });
