@@ -31,7 +31,7 @@ import { BUILDING_TYPES } from "./balance";
 import { noteColumns } from "./candidates";
 import { noteBuildingChanged } from "./changes";
 import { ZONING_BALANCE } from "../zoning/balance";
-import { fileBuilding, lotColumns, lotProblem, lotShapeOf, unfileBuilding } from "./where";
+import { fileBuilding, lotColumns, lotProblem, lotShapeOf, unfileBuildings } from "./where";
 
 /** Set in `flags` for a live building. */
 export const BUILDING_ALIVE = 1;
@@ -308,17 +308,60 @@ function lotShapeProblem(state: SimState, spec: NewBuilding, through: boolean): 
 
 /** Removes building `id`: its row becomes zeros and its id goes on the free list. Internal, like `addBuilding`. */
 export function removeBuilding(state: SimState, id: number): void {
+  removeBuildings(state, [id]);
+}
+
+/**
+ * Removes buildings `ids`, in that order, as `removeBuilding` does each: the
+ * free list ends with them in that order. Throws, changing nothing, if any
+ * is not a live building or is named twice. One pass for the lot, so
+ * clearing thousands does not copy the free list once per building (issue
+ * #162).
+ */
+export function removeBuildings(state: SimState, ids: readonly number[]): void {
   const b = state.buildings;
-  if (!isBuilding(b, id)) throw new RangeError(`building ${id} does not exist`);
-  // The columns it was filed on, which a lot a change of roads took may no
-  // longer walk to from its row.
-  noteColumns(state, unfileBuilding(state, id));
-  const arrays = b as unknown as Record<BuildingKey, AnyTypedArray>;
-  for (const key of BUILDING_ARRAYS) arrays[key][id] = 0;
-  const free = resized(b.free, b.free.length + 1);
-  free[free.length - 1] = id;
+  const named = new Uint8Array(b.flags.length);
+  for (const id of ids) {
+    if (!isBuilding(b, id)) throw new RangeError(`building ${id} does not exist`);
+    if (named[id]) throw new RangeError(`building ${id} is named twice`);
+    named[id] = 1;
+  }
+  if (ids.length === 0) return;
+  // The columns each was filed on, which a lot a change of roads took may
+  // no longer walk to from its row.
+  unfileBuildings(state, ids);
+  for (const id of ids) clearRow(b, id);
+  const free = resized(b.free, b.free.length + ids.length);
+  free.set(ids, b.free.length);
   b.free = free;
-  noteBuildingChanged(b, id);
+  for (const id of ids) noteBuildingChanged(b, id);
+}
+
+/**
+ * Sets every field of row `id` to 0. Written out field by field, not as a
+ * loop over `BUILDING_ARRAYS`: one store into eighteen kinds of typed array
+ * is slow, and a clear of thousands pays it on each (issue #162). A test
+ * checks the list here against `BUILDING_ARRAYS`.
+ */
+function clearRow(b: BuildingState, id: number): void {
+  b.flags[id] = 0;
+  b.firstSeg[id] = 0;
+  b.firstSide[id] = 0;
+  b.firstPlace[id] = 0;
+  b.dir[id] = 0;
+  b.width[id] = 0;
+  b.depth[id] = 0;
+  b.backSeg[id] = 0;
+  b.backSide[id] = 0;
+  b.backPlace[id] = 0;
+  b.backDir[id] = 0;
+  b.backDepth[id] = 0;
+  b.zone[id] = 0;
+  b.density[id] = 0;
+  b.type[id] = 0;
+  b.residents[id] = 0;
+  b.variant[id] = 0;
+  b.builtAt[id] = 0;
 }
 
 /**

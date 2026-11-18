@@ -34,7 +34,7 @@
 // building whose back road goes is lost like one whose front road goes.
 
 import { BUILDING_ALIVE, BUILDING_ARRAYS, type BuildingState } from "./buildings";
-import { noteColumns, segmentsNear } from "./candidates";
+import { noteColumns, noteFrontColumns, segmentsNear } from "./candidates";
 import { noteBuildingChanged } from "./changes";
 import type { SimState } from "../state";
 import {
@@ -51,6 +51,7 @@ import {
   type Column,
 } from "../zoning/cell-index";
 import { ZONING_BALANCE } from "../zoning/balance";
+import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { localIndex } from "../zoning/cells";
 import { anchorSpan, measureCurve } from "../zoning/shape";
 import { readAnchor } from "../roads/network";
@@ -234,12 +235,11 @@ function file(bi: BuildingIndex, b: BuildingState, id: number): boolean {
 
 /**
  * Takes building `id` off the cells it was filed on, from what `file`
- * kept, so it works whatever the row or the roads say now. Returns the
- * front cells it held, as segment and place in the run.
+ * kept, so it works whatever the row or the roads say now. Adds to `fronts`
+ * the front cells it held, as segment and place in the run, and returns it.
  */
-function unfile(bi: BuildingIndex, id: number): number[] {
+function unfile(bi: BuildingIndex, id: number, fronts: number[] = []): number[] {
   const rec = bi.filed[id];
-  const fronts: number[] = [];
   if (rec) {
     for (let i = 0; i < rec.length; i += 3) {
       const seg = rec[i] ?? 0;
@@ -444,6 +444,26 @@ export function unfileBuilding(state: SimState, id: number): Column[] {
   const cols: Column[] = [];
   for (let i = 0; i < fronts.length; i += 2) cols.push(columnOfFront(fronts[i] ?? 0, fronts[i + 1] ?? 0));
   return cols;
+}
+
+/**
+ * Unfiles buildings about to be removed, as `unfileBuilding` does each,
+ * catching the index up once for all of them, and tells the grower's
+ * candidates which columns they held. For a command that clears thousands
+ * at once (issue #162).
+ */
+export function unfileBuildings(state: SimState, ids: readonly number[]): void {
+  if (!current(state)) return;
+  const { bi } = indexOf(state, false);
+  const fronts: number[] = [];
+  for (const id of ids) {
+    bi.toCheck.delete(id);
+    bi.lost.delete(id);
+    unfile(bi, id, fronts);
+  }
+  const keys: number[] = [];
+  for (let i = 0; i < fronts.length; i += 2) keys.push((fronts[i] ?? 0) * CELL_KEY_STRIDE + (fronts[i + 1] ?? 0) / DEPTH);
+  noteFrontColumns(state, keys);
 }
 
 /** The chunk building `id` was filed in, or NO_BUILDING, without building the index. For deltas. */

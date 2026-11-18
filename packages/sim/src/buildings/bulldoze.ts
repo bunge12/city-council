@@ -20,7 +20,7 @@ import { terrainOf } from "../terrain/cache";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { openCellsUnder, syncCells } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE } from "./balance";
-import { isBuilding, removeBuilding, type BuildingState } from "./buildings";
+import { isBuilding, removeBuildings, type BuildingState } from "./buildings";
 import { buildingsOnCells, buildingsOnSegments, buildingsOnStretch } from "./where";
 
 /** One building a `BulldozeBuilding` names, as the player saw it: its id, its lot's first cell and the tick it was built on. */
@@ -76,7 +76,7 @@ export function planBulldozeBuildings(state: SimState, payload: unknown): { ok: 
 
 /** Removes the buildings a plan named, in ascending id order. */
 export function bulldozeBuildings(state: SimState, ids: readonly number[]): void {
-  for (const id of ids) removeBuilding(state, id);
+  removeBuildings(state, ids);
 }
 
 /** The buildings a road command would clear, for a preview. */
