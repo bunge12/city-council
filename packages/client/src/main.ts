@@ -45,7 +45,7 @@ import { zonedCellLookup } from "./tools/cell-snap";
 import { BlockOverlayController, blockLabelPoint, blockShapes } from "./tools/block-overlay";
 import { BulldozeToolController, type BulldozeKind, type BulldozePreview, type BulldozeTarget } from "./tools/bulldoze-tool";
 import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
-import { GridToolController, gridMarks, gridShapes } from "./tools/grid-tool";
+import { GridToolController, gridMarks, gridShapes, gridSideMarks } from "./tools/grid-tool";
 import { dragSamples, pickSegment } from "./tools/pick-segment";
 import { RoadToolController, type RoadPreview } from "./tools/road-tool";
 import { RouteToolController, routeShapes } from "./tools/route-tool";
@@ -724,8 +724,12 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       zoneTool.click({ ground: hit, segment: pointer ? segmentAt(pointer) : -1 });
       return;
     }
-    // The grid tool takes drags, not clicks.
-    if (gridTool.active()) return;
+    // The grid tool draws its first side with a drag; a click fixes how far the grid reaches, where it was clicked.
+    if (gridTool.active()) {
+      gridTool.hover(snapAt(hit), controls.altHeld());
+      gridTool.click();
+      return;
+    }
     const snap = snapAt(hit);
     roadTool.click(snap ? { x: snap.x, z: snap.z } : hit);
   });
@@ -739,7 +743,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     }
     roadTool.cancel();
   });
-  /** The grid tool's corner at screen point `p`: the ground there, caught by a road node or segment unless Alt is held. */
+  /** The grid tool's point at screen point `p`: the ground there, caught by the snaps for the move it would be unless Alt is held. */
   const gridPointAt = (p: { x: number; y: number }): { x: number; z: number } | null => {
     const hit = rig.pickGround(p.x, p.y);
     if (!hit) return null;
@@ -762,7 +766,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
           gridDragStarting = false;
           gridTool.dragStart(gridPointAt(from));
         }
-        gridTool.dragMove(gridPointAt(to), controls.altHeld());
+        gridTool.dragMove(gridPointAt(to));
         return;
       }
       if (zoneTool.brushing()) {
@@ -1020,6 +1024,8 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const cursor = controls.cursor();
     const snap = snapAt(cursor);
     lastSnap = snap;
+    // While the grid tool waits for its reach, the pointer sets it.
+    if (gridTool.active()) gridTool.hover(snap, controls.altHeld());
     document.body.dataset["snap"] = snap?.kind ?? "";
     document.body.dataset["snapSquare"] = String(snap?.square ?? false);
     const live = livePreview(snap);
@@ -1101,8 +1107,10 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     previews.show(shapes);
     const scale = cursor ? metresPerPixel(cursor) : 1;
     const ui = useUi.getState();
-    const shown = snap && !routeTool.active() ? snapMarks(snap, roadTool.anchor(), scale) : [];
+    const shown = snap && !routeTool.active() ? snapMarks(snap, gridTool.active() ? gridTool.anchor() : roadTool.anchor(), scale) : [];
     if (gridPayload) shown.push(...gridMarks(gridPayload, gridNow?.cuts ?? []));
+    const gridSide = gridTool.side();
+    if (gridSide) shown.push(...gridSideMarks(gridSide.origin, gridSide.end));
     // The route tool's points, as rings.
     for (const point of [ui.routeFrom, ui.routeTo]) if (point) shown.push({ shape: "ring", x: point.x, z: point.z, look: "node" });
     // Before a curve's control point is set, a line from the start shows the direction it will leave in.

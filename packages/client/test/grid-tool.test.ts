@@ -20,7 +20,7 @@ import {
   gridMarks,
   gridShapes,
   previewGrid,
-  roadDirAt,
+  reachTo,
   type GridPreview,
   type GridToolState,
 } from "../src/tools/grid-tool";
@@ -64,12 +64,28 @@ function setup(send?: (payload: BuildRoadGridPayload) => Promise<CommandResult>)
   return { mirror, tool, tick, settle, sent, state: () => state };
 }
 
-/** Draws the rectangle from `a` to `b` as a drag would. */
-function drag(tool: GridToolController, a: { x: number; z: number }, b: { x: number; z: number }): void {
-  tool.dragStart(a);
-  tool.dragMove({ x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 }, false);
-  tool.dragMove(b, false);
+type Point = { x: number; z: number };
+
+/**
+ * Draws a rectangle as a player would (issue 88): a drag along the first
+ * side from `origin` to `sideEnd`, then the pointer to `reach` and a click.
+ * The pointer is passed as caught by a snap, so the reach is exactly to it.
+ */
+function draw(tool: GridToolController, origin: Point, sideEnd: Point, reach: Point): void {
+  tool.dragStart(origin);
+  tool.dragMove({ x: (origin.x + sideEnd.x) / 2, z: (origin.z + sideEnd.z) / 2 });
+  tool.dragMove(sideEnd);
   tool.dragEnd();
+  tool.hover(caught(reach));
+  tool.click();
+}
+
+/** A pointer position as a snap that caught it, so the length guide leaves it be. */
+const caught = (p: Point) => ({ ...p, kind: "node" as const, lengthSnapped: false, source: null, angle: null, square: false, squareTo: null });
+
+/** Draws the rectangle square to the map from corner `a` to corner `b`, its first side running east or west from `a`. */
+function drag(tool: GridToolController, a: Point, b: Point): void {
+  draw(tool, a, { x: b.x, z: a.z }, b);
 }
 
 const key = (ax: number, az: number, bx: number, bz: number): string =>
@@ -91,28 +107,41 @@ function builtLinks(net: RoadNet): string[] {
 }
 
 describe("gridCorners", () => {
-  it("projects the pointer onto the two sides, so the far corner is the pointer", () => {
-    expect(gridCorners({ x: 4200, z: 4500 }, { x: 4400, z: 4300 }, { dx: 1, dz: 0 })).toEqual({
+  it("takes the first side as drawn and reaches square to it, to the left for a positive reach", () => {
+    expect(gridCorners({ x: 4200, z: 4500 }, { x: 4400, z: 4500 }, -200)).toEqual({
       origin: { x: 4200, z: 4500 },
       along: { x: 4400, z: 4500 },
       across: { x: 4200, z: 4300 },
     });
+    expect(gridCorners({ x: 4200, z: 4500 }, { x: 4400, z: 4500 }, 200).across).toEqual({ x: 4200, z: 4700 });
   });
 
-  it("turns with the direction and puts the corners on the build grid", () => {
+  it("follows a side at any angle and puts the corners on the build grid", () => {
     const d = { dx: Math.cos(0.3), dz: Math.sin(0.3) };
-    const c = gridCorners({ x: 4200, z: 4500 }, { x: 4200 + 300 * d.dx - 200 * d.dz, z: 4500 + 300 * d.dz + 200 * d.dx }, d);
+    const end = { x: 4200 + 300 * d.dx, z: 4500 + 300 * d.dz };
+    const c = gridCorners({ x: 4200, z: 4500 }, end, 200);
     for (const p of [c.along, c.across]) {
       expect(p.x * 8).toBe(Math.round(p.x * 8));
       expect(p.z * 8).toBe(Math.round(p.z * 8));
     }
     expect(Math.hypot(c.along.x - 4200, c.along.z - 4500)).toBeCloseTo(300, 0);
     expect(Math.hypot(c.across.x - 4200, c.across.z - 4500)).toBeCloseTo(200, 0);
+    // Square to the side, within the build grid's rounding.
+    const dot = (c.along.x - 4200) * (c.across.x - 4200) + (c.along.z - 4500) * (c.across.z - 4500);
+    expect(Math.abs(dot) / (300 * 200)).toBeLessThan(1e-3);
+  });
+
+  it("measures the reach from the side's line, signed by the side the point is on", () => {
+    const o = { x: 0, z: 0 };
+    const e = { x: 100, z: 0 };
+    expect(reachTo(o, e, { x: 50, z: 30 })).toBeCloseTo(30, 9);
+    expect(reachTo(o, e, { x: 500, z: -40 })).toBeCloseTo(-40, 9);
+    expect(gridCorners(o, e, reachTo(o, e, { x: 50, z: 30 })).across).toEqual({ x: 0, z: 30 });
   });
 });
 
 describe("the grid tool", () => {
-  it("counts the buildings in the way once the drag is over, and again only for buildings near the rectangle (issue M2-15)", async () => {
+  it("counts the buildings in the way once the rectangle is placed, and again only for buildings near the rectangle (issue M2-15)", async () => {
     const { client, host: hostEnd } = memoryTransportPair();
     new SimHost(createBareState(SEED), hostEnd, () => 0);
     const mirror = new SimMirror(client, "p1");
@@ -139,10 +168,14 @@ describe("the grid tool", () => {
     });
     tool.toggle();
     tool.dragStart({ x: 4200, z: 4500 });
-    tool.dragMove({ x: 4604, z: 4712 }, false);
+    tool.dragMove({ x: 4604, z: 4500 });
+    expect(tool.preview()).toBeNull();
+    tool.dragEnd();
+    // While the reach follows the pointer, the buildings in the way are not counted.
+    tool.hover(caught({ x: 4604, z: 4712 }));
     expect(tool.preview()?.clears).toBeNull();
     expect(counts).toBe(0);
-    tool.dragEnd();
+    tool.click();
     expect(tool.preview()?.clears).toEqual({ ids: [7], residents: 3 });
     expect(counts).toBe(1);
 
@@ -171,7 +204,7 @@ describe("the grid tool", () => {
     const preview = tool.preview();
     expect(preview?.ok).toBe(true);
     expect(preview?.payload.depth).toBe(96);
-    expect(state().gridDir).toEqual({ dx: 1, dz: 0 });
+    expect(preview?.payload.along).toEqual({ x: 4200 + 2 * 202, z: 4500 });
     // Depth 96 m and width 192 m between road edges: 2 by 2 blocks.
     expect(preview?.streets).toHaveLength(6);
     expect(preview?.cost).toBe(Math.round((preview?.length ?? 0) * (preview?.type.buildCostPerMetre ?? 0)));
@@ -192,7 +225,7 @@ describe("the grid tool", () => {
     expect(mirror.state?.log.map((e) => e.type)).toEqual(["BuildRoadGrid"]);
   });
 
-  it("takes the angle of the road a drag starts on, and joins that road", async () => {
+  it("lines the first side up with the road it starts on, and joins that road", async () => {
     const { tool, tick, settle, mirror, state } = setup();
     const d = { dx: 0.8, dz: 0.6 };
     await mirror.sendCommand("BuildRoad", { from: { x: 4150, z: 4450 }, to: { x: 4150 + 500 * d.dx, z: 4450 + 500 * d.dz }, type: "street" });
@@ -201,20 +234,25 @@ describe("the grid tool", () => {
     const net = mirror.state?.roads;
     if (!net) throw new Error("no state");
     const origin = { x: 4150 + 100 * d.dx, z: 4450 + 100 * d.dz };
-    const dir = roadDirAt(net, origin);
-    expect(dir?.dx).toBeCloseTo(0.8, 9);
-    expect(dir?.dz).toBeCloseTo(0.6, 9);
 
     tool.toggle();
-    // Off the road, to the left of it, two blocks each way.
-    drag(tool, origin, { x: origin.x + 300 * d.dx - 220 * d.dz, z: origin.z + 300 * d.dz + 220 * d.dx });
-    expect(state().gridOnRoad).toBe(true);
-    // Alt does not turn a rectangle started on a road.
-    tool.dragStart(origin);
-    tool.dragMove({ x: origin.x, z: origin.z + 300 }, true);
-    expect(state().gridDir.dx).toBeCloseTo(0.8, 9);
-    tool.dragMove({ x: origin.x + 300 * d.dx - 220 * d.dz, z: origin.z + 300 * d.dz + 220 * d.dx }, false);
+    tool.dragStart(tool.snap(origin, { metresPerPixel: 0.5, free: false }));
+    // A pointer a little off the road's line: the angle guide catches it on the line.
+    const off = { x: origin.x + 300 * d.dx + 3 * d.dz, z: origin.z + 300 * d.dz - 3 * d.dx };
+    const end = tool.snap(off, { metresPerPixel: 0.5, free: false });
+    expect(end?.kind).toBe("angle");
+    tool.dragMove(end);
     tool.dragEnd();
+    expect(state().gridStage).toBe("depth");
+    const side = state().gridSideEnd;
+    const o = state().gridOrigin;
+    if (!side || !o) throw new Error("no side");
+    // Along the road, within the build grid's rounding, and whole cells long.
+    expect(Math.abs((side.x - o.x) * d.dz - (side.z - o.z) * d.dx)).toBeLessThan(0.2);
+    expect(Math.hypot(side.x - o.x, side.z - o.z) / 8).toBeCloseTo(Math.round(Math.hypot(side.x - o.x, side.z - o.z) / 8), 1);
+    // Off the road to its left, two blocks deep.
+    tool.hover(caught({ x: origin.x - 220 * d.dz, z: origin.z + 220 * d.dx }));
+    tool.click();
 
     const preview = tool.preview();
     expect(preview?.ok, preview?.reason ?? "").toBe(true);
@@ -231,25 +269,84 @@ describe("the grid tool", () => {
     expect(builtLinks(net).length).toBeGreaterThan(before);
   });
 
-  it("turns a rectangle on open ground while Alt is held, keeping its size", () => {
+  it("lines the first side up with the map on open ground, and leaves it free-hand with Alt", () => {
     const { tool, state } = setup();
     tool.toggle();
     tool.dragStart({ x: 4200, z: 4500 });
-    tool.dragMove({ x: 4500, z: 4700 }, false);
-    // Turn it so the far corner points straight south of the origin.
-    tool.dragMove({ x: 4200, z: 4900 }, true);
-    const dir = state().gridDir;
-    const corner = state().gridCorner;
-    if (!corner) throw new Error("no corner");
-    expect(Math.hypot(dir.dx, dir.dz)).toBeCloseTo(1, 9);
-    expect(dir.dx).not.toBeCloseTo(1, 3);
-    expect(Math.hypot(corner.x - 4200, corner.z - 4500)).toBeCloseTo(Math.hypot(300, 200), 0);
-    expect(Math.abs(corner.x - 4200)).toBeLessThan(10);
-    // Let go of Alt and the drag sizes the turned rectangle.
-    tool.dragMove({ x: 4300, z: 4900 }, false);
-    expect(state().gridDir).toEqual(dir);
+    const near = { x: 4500, z: 4504 };
+    const snapped = tool.snap(near, { metresPerPixel: 0.5, free: false });
+    expect(snapped?.kind).toBe("angle");
+    expect(snapped?.z).toBe(4500);
+    expect(tool.snap(near, { metresPerPixel: 0.5, free: true })?.kind).toBe("none");
+    tool.dragMove(snapped);
     tool.dragEnd();
+    expect(state().gridSideEnd).toEqual({ x: 4504, z: 4500 });
+  });
+
+  it("sets the reach from the pointer, on either side, in whole cells unless a snap caught it", () => {
+    const { tool, state } = setup();
+    tool.toggle();
+    tool.dragStart({ x: 4200, z: 4500 });
+    tool.dragMove({ x: 4600, z: 4500 });
+    tool.dragEnd();
+    expect(tool.preview()).toBeNull();
+    tool.hover({ x: 4400, z: 4703 });
+    expect(state().gridReach).toBe(200);
+    tool.hover({ x: 4400, z: 4297 });
+    expect(state().gridReach).toBe(-200);
+    expect(tool.payload()?.across).toEqual({ x: 4200, z: 4300 });
+    tool.hover(caught({ x: 4400, z: 4703 }));
+    expect(state().gridReach).toBe(203);
+    // Held, the free-hand key leaves the reach where the pointer is.
+    tool.hover({ x: 4400, z: 4703 }, true);
+    expect(state().gridReach).toBe(203);
     expect(tool.preview()?.ok).toBe(true);
+  });
+
+  it("places the rectangle on the first Enter and sends it on the second, so the buildings in the way show first", () => {
+    const { tool, sent, state } = setup();
+    tool.toggle();
+    tool.dragStart({ x: 4200, z: 4500 });
+    tool.dragMove({ x: 4600, z: 4500 });
+    tool.dragEnd();
+    tool.hover(caught({ x: 4400, z: 4703 }));
+    tool.confirm();
+    expect(state().gridStage).toBe("placed");
+    expect(sent).toHaveLength(0);
+    // Placed, the pointer no longer moves it.
+    tool.hover(caught({ x: 4400, z: 4900 }));
+    expect(state().gridReach).toBe(203);
+    tool.confirm();
+    expect(sent).toHaveLength(1);
+  });
+
+  it("keeps the rectangle when the click that places it moves a few pixels", () => {
+    const { tool, state } = setup();
+    tool.toggle();
+    tool.dragStart({ x: 4200, z: 4500 });
+    tool.dragMove({ x: 4600, z: 4500 });
+    tool.dragEnd();
+    tool.hover(caught({ x: 4400, z: 4703 }));
+    // A press that moved past the click slop is a drag, but too short to be a side.
+    tool.dragStart({ x: 4400, z: 4703 });
+    tool.dragMove({ x: 4403, z: 4705 });
+    tool.dragEnd();
+    expect(state()).toMatchObject({ gridStage: "placed", gridOrigin: { x: 4200, z: 4500 }, gridSideEnd: { x: 4600, z: 4500 }, gridReach: 203 });
+    // A real drag starts a new side.
+    tool.dragStart({ x: 4300, z: 4600 });
+    tool.dragMove({ x: 4300, z: 4800 });
+    tool.dragEnd();
+    expect(state()).toMatchObject({ gridStage: "depth", gridOrigin: { x: 4300, z: 4600 }, gridSideEnd: { x: 4300, z: 4800 } });
+  });
+
+  it("drops a first side too short to build", () => {
+    const { tool, state } = setup();
+    tool.toggle();
+    tool.dragStart({ x: 4200, z: 4500 });
+    tool.dragMove({ x: 4204, z: 4500 });
+    tool.dragEnd();
+    expect(state().gridStage).toBeNull();
+    expect(state().gridOrigin).toBeNull();
   });
 
   it("shows where water cuts the streets and builds what it showed", async () => {
@@ -277,7 +374,9 @@ describe("the grid tool", () => {
     drag(tool, { x: 4100, z: 4400 }, { x: 4500, z: 4800 });
     const preview = tool.preview();
     expect(preview?.ok).toBe(false);
-    expect(preview?.reason).toMatch(new RegExp(`^Too many streets: the grid has \\d+, and the most one grid can lay is ${ROAD_BUILD.gridMaxStreets}$`));
+    expect(preview?.reason).toMatch(
+      new RegExp(`^Too big for one grid: it has \\d+ street sections, and one grid can lay ${ROAD_BUILD.gridMaxSections}\\. Make it smaller, or lay it in parts\\.$`),
+    );
     if (preview) expect(gridShapes(preview, "refused")).toHaveLength(0);
     tool.confirm();
     expect(sent).toHaveLength(0);
@@ -322,14 +421,16 @@ describe("the grid tool", () => {
     const { mirror } = setup();
     const net = mirror.state?.roads;
     if (!net) throw new Error("no state");
-    // 7 by 7 lines over the flat square: the most one grid can lay.
-    const payload = { origin: { x: 4100, z: 4400 }, along: { x: 4100 + 6 * 82, z: 4400 }, across: { x: 4100, z: 4400 + 6 * 82 }, depth: 72, width: 72, type: "street" };
+    // 13 by 14 lines 40 m apart over the flat square: 337 sections on open
+    // ground, near the most one grid can lay (issue 88).
+    const payload = { origin: { x: 4110, z: 4410 }, along: { x: 4110 + 12 * 40, z: 4410 }, across: { x: 4110, z: 4410 + 13 * 40 }, depth: 30, width: 30, type: "street" };
     const first = previewGrid(net, terrain, payload);
     expect(first.ok, first.reason ?? "").toBe(true);
-    expect(first.streets).toHaveLength(ROAD_BUILD.gridMaxStreets);
+    expect(first.streets).toHaveLength(27);
+    expect(first.streets.reduce((n, s) => n + s.points.length - 1, 0)).toBe(337);
     const t0 = performance.now();
     for (let i = 0; i < 10; i++) previewGrid(net, terrain, payload);
-    // Generous for a slow CI runner; on the development container it is about a millisecond.
+    // Generous for a slow CI runner; on the development container it is a few milliseconds.
     expect((performance.now() - t0) / 10).toBeLessThan(16);
   });
 });

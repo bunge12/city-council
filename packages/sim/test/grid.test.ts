@@ -333,11 +333,61 @@ describe("BuildRoadGrid", () => {
     expect(segmentCount(state.roads)).toBe(1);
   });
 
-  it(`refuses a grid of more than ${ROAD_BUILD.gridMaxStreets} streets`, () => {
+  it(`refuses a grid of more than ${ROAD_BUILD.gridMaxSections} street sections before looking at its links`, () => {
     const state = createBareState(SEED);
-    expect(refusal(state, grid(squareGrid([4100, 4400], 7, 6)))).toBe(
-      `Too many streets: the grid has 15, and the most one grid can lay is ${ROAD_BUILD.gridMaxStreets}`,
+    // 14 by 15 lines: 14 x 14 + 15 x 13 = 391 sections.
+    expect(refusal(state, grid(squareGrid([4100, 4400], 13, 14)))).toBe(
+      `Too big for one grid: it has 391 street sections, and one grid can lay ${ROAD_BUILD.gridMaxSections}. Make it smaller, or lay it in parts.`,
     );
+  });
+
+  it("counts each place the grid meets an existing road as several sections (issue 88)", () => {
+    const state = createBareState(SEED);
+    // 11 by 11 lines 40 m apart over the flat square: 220 sections. Each
+    // street west to east between two of its lines is met by all 11 lines
+    // across, and each meeting counts as six sections.
+    const dense = gridPayload([4150, 4450], [4550, 4450], [4150, 4850], 30, 30);
+    const meeting = ROAD_BUILD.gridMeetingSections;
+    const plan = (): GridPlan => {
+      const result = planRoadGrid(state.roads, terrainOf(SEED), dense);
+      if (!result.ok) throw new Error(result.reason);
+      return result.plan;
+    };
+    expect(plan()).toMatchObject({ lines: 22, sections: 220, meetings: 0, work: 220 });
+    ok(state, road([4120, 4470], [4580, 4470]));
+    ok(state, road([4120, 4510], [4580, 4510]));
+    expect(plan()).toMatchObject({ sections: 220, meetings: 22, work: 220 + 22 * meeting });
+    expect(220 + 22 * meeting).toBeLessThanOrEqual(ROAD_BUILD.gridMaxSections);
+    ok(state, road([4120, 4550], [4580, 4550]));
+    expect(220 + 33 * meeting).toBeGreaterThan(ROAD_BUILD.gridMaxSections);
+    expect(refusal(state, grid(dense))).toBe(
+      `Too big for one grid here: it has 220 street sections and meets existing roads 33 times. ` +
+        `One grid can lay ${ROAD_BUILD.gridMaxSections} sections, and each meeting counts as ${meeting}. Make it smaller, or lay it in parts.`,
+    );
+  });
+
+  it("counts a street that ends within the merge distance of a road as meeting it, as BuildRoad joins it there", () => {
+    const state = createBareState(SEED);
+    // A street 2 m past the grid's far side: that side lies along it and is
+    // left out, and each of the three lines across ends 2 m short of it.
+    ok(state, road([4100, 4644], [4400, 4644]));
+    const payload = gridPayload([4154, 4450], [4346, 4450], [4154, 4642]);
+    const result = planRoadGrid(state.roads, terrainOf(SEED), payload);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.plan).toMatchObject({ sections: 12, meetings: 3 });
+  });
+
+  it("counts a join at an existing node once, however many roads meet there", () => {
+    const state = createBareState(SEED);
+    // Two diagonal streets crossing at (4250, 4546), a lattice point of the
+    // grid below: four segments meet at the node there.
+    ok(state, road([4210, 4506], [4290, 4586]));
+    ok(state, road([4210, 4586], [4290, 4506]));
+    const payload = gridPayload([4154, 4450], [4346, 4450], [4154, 4642]);
+    const result = planRoadGrid(state.roads, terrainOf(SEED), payload);
+    if (!result.ok) throw new Error(result.reason);
+    // 3 by 3 lines: 12 sections. The four links that end at the node meet it once each.
+    expect(result.plan).toMatchObject({ sections: 12, meetings: 4, work: 12 + 4 * ROAD_BUILD.gridMeetingSections });
   });
 
   it("refuses a bad grid with a reason", () => {

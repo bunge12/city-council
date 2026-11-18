@@ -70,18 +70,26 @@ function roadCrossing(n: number): { payload: BuildRoadPayload; plan: RoadPlan } 
   throw new Error(`no road splits ${n} segments`);
 }
 
-/** A grid at the cap laid over one of the city's own grids, offset so its streets cross the city's. */
+/**
+ * A grid at the cap laid over one of the city's own grids, offset so its
+ * streets cross the city's: 5 by 6 lines, each of its 49 sections splitting
+ * one of the city's streets, which comes to 343 of the 360 the cap allows
+ * (issue 88). Of the grids that fit, the one with the most work.
+ */
 function gridOverStreets(): BuildRoadGridPayload {
+  let best: { payload: BuildRoadGridPayload; work: number } | null = null;
   for (const g of grids) {
     for (const off of [24, 72]) {
       const o = { x: g.x + off, z: g.z + off };
-      const payload = { origin: o, along: { x: o.x + SPAN, z: o.z }, across: { x: o.x, z: o.z + SPAN }, depth: 86, width: 86, type: "street" };
+      const payload = { origin: o, along: { x: o.x + 4 * LINE, z: o.z }, across: { x: o.x, z: o.z + 5 * LINE }, depth: 86, width: 86, type: "street" };
       const result = planRoadGrid(net, terrain, payload);
-      if (!result.ok || result.plan.lines !== ROAD_BUILD.gridMaxStreets) continue;
-      if (checkRoadGrid(net, terrain, result.plan) === null) return payload;
+      if (!result.ok || (best && result.plan.work <= best.work)) continue;
+      if (checkRoadGrid(net, terrain, result.plan) === null) best = { payload, work: result.plan.work };
     }
+    if (best && best.work * 1.1 > ROAD_BUILD.gridMaxSections) break;
   }
-  throw new Error("no grid at the cap fits over the city's streets");
+  if (!best) throw new Error("no grid at the cap fits over the city's streets");
+  return best.payload;
 }
 
 /** Builds `plan` on `on` with the journal open, as the step does. */
