@@ -26,7 +26,11 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
-test.setTimeout(300_000);
+// Each test opens a city of towers and takes several screenshots in software
+// WebGL. The downtown test took 2.3 minutes on an EPYC 9V45 runner and ran out
+// of five minutes on an EPYC 9V74, in its last close-ups both times. Slow
+// runners take about twice as long (issue #152), so eight minutes.
+test.setTimeout(480_000);
 
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
