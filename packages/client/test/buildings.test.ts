@@ -317,6 +317,37 @@ describe("the building layer", () => {
     expect(at(4020 + BUILDINGS.treeClearance + 3, 4010)).toBe(0);
     layer.dispose();
   });
+
+  it("keeps trees off the ground round a turned lot in a chunk none of its corners reach, and makes each mask once until a lot comes or goes", () => {
+    const { source, rows, put } = fakeSource();
+    const chunk = put(1, 4004, 4004);
+    // Turned 45 degrees about (4510, 4510), its corners 15 m out along the axes: the chunk over (4500, 4500) to the south-west holds
+    // none of them, but its corner is 7 m from the lot's middle, well inside the clearance.
+    const row = rows.get(1);
+    if (!row) throw new Error("no row");
+    row.corners = [4510, 4525, 4495, 4510, 4510, 4495, 4525, 4510];
+    const mid = 9 * CHUNKS_PER_SIDE + 9;
+    row.chunk = mid;
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    settle(layer, { x: 4510, z: 4510 });
+    expect(chunk).not.toBe(mid);
+    const corner = (9 - 1) * CHUNKS_PER_SIDE + 9 - 1;
+    expect(layer.takeLotChunks()).toContain(corner);
+    const mask = layer.lotMask(corner);
+    expect(mask).not.toBeNull();
+    // The cell at (4499, 4499) is about 4.6 m from the lot's nearest edge.
+    const at = (m: Uint8Array | null, c: number, x: number, z: number) =>
+      m?.[Math.floor((z - Math.floor(c / CHUNKS_PER_SIDE) * CHUNK_SIZE) / ROADS.maskCell) * MASK_SIDE + Math.floor((x - (c % CHUNKS_PER_SIDE) * CHUNK_SIZE) / ROADS.maskCell)] ?? 0;
+    expect(at(mask, corner, 4499, 4499)).toBe(MASK_TREES);
+    // Asked again with nothing changed, the same mask; a building gone, a new one.
+    expect(layer.lotMask(corner)).toBe(mask);
+    rows.delete(1);
+    layer.applyIds([1]);
+    settle(layer, { x: 4510, z: 4510 });
+    expect(layer.lotMask(corner)).toBeNull();
+    layer.dispose();
+  });
 });
 
 describe("the building layer's levels of detail (issue M2-13)", () => {

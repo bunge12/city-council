@@ -83,7 +83,7 @@ import {
   type MergedArrays,
   type MergedItem,
 } from "./building-lod";
-import { MASK_GRASS, MASK_SIDE, MASK_TREES, ringDistance } from "./road-geometry";
+import { MASK_GRASS, MASK_SIDE, MASK_TREES } from "./road-geometry";
 import { BUILDINGS, CELLS, CONSTRUCTION, ROADS } from "./config";
 import { STYLES, lookFor, tintFor } from "./building-tint";
 import { LONG_AGO, finishedAt, riseNode, rising, scaffoldGeometry, scaffoldMaterial, tickUniform, underConstruction } from "./construction";
@@ -369,7 +369,7 @@ function patterned(colour: Node<"vec3">, glass: GlassColours, kind: Node<"float"
   // Where a window bay or a floor comes to less than a couple of pixels, the
   // panes fade to the share of the wall they cover, so a far facade has no
   // moiré.
-  const blur = smoothstep(0.25, 0.6, max(fwidth(bay), fwidth(up)));
+  const blur = smoothstep(0.25, 0.6, max(fwidth(select(kind.lessThan(1.5).and(style.greaterThan(2.5)), bay.mul(2), bay)), fwidth(up)));
   const cover = rect.y.sub(rect.x).mul(rect.w.sub(rect.z));
   const pane = select(kind.lessThan(0.5), 0, mix(insideRect(u, v, rect), cover, blur));
   // Each pane's shade, and whether it has a blind, from where it is and the building's seed.
@@ -608,14 +608,43 @@ function chunkOf(x: number, z: number): number {
 
 /** The chunks a lot reaches, with the ground round it kept clear of trees. */
 function cornerChunks(corners: ArrayLike<number>): number[] {
-  const out = new Set<number>();
-  const pad = BUILDINGS.treeClearance;
+  // Every chunk under the lot's box, widened by the trees' reach, so a turned lot or one over a chunk's corner misses none.
+  const reach = treeReach();
+  let [minX, maxX, minZ, maxZ] = [Infinity, -Infinity, Infinity, -Infinity];
   for (let k = 0; k < 4; k++) {
     const x = corners[k * 2] ?? 0;
     const z = corners[k * 2 + 1] ?? 0;
-    for (const [dx, dz] of [[0, 0], [-pad, -pad], [pad, -pad], [-pad, pad], [pad, pad]] as const) out.add(chunkOf(x + dx, z + dz));
+    [minX, maxX, minZ, maxZ] = [Math.min(minX, x), Math.max(maxX, x), Math.min(minZ, z), Math.max(maxZ, z)];
   }
-  return [...out];
+  const a = chunkOf(minX - reach, minZ - reach);
+  const b = chunkOf(maxX + reach, maxZ + reach);
+  const out: number[] = [];
+  for (let cj = Math.floor(a / CHUNKS_PER_SIDE); cj <= Math.floor(b / CHUNKS_PER_SIDE); cj++) {
+    for (let ci = a % CHUNKS_PER_SIDE; ci <= b % CHUNKS_PER_SIDE; ci++) out.push(cj * CHUNKS_PER_SIDE + ci);
+  }
+  return out;
+}
+
+/** Metres round a lot whose decoration mask cells are kept clear of trees: the clearance, and half a cell's diagonal, as a cell is clear when any point of it could be within the clearance. */
+function treeReach(): number {
+  return BUILDINGS.treeClearance + (ROADS.maskCell * Math.SQRT2) / 2;
+}
+
+/** The square of the distance from (x, z) to the edges of the quadrilateral `q`. */
+function edgeDistance2(q: readonly number[], x: number, z: number): number {
+  let best = Infinity;
+  for (let k = 0; k < 4; k++) {
+    const ax = q[k * 2] ?? 0;
+    const az = q[k * 2 + 1] ?? 0;
+    const ex = (q[((k + 1) % 4) * 2] ?? 0) - ax;
+    const ez = (q[((k + 1) % 4) * 2 + 1] ?? 0) - az;
+    const len2 = ex * ex + ez * ez;
+    const t = len2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * ex + (z - az) * ez) / len2)) : 0;
+    const dx = x - ax - ex * t;
+    const dz = z - az - ez * t;
+    best = Math.min(best, dx * dx + dz * dz);
+  }
+  return best;
 }
 
 /** The flat form's colour for a building type: its zone's at its density, as the overlay draws them. */
@@ -646,6 +675,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   const placed = new Map<number, Placed>();
   /** Drawn buildings by the chunks their lots' corners are in. */
   const byLotChunk = new Map<number, Set<number>>();
+  /** Each chunk's decoration mask as `lotMask` last made it, until a lot comes into the chunk or leaves it. The decoration asks twice per change. */
+  const lotMasks = new Map<number, Uint8Array | null>();
   const chunks = new Map<number, Chunk>();
   /** Chunks waiting, and whether each is to be rebuilt or only brought up to date. */
   const dirty = new Map<number, "rebuild" | "apply">();
@@ -1074,6 +1105,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   function fileLot(id: number, list: readonly number[]): void {
     for (const c of list) {
       lotChunks.add(c);
+      lotMasks.delete(c);
       let set = byLotChunk.get(c);
       if (!set) byLotChunk.set(c, (set = new Set()));
       set.add(id);
@@ -1083,6 +1115,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   function unfileLot(id: number, list: readonly number[]): void {
     for (const c of list) {
       lotChunks.add(c);
+      lotMasks.delete(c);
       byLotChunk.get(c)?.delete(id);
     }
   }
@@ -1479,8 +1512,13 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       return out;
     },
     lotMask(chunk) {
+      const kept = lotMasks.get(chunk);
+      if (kept !== undefined) return kept;
       const ids = byLotChunk.get(chunk);
-      if (!ids || ids.size === 0) return null;
+      if (!ids || ids.size === 0) {
+        lotMasks.set(chunk, null);
+        return null;
+      }
       const cell = ROADS.maskCell;
       const ci = chunk % CHUNKS_PER_SIDE;
       const cj = (chunk - ci) / CHUNKS_PER_SIDE;
@@ -1488,8 +1526,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       const z0 = cj * CHUNK_SIZE;
       const mask = new Uint8Array(MASK_SIDE * MASK_SIDE);
       // Grass stays off the lot, and trees off the ground round it too, so no crown reaches a wall (issue #137).
-      // A cell is clear of trees when any point of it could be within the clearance.
-      const reach = BUILDINGS.treeClearance + (cell * Math.SQRT2) / 2;
+      const reach = treeReach();
+      const reach2 = reach * reach;
       for (const id of ids) {
         const q = placed.get(id)?.corners;
         if (!q || q.length < 8) continue;
@@ -1505,10 +1543,11 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
             const z = z0 + (j + 0.5) * cell;
             const m = j * MASK_SIDE + i;
             if (inQuad(q, x, z)) mask[m] = MASK_TREES | MASK_GRASS;
-            else if (ringDistance(q, x, z) <= reach) mask[m] = (mask[m] ?? 0) | MASK_TREES;
+            else if ((mask[m] ?? 0) === 0 && edgeDistance2(q, x, z) <= reach2) mask[m] = MASK_TREES;
           }
         }
       }
+      lotMasks.set(chunk, mask);
       return mask;
     },
     tintOf: (id) => placed.get(id)?.tint ?? null,
