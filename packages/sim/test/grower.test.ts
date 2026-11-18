@@ -19,6 +19,7 @@ import {
   residentsFor,
   serialize,
   step,
+  typesFor,
   type BuildingRow,
   type Command,
   type SimState,
@@ -27,11 +28,11 @@ import { submit } from "./seen-ends";
 import { removeBuilding } from "../src/buildings/buildings";
 import { candidateSets } from "../src/buildings/candidates";
 import { grow } from "../src/buildings/grower";
-import { freeFrontage } from "../src/buildings/lots";
+import { freeFrontage, lotOptions } from "../src/buildings/lots";
 import { segmentBuildings } from "../src/buildings/where";
 import { nextInt, seedRng } from "../src/rng";
-import { isSegment } from "../src/roads/network";
-import { syncCells } from "../src/zoning/cell-index";
+import { isSegment, segmentIdLimit } from "../src/roads/network";
+import { nextColumn, nextColumnInto, syncCells, type Column } from "../src/zoning/cell-index";
 import { enqueue } from "../src/commands";
 import growthJson from "./fixtures/replay/growth.json";
 import { expectReplay, runFixture, type ReplayFixture } from "./replay-helper";
@@ -659,5 +660,94 @@ describe("replay fixture growth", () => {
 
   it.each([150, 451, 777, 1234])("hashes the same saved and loaded at tick %d, mid-growth", (at) => {
     expect(hashState(replaySavedAt(at))).toBe(fixture.hash);
+  });
+});
+
+describe("the grower's queries make no garbage and change no answer (issue 166)", () => {
+  /**
+   * A street cut in two by a street from the north, so strips run on across
+   * the cut, zoned so every refusal the grower meets comes up, and grown
+   * for ten days.
+   */
+  function town(): SimState {
+    const state = street(30);
+    ok(state, command("BuildRoad", { from: { x: 4200 + CELL * 15, z: 4300 }, to: { x: 4200 + CELL * 15, z: 4600 }, type: "street" }));
+    // R1 six deep, past its deepest lot of five; I1 on past the cut, its back rows behind its buildings.
+    zone(state, "residential", 1, 0, 13, 6, "north");
+    zone(state, "industrial", 1, 16, 14, 6, "north");
+    // R3 two deep, short of its shallowest lot of four; O3 two wide, short of its narrowest of three.
+    zone(state, "residential", 3, 0, 10, 2, "south");
+    zone(state, "office", 3, 12, 2, 6, "south");
+    // C3, where through-lot types grow.
+    zone(state, "commercial", 3, 16, 14, 6, "south");
+    runDays(state, 10);
+    expect(buildings(state).length).toBeGreaterThan(5);
+    return state;
+  }
+
+  it("asks the lot finder without reasons and gets the same answer, the problem alone on a refusal", () => {
+    const state = town();
+    const index = syncCells(state);
+    const seen = new Set<string>();
+    let asked = 0;
+    for (let seg = 0; seg < segmentIdLimit(state.roads); seg++) {
+      const places = index.segs[seg]?.places ?? 0;
+      for (let place = 0; place < places; place++) {
+        for (let side = 0; side < 2; side++) {
+          for (let depth = 0; depth < ZONING_BALANCE.zoneDepthCells; depth++) {
+            const ref = { segment: seg, side, place, depth };
+            const told = lotOptions(state, ref);
+            const quiet = lotOptions(state, ref, false);
+            asked++;
+            if (told.ok) {
+              expect(quiet).toEqual(told);
+              seen.add("ok");
+            } else {
+              expect(quiet).toEqual({ ok: false, problem: told.problem, reason: "" });
+              seen.add(told.problem);
+            }
+          }
+        }
+      }
+    }
+    expect(asked).toBeGreaterThan(500);
+    // The refusals the grower meets most, and the ones before them.
+    for (const answer of ["ok", "built", "unzoned", "too-shallow", "too-narrow", "too-deep", "off-road"]) expect(seen).toContain(answer);
+  });
+
+  it("lists each zone and density's types once, as the balance has them", () => {
+    for (let zone = 0; zone <= ZONING_BALANCE.zones.length + 1; zone++) {
+      for (let density = 0; density <= 4; density++) {
+        expect(typesFor(zone, density)).toEqual(BUILDING_TYPES.filter((t) => t.zoneNumber === zone && t.density === density));
+      }
+    }
+    expect(typesFor(1, 1).length).toBeGreaterThan(0);
+  });
+
+  it("steps along a strip into a column it is given as nextColumn does, the same column included", () => {
+    const state = town();
+    const index = syncCells(state);
+    const into: Column = { seg: -1, side: -1, place: -1, dir: -1 };
+    let crossed = 0;
+    for (let seg = 0; seg < segmentIdLimit(state.roads); seg++) {
+      const places = index.segs[seg]?.places ?? 0;
+      for (let place = 0; place < places; place++) {
+        for (let side = 0; side < 2; side++) {
+          for (let dir = 0; dir < 2; dir++) {
+            const col = { seg, side, place, dir };
+            const next = nextColumn(index, col);
+            const before = { ...into };
+            expect(nextColumnInto(index, col, into)).toBe(next !== null);
+            expect(into).toEqual(next ?? before);
+            if (next && next.seg !== seg) crossed++;
+            const self = { ...col };
+            if (nextColumnInto(index, self, self)) expect(self).toEqual(next);
+            else expect(self).toEqual(col);
+          }
+        }
+      }
+    }
+    // Some steps run on into the next segment, where the search is.
+    expect(crossed).toBeGreaterThan(0);
   });
 });

@@ -62,9 +62,9 @@
 import { TIME_BALANCE } from "../calendar";
 import { nextInt } from "../rng";
 import type { SimState } from "../state";
-import { cellSlot, type CellRef } from "../zoning/cells";
+import type { CellRef } from "../zoning/cells";
 import type { System } from "../step";
-import { cellsSettled, nextColumn, syncCells, type Column } from "../zoning/cell-index";
+import { cellSlotIn, cellsSettled, nextColumn, syncCells, type Column } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE, BUILDING_TYPES, typesFor, type BuildingType } from "./balance";
 import { addBuilding } from "./buildings";
 import type { GrowthState } from "./growth";
@@ -140,8 +140,13 @@ function chooseLot(rng: Uint32Array, lots: readonly Lot[], free: number, leaving
 
 /** The narrowest lot any type on one strip of `type`'s zone and density takes. */
 function narrowestBeside(type: BuildingType): number {
-  return Math.min(...typesFor(type.zoneNumber, type.density).filter((t) => !t.throughLot).map((t) => t.width[0]));
+  return NARROWEST_BESIDE[type.index] ?? Infinity;
 }
+
+/** `narrowestBeside` by type index, found once rather than on every draw (issue 166). */
+const NARROWEST_BESIDE = BUILDING_TYPES.map((type) =>
+  Math.min(...typesFor(type.zoneNumber, type.density).filter((t) => !t.throughLot).map((t) => t.width[0])),
+);
 
 /**
  * `lot`, standing at the end `end` of a free frontage `run` columns wide,
@@ -167,7 +172,7 @@ function leavingRoom(state: SimState, lot: Lot, end: CellRef, run: number): Lot 
 
 /** Whether any through-lot type grows on the zone and density of the cell `ref` names. */
 function hasThroughLots(state: SimState, ref: CellRef): boolean {
-  const slot = cellSlot(state.roads, state.cells, ref);
+  const slot = cellSlotIn(syncCells(state), state.cells, ref.segment, ref.side, ref.place, ref.depth);
   if (slot < 0) return false;
   return typesFor(state.cells.zone[slot] ?? 0, state.cells.density[slot] ?? 0).some((t) => t.throughLot);
 }
@@ -184,16 +189,16 @@ function optionsFromEnd(state: SimState, ref: CellRef): { options: LotOptions; l
   let last: LotOptions | null = null;
   const isEnd = ends.some((e) => e.segment === ref.segment && e.side === ref.side && e.place === ref.place);
   for (const at of ends) {
-    last = lotOptions(state, at);
+    last = lotOptions(state, at, false);
     if (!last.ok) continue;
     // A through-lot at the cell drawn still comes first, as before issue 194.
     if (!isEnd && !last.lots.some((lot) => lot.backDepth > 0) && hasThroughLots(state, ref)) {
-      const drawn = lotOptions(state, ref);
+      const drawn = lotOptions(state, ref, false);
       if (drawn.ok && drawn.lots.some((lot) => lot.backDepth > 0)) return { options: drawn, leaving: asIs };
     }
     return { options: last, leaving: (lot) => leavingRoom(state, lot, at, width) };
   }
-  return { options: isEnd && last ? last : lotOptions(state, ref), leaving: asIs };
+  return { options: isEnd && last ? last : lotOptions(state, ref, false), leaving: asIs };
 }
 
 /** Adds one building where the draw lands, or none after `growthTries` cells with no lot. Returns the id or -1. */

@@ -962,6 +962,8 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   const changed: Before[] = [];
   const restore = index.restore;
   index.restore = null;
+  // Nearly every call, from a query between changes: nothing to look at, and no garbage made finding that out (issue 166).
+  if (index.touched.size === 0 && limit === oldLimit) return null;
   const look = [...index.touched];
   index.touched.clear();
   for (let id = Math.min(limit, oldLimit); id < Math.max(limit, oldLimit); id++) look.push(id);
@@ -1890,17 +1892,41 @@ function sameEdge(p: Float64Array, q: Float64Array): boolean {
  * give, the lower segment id.
  */
 export function nextColumn(index: CellIndex, col: Column): Column | null {
-  const s = index.segs[col.seg];
-  if (!s?.status) return null;
-  const step = col.dir === 0 ? 1 : -1;
-  const place = col.place + step;
-  if (place >= 0 && place < s.places) return { seg: col.seg, side: col.side, place, dir: col.dir };
-  const node = col.dir === 0 ? s.b : s.a;
-  columnEdge(s, col.side, col.place, col.dir, DEPTH, edgeA);
+  const out: Column = { seg: 0, side: 0, place: 0, dir: 0 };
+  return nextColumnInto(index, col, out) ? out : null;
+}
+
+/**
+ * `nextColumn` written into `out`, which may be `col` itself: true when
+ * there is a next column, false with `out` as it was when there is none.
+ * For walks that keep no column they pass, so a step makes no garbage
+ * (issue 166).
+ */
+export function nextColumnInto(index: CellIndex, col: Column, out: Column): boolean {
+  const seg = col.seg;
+  const colSide = col.side;
+  const colPlace = col.place;
+  const dir = col.dir;
+  const s = index.segs[seg];
+  if (!s?.status) return false;
+  const place = colPlace + (dir === 0 ? 1 : -1);
+  if (place >= 0 && place < s.places) {
+    out.seg = seg;
+    out.side = colSide;
+    out.place = place;
+    out.dir = dir;
+    return true;
+  }
+  const node = dir === 0 ? s.b : s.a;
+  columnEdge(s, colSide, colPlace, dir, DEPTH, edgeA);
   const net = index.net;
-  let best: Column | null = null;
+  // The best so far, the lowest segment id; NONE for none yet.
+  let bestSeg = NONE;
+  let bestSide = 0;
+  let bestPlace = 0;
+  let bestDir = 0;
   for (let other = net.nodeFirstSeg[node] ?? NONE; other !== NONE; other = nextSegmentAt(net, other, node)) {
-    if (other === col.seg || (best !== null && other > best.seg)) continue;
+    if (other === seg || (bestSeg !== NONE && other > bestSeg)) continue;
     const o = index.segs[other];
     if (!o?.status || o.places === 0) continue;
     // Leaving through node A means walking toward node B, and the other way.
@@ -1909,10 +1935,19 @@ export function nextColumn(index: CellIndex, col: Column): Column | null {
     const oDir = fromA ? 0 : 1;
     for (let side = 0; side < 2; side++) {
       columnEdge(o, side, oPlace, 1 - oDir, DEPTH, edgeB);
-      if (sameEdge(edgeA, edgeB)) best = { seg: other, side, place: oPlace, dir: oDir };
+      if (!sameEdge(edgeA, edgeB)) continue;
+      bestSeg = other;
+      bestSide = side;
+      bestPlace = oPlace;
+      bestDir = oDir;
     }
   }
-  return best;
+  if (bestSeg === NONE) return false;
+  out.seg = bestSeg;
+  out.side = bestSide;
+  out.place = bestPlace;
+  out.dir = bestDir;
+  return true;
 }
 
 /**
@@ -1922,6 +1957,23 @@ export function nextColumn(index: CellIndex, col: Column): Column | null {
 export function columnExists(index: CellIndex, col: Column): boolean {
   const s = index.segs[col.seg];
   return !!s?.status && (col.side === 0 || col.side === 1) && Number.isInteger(col.place) && col.place >= 0 && col.place < s.places;
+}
+
+/**
+ * As `cellSlot` (cells.ts) for the cell at `side`, `place` and `depth` of
+ * `segment`, from the places `index` keeps rather than measuring the
+ * segment again, which allocates. `index` must be the one `syncCells` gave
+ * for `cells`, so its shapes are the roads' as they are now. For the
+ * grower's queries, which ask this many times a draw (issue 166).
+ */
+export function cellSlotIn(index: CellIndex, cells: CellState, segment: number, side: number, place: number, depth: number): number {
+  if (!Number.isInteger(segment) || segment < 0 || segment >= cells.offset.length - 1) return -1;
+  if (side !== 0 && side !== 1) return -1;
+  if (!Number.isInteger(depth) || depth < 0 || depth >= DEPTH) return -1;
+  if (!Number.isInteger(place) || place < 0 || place >= (index.segs[segment]?.places ?? 0)) return -1;
+  const start = cells.offset[segment] ?? 0;
+  const local = (place * 2 + side) * DEPTH + depth;
+  return local < (cells.offset[segment + 1] ?? 0) - start ? start + local : -1;
 }
 
 /** The CELL_ value of the cell at `depth` in `col`, or -1 if there is none. */

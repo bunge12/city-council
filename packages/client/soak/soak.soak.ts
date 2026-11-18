@@ -40,6 +40,11 @@
 // of an autosave, are also held to the budget by \`pnpm bench\`, which
 // averages many runs.
 //
+// A garbage collection pauses whichever step is running, and the grower's
+// is the step that runs most, so the report counts the collections on the
+// sim's thread and names the ones that ran during each step over the budget
+// and each grower step over 5 ms (issue 166).
+//
 // At the end a replay of the full log from the
 // seed, the scale city's own commands included, must give the same state
 // hash as the live city.
@@ -50,7 +55,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { memoryUsage } from "node:process";
-import { performance } from "node:perf_hooks";
+import { PerformanceObserver, constants, performance } from "node:perf_hooks";
 import {
   CELLS_SYSTEM,
   GROWER_SYSTEM,
@@ -117,6 +122,8 @@ const PAUSES_ALLOWED = 2;
 const SAVE_PAUSES_ALLOWED = 3;
 /** A step whose cells system took longer than this walked a slice; an idle one takes microseconds. */
 const SETTLE_MIN_MS = 0.25;
+/** A grower step slower than this is listed in the report with the collections that paused it (issue 166). Not checked. */
+const GROWER_SLOW_MS = 5;
 const REPORT = process.env["SOAK_REPORT"] ?? "soak-report.json";
 
 /**
@@ -348,7 +355,29 @@ test("soak: one hour of game time at 4x", async () => {
   /** The command waiting for its step: its type and the log length before it. */
   let waitingRoad: { type: string; logBefore: number } | null = null;
   /** Every step over the budget: its tick, what it applied, and each system's time, to say where the time went. */
-  const slowSteps: { tick: number; command: string | null; ms: Record<string, number> }[] = [];
+  const slowSteps: { tick: number; command: string | null; ms: Record<string, number>; gc?: string[] }[] = [];
+  /**
+   * Every garbage collection on this thread, which hosts the sim, and the
+   * pump each slow step ran in, so the report says which slow steps a
+   * collection paused (issue 166). The page's collections run in its own
+   * worker and pause no step.
+   */
+  const collections: { start: number; ms: number; kind: string }[] = [];
+  const GC_KINDS: Record<number, string> = {
+    [constants.NODE_PERFORMANCE_GC_MAJOR]: "major",
+    [constants.NODE_PERFORMANCE_GC_MINOR]: "minor",
+    [constants.NODE_PERFORMANCE_GC_INCREMENTAL]: "incremental",
+    [constants.NODE_PERFORMANCE_GC_WEAKCB]: "weak callbacks",
+  };
+  const takeCollections = (list: { getEntries(): readonly { startTime: number; duration: number; detail?: unknown }[] }) => {
+    for (const e of list.getEntries()) {
+      const kind = (e.detail as { kind?: number } | undefined)?.kind ?? 0;
+      collections.push({ start: e.startTime, ms: e.duration, kind: GC_KINDS[kind] ?? "other" });
+    }
+  };
+  const gcObserver = new PerformanceObserver(takeCollections);
+  gcObserver.observe({ entryTypes: ["gc"] });
+  const slowPumps: { tick: number; growerMs: number; start: number; end: number; step?: (typeof slowSteps)[number] }[] = [];
   /** The grower's time in each step it ran in. */
   const growerMs: number[] = [];
   /**
@@ -407,15 +436,20 @@ test("soak: one hour of game time at 4x", async () => {
     pumpStart = performance.now();
     paced = false;
     host.pump();
+    const pumpEnd = performance.now();
     // Each delta reports the timings of the last step it covers. Sum them to
     // get that step's time. At 4x a pump of 10 ms runs zero or one step.
     for (let i = before; i < received.length; i++) {
       const message = received[i];
       if (message?.type !== "delta" || message.steps === 0) continue;
       let total = 0;
+      let grower = 0;
       for (const timing of message.timings) {
         total += timing.ms;
-        if (timing.system === GROWER_SYSTEM) growerMs.push(timing.ms);
+        if (timing.system === GROWER_SYSTEM) {
+          growerMs.push(timing.ms);
+          grower += timing.ms;
+        }
       }
       if (steps < stepMs.length) stepMs[steps++] = total;
       // The first step after a road command was sent applies it, or drops
@@ -435,6 +469,10 @@ test("soak: one hour of game time at 4x", async () => {
         const bySystem: Record<string, number> = {};
         for (const timing of message.timings) bySystem[timing.system] = ms((bySystem[timing.system] ?? 0) + timing.ms);
         slowSteps.push({ tick: host.tick, command: applied ? (waitingType ?? null) : null, ms: bySystem });
+      }
+      if (total > BUDGET_MS || grower > GROWER_SLOW_MS) {
+        const slow = total > BUDGET_MS ? slowSteps.at(-1) : undefined;
+        slowPumps.push({ tick: host.tick, growerMs: grower, start: pumpStart, end: pumpEnd, ...(slow ? { step: slow } : {}) });
       }
       if (!applied) {
         const settling = message.timings.some((t) => t.system === CELLS_SYSTEM && t.ms > SETTLE_MIN_MS);
@@ -475,6 +513,12 @@ test("soak: one hour of game time at 4x", async () => {
     }
   }
   const wallMs = performance.now() - wallStart;
+  takeCollections({ getEntries: () => gcObserver.takeRecords() });
+  gcObserver.disconnect();
+  /** The collections that ran during a pump, as "major 7.1 ms": the step's, or the delta's sent after it in the same pump. */
+  const pausedBy = (p: { start: number; end: number }): string[] =>
+    collections.filter((c) => c.start < p.end && c.start + c.ms > p.start).map((c) => `${c.kind} ${ms(c.ms)} ms`);
+  for (const p of slowPumps) if (p.step) p.step.gc = pausedBy(p);
   const fileStart = performance.now();
   const fileBytes = host.snapshotBytes().byteLength;
   const fileMs = performance.now() - fileStart;
@@ -579,6 +623,8 @@ test("soak: one hour of game time at 4x", async () => {
         homesAtEnd: pageHashes?.homes ?? null,
         mostHomes: buildingsOverTime.reduce((a, b) => Math.max(a, b.homes), 0),
         homesMismatches,
+        // Each grower step over GROWER_SLOW_MS and the collections that ran in its pump.
+        slowSteps: slowPumps.filter((p) => p.growerMs > GROWER_SLOW_MS).map((p) => ({ tick: p.tick, ms: ms(p.growerMs), gc: pausedBy(p) })),
         // One sample every ten game minutes, for the shape of the growth.
         buildingsOverTime: buildingsOverTime.filter((_, i) => i % 10 === 0),
       };
@@ -586,6 +632,11 @@ test("soak: one hour of game time at 4x", async () => {
     settleSteps: { count: settleSorted.length, p50: ms(quantile(settleSorted, 0.5)), p95: ms(quantile(settleSorted, 0.95)), max: ms(settleSorted.at(-1) ?? 0), overBudget: overOf(settleSorted) },
     idleSteps: { count: idleSorted.length, p99: ms(quantile(idleSorted, 0.99)), max: ms(idleSorted.at(-1) ?? 0), overBudget: overOf(idleSorted) },
     slowSteps,
+    // Collections on the thread that hosts the sim. A major one pauses whichever step is running.
+    gc: (() => {
+      const majors = collections.filter((c) => c.kind === "major").map((c) => c.ms).sort((x, y) => x - y);
+      return { minor: collections.filter((c) => c.kind === "minor").length, major: majors.length, other: collections.length - majors.length - collections.filter((c) => c.kind === "minor").length, majorMedianMs: ms(quantile(Float64Array.from(majors), 0.5)), majorMaxMs: ms(majors.at(-1) ?? 0) };
+    })(),
     checks: checks.map((c) => ({ ...c, medianMs: ms(c.medianMs), maxMs: ms(c.maxMs) })),
     snapshot: {
       count: snapshotParts.length,
