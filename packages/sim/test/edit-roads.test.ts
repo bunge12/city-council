@@ -288,7 +288,7 @@ describe("BulldozeRoad", () => {
     const result = planBulldoze(state.roads, withEnds(state.roads, { segments: [0] }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.plan).toEqual({ segments: [0], nodes: [0, 1], length: 300, cost: 300 * typeOf("avenue").demolitionCostPerMetre });
+    expect(result.plan).toEqual({ segments: [0], sections: [], nodes: [0, 1], length: 300, cost: 300 * typeOf("avenue").demolitionCostPerMetre });
     expect(Number.isSafeInteger(result.plan.cost)).toBe(true);
   });
 

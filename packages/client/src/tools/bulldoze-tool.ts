@@ -22,6 +22,11 @@
 // buildings on it, as a road bulldoze does. Each kind has a filter in the
 // tool's menu; with one off the pointer ignores that kind.
 //
+// A road is taken a short stretch at a time around the pointer, or whole
+// with Shift held (issue 86, edit-section.ts): the road target carries the
+// stretch, and a drag that passes over more of a road it has already taken
+// grows that road's stretch.
+//
 // Removing a road can be undone. Removing a building cannot, and asks for no
 // confirmation: the price tag is the warning. Tool state lives in the UI
 // store; nothing here writes sim state.
@@ -36,12 +41,14 @@ import {
   type BuildingInfo,
   type BuildingSeen,
   type CommandResult,
+  type Section,
   type SimState,
   type Terrain,
 } from "@city-council/sim";
+import { sectionKey } from "./edit-section";
 import type { ReadonlyDeep } from "../protocol/mirror";
 import { liveRoadSegment } from "../render/road-geometry";
-import { previewEdit, seeSegment, type EditPreview, type SeenSegment } from "./edit-tool";
+import { previewEdit, seeMore, seeSegment, type EditPreview, type SeenSegment } from "./edit-tool";
 import type { RoadToolState } from "./road-tool";
 
 /** The kinds of thing the bulldozer removes in M2. Later milestones add theirs. */
@@ -97,8 +104,15 @@ export interface BulldozeTargetKind {
   id: BulldozeKind;
   /** The filter toggle's label. */
   label: string;
-  /** How target `id` is now, as a command names it, or null when it is not there. */
-  see(world: BulldozeWorld, id: number): unknown;
+  /** How `target` is now, as a command names it, or null when it is not there. */
+  see(world: BulldozeWorld, target: BulldozeTarget): unknown;
+  /**
+   * Optional: how a target already in a drag, seen as `seen`, looks once the
+   * drag passes over it again as `target`. Left out, a second pass changes nothing.
+   */
+  seeMore?(seen: unknown, target: BulldozeTarget): unknown;
+  /** A short text key for how a target was seen, for telling when a preview needs working out again. */
+  seenKey?(seen: unknown): string;
   /** Whether a drag may take target `id` alone: something a click on it would not refuse. */
   takes(world: BulldozeWorld, id: number): boolean;
   /** What removing `ids` would do, each as `seen` says the player saw it. */
@@ -163,14 +177,16 @@ export const BULLDOZE_TARGETS: readonly BulldozeTargetKind[] = [
   {
     id: "building",
     label: "Buildings",
-    see: (world, id) => seeBuilding(asState(world).buildings, id),
+    see: (world, target) => seeBuilding(asState(world).buildings, target.id),
     takes: (world, id) => isBuilding(asState(world).buildings, id),
     plan: buildingPlan,
   },
   {
     id: "road",
     label: "Roads",
-    see: (world, id) => (liveRoadSegment(world.state.roads, id) ? seeSegment(world.state.roads, id) : null),
+    see: (world, target) => (liveRoadSegment(world.state.roads, target.id) ? seeSegment(world.state.roads, target.id, target.section) : null),
+    seeMore: (seen, target) => seeMore(seen as SeenSegment, target.section),
+    seenKey: (seen) => sectionKey((seen as SeenSegment | null)?.section),
     // A fixed segment would refuse the whole drag, so a drag leaves it out. The road's own plan says so; the buildings on it do not matter.
     takes: (world, id) => liveRoadSegment(world.state.roads, id) && previewEdit(world.state.roads, world.terrain, "bulldoze", [id], "street").ok,
     plan: roadPlan,
@@ -187,6 +203,8 @@ function targetKind(kind: BulldozeKind): BulldozeTargetKind {
 export interface BulldozeTarget {
   kind: BulldozeKind;
   id: number;
+  /** For a road, the stretch of the segment the pointer marks; the whole when left out. */
+  section?: Section;
 }
 
 /** A bulldoze the tool has sent and the sim has not yet applied or refused. */
@@ -229,6 +247,9 @@ export interface BulldozeToolHost {
  * one a drag took last, which wins while the pointer is still on it.
  */
 export type BulldozePicker = (kind: BulldozeKind, prefer: number) => number;
+
+/** The stretch of road segment `seg` the pointer marks, or undefined for the whole. */
+export type SectionPicker = (seg: number) => Section | undefined;
 
 /** Nothing being drawn with the road tool. */
 const ROAD_IDLE = { roadStart: null, roadControl: null, roadChain: 0 } as const;
@@ -288,7 +309,7 @@ export class BulldozeToolController {
    * takes is passed over. While a drag is on, only the drag's
    * kind, with the one it took last preferred.
    */
-  pick(pick: BulldozePicker): BulldozeTarget | null {
+  pick(pick: BulldozePicker, section?: SectionPicker): BulldozeTarget | null {
     if (!this.active()) return null;
     const s = this.host.get();
     const drag = s.bulldozeDrag;
@@ -297,7 +318,9 @@ export class BulldozeToolController {
       if (drag?.kind && drag.kind !== t.id) continue;
       const prefer = drag?.kind === t.id ? (drag.ids[drag.ids.length - 1] ?? NONE) : NONE;
       const id = pick(t.id, prefer);
-      if (id !== NONE && !this.going({ kind: t.id, id })) return { kind: t.id, id };
+      if (id === NONE || this.going({ kind: t.id, id })) continue;
+      const part = t.id === "road" ? section?.(id) : undefined;
+      return part ? { kind: t.id, id, section: part } : { kind: t.id, id };
     }
     return null;
   }
@@ -315,8 +338,15 @@ export class BulldozeToolController {
     if (!target) return null;
     if (this.going(target)) return null;
     const kind = targetKind(target.kind);
-    const seen = kind.see(world, target.id);
+    const seen = kind.see(world, target);
     return seen === null ? null : kind.plan(world, [target.id], [seen]);
+  }
+
+  /** A key that changes whenever how the drag saw its targets does, for telling when its preview needs working out again. */
+  dragKey(): string {
+    const kind = this.host.get().bulldozeDrag?.kind;
+    const key = kind ? targetKind(kind).seenKey : undefined;
+    return key ? this.dragSeen.map(key).join(";") : "";
   }
 
   /** A left click with `target` under the pointer, or null. */
@@ -332,7 +362,11 @@ export class BulldozeToolController {
     this.host.set({ bulldozeDrag: { kind: null, ids: [] }, bulldozeNote: null });
   }
 
-  /** The drag passed over `target`. It joins unless it is another kind, there already, or a click on it alone would be refused. */
+  /**
+   * The drag passed over `target`. It joins unless it is another kind or a
+   * click on it alone would be refused. One there already is seen again
+   * (`seeMore`): a road's stretch grows.
+   */
   dragOver(target: BulldozeTarget | null): void {
     const s = this.host.get();
     const drag = s.bulldozeDrag;
@@ -340,10 +374,21 @@ export class BulldozeToolController {
     if (!this.active() || !drag || !world || !target || target.id === NONE) return;
     if (!s.bulldozeFilters[target.kind]) return;
     if (drag.kind && drag.kind !== target.kind) return;
-    if (drag.ids.includes(target.id) || this.going(target)) return;
+    if (this.going(target)) return;
     const kind = targetKind(target.kind);
+    const at = drag.ids.indexOf(target.id);
+    if (at >= 0) {
+      if (!kind.seeMore) return;
+      const before = this.dragSeen[at];
+      const more = kind.seeMore(before, target);
+      if (kind.seenKey && kind.seenKey(more) === kind.seenKey(before)) return;
+      this.dragSeen = this.dragSeen.map((x, i) => (i === at ? more : x));
+      // A new drag object, so the page works the preview out again.
+      this.host.set({ bulldozeDrag: { kind: drag.kind, ids: [...drag.ids] } });
+      return;
+    }
     if (!kind.takes(world, target.id)) return;
-    this.dragSeen = [...this.dragSeen.slice(0, drag.ids.length), kind.see(world, target.id)];
+    this.dragSeen = [...this.dragSeen.slice(0, drag.ids.length), kind.see(world, target)];
     this.host.set({ bulldozeDrag: { kind: target.kind, ids: [...drag.ids, target.id] } });
   }
 

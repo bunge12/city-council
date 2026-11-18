@@ -74,7 +74,7 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "Click, drag", description: "with upgrade: one road, or every road the drag passes over" },
   { label: "Click or drag over things", description: "with the bulldozer: what is under the pointer, or every thing of that kind the drag passes over" },
   { label: "Right-click", description: "with upgrade: reverse a one-way" },
-  { label: "Shift-drag", description: "with the bulldozer or upgrade: orbit, since a drag picks" },
+  { label: "Hold Shift", description: "with the bulldozer or upgrade: take whole roads, not the stretch under the pointer" },
   { label: "Click a road", description: "with the zone tool's fill: zone the strip on the side the pointer is" },
   { label: "Drag over cells", description: "with the zone tool's brush: zone the cells under the pointer" },
   { label: "Right-click while brushing", description: "with the zone tool: drop the brush stroke" },

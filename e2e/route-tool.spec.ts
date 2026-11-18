@@ -120,7 +120,10 @@ test("picks two points, sees the route, bulldozes the only link and sees no rout
   const before = await liveSegments(page);
   await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
+  // Shift takes the whole link (issue 86).
+  await page.keyboard.down("Shift");
   await click(page, 4350, LINK_Z);
+  await page.keyboard.up("Shift");
   await expect.poll(() => liveSegments(page)).toBe(before - 1);
   await expect(readout).toHaveText("no route");
   await expect(readout).toHaveAttribute("data-found", "false");

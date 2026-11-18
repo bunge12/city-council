@@ -549,6 +549,8 @@ for (const variant of [
       await page.keyboard.press("KeyV");
       await page.keyboard.press("KeyX");
       await expect(page.locator("#upgrade-tool")).toHaveAttribute("aria-pressed", "true");
+      // Shift takes whole segments (issue 86); a click alone takes a stretch.
+      await page.keyboard.down("Shift");
       await hover(page, (A.x0 + B.x) / 2, A.z);
       await expect(page.locator("#edit-readout")).toHaveAttribute("data-kind", "upgrade");
       await click(page, (A.x0 + B.x) / 2, A.z);
@@ -562,6 +564,7 @@ for (const variant of [
       await page.keyboard.press("KeyB");
       await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
       await click(page, B.x, (A.z + B.z1) / 2);
+      await page.keyboard.up("Shift");
       await expect.poll(async () => segmentNear(await roads(page), B.x, (A.z + B.z1) / 2)).toBeNull();
       await away(page);
       await shot(page, info, dir, "6-bulldozed");
@@ -597,7 +600,9 @@ for (const variant of [
 
       const before = await roads(page);
       await page.keyboard.press("KeyB");
+      await page.keyboard.down("Shift");
       await click(page, (A.x0 + B.x) / 2, A.z);
+      await page.keyboard.up("Shift");
       await expect.poll(async () => segmentNear(await roads(page), (A.x0 + B.x) / 2, A.z)).toBeNull();
       await expect(route).toHaveText("no route");
       await expect(route).toHaveAttribute("data-found", "false");
@@ -730,7 +735,9 @@ for (const variant of [
       await shot(page, info, dir, "11-block-outlined");
 
       await page.keyboard.press("KeyB");
+      await page.keyboard.down("Shift");
       await click(page, 4620, 4860);
+      await page.keyboard.up("Shift");
       await expect(blocks).toHaveAttribute("data-count", String(startCount));
       await expect(page.locator(".block-label[data-area='14400']")).toHaveCount(0);
       await noTool(page);

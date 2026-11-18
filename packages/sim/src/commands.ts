@@ -159,8 +159,9 @@ const BuildRoadGrid: CommandDef = {
 };
 
 /**
- * Removes the segments in `payload.segments`, and every node they leave with
- * no segments. See roads/edit.ts.
+ * Removes the segments in `payload.segments`, or the stretch of each that
+ * `payload.sections` names, and every node they leave with no segments.
+ * See roads/edit.ts.
  */
 const BulldozeRoad: CommandDef = {
   validate: (state, command) => {
@@ -169,7 +170,7 @@ const BulldozeRoad: CommandDef = {
   },
   apply: (state, command) => {
     const result = planBulldoze(state.roads, command.payload);
-    if (result.ok) undoable(state, command, () => bulldozeRoad(state.roads, result.plan));
+    if (result.ok) undoable(state, command, () => bulldozeRoad(state.roads, terrainOf(state.seed), result.plan));
   },
 };
 
@@ -183,8 +184,9 @@ const UpgradeRoad: CommandDef = {
     return result.ok ? null : result.reason;
   },
   apply: (state, command) => {
-    const result = planUpgrade(state.roads, terrainOf(state.seed), command.payload);
-    if (result.ok) undoable(state, command, () => upgradeRoad(state.roads, result.plan));
+    const terrain = terrainOf(state.seed);
+    const result = planUpgrade(state.roads, terrain, command.payload);
+    if (result.ok) undoable(state, command, () => upgradeRoad(state.roads, terrain, result.plan));
   },
 };
 

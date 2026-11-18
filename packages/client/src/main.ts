@@ -15,6 +15,7 @@ import {
   type BuildingInfo,
   type CommandResult,
   type LogEntry,
+  type Section,
   type Terrain,
 } from "@city-council/sim";
 import { Vector3 } from "three/webgpu";
@@ -47,6 +48,7 @@ import { BulldozeToolController, type BulldozeKind, type BulldozePreview, type B
 import { EditToolController, editShapes, type EditPreview } from "./tools/edit-tool";
 import { GridToolController, gridMarks, gridShapes, gridSideMarks } from "./tools/grid-tool";
 import { dragSamples, pickSegment } from "./tools/pick-segment";
+import { alongSegment, sectionAt, sectionKey } from "./tools/edit-section";
 import { RoadToolController, type RoadPreview } from "./tools/road-tool";
 import { RouteToolController, routeShapes } from "./tools/route-tool";
 import type { Snap } from "./tools/snap";
@@ -655,7 +657,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     snap: () => lastSnap,
     pickSegmentAt: (sx, sy) => segmentAt({ x: sx, y: sy }),
     pickBuildingAt: (sx, sy) => buildingAtPointer({ x: sx, y: sy }),
-    bulldozeTargetAt: (sx, sy) => bulldozeTool.pick(pickerAt({ x: sx, y: sy })),
+    bulldozeTargetAt: (sx, sy) => bulldozeTool.pick(pickerAt({ x: sx, y: sy }), sectionsAt({ x: sx, y: sy })),
   };
   /**
    * Metres one CSS pixel covers on the ground at `hit`: the mean of the
@@ -691,6 +693,19 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       project: hooks.project,
     }, undefined, prefer);
   }
+  /**
+   * The stretch of segment `seg` the bulldozer and upgrade mark with the
+   * pointer at screen point `p`: a short one around the point on the road
+   * nearest the ground under it, or the whole while Shift is held (issue 86).
+   */
+  function sectionUnder(p: { x: number; y: number }, seg: number): Section | undefined {
+    const net = mirror.state?.roads;
+    if (!net || seg < 0) return undefined;
+    const at = rig.pickGround(p.x, p.y) ?? rig.pickLevel(p.x, p.y, bridgeDeckLevel(hooks.terrain.waterLevel));
+    if (!at) return undefined;
+    return sectionAt(net, seg, alongSegment(net, seg, at.x, at.z), controls.shiftHeld());
+  }
+  const sectionsAt = (p: { x: number; y: number }) => (seg: number) => sectionUnder(p, seg);
   /** The building whose drawn box the ray through screen point `p` enters first, or -1. */
   function buildingAtPointer(p: { x: number; y: number }): number {
     // No further than the ground under the pointer, give or take a metre, so a building behind a hill is not picked.
@@ -711,12 +726,13 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     }
     if (bulldozeTool.active()) {
       const pointer = controls.pointer();
-      bulldozeTool.click(pointer ? bulldozeTool.pick(pickerAt(pointer)) : null);
+      bulldozeTool.click(pointer ? bulldozeTool.pick(pickerAt(pointer), sectionsAt(pointer)) : null);
       return;
     }
     if (editTool.active()) {
       const pointer = controls.pointer();
-      editTool.click(pointer ? segmentAt(pointer) : -1);
+      const seg = pointer ? segmentAt(pointer) : -1;
+      editTool.click(seg, pointer ? sectionUnder(pointer, seg) : undefined);
       return;
     }
     if (zoneTool.active()) {
@@ -754,6 +770,8 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   let gridDragStarting = false;
   controls.setToolDrag({
     active: () => editTool.active() !== null || bulldozeTool.active() || gridTool.active() || zoneTool.brushing(),
+    // Shift takes whole roads with these two (issue 86), so a Shift drag is theirs; the right drag orbits.
+    takesShift: () => editTool.active() !== null || bulldozeTool.active(),
     start: () => {
       if (gridTool.active()) gridDragStarting = true;
       else if (zoneTool.brushing()) zoneTool.dragStart();
@@ -779,13 +797,14 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       }
       if (bulldozeTool.active()) {
         // Sampled along the path, so a fast drag skips nothing. The tool picks only the drag's kind once it has one.
-        for (const p of dragSamples(from, to)) bulldozeTool.dragOver(bulldozeTool.pick(pickerAt(p)));
+        for (const p of dragSamples(from, to)) bulldozeTool.dragOver(bulldozeTool.pick(pickerAt(p), sectionsAt(p)));
         return;
       }
       for (const p of dragSamples(from, to)) {
         // The segment the drag took last wins while the pointer is on it, so a drag along a road skips the roads crossing it.
         const drag = useUi.getState().editDrag;
-        editTool.dragOver(segmentAt(p, drag?.[drag.length - 1] ?? -1));
+        const seg = segmentAt(p, drag?.[drag.length - 1] ?? -1);
+        editTool.dragOver(seg, sectionUnder(p, seg));
       }
     },
     end: () => {
@@ -840,12 +859,14 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   // The edit under the pointer, worked out again only when what it depends on changes.
   let editKey = "";
   let edit: EditPreview | null = null;
-  const liveEdit = (seg: number): EditPreview | null => {
+  const liveEdit = (seg: number, section: Section | undefined): EditPreview | null => {
     const ui = useUi.getState();
-    const key = editTool.active() ? `${ui.tool},${seg},${ui.editDrag?.join(";") ?? "-"},${ui.roadType},${mirrorVersion}` : "";
+    const key = editTool.active()
+      ? `${ui.tool},${seg},${sectionKey(section)},${ui.editDrag?.join(";") ?? "-"},${editTool.dragKey()},${ui.roadType},${mirrorVersion}`
+      : "";
     if (key !== editKey) {
       editKey = key;
-      edit = key === "" ? null : editTool.preview(seg);
+      edit = key === "" ? null : editTool.preview(seg, section);
     }
     return edit;
   };
@@ -855,7 +876,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   const liveBulldoze = (target: BulldozeTarget | null): BulldozePreview | null => {
     const ui = useUi.getState();
     const key = bulldozeTool.active()
-      ? `${target ? `${target.kind}:${target.id}` : "-"},${ui.bulldozeDrag ? `${ui.bulldozeDrag.kind ?? "?"}:${ui.bulldozeDrag.ids.join(";")}` : "-"},${ui.bulldozePending.map((p) => p.id).join(";")},${worldVersion}`
+      ? `${target ? `${target.kind}:${target.id}:${sectionKey(target.section)}` : "-"},${ui.bulldozeDrag ? `${ui.bulldozeDrag.kind ?? "?"}:${ui.bulldozeDrag.ids.join(";")}:${bulldozeTool.dragKey()}` : "-"},${ui.bulldozePending.map((p) => p.id).join(";")},${worldVersion}`
       : "";
     if (key !== bulldozeKey) {
       bulldozeKey = key;
@@ -871,11 +892,11 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const c = view.camera.position;
     const key =
       bulldozeTool.active() && pointer
-        ? `${pointer.x},${pointer.y},${c.x},${c.y},${c.z},${rig.pose.yaw},${rig.pose.pitch},${ui.bulldozeFilters.building},${ui.bulldozeFilters.road},${ui.bulldozeDrag?.kind ?? "-"},${ui.bulldozeDrag?.ids.at(-1) ?? "-"},${worldVersion},${view.buildingStats()?.totalWrites ?? 0},${view.buildingFormVersion()},${ui.bulldozePending.length}`
+        ? `${pointer.x},${pointer.y},${c.x},${c.y},${c.z},${rig.pose.yaw},${rig.pose.pitch},${ui.bulldozeFilters.building},${ui.bulldozeFilters.road},${ui.bulldozeDrag?.kind ?? "-"},${ui.bulldozeDrag?.ids.at(-1) ?? "-"},${worldVersion},${view.buildingStats()?.totalWrites ?? 0},${view.buildingFormVersion()},${ui.bulldozePending.length},${controls.shiftHeld()}`
         : "";
     if (key !== targetKey) {
       targetKey = key;
-      targetNow = key === "" || !pointer ? null : bulldozeTool.pick(pickerAt(pointer));
+      targetNow = key === "" || !pointer ? null : bulldozeTool.pick(pickerAt(pointer), sectionsAt(pointer));
     }
     return targetNow;
   };
@@ -1041,7 +1062,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const pointerNow = controls.pointer();
     const picked = editTool.active() && pointerNow ? segmentAt(pointerNow) : -1;
     document.body.dataset["pickedSegment"] = String(picked);
-    const editNow = liveEdit(picked);
+    const editNow = liveEdit(picked, picked >= 0 && pointerNow ? sectionUnder(pointerNow, picked) : undefined);
     const net = mirror.state?.roads;
     if (net) {
       for (const p of useUi.getState().editPending) shapes.push(...editShapes(net, p.preview, "pending"));

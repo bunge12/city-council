@@ -113,18 +113,33 @@ export { ROAD_BALANCE, ROAD_BUILD, ROAD_LEVELS, ROAD_TYPES, roadTypeIndex } from
 export type { BalancePrice, BridgeBalance, RoadBalance, RoadBuildBalance, RoadType, RoadTypeBalance } from "./roads/balance";
 export { planRoad, snapToGrid } from "./roads/build";
 export { bridgeDeckHeight, bridgeDeckLevel, bridgeRamps } from "./roads/bridge";
-export { curveBox, isStraight, minRadius, nearestOnQuad, quadPoint, segmentQuad, subControl } from "./roads/curve";
+export { curveBox, isStraight, minRadius, nearestOnQuad, quadPoint, segmentQuad, subControl, subQuad } from "./roads/curve";
 export type { Box, Quad, QuadNearest } from "./roads/curve";
 export type { BuildPoint, BuildRoadPayload, PlanStop, RoadPlan, RoadPlanResult } from "./roads/build";
 export { gridLines, planRoadGrid } from "./roads/grid";
 export type { BuildRoadGridPayload, GridPlan, GridPlanResult, GridProblem, GridStreet } from "./roads/grid";
-export { SEGMENT_CHANGED, planBulldoze, planUpgrade, segmentEnds, segmentTypeId } from "./roads/edit";
+export {
+  SEGMENT_CHANGED,
+  SHORT_SECTION,
+  WHOLE_ONLY,
+  WHOLE_REVERSE,
+  planBulldoze,
+  planSection,
+  planUpgrade,
+  sectionable,
+  segmentEnds,
+  segmentTypeId,
+} from "./roads/edit";
 export type {
   BulldozePlan,
   BulldozePlanResult,
   BulldozeRoadPayload,
+  Section,
+  SectionCut,
+  SectionPlan,
   SegmentEnds,
   SegmentEndsNetwork,
+  SegmentLevelsNetwork,
   UpgradePlan,
   UpgradePlanResult,
   UpgradeRoadPayload,

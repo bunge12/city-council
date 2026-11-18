@@ -21,7 +21,7 @@ import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { openCellsUnder, syncCells } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE } from "./balance";
 import { isBuilding, removeBuilding, type BuildingState } from "./buildings";
-import { buildingsOnCells, buildingsOnSegments } from "./where";
+import { buildingsOnCells, buildingsOnSegments, buildingsOnStretch } from "./where";
 
 /** One building a `BulldozeBuilding` names, as the player saw it: its id, its lot's first cell and the tick it was built on. */
 export interface BuildingSeen {
@@ -94,11 +94,15 @@ function inTheWay(state: SimState, ids: number[]): BuildingsInTheWay {
 }
 
 /**
- * The buildings that stand on the cells of the segments a bulldoze removes.
- * Their cells go with the road, so the command removes them at once.
+ * The buildings that stand on the cells of the segments a bulldoze removes,
+ * or of the stretch of each it cuts out. Their cells go with the road, so
+ * the command removes them at once.
  */
 export function bulldozeClears(state: SimState, plan: BulldozePlan): BuildingsInTheWay {
-  return inTheWay(state, buildingsOnSegments(state, plan.segments));
+  const cut = new Set(plan.sections.map((s) => s.seg));
+  const ids = new Set(buildingsOnSegments(state, plan.segments.filter((seg) => !cut.has(seg))));
+  for (const s of plan.sections) for (const id of buildingsOnStretch(state, s.seg, s.from, s.to)) ids.add(id);
+  return inTheWay(state, [...ids].sort((p, q) => p - q));
 }
 
 /**
