@@ -28,10 +28,24 @@
 //
 // For each building the grower draws a free zoned cell by the road from
 // the generator in state (candidates.ts; M3 replaces the draw with land
-// value) and asks the lot finder what fits there. The draw then picks the
-// type among those that fit: the ones whose lot reaches the back of the
-// free ground at the cell, or every one that fits if none does, each as
-// likely, on its largest lot. So a deep R2 strip grows apartments and a
+// value). It builds at an end of the free frontage that cell lies on, not
+// at the cell (issue 194): it asks the lot finder what fits at the nearer
+// end (`freeFrontage`, lots.ts), then at the farther, and only if neither
+// fits, at the cell drawn. A lot holding an end cell runs from it, so the
+// building stands against whatever ends the run, a junction, a neighbour
+// or other zoning, and the free ground it leaves stays in one piece. Built
+// around the cell drawn, a 3-wide building on a strip 7 wide left 2 cells
+// either side, too narrow for anything of its zone. At an end, each lot is
+// also narrowed, within its type's widths, until the frontage it leaves is
+// empty or as wide as the narrowest type of its zone and density, so a
+// 6-wide tower does not take a 7-wide O3 strip and leave one cell. A lot
+// that no width of its type leaves room beside drops out of the draw, unless
+// every one does. Through-lots keep their place: when the end has none but
+// one fits at the cell drawn, the grower builds that one there, as before,
+// and a through-lot is never narrowed. The draw then picks the type among
+// those left: the ones
+// whose lot reaches the back of the free ground at the cell, or every one
+// if none does, each as likely, on its largest lot, narrowed as above. So a deep R2 strip grows apartments and a
 // shallow one townhomes, as the PRD says the lot's shape decides, while a
 // long R1 strip zoned six deep, where neither type reaches the back, grows
 // houses and plexes both and not plexes alone. Where a through-lot fits
@@ -48,13 +62,14 @@
 import { TIME_BALANCE } from "../calendar";
 import { nextInt } from "../rng";
 import type { SimState } from "../state";
+import { cellSlot, type CellRef } from "../zoning/cells";
 import type { System } from "../step";
-import { cellsSettled, syncCells } from "../zoning/cell-index";
-import { BUILDINGS_BALANCE, BUILDING_TYPES, type BuildingType } from "./balance";
+import { cellsSettled, nextColumn, syncCells, type Column } from "../zoning/cell-index";
+import { BUILDINGS_BALANCE, BUILDING_TYPES, typesFor, type BuildingType } from "./balance";
 import { addBuilding } from "./buildings";
 import type { GrowthState } from "./growth";
 import { candidateAt, candidateCount } from "./candidates";
-import { lotOptions, type Lot } from "./lots";
+import { freeFrontage, lotOptions, type Lot, type LotOptions } from "./lots";
 import { segmentBuildings } from "./where";
 
 /** Name the timer hook reports for the grower. */
@@ -107,13 +122,78 @@ export function residentsFor(rng: Uint32Array, type: BuildingType, width: number
   return low + Math.floor(((high - low) * (width * depth - least) * 2 + span) / (2 * span));
 }
 
-/** The lot the draw picks among the types that fit at a cell, as the header says. */
-function chooseLot(rng: Uint32Array, lots: readonly Lot[], free: number): Lot {
+/**
+ * The lot the draw picks among the types that fit at a cell, as the header
+ * says. `leaving` gives each lot as it would stand to leave room on its
+ * frontage, or null when it cannot; the draw is among those that can, if
+ * any. One draw either way.
+ */
+function chooseLot(rng: Uint32Array, lots: readonly Lot[], free: number, leaving: (lot: Lot) => Lot | null): Lot {
   const through = lots.filter((lot) => lot.backDepth > 0);
   if (through.length > 0) return through[nextInt(rng, through.length)] as Lot;
-  const reaching = lots.filter((lot) => lot.depth === free);
-  const pool = reaching.length > 0 ? reaching : lots;
+  const room = lots.map(leaving).filter((lot): lot is Lot => lot !== null);
+  const fitting = room.length > 0 ? room : lots;
+  const reaching = fitting.filter((lot) => lot.depth === free);
+  const pool = reaching.length > 0 ? reaching : fitting;
   return pool[nextInt(rng, pool.length)] as Lot;
+}
+
+/** The narrowest lot any type on one strip of `type`'s zone and density takes. */
+function narrowestBeside(type: BuildingType): number {
+  return Math.min(...typesFor(type.zoneNumber, type.density).filter((t) => !t.throughLot).map((t) => t.width[0]));
+}
+
+/**
+ * `lot`, standing at the end `end` of a free frontage `run` columns wide,
+ * at the widest its type takes up to its own width that leaves the rest of
+ * the frontage empty or at least as wide as the narrowest type of its zone
+ * and density; or null when no width does. Narrower, it keeps the end
+ * column, so when the lot runs toward the end its first column moves on.
+ */
+function leavingRoom(state: SimState, lot: Lot, end: CellRef, run: number): Lot | null {
+  const type = BUILDING_TYPES[lot.type] as BuildingType;
+  const narrowest = narrowestBeside(type);
+  let width = lot.width;
+  while (width >= type.width[0] && run - width !== 0 && run - width < narrowest) width--;
+  if (width < type.width[0]) return null;
+  if (width === lot.width) return lot;
+  const first: Column = { seg: lot.firstSeg, side: lot.firstSide, place: lot.firstPlace, dir: lot.dir };
+  if (first.seg === end.segment && first.side === end.side && first.place === end.place) return { ...lot, width };
+  const index = syncCells(state);
+  let col: Column | null = first;
+  for (let i = 0; i < lot.width - width && col; i++) col = nextColumn(index, col);
+  return col ? { ...lot, firstSeg: col.seg, firstSide: col.side, firstPlace: col.place, width } : null;
+}
+
+/** Whether any through-lot type grows on the zone and density of the cell `ref` names. */
+function hasThroughLots(state: SimState, ref: CellRef): boolean {
+  const slot = cellSlot(state.roads, state.cells, ref);
+  if (slot < 0) return false;
+  return typesFor(state.cells.zone[slot] ?? 0, state.cells.density[slot] ?? 0).some((t) => t.throughLot);
+}
+
+/**
+ * What fits at the nearer end of the free frontage `ref` lies on, else at
+ * the farther end, else at `ref` itself, as the header says; and how each
+ * lot would stand to leave room on the frontage. Away from an end every
+ * lot stands as it is.
+ */
+function optionsFromEnd(state: SimState, ref: CellRef): { options: LotOptions; leaving: (lot: Lot) => Lot | null } {
+  const { ends, width } = freeFrontage(state, ref);
+  const asIs = (lot: Lot) => lot;
+  let last: LotOptions | null = null;
+  const isEnd = ends.some((e) => e.segment === ref.segment && e.side === ref.side && e.place === ref.place);
+  for (const at of ends) {
+    last = lotOptions(state, at);
+    if (!last.ok) continue;
+    // A through-lot at the cell drawn still comes first, as before issue 194.
+    if (!isEnd && !last.lots.some((lot) => lot.backDepth > 0) && hasThroughLots(state, ref)) {
+      const drawn = lotOptions(state, ref);
+      if (drawn.ok && drawn.lots.some((lot) => lot.backDepth > 0)) return { options: drawn, leaving: asIs };
+    }
+    return { options: last, leaving: (lot) => leavingRoom(state, lot, at, width) };
+  }
+  return { options: isEnd && last ? last : lotOptions(state, ref), leaving: asIs };
 }
 
 /** Adds one building where the draw lands, or none after `growthTries` cells with no lot. Returns the id or -1. */
@@ -124,9 +204,9 @@ export function growOne(state: SimState): number {
     const count = candidateCount(state, index, onCell);
     if (count === 0) return -1;
     const ref = candidateAt(state, index, onCell, nextInt(state.rng, count));
-    const options = lotOptions(state, ref);
+    const { options, leaving } = optionsFromEnd(state, ref);
     if (!options.ok) continue;
-    const lot = chooseLot(state.rng, options.lots, options.free);
+    const lot = chooseLot(state.rng, options.lots, options.free, leaving);
     const type = BUILDING_TYPES[lot.type] as BuildingType;
     const residents = residentsFor(state.rng, type, lot.width, lot.depth);
     const variant = nextInt(state.rng, VARIANTS);
