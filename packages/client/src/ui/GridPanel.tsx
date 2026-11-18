@@ -1,18 +1,16 @@
 import { useState } from "react";
 import { GRID_TOOL } from "../tools/config";
+import type { GridStage } from "../tools/grid-tool";
 import { formatClears, formatMoneyShort } from "./format";
 import { useServices, useSim } from "./hooks";
 import { useUi } from "./store";
 
 /** What the hint says while the grid tool is on. */
-export function gridHint(drawn: boolean, dragging: boolean, onRoad: boolean): string {
-  if (dragging) {
-    return onRoad
-      ? "Release to set the rectangle. It keeps the angle of the road it started on."
-      : "Release to set the rectangle. Hold Alt to turn it.";
-  }
-  if (drawn) return "Confirm or press Enter to build the grid. Esc or right-click drops it.";
-  return "Drag out a rectangle. Start on a road to take its angle.";
+export function gridHint(stage: GridStage | null): string {
+  if (stage === "side") return "Release to set the grid's first side. It snaps to the roads and zoning around it; hold Alt to draw free-hand.";
+  if (stage === "depth") return "Move to set how far the grid reaches, then click or press Enter. Esc or right-click drops it.";
+  if (stage === "placed") return "Confirm or press Enter to build the grid. Esc or right-click drops it.";
+  return "Drag along one side of the grid, then move to set how far it reaches.";
 }
 
 /**
@@ -59,18 +57,18 @@ function CellsField(props: { id: string; label: string; value: number; onCommit(
 /**
  * The grid tool's part of the build bar: the block size in cells, and once
  * a rectangle is drawn, what the sim would build, the buildings it would
- * clear once the drag is over (issue M2-15), and the Confirm button.
+ * clear once it is placed (issue M2-15), and the Confirm button.
  * The numbers are also on data attributes, for tests.
  */
 export function GridPanel() {
   const { gridTool } = useServices();
   const depth = useUi((s) => s.gridDepthCells);
   const width = useUi((s) => s.gridWidthCells);
-  const dragging = useUi((s) => s.gridDragging);
+  const stage = useUi((s) => s.gridStage);
   // Read for their changes: the preview below depends on them.
   useUi((s) => s.gridOrigin);
-  useUi((s) => s.gridCorner);
-  useUi((s) => s.gridDir);
+  useUi((s) => s.gridSideEnd);
+  useUi((s) => s.gridReach);
   useUi((s) => s.roadType);
   useSim((s) => s?.tick ?? -1);
   const preview = gridTool.preview();
@@ -114,7 +112,7 @@ export function GridPanel() {
           )}
         </span>
       )}
-      {preview && !dragging && (
+      {preview && stage === "placed" && (
         <>
           <button type="button" id="grid-confirm" disabled={!preview.ok} title="Build the grid (Enter)" onClick={() => gridTool.confirm()}>
             Confirm <kbd>Enter</kbd>

@@ -37,8 +37,6 @@ export const GRID_TOOL = {
   /** The block size fields take whole cells in this range. The sim refuses blocks under 10 m. */
   minBlockCells: 2,
   maxBlockCells: 100,
-  /** A rectangle turned with Alt held turns in steps of this many degrees. */
-  turnStepDegrees: 1,
   /**
    * Metres around the rectangle within which a building that comes or goes
    * makes the preview count the buildings in the way again (issue M2-15):

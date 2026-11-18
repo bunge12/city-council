@@ -1,10 +1,13 @@
-// The grid tool (issue M1-21). A player lays out a street grid with one drag
-// and one confirm:
+// The grid tool (issue M1-21, reworked in issue 88). A player lays out a
+// street grid in three moves:
 //
-//   drag     from one corner to the other. Started on a road, the
-//            rectangle takes that road's angle; on open ground it is
-//            square to the map, and holding Alt during the drag turns it
-//            around the corner the drag started from
+//   drag     draws the grid's first side, from the corner pressed to the
+//            corner released. Its end snaps as a road's end does: the angle
+//            guide lines it up with the road it starts on, or with the map
+//            on open ground, and the guide lines, offsets and cell lines
+//            line it up with roads and zoning nearby
+//   move     sets how far the grid reaches from that side, square to it, on
+//            whichever side the pointer is; a click or Enter fixes it
 //   confirm  the Confirm button or Enter sends one `BuildRoadGrid`
 //
 // Escape or a right-click drops the rectangle, and Escape with nothing drawn
@@ -14,8 +17,9 @@
 // The preview runs `planRoadGrid`, the function the sim plans the command
 // with, on the mirror's read-only copy of the roads, so it shows the streets
 // the sim would lay and where water or steep ground cuts them. Then each
-// link is checked with `planRoad`, the function `BuildRoad` is checked with,
-// which finds the junctions with existing roads and most refusals. The sim
+// link with a road near it is checked with `planRoad`, the function
+// `BuildRoad` is checked with, which finds the junctions with existing roads
+// and most refusals; a link with none near it cannot have either. The sim
 // checks the links one after another on a network the earlier links have
 // changed, which the client cannot do without writing its copy, so the sim
 // still has the final say and its reason shows if it refuses.
@@ -26,10 +30,14 @@
 
 import {
   LEVEL_GROUND,
+  NETWORKS_ROAD,
   NONE,
+  ROAD_BUILD,
   ROAD_TYPES,
   planRoad,
   planRoadGrid,
+  roadIndexOf,
+  segmentsInBox,
   snapToGrid,
   type BuildPoint,
   type BuildRoadGridPayload,
@@ -46,17 +54,14 @@ import type { PreviewLook, PreviewShape } from "../render/road-preview-geometry"
 import type { SnapMark } from "../render/snap-marks-geometry";
 import { GRID_TOOL, SNAP } from "./config";
 import { cellCornerSource, cellEdgeSource, type CellLookup } from "./cell-snap";
-import { nodeSource, segmentSource, snapPoint, startSource, type Snap } from "./snap";
+import { SNAP_SOURCES, angleSource, nodeSource, segmentSource, snapPoint, startSource, type Snap, type SnapSource } from "./snap";
 import type { RoadToolState } from "./road-tool";
 
-/** A unit direction in plan. */
-export interface Dir {
-  dx: number;
-  dz: number;
-}
-
-/** Map-square: the rectangle's first side runs east. */
-export const SQUARE_TO_MAP: Dir = { dx: 1, dz: 0 };
+/**
+ * Where the grid tool is: drawing the first side, setting how far the grid
+ * reaches from it, or holding a rectangle until Confirm.
+ */
+export type GridStage = "side" | "depth" | "placed";
 
 /** What the grid tool would send, and what the sim would do with it. */
 export interface GridPreview {
@@ -100,16 +105,17 @@ export interface GridToolState {
   gridDepthCells: number;
   /** Block width, cells between road edges from one street to the next along the first side. */
   gridWidthCells: number;
-  /** The corner the drag started from, or null when no rectangle is drawn. */
+  /** Where the grid tool is, or null when no rectangle is being drawn. */
+  gridStage: GridStage | null;
+  /** The corner the first side starts from, or null when none is drawn. */
   gridOrigin: BuildPoint | null;
-  /** The far corner, where the pointer is or was when the drag ended. */
-  gridCorner: BuildPoint | null;
-  /** The direction of the rectangle's first side. */
-  gridDir: Dir;
-  /** The drag started on a road, so the rectangle keeps that road's angle. */
-  gridOnRoad: boolean;
-  /** The drag is under way. */
-  gridDragging: boolean;
+  /** The other end of the first side. */
+  gridSideEnd: BuildPoint | null;
+  /**
+   * How far the grid reaches from the first side, metres, signed: positive
+   * to the left looking from the origin along the side.
+   */
+  gridReach: number;
   gridPending: readonly PendingGrid[];
   /** The last refusal, from the preview or from the sim. */
   gridNote: string | null;
@@ -118,16 +124,15 @@ export interface GridToolState {
 export const INITIAL_GRID_TOOL: GridToolState = {
   gridDepthCells: GRID_TOOL.defaultDepthCells,
   gridWidthCells: GRID_TOOL.defaultWidthCells,
+  gridStage: null,
   gridOrigin: null,
-  gridCorner: null,
-  gridDir: SQUARE_TO_MAP,
-  gridOnRoad: false,
-  gridDragging: false,
+  gridSideEnd: null,
+  gridReach: 0,
   gridPending: [],
   gridNote: null,
 };
 
-const NO_RECTANGLE = { gridOrigin: null, gridCorner: null, gridDir: SQUARE_TO_MAP, gridOnRoad: false, gridDragging: false } as const;
+const NO_RECTANGLE = { gridStage: null, gridOrigin: null, gridSideEnd: null, gridReach: 0 } as const;
 
 function typeById(id: string): RoadType {
   const type = ROAD_TYPES.find((t) => t.id === id);
@@ -145,70 +150,94 @@ function onGrid(p: BuildPoint): BuildPoint {
   return { x: snapToGrid(p.x), z: snapToGrid(p.z) };
 }
 
-/**
- * The direction a rectangle started at `origin` takes: the road there, as
- * the road tool finds what a road starts from, or null on open ground. On a
- * segment it is the segment's direction at that point; at a node, the first
- * road leaving it.
- */
-export function roadDirAt(net: RoadNet, origin: BuildPoint): Dir | null {
-  const source = startSource(net, origin);
-  return source?.dirs[0] ?? null;
+/** The unit direction from `a` to `b`, or null when they are the same point. */
+function unitFrom(a: BuildPoint, b: BuildPoint): { dx: number; dz: number } | null {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const len = Math.hypot(dx, dz);
+  return len > 1e-9 ? { dx: dx / len, dz: dz / len } : null;
 }
 
 /**
- * The three corners of the rectangle from `origin` to the pointer at
- * `corner`, with its first side along `dir`. The pointer is projected onto
- * the two sides, so the rectangle's far corner is the pointer. Corners are
- * on the build grid, as the sim takes them.
+ * How far `point` lies from the line through the first side, from `origin`
+ * to `sideEnd`, metres: positive to the left looking along the side, which
+ * is the side `gridCorners` reaches toward with a positive reach.
  */
-export function gridCorners(origin: BuildPoint, corner: BuildPoint, dir: Dir): { origin: BuildPoint; along: BuildPoint; across: BuildPoint } {
-  const dx = corner.x - origin.x;
-  const dz = corner.z - origin.z;
-  const a = dx * dir.dx + dz * dir.dz;
-  // Square to `dir`, turned a quarter to the left.
-  const vx = -dir.dz;
-  const vz = dir.dx;
-  const b = dx * vx + dz * vz;
+export function reachTo(origin: BuildPoint, sideEnd: BuildPoint, point: BuildPoint): number {
+  const u = unitFrom(origin, sideEnd);
+  if (!u) return 0;
+  return (point.z - origin.z) * u.dx - (point.x - origin.x) * u.dz;
+}
+
+/**
+ * The three corners of the rectangle with its first side from `origin` to
+ * `sideEnd`, reaching `reach` metres square to it, to the left for a
+ * positive reach. Corners are on the build grid, as the sim takes them.
+ */
+export function gridCorners(origin: BuildPoint, sideEnd: BuildPoint, reach: number): { origin: BuildPoint; along: BuildPoint; across: BuildPoint } {
+  const u = unitFrom(origin, sideEnd) ?? { dx: 1, dz: 0 };
+  // Square to the side, turned a quarter to the left.
   return {
     origin: onGrid(origin),
-    along: onGrid({ x: origin.x + dir.dx * a, z: origin.z + dir.dz * a }),
-    across: onGrid({ x: origin.x + vx * b, z: origin.z + vz * b }),
+    along: onGrid(sideEnd),
+    across: onGrid({ x: origin.x - u.dz * reach, z: origin.z + u.dx * reach }),
   };
 }
 
 /**
- * The direction that turns the rectangle `size`, measured along and across
- * `dir`, around its origin so its far corner points at `toward`. Whole
- * degrees, so a turned grid reads cleanly. Holding Alt during a drag on
- * open ground calls this.
+ * Lines a grid's first side up with the road it starts on, straight along
+ * it either way or square to it, or with the map's axes on open ground. The
+ * road tool's angle guide leaves out the directions along the road a road
+ * starts from, since a road there would lie on top of it, but a grid's side
+ * along its road is how the grid lines up with it: the sim leaves out what
+ * lies along an existing road and joins the rest. Catches as the angle
+ * guide's strong steps do. Off with the angle guide or while the free-hand
+ * key is held.
  */
-export function turnedDir(origin: BuildPoint, toward: BuildPoint, size: { a: number; b: number }): Dir {
-  const pointer = Math.atan2(toward.z - origin.z, toward.x - origin.x);
-  const diagonal = Math.atan2(size.b, size.a);
-  const step = GRID_TOOL.turnStepDegrees * (Math.PI / 180);
-  const angle = Math.round((pointer - diagonal) / step) * step;
-  return { dx: Math.cos(angle), dz: Math.sin(angle) };
-}
+export const sideAxisSource: SnapSource = {
+  id: "side-axis",
+  find(x, z, ctx) {
+    const { start } = ctx;
+    if (!start || !ctx.guides.angle || ctx.free) return null;
+    const vx = x - start.x;
+    const vz = z - start.z;
+    const reach = SNAP.strongAnglePx * ctx.metresPerPixel;
+    const base = ctx.source?.dirs ?? [{ dx: 1, dz: 0 }];
+    let best: { d: number; t: number; dx: number; dz: number } | null = null;
+    for (const dir of base) {
+      for (const [dx, dz] of [
+        [dir.dx, dir.dz],
+        [-dir.dz, dir.dx],
+        [-dir.dx, -dir.dz],
+        [dir.dz, -dir.dx],
+      ] as const) {
+        const t = vx * dx + vz * dz;
+        if (t <= 0) continue;
+        const d = Math.abs(vx * dz - vz * dx);
+        if (d <= reach && (!best || d < best.d)) best = { d, t, dx, dz };
+      }
+    }
+    if (!best) return null;
+    return { kind: "angle", x: start.x + best.dx * best.t, z: start.z + best.dz * best.t, ray: { dx: best.dx, dz: best.dz } };
+  },
+};
 
-/** The rectangle's size along and across `dir`, metres, signed. */
-export function rectangleSize(origin: BuildPoint, corner: BuildPoint, dir: Dir): { a: number; b: number } {
-  const dx = corner.x - origin.x;
-  const dz = corner.z - origin.z;
-  return { a: dx * dir.dx + dz * dir.dz, b: -dx * dir.dz + dz * dir.dx };
-}
+/** What the first side's end snaps to: everything a road's end does, with the side's own axes after the angle guide. */
+const SIDE_SOURCES: readonly SnapSource[] = SNAP_SOURCES.flatMap((source) => (source === angleSource ? [source, sideAxisSource] : [source]));
+/** What the first corner and the reach snap to: road nodes and segments, and zoned cells' corners and edges. */
+const CORNER_SOURCES: readonly SnapSource[] = [nodeSource, cellCornerSource, segmentSource, cellEdgeSource];
 
 /** The `BuildRoadGrid` payload for a rectangle and a block size in cells. */
 export function gridPayload(
   origin: BuildPoint,
-  corner: BuildPoint,
-  dir: Dir,
+  sideEnd: BuildPoint,
+  reach: number,
   depthCells: number,
   widthCells: number,
   typeId: string,
 ): BuildRoadGridPayload {
   return {
-    ...gridCorners(origin, corner, dir),
+    ...gridCorners(origin, sideEnd, reach),
     depth: depthCells * SNAP.cellSize,
     width: widthCells * SNAP.cellSize,
     type: typeId,
@@ -216,6 +245,22 @@ export function gridPayload(
 }
 
 const samePoint = (p: BuildPoint, q: BuildPoint): boolean => p.x === q.x && p.z === q.z;
+
+/**
+ * Whether no road, at any level, comes within the merge distance of the
+ * link from `a` to `b`. `planRoad` looks no further than that for what a
+ * road joins, crosses or passes over, so such a link has no junction and no
+ * refusal but the ground's, which the plan has already checked, and the
+ * preview need not plan it (issue 88). On open ground that is most links.
+ */
+function clearOfRoads(net: RoadNetwork, a: BuildPoint, b: BuildPoint): boolean {
+  const r = ROAD_BUILD.mergeDistance;
+  const minX = Math.min(a.x, b.x) - r;
+  const minZ = Math.min(a.z, b.z) - r;
+  const maxX = Math.max(a.x, b.x) + r;
+  const maxZ = Math.max(a.z, b.z) + r;
+  return segmentsInBox(roadIndexOf(net), minX, minZ, maxX, maxZ, NETWORKS_ROAD).length === 0;
+}
 
 /**
  * What the sim would do with `payload`, checked against the mirror's roads.
@@ -240,6 +285,7 @@ export function previewGrid(net: RoadNet, terrain: Terrain, payload: BuildRoadGr
     for (let k = 1; k < street.points.length; k++) {
       const from = street.points[k - 1] as BuildPoint;
       const to = street.points[k] as BuildPoint;
+      if (clearOfRoads(asNetwork(net), from, to)) continue;
       const link = planRoad(asNetwork(net), terrain, { from, to, type: type.id });
       let problem: string | null = null;
       if (!link.ok) problem = link.reason;
@@ -301,6 +347,11 @@ export function gridMarks(payload: BuildRoadGridPayload, cuts: readonly BuildPoi
   return marks;
 }
 
+/** The first side while it is drawn, before the grid has any reach, as a flat mark. */
+export function gridSideMarks(origin: BuildPoint, sideEnd: BuildPoint): SnapMark[] {
+  return [{ shape: "line", ax: origin.x, az: origin.z, bx: sideEnd.x, bz: sideEnd.z, look: "angle" }];
+}
+
 /** What the controller needs from the page. */
 export interface GridToolHost {
   get(): GridToolState & Pick<RoadToolState, "tool" | "roadType" | "guides">;
@@ -315,26 +366,30 @@ export interface GridToolHost {
   send(payload: BuildRoadGridPayload): Promise<CommandResult>;
 }
 
-/** What the corner snap needs from the view at the pointer. */
+/** What the snap needs from the view at the pointer. */
 export interface GridSnapView {
   /** Metres one CSS pixel covers at the pointer. */
   metresPerPixel: number;
-  /** The free-hand key, Alt, is held: no snaps, and on open ground the rectangle turns. */
+  /** The free-hand key, Alt, is held: no snaps. */
   free: boolean;
 }
 
-/** The grid tool's input handling. Holds no state of its own beyond a counter for ids. */
+/** The grid tool's input handling. Holds no state of its own beyond a counter for ids and the preview cache. */
 export class GridToolController {
   private readonly host: GridToolHost;
   private nextId = 1;
-  /** The rectangle's size when Alt was pressed during the drag, kept while it turns. */
-  private turning: { a: number; b: number } | null = null;
   /** The last preview worked out, and what it was worked out for. */
   private cacheKey = "";
   private cached: GridPreview | null = null;
   private version = 0;
   /** Counts mirror updates that carried buildings, so the buildings in the way are found again. */
   private buildingsVersion = 0;
+  /**
+   * The rectangle a drag replaced, while the drag is under way. A drag too
+   * short to be a side puts it back, so a click that moved a few pixels
+   * does not lose it.
+   */
+  private replaced: Pick<GridToolState, "gridStage" | "gridOrigin" | "gridSideEnd" | "gridReach"> | null = null;
 
   constructor(host: GridToolHost) {
     this.host = host;
@@ -351,7 +406,6 @@ export class GridToolController {
   }
 
   leave(): void {
-    this.turning = null;
     this.host.set({ tool: null, gridNote: null, ...NO_RECTANGLE });
   }
 
@@ -365,98 +419,124 @@ export class GridToolController {
   /** Escape: drops the rectangle, or leaves the tool when there is none. Returns whether it did anything. */
   escape(): boolean {
     if (!this.active()) return false;
-    if (this.host.get().gridOrigin) this.drop();
+    if (this.host.get().gridStage) this.drop();
     else this.leave();
     return true;
   }
 
   /** A right-click: drops the rectangle. */
   cancel(): void {
-    if (this.active() && this.host.get().gridOrigin) this.drop();
+    if (this.active() && this.host.get().gridStage) this.drop();
   }
 
   private drop(): void {
-    this.turning = null;
+    this.replaced = null;
     this.host.set({ gridNote: null, ...NO_RECTANGLE });
   }
 
+  /** The start of the snap marks' angle and length guides: the first corner while the first side is drawn. */
+  anchor(): BuildPoint | null {
+    const s = this.host.get();
+    return s.gridStage === "side" ? s.gridOrigin : null;
+  }
+
   /**
-   * Where the pointer at `ground` lands: on a road node or segment, as the
-   * road tool snaps, or on the corners and edges of zoned cells when the
-   * road tool's cell guide is on (issue M2-08), or where it is.
+   * Where the pointer at `ground` lands, for the move it would be. The
+   * first side's end snaps as a road's end does, measured from the first
+   * corner (issue 88). The first corner and the reach catch road nodes and
+   * segments, and the corners and edges of zoned cells when the road tool's
+   * cell guide is on (issue M2-08).
    */
   snap(ground: BuildPoint, view: GridSnapView): Snap | null {
     const world = this.host.world();
     if (!world) return null;
     const s = this.host.get();
     const type = typeById(s.roadType);
+    const drawingSide = s.gridStage === "side" && s.gridOrigin !== null;
+    const start = drawingSide ? s.gridOrigin : null;
     return snapPoint(
       ground.x,
       ground.z,
       {
         net: world.net,
-        start: null,
-        source: null,
+        start,
+        source: start ? startSource(world.net, start) : null,
         metresPerPixel: view.metresPerPixel,
-        guides: { angle: false, length: false, grid: false, lines: false, offset: false, cells: s.guides.cells },
+        guides: drawingSide ? s.guides : { angle: false, length: false, grid: false, lines: false, offset: false, cells: s.guides.cells },
         free: view.free,
         gridStep: world.terrain.spacing,
         roadWidth: type.width,
         cells: world.cells ?? null,
       },
-      [nodeSource, cellCornerSource, segmentSource, cellEdgeSource],
+      drawingSide ? SIDE_SOURCES : CORNER_SOURCES,
     );
   }
 
-  /** A drag began at `ground`, already snapped: the rectangle's first corner. */
+  /** A drag began at `ground`, already snapped: the first side starts there. Any rectangle drawn before goes. */
   dragStart(ground: BuildPoint | null): void {
-    const world = this.host.world();
-    if (!this.active() || !ground || !world) return;
+    if (!this.active() || !ground || !this.host.world()) return;
+    const s = this.host.get();
+    this.replaced = s.gridStage === "depth" || s.gridStage === "placed" ? { gridStage: s.gridStage, gridOrigin: s.gridOrigin, gridSideEnd: s.gridSideEnd, gridReach: s.gridReach } : null;
     const origin = onGrid(ground);
-    const road = roadDirAt(world.net, origin);
-    this.turning = null;
-    this.host.set({
-      gridOrigin: origin,
-      gridCorner: origin,
-      gridDir: road ?? SQUARE_TO_MAP,
-      gridOnRoad: road !== null,
-      gridDragging: true,
-      gridNote: null,
-    });
+    this.host.set({ gridStage: "side", gridOrigin: origin, gridSideEnd: origin, gridReach: 0, gridNote: null });
+  }
+
+  /** The pointer moved to `ground`, already snapped, during the drag: the first side ends there. */
+  dragMove(ground: BuildPoint | null): void {
+    const s = this.host.get();
+    if (!this.active() || s.gridStage !== "side" || !ground) return;
+    this.host.set({ gridSideEnd: onGrid(ground) });
   }
 
   /**
-   * The pointer moved to `ground`, already snapped, during the drag. With
-   * `turn`, a rectangle on open ground turns around its origin so its far
-   * corner follows the pointer, keeping its size; let go, and the drag
-   * sizes it at the new angle.
+   * The button came up: the first side is set, and the pointer now sets the
+   * reach. A side shorter than the shortest road the sim builds is no side:
+   * it was a click that moved a little, so a rectangle it replaced comes
+   * back, and is placed as a click would place it.
    */
-  dragMove(ground: BuildPoint | null, turn: boolean): void {
+  dragEnd(): void {
     const s = this.host.get();
-    if (!this.active() || !s.gridDragging || !s.gridOrigin || !ground) return;
-    const point = onGrid(ground);
-    if (turn && !s.gridOnRoad) {
-      this.turning ??= rectangleSize(s.gridOrigin, s.gridCorner ?? point, s.gridDir);
-      const size = this.turning;
-      if (Math.hypot(size.a, size.b) < 1e-6) return;
-      const dir = turnedDir(s.gridOrigin, point, size);
-      const corner = { x: s.gridOrigin.x + dir.dx * size.a - dir.dz * size.b, z: s.gridOrigin.z + dir.dz * size.a + dir.dx * size.b };
-      this.host.set({ gridDir: dir, gridCorner: corner });
+    if (s.gridStage !== "side") return;
+    const o = s.gridOrigin;
+    const e = s.gridSideEnd;
+    const replaced = this.replaced;
+    this.replaced = null;
+    if (!o || !e || Math.hypot(e.x - o.x, e.z - o.z) < ROAD_BUILD.minLength) {
+      if (replaced) {
+        this.host.set(replaced);
+        this.click();
+      } else this.drop();
       return;
     }
-    this.turning = null;
-    this.host.set({ gridCorner: point });
-  }
-
-  /** The button came up: the rectangle stays, waiting for Confirm. */
-  dragEnd(): void {
-    this.turning = null;
-    if (this.host.get().gridDragging) this.host.set({ gridDragging: false });
+    this.host.set({ gridStage: "depth" });
   }
 
   /** The drag was cut off: the rectangle goes. */
   dragCancel(): void {
-    if (this.host.get().gridDragging) this.drop();
+    if (this.host.get().gridStage === "side") this.drop();
+  }
+
+  /**
+   * The pointer is at `ground`, already snapped, with no button held. While
+   * the reach is being set, the grid reaches square from the first side to
+   * the pointer. When the length guide is on, nothing caught the pointer
+   * and the free-hand key is not held, the reach is whole cells, as a
+   * road's length is.
+   */
+  hover(ground: Snap | BuildPoint | null, free = false): void {
+    const s = this.host.get();
+    if (!this.active() || s.gridStage !== "depth" || !ground || !s.gridOrigin || !s.gridSideEnd) return;
+    let reach = reachTo(s.gridOrigin, s.gridSideEnd, ground);
+    const caught = "kind" in ground && ground.kind !== "none";
+    if (!caught && !free && s.guides.length) reach = Math.sign(reach) * Math.max(1, Math.round(Math.abs(reach) / SNAP.cellSize)) * SNAP.cellSize;
+    if (reach !== s.gridReach) this.host.set({ gridReach: reach });
+  }
+
+  /** A click on the map: while the reach is being set, it fixes the rectangle, which waits for Confirm. */
+  click(): void {
+    const s = this.host.get();
+    if (!this.active() || s.gridStage !== "depth" || !this.payload()) return;
+    this.host.set({ gridStage: "placed" });
   }
 
   /**
@@ -506,24 +586,32 @@ export class GridToolController {
     return { x0: Math.min(...xs) - pad, x1: Math.max(...xs) + pad, z0: Math.min(...zs) - pad, z1: Math.max(...zs) + pad };
   }
 
-  /** The payload for the rectangle drawn now, or null when there is none or it has no size. */
+  /** The payload for the rectangle drawn now, or null while there is none or it has no reach yet. */
   payload(): BuildRoadGridPayload | null {
     const s = this.host.get();
-    if (!this.active() || !s.gridOrigin || !s.gridCorner) return null;
-    if (samePoint(s.gridOrigin, onGrid(s.gridCorner))) return null;
-    return gridPayload(s.gridOrigin, s.gridCorner, s.gridDir, s.gridDepthCells, s.gridWidthCells, s.roadType);
+    if (!this.active() || s.gridStage === null || s.gridStage === "side" || !s.gridOrigin || !s.gridSideEnd) return null;
+    if (samePoint(s.gridOrigin, s.gridSideEnd)) return null;
+    const payload = gridPayload(s.gridOrigin, s.gridSideEnd, s.gridReach, s.gridDepthCells, s.gridWidthCells, s.roadType);
+    return samePoint(payload.origin, payload.across) ? null : payload;
+  }
+
+  /** The first side while it is being drawn, for its mark, or null. */
+  side(): { origin: BuildPoint; end: BuildPoint } | null {
+    const s = this.host.get();
+    if (!this.active() || s.gridStage !== "side" || !s.gridOrigin || !s.gridSideEnd) return null;
+    return { origin: s.gridOrigin, end: s.gridSideEnd };
   }
 
   /**
    * The preview of the rectangle drawn now, worked out again only when it or
-   * the roads change. The buildings in its way are found once the drag is
-   * over, and again when buildings come or go.
+   * the roads change. The buildings in its way are found once the
+   * rectangle is placed, and again when buildings come or go.
    */
   preview(): GridPreview | null {
     const payload = this.payload();
     const world = this.host.world();
     if (!payload || !world) return null;
-    const settled = !this.host.get().gridDragging && world.clears !== undefined;
+    const settled = this.host.get().gridStage === "placed" && world.clears !== undefined;
     const key = `${JSON.stringify(payload)}|${this.version}|${settled ? this.buildingsVersion : "-"}`;
     if (key !== this.cacheKey) {
       this.cacheKey = key;
@@ -534,11 +622,17 @@ export class GridToolController {
 
   /**
    * Confirm or Enter: sends the grid if the preview passes. A grid the
-   * preview refuses sends nothing and keeps its reason on screen.
+   * preview refuses sends nothing and keeps its reason on screen. While the
+   * reach still follows the pointer, Enter places the rectangle instead, so
+   * the buildings it would clear show before a second Enter sends it.
    */
   confirm(): void {
     const s = this.host.get();
-    if (!this.active() || s.gridDragging) return;
+    if (!this.active() || s.gridStage === "side") return;
+    if (s.gridStage === "depth") {
+      this.click();
+      return;
+    }
     const preview = this.preview();
     if (!preview) return;
     if (!preview.ok) {
@@ -546,7 +640,6 @@ export class GridToolController {
       return;
     }
     const pending: PendingGrid = { id: this.nextId++, preview };
-    this.turning = null;
     this.host.set({ ...NO_RECTANGLE, gridNote: null, gridPending: [...s.gridPending, pending] });
     void this.host.send(preview.payload).then((result) => this.answered(pending.id, result));
   }

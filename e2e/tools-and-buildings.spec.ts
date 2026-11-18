@@ -170,16 +170,23 @@ test("the grid tool counts the buildings its rectangle would clear", async ({ pa
   const before = await live(page);
 
   await page.keyboard.press("KeyG");
-  const a = await screenAt(page, 4180, 4480);
+  // The first side west to east along the near edge, then the grid reaches
+  // north and a click places it (issue 88). The reach is set with no button
+  // held, so the pointer stays clear of the build menu at the bottom.
+  const a = await screenAt(page, 4180, 4700);
   const b = await screenAt(page, 4420, 4700);
+  const c = await screenAt(page, 4300, 4480);
   await page.mouse.move(a.x, a.y, { steps: 4 });
   await frames(page);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 30 });
   await frames(page);
-  // While the drag is under way the count waits.
-  await expect(page.locator("#grid-summary")).toHaveAttribute("data-clears", "");
   await page.mouse.up();
+  await page.mouse.move(c.x, c.y, { steps: 20 });
+  await frames(page);
+  // While the reach follows the pointer the count waits.
+  await expect(page.locator("#grid-summary")).toHaveAttribute("data-clears", "");
+  await page.mouse.click(c.x, c.y);
   await frames(page);
   const summary = page.locator("#grid-summary");
   await expect(summary).toHaveAttribute("data-ok", "true");

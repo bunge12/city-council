@@ -89,9 +89,7 @@ export function BuildBar() {
   const dragging = useUi((s) => s.editDrag !== null);
   const editPending = useUi((s) => s.editPending.length);
   const editNote = useUi((s) => s.editNote);
-  const gridDrawn = useUi((s) => s.gridOrigin !== null);
-  const gridDragging = useUi((s) => s.gridDragging);
-  const gridOnRoad = useUi((s) => s.gridOnRoad);
+  const gridStage = useUi((s) => s.gridStage);
   const gridPending = useUi((s) => s.gridPending.length);
   const gridNote = useUi((s) => s.gridNote);
   const zonePick = useUi((s) => s.zonePick);
@@ -118,7 +116,7 @@ export function BuildBar() {
     hint = toolHint(roadMode, drawing, curving);
     hint += ` Hold ${FREE_HAND_KEY_LABEL} to draw free-hand.`;
   } else if (gridding) {
-    hint = gridHint(gridDrawn, gridDragging, gridOnRoad);
+    hint = gridHint(gridStage);
   } else if (editing) {
     hint = editHint(dragging, typeName(roadType));
   } else if (bulldozing) {

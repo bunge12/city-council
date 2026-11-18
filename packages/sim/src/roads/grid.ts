@@ -19,6 +19,14 @@
 // streets only meet at lattice points. A link that lies along an existing
 // road is left out, so a grid started on a road joins it.
 //
+// How much one grid may build is counted in street sections, the links
+// between neighbouring lattice points: each counts one, and each place a
+// built link meets an existing road counts `gridMeetingSections` more,
+// since the split or join BuildRoad makes there costs about that many links
+// on open ground (issue 88). The count is checked twice: on the bare
+// lattice before any link is looked at, so a huge rectangle is refused at
+// once, and with the meetings once the links are known.
+//
 // The grid is built one link at a time through the BuildRoad path
 // (`planRoad` then `buildRoad`): first the streets along the origin to
 // `along` side, from the origin out, then the ones across. Each link joins
@@ -31,7 +39,7 @@
 
 import { ROAD_BUILD, ROAD_TYPES, type RoadType } from "./balance";
 import { buildRoad, cosDegrees, groundProblem, planRoad, snapToGrid, type BuildPoint } from "./build";
-import { isStraight, nearestOnQuad, segmentQuad, straightQuad, type Quad } from "./curve";
+import { isStraight, nearestOnQuad, orient, quadMeetings, segmentQuad, segmentsMeet, straightQuad, type Quad } from "./curve";
 import { LEVEL_GROUND, NETWORK_ROAD, endJournal, reverseOps, segmentAtLevel, startJournal, type RoadNetwork } from "./network";
 import { NETWORKS_ROAD, nearestNode, roadIndexOf, segmentsInBox } from "./spatial";
 import { heightAt, mapSize, type Terrain } from "../terrain/terrain";
@@ -73,8 +81,14 @@ export interface GridPlan {
   type: RoadType;
   /** In the order they are built. Streets parallel to the origin to `along` side come first. */
   streets: GridStreet[];
-  /** Grid lines, the count held to `gridMaxStreets`. */
+  /** Grid lines along both sides, before water or slopes cut them. */
   lines: number;
+  /** Links between neighbouring lattice points, before water or slopes cut them or existing roads cover them. */
+  sections: number;
+  /** Places the links that are built meet an existing road: a crossing, or a join at an existing node or segment. */
+  meetings: number;
+  /** `sections` plus `gridMeetingSections` for each meeting, held to `gridMaxSections`. */
+  work: number;
   /** Plan length of every street added up, metres. */
   length: number;
   /** Whole 2026 dollars. Not charged until the treasury arrives in M4. */
@@ -90,7 +104,8 @@ export interface GridProblem {
   reason: string;
 }
 
-const MAX_STREETS = ROAD_BUILD.gridMaxStreets;
+const MAX_SECTIONS = ROAD_BUILD.gridMaxSections;
+const MEETING_SECTIONS = ROAD_BUILD.gridMeetingSections;
 // Sides closer to square than this count as square. The corners are on the
 // build grid, so a rectangle the client turned to any angle is a hair off.
 const SQUARE_COS = cosDegrees(89);
@@ -285,6 +300,79 @@ function stubEnd(terrain: Terrain, type: RoadType, a: BuildPoint, b: BuildPoint,
   return null;
 }
 
+/** Whether a ground road comes within the merge distance of (x, z), where BuildRoad joins an end to it. */
+function roadNear(net: RoadNetwork, x: number, z: number): boolean {
+  const r = ROAD_BUILD.mergeDistance;
+  for (const seg of segmentsInBox(roadIndexOf(net), x - r, z - r, x + r, z + r, NETWORKS_ROAD)) {
+    if (net.segNetwork[seg] !== NETWORK_ROAD || !segmentAtLevel(net, seg, LEVEL_GROUND)) continue;
+    if (nearestOnQuad(segmentQuad(net, seg), x, z).d2 <= r * r) return true;
+  }
+  return false;
+}
+
+/**
+ * How many places the straight link from `a` to `b` meets an existing
+ * ground road, each a split or a join when the link is built. Each end
+ * counts one when a road is within the merge distance of it, since
+ * BuildRoad joins the end to that road there (`resolveEnd`). Between the
+ * ends, the merge distance clear of them, each crossing counts one, and
+ * each existing node the link runs through counts once however many roads
+ * meet there. A road it runs along counts once, at most, and the plan has
+ * already left such links out.
+ */
+function meetingsAlong(net: RoadNetwork, a: BuildPoint, b: BuildPoint): number {
+  let count = (roadNear(net, a.x, a.z) ? 1 : 0) + (roadNear(net, b.x, b.z) ? 1 : 0);
+  const r = ROAD_BUILD.mergeDistance;
+  const length = distance(a.x, a.z, b.x, b.z);
+  if (length <= 2 * r) return count;
+  // The middle of the link, the merge distance in from each end.
+  const ux = ((b.x - a.x) * r) / length;
+  const uz = ((b.z - a.z) * r) / length;
+  const ax = a.x + ux;
+  const az = a.z + uz;
+  const bx = b.x - ux;
+  const bz = b.z - uz;
+  const middle = straightQuad(ax, az, bx, bz);
+  const nodes = new Set<number>();
+  for (const seg of segmentsInBox(roadIndexOf(net), ax < bx ? ax : bx, az < bz ? az : bz, ax < bx ? bx : ax, az < bz ? bz : az, NETWORKS_ROAD)) {
+    if (net.segNetwork[seg] !== NETWORK_ROAD || !segmentAtLevel(net, seg, LEVEL_GROUND)) continue;
+    const p = net.segA[seg] ?? 0;
+    const q = net.segB[seg] ?? 0;
+    const px = net.nodeX[p] ?? 0;
+    const pz = net.nodeZ[p] ?? 0;
+    const qx = net.nodeX[q] ?? 0;
+    const qz = net.nodeZ[q] ?? 0;
+    const shape = segmentQuad(net, seg);
+    if (!isStraight(shape)) {
+      // A curve can cross the link more than once; each is a split.
+      count += quadMeetings(middle, shape).at.length;
+      continue;
+    }
+    if (!segmentsMeet(ax, az, bx, bz, px, pz, qx, qz)) continue;
+    // Through an existing node: one meeting for every road there.
+    const atP = orient(ax, az, bx, bz, px, pz) === 0 && segmentsMeet(ax, az, bx, bz, px, pz, px, pz);
+    const atQ = orient(ax, az, bx, bz, qx, qz) === 0 && segmentsMeet(ax, az, bx, bz, qx, qz, qx, qz);
+    if (atP) nodes.add(p);
+    if (atQ) nodes.add(q);
+    if (!atP && !atQ) count++;
+  }
+  return count + nodes.size;
+}
+
+/** What a grid's size comes to, counted as `gridMaxSections` counts it, and why it is too big if it is. */
+function tooBig(sections: number, meetings: number | null): string | null {
+  const work = sections + (meetings ?? 0) * MEETING_SECTIONS;
+  if (work <= MAX_SECTIONS) return null;
+  const advice = "Make it smaller, or lay it in parts.";
+  if (meetings === null || meetings === 0) {
+    return `Too big for one grid: it has ${sections} street sections, and one grid can lay ${MAX_SECTIONS}. ${advice}`;
+  }
+  return (
+    `Too big for one grid here: it has ${sections} street sections and meets existing roads ${meetings} ` +
+    `${meetings === 1 ? "time" : "times"}. One grid can lay ${MAX_SECTIONS} sections, and each meeting counts as ${MEETING_SECTIONS}. ${advice}`
+  );
+}
+
 /** A piece of a grid line between two points, before pieces that meet are joined into streets. */
 interface Edge {
   a: BuildPoint;
@@ -331,10 +419,13 @@ export function planRoadGrid(net: RoadNetwork, terrain: Terrain, payload: unknow
   const dot = e1x * e2x + e1z * e2z;
   if ((dot < 0 ? -dot : dot) > SQUARE_COS * l1 * l2) return { ok: false, reason: "The grid's corners must make a rectangle" };
 
-  const lines = lineCount(l1, s1, input.width, type.width) + lineCount(l2, s2, input.depth, type.width);
-  if (lines > MAX_STREETS) {
-    return { ok: false, reason: `Too many streets: the grid has ${lines}, and the most one grid can lay is ${MAX_STREETS}` };
-  }
+  const c1 = lineCount(l1, s1, input.width, type.width);
+  const c2 = lineCount(l2, s2, input.depth, type.width);
+  const lines = c1 + c2;
+  const sections = c1 * (c2 - 1) + c2 * (c1 - 1);
+  // Before any link is looked at, so a rectangle far too big costs nothing.
+  const bare = tooBig(sections, null);
+  if (bare !== null) return { ok: false, reason: bare };
   const at1 = gridLines(l1, s1, input.width, type.width);
   const at2 = gridLines(l2, s2, input.depth, type.width);
   const n1 = at1.length;
@@ -369,6 +460,7 @@ export function planRoadGrid(net: RoadNetwork, terrain: Terrain, payload: unknow
 
   const streets: GridStreet[] = [];
   let length = 0;
+  let meetings = 0;
   lineList.forEach((line, l) => {
     const linkStates = states[l] ?? [];
     const isGround = (k: number) => linkStates[k]?.kind === "ground";
@@ -398,6 +490,7 @@ export function planRoadGrid(net: RoadNetwork, terrain: Terrain, payload: unknow
     };
     for (const e of edges) {
       length += distance(e.a.x, e.a.z, e.b.x, e.b.z);
+      meetings += meetingsAlong(net, e.a, e.b);
       const open = current as { points: BuildPoint[]; cutStart: boolean; cutEnd: boolean } | null;
       if (open && same(open.points[open.points.length - 1] as BuildPoint, e.a)) {
         open.points.push(e.b);
@@ -409,8 +502,10 @@ export function planRoadGrid(net: RoadNetwork, terrain: Terrain, payload: unknow
     }
     close();
   });
+  const big = tooBig(sections, meetings);
+  if (big !== null) return { ok: false, reason: big };
   const cost = Math.round(length * type.buildCostPerMetre);
-  return { ok: true, plan: { type, streets, lines, length, cost } };
+  return { ok: true, plan: { type, streets, lines, sections, meetings, work: sections + meetings * MEETING_SECTIONS, length, cost } };
 }
 
 /**

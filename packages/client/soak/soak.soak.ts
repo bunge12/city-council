@@ -297,8 +297,10 @@ test("soak: one hour of game time at 4x", async () => {
         return [type, { from: { x: g.x - 24, z }, to: { x: g.x + 3 * LINE + 24, z }, type: "street" }];
       }
       case "BuildRoadGrid": {
+        // Near the cap over the city's streets (issue 88): 5 by 6 lines, each
+        // of the 49 sections splitting one street, 343 of the 360 allowed.
         const o = { x: g.x + 72, z: g.z + 72 };
-        return [type, { origin: o, along: { x: o.x + SPAN, z: o.z }, across: { x: o.x, z: o.z + SPAN }, depth: 86, width: 86, type: "street" }];
+        return [type, { origin: o, along: { x: o.x + 4 * LINE, z: o.z }, across: { x: o.x, z: o.z + 5 * LINE }, depth: 86, width: 86, type: "street" }];
       }
       case "UpgradeRoad":
       case "BulldozeRoad": {

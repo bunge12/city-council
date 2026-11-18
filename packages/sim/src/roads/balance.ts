@@ -76,11 +76,17 @@ export interface RoadBuildBalance {
   /** How many of their own road changes each player can undo. The oldest past this are forgotten. */
   undoSteps: number;
   /**
-   * Most streets one BuildRoadGrid may lay: one for each grid line, counted
-   * before water or a slope cuts it. Keeps the step that applies a grid
-   * inside the tick budget.
+   * How much one BuildRoadGrid may build, in street sections: each piece of
+   * street between two neighbouring junctions of the grid counts one, and
+   * each place a section meets an existing road counts `gridMeetingSections`
+   * more. Keeps the step that applies a grid inside the tick budget (issue 88).
    */
-  gridMaxStreets: number;
+  gridMaxSections: number;
+  /**
+   * What one meeting with an existing road counts, in street sections: the
+   * split or join it makes costs about this many sections on open ground.
+   */
+  gridMeetingSections: number;
   /**
    * Most segments one BulldozeRoad or UpgradeRoad may name. Keeps the step
    * that applies it inside the tick budget.
@@ -244,8 +250,10 @@ export function checkRoadBalance(data: unknown): string[] {
     if (typeof credit !== "number" || !(credit >= 0 && credit <= 1)) errors.push("build.upgradeCredit must be a number from 0 to 1");
     const undoSteps = build["undoSteps"];
     if (!Number.isSafeInteger(undoSteps) || (undoSteps as number) < 1) errors.push("build.undoSteps must be a whole number of at least 1");
-    const gridMax = build["gridMaxStreets"];
-    if (!Number.isSafeInteger(gridMax) || (gridMax as number) < 4) errors.push("build.gridMaxStreets must be a whole number of at least 4");
+    const gridMax = build["gridMaxSections"];
+    if (!Number.isSafeInteger(gridMax) || (gridMax as number) < 4) errors.push("build.gridMaxSections must be a whole number of at least 4");
+    const meeting = build["gridMeetingSections"];
+    if (!Number.isSafeInteger(meeting) || (meeting as number) < 0) errors.push("build.gridMeetingSections must be a whole number of at least 0");
     const editMax = build["editMaxSegments"];
     if (!Number.isSafeInteger(editMax) || (editMax as number) < 1) errors.push("build.editMaxSegments must be a whole number of at least 1");
     const share = build["gridMinBlockShare"];

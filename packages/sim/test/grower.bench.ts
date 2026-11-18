@@ -45,7 +45,7 @@ import { grow, growOne } from "../src/buildings/grower";
 import { keepBuildings } from "../src/buildings/upkeep";
 import { ROAD_BUILD } from "../src/roads/balance";
 import { buildRoad, type RoadPlan } from "../src/roads/build";
-import { buildRoadGrid } from "../src/roads/grid";
+import { buildRoadGrid, checkRoadGrid } from "../src/roads/grid";
 import { endJournal, reverseOps, startJournal, type NetworkOp } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 import { syncCells } from "../src/zoning/cell-index";
@@ -80,14 +80,18 @@ function streetAcross(): RoadPlan {
   throw new Error("no street plans");
 }
 
-/** A grid at the cap over one of the city's grids, offset so its streets cross the city's. */
+/**
+ * A grid at the cap over one of the city's grids, offset so its streets
+ * cross the city's: 5 by 6 lines, each section splitting a street (issue
+ * 88). Rehearsed, so the sim would build it rather than refuse a link.
+ */
 function gridOver(): BuildRoadGridPayload {
   for (const g of grids) {
     for (const off of [24, 72]) {
       const o = { x: g.x + off, z: g.z + off };
-      const payload = { origin: o, along: { x: o.x + SPAN, z: o.z }, across: { x: o.x, z: o.z + SPAN }, depth: 86, width: 86, type: "street" };
+      const payload = { origin: o, along: { x: o.x + 4 * LINE, z: o.z }, across: { x: o.x, z: o.z + 5 * LINE }, depth: 86, width: 86, type: "street" };
       const result = planRoadGrid(net, terrain, payload);
-      if (result.ok && result.plan.lines === ROAD_BUILD.gridMaxStreets) return payload;
+      if (result.ok && result.plan.work * 1.1 > ROAD_BUILD.gridMaxSections && checkRoadGrid(net, terrain, result.plan) === null) return payload;
     }
   }
   throw new Error("no grid at the cap plans");

@@ -100,7 +100,7 @@ const RIVER = { x0: 3400, x1: 3700, z: 6600, mid: 3545 };
 const STEEP = { x0: 3850, x1: 3930, z: 4700 };
 /** The street's slope limit as the refusal reads it, a whole percentage. */
 const STREET_SLOPE = `${Math.round((street?.maxSlope ?? 0) * 100)}%`;
-/** The street the grid is dragged from, on the inlet's east bank, and the grid's far corner across the water. */
+/** The street the grid's first side is drawn along, on the inlet's east bank, and the grid's far corner across the water. */
 const GRID_STREET = { x: 3840, z0: 6640, z1: 6900 };
 const GRID_CORNER = { x: 3440, z: 6890 };
 /** Pixel offsets about 10 px long, for clicks that miss, as in the snapping and guides specs. */
@@ -174,16 +174,25 @@ async function click(page: Page, x: number, z: number, off: [number, number] = [
   return snap;
 }
 
-/** Drags from one ground point to another with the left button. */
-async function drag(page: Page, from: [number, number], to: [number, number]): Promise<void> {
-  const a = await screenAt(page, from[0], from[1]);
-  const b = await screenAt(page, to[0], to[1]);
+/**
+ * Lays out a grid's rectangle as a player does (issue 88): drags its first
+ * side from `origin` to `sideEnd`, moves the pointer to `reach` to set how
+ * far it reaches, and clicks there.
+ */
+async function rectangle(page: Page, origin: [number, number], sideEnd: [number, number], reach: [number, number]): Promise<void> {
+  const a = await screenAt(page, origin[0], origin[1]);
+  const b = await screenAt(page, sideEnd[0], sideEnd[1]);
+  const c = await screenAt(page, reach[0], reach[1]);
   await page.mouse.move(a.x, a.y, { steps: 4 });
   await frames(page);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 30 });
   await frames(page);
   await page.mouse.up();
+  await frames(page);
+  await page.mouse.move(c.x, c.y, { steps: 20 });
+  await frames(page);
+  await page.mouse.click(c.x, c.y);
   await frames(page);
 }
 
@@ -781,8 +790,8 @@ for (const variant of [
       await shot(page, info, dir, "12-three-parallel-streets");
     });
 
-    await test.step("13. drag a grid from a street and confirm: one log entry, joined, stopped at water, one undo removes it", async () => {
-      // Not shifted for the road menu: the drag's corners snap to the street at
+    await test.step("13. draw a grid's first side along a street, set its reach, and confirm: one log entry, joined, stopped at water, one undo removes it", async () => {
+      // Not shifted for the road menu: the first side snaps to the street at
       // this exact view, and the work area here sits clear of the menu anyway.
       await look(page, 3640, 6770, 560, 0.75, 0);
       await roadTool(page);
@@ -797,7 +806,10 @@ for (const variant of [
       await expect(page.locator("#grid-tool")).toHaveAttribute("aria-pressed", "true");
       await page.locator("#grid-depth").fill("12");
       await page.locator("#grid-width").fill("12");
-      await drag(page, [GRID_STREET.x, GRID_STREET.z0 + 10], [GRID_CORNER.x, GRID_CORNER.z]);
+      // The first side along the street, then the grid reaches west across the
+      // water. The reach is set with no button held, so the pointer stays over
+      // the map, clear of the build menu: only its distance from the side counts.
+      await rectangle(page, [GRID_STREET.x, GRID_STREET.z0 + 10], [GRID_STREET.x, GRID_CORNER.z], [GRID_CORNER.x, (GRID_STREET.z0 + GRID_CORNER.z) / 2]);
       const summary = page.locator("#grid-summary");
       await expect(summary).toHaveAttribute("data-ok", "true");
       const junctions = Number(await summary.getAttribute("data-junctions"));

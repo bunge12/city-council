@@ -3,8 +3,8 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 
-// Issue M1-21: the grid tool. A player drags a rectangle off a street that
-// came with the city, confirms, and gets a grid joined to that street as
+// Issue M1-21: the grid tool. A player draws a grid's first side along a
+// street that came with the city, sets how far it reaches, confirms, and gets a grid joined to that street as
 // one log entry, which one Ctrl+Z takes back. A rectangle over water shows
 // its cut streets before the click and builds what it showed. A grid over
 // the cap shows the reason and cannot be confirmed.
@@ -73,16 +73,25 @@ async function screenAt(page: Page, x: number, z: number): Promise<{ x: number; 
   return page.evaluate(async ([x, y, z]) => (await window.cityCouncil.camera).project(x, y, z), [x, h, z] as const);
 }
 
-/** Drags from one ground point to another with the left button, and leaves the pointer at the end. */
-async function drag(page: Page, from: [number, number], to: [number, number]): Promise<void> {
-  const a = await screenAt(page, from[0], from[1]);
-  const b = await screenAt(page, to[0], to[1]);
+/**
+ * Lays out a grid's rectangle as a player does (issue 88): drags its first
+ * side from `origin` to `sideEnd`, moves the pointer to `reach` to set how
+ * far it reaches, and clicks there.
+ */
+async function rectangle(page: Page, origin: [number, number], sideEnd: [number, number], reach: [number, number]): Promise<void> {
+  const a = await screenAt(page, origin[0], origin[1]);
+  const b = await screenAt(page, sideEnd[0], sideEnd[1]);
+  const c = await screenAt(page, reach[0], reach[1]);
   await page.mouse.move(a.x, a.y, { steps: 4 });
   await frames(page);
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 30 });
   await frames(page);
   await page.mouse.up();
+  await frames(page);
+  await page.mouse.move(c.x, c.y, { steps: 20 });
+  await frames(page);
+  await page.mouse.click(c.x, c.y);
   await frames(page);
 }
 
@@ -135,7 +144,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-test("lays a grid off a street, joined to it, and one Ctrl+Z takes it all back", async ({ page }, testInfo) => {
+test("lays a grid with its first side along a street, joined to it, and one Ctrl+Z takes it all back", async ({ page }, testInfo) => {
   await openCity(page, startCity());
   await look(page, 4240, 4610, 420);
   await page.keyboard.press("KeyL");
@@ -145,8 +154,10 @@ test("lays a grid off a street, joined to it, and one Ctrl+Z takes it all back",
   await page.keyboard.press("KeyG");
   await expect(page.locator("#grid-tool")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#grid-depth")).toHaveValue("12");
-  // From a point on the street, west and along it: the rectangle takes the street's angle.
-  await drag(page, [4350, 4480], [4120, 4740]);
+  // The first side along the street, then the grid reaches 230 m west of it.
+  // The reach is set with no button held, so the pointer stays over the map,
+  // clear of the build menu at the bottom: only its distance from the side counts.
+  await rectangle(page, [4350, 4480], [4350, 4740], [4120, 4600]);
   const summary = page.locator("#grid-summary");
   await expect(summary).toHaveAttribute("data-ok", "true");
   const junctions = Number(await summary.getAttribute("data-junctions"));
@@ -154,7 +165,7 @@ test("lays a grid off a street, joined to it, and one Ctrl+Z takes it all back",
   await expect(summary).toContainText(/\d+ streets, \d+ m · \$[\d.]+[KM]/);
   await expect(page.locator("#grid-confirm")).toBeEnabled();
   await away(page);
-  await attach(page, testInfo, "1 the preview of a grid dragged off the street");
+  await attach(page, testInfo, "1 the preview of a grid drawn along the street");
 
   await page.locator("#grid-confirm").click();
   await expect.poll(async () => (await logTypes(page)).length).toBe(startLog + 1);
@@ -185,7 +196,10 @@ test("shows where water cuts a grid's streets and builds what it showed", async 
   const startLog = (await logTypes(page)).length;
 
   await page.keyboard.press("KeyG");
-  await drag(page, [INLET.x0, INLET.z0], [INLET.x1, INLET.z1]);
+  // The first side along the inlet's near edge, then the grid reaches north over it.
+  // The reach is set with no button held, so the pointer stays over the map,
+  // clear of the build menu at the bottom: only its distance from the side counts.
+  await rectangle(page, [INLET.x0, INLET.z1], [INLET.x1, INLET.z1], [(INLET.x0 + INLET.x1) / 2, INLET.z0]);
   const summary = page.locator("#grid-summary");
   await expect(summary).toHaveAttribute("data-ok", "true");
   const cuts = Number(await summary.getAttribute("data-cuts"));
@@ -214,19 +228,20 @@ test("a grid over the cap shows the reason and cannot be confirmed", async ({ pa
   const startLog = (await logTypes(page)).length;
 
   await page.keyboard.press("KeyG");
-  await page.locator("#grid-depth").fill("4");
-  await page.locator("#grid-width").fill("4");
-  await drag(page, [4150, 4450], [4550, 4850]);
+  // Blocks 2 cells each way over 400 m: 17 by 17 lines, 544 street sections.
+  await page.locator("#grid-depth").fill("2");
+  await page.locator("#grid-width").fill("2");
+  await rectangle(page, [4150, 4850], [4550, 4850], [4350, 4450]);
   const summary = page.locator("#grid-summary");
   await expect(summary).toHaveAttribute("data-ok", "false");
-  await expect(page.locator("#grid-reason")).toHaveText(/^Too many streets: the grid has \d+, and the most one grid can lay is 14$/);
+  await expect(page.locator("#grid-reason")).toHaveText(/^Too big for one grid: it has \d+ street sections, and one grid can lay 360\. Make it smaller, or lay it in parts\.$/);
   await expect(page.locator("#grid-confirm")).toBeDisabled();
   await expect.poll(() => page.evaluate(() => document.body.dataset["gridPreview"])).toBe("refused");
   await away(page);
   await attach(page, testInfo, "6 a grid over the cap, refused with the reason");
 
   await page.keyboard.press("Enter");
-  await expect(page.locator("#road-note")).toHaveText(/^Too many streets/);
+  await expect(page.locator("#road-note")).toHaveText(/^Too big for one grid/);
   await page.waitForTimeout(500);
   expect((await logTypes(page)).length).toBe(startLog);
 
