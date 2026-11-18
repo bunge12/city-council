@@ -36,7 +36,7 @@ import {
 } from "../src/index";
 import buildingsJson from "../balance/buildings.json";
 import { BUILDING_ARRAYS, addBuilding, removeBuilding, removeBuildings } from "../src/buildings/buildings";
-import { candidateSets, noteFrontColumns } from "../src/buildings/candidates";
+import { candidateSets, frontsWaiting, noteFrontColumns } from "../src/buildings/candidates";
 import { cellBuildings, segmentBuildings } from "../src/buildings/where";
 import { CELL_KEY_STRIDE } from "../src/zoning/cell-changes";
 import { nextInt, seedRng } from "../src/rng";
@@ -517,10 +517,29 @@ describe("buildings in state", () => {
     const keys: number[] = [];
     for (let i = 0; i < (1 << 20) + 1000; i++) keys.push(seg * CELL_KEY_STRIDE + (i % 24) * 2 + CELL_LEFT);
     noteFrontColumns(state, keys);
+    // The repeats went: 48 front columns, a few noted since the drop.
+    expect(frontsWaiting(state)).toBeLessThan(2000);
     removeBuildings(state, [ids[0] as number]);
     const { kept, fresh } = candidatesOf(state);
     expect(kept).toEqual(fresh);
+    expect(frontsWaiting(state)).toBe(0);
   });
+
+  it("drops repeats now and then, not on every note, when a city has more front cells than the cap", () => {
+    const { state } = row();
+    // More distinct keys than the cap, on segment ids the city does not have, so looking at them changes nothing.
+    // Dropping repeats on every note past the cap would sort a million keys a million times, and the test would time out.
+    const far = state.roads.segA.length + 10;
+    const distinct = (1 << 20) + (1 << 19);
+    const keys: number[] = [];
+    for (let i = 0; i < distinct; i++) keys.push((far + (i >> 10)) * CELL_KEY_STRIDE + (i & 1023));
+    noteFrontColumns(state, keys);
+    noteFrontColumns(state, keys.slice(0, 1 << 19));
+    expect(frontsWaiting(state)).toBeGreaterThanOrEqual(distinct);
+    expect(frontsWaiting(state)).toBeLessThanOrEqual(distinct + (1 << 19));
+    const { kept, fresh } = candidatesOf(state);
+    expect(kept).toEqual(fresh);
+  }, 20_000);
 
   it("refuses a save whose buildings are malformed", () => {
     const { state } = built();

@@ -59,6 +59,8 @@ interface Candidates {
    * which changes nothing. `noteFront` keeps it from growing without bound.
    */
   fronts: number[];
+  /** How long `fronts` may grow before `noteFront` drops its repeats: `MOST_FRONTS`, or twice what the last drop left. */
+  frontsCap: number;
 }
 
 const live = new WeakMap<BuildingState, Candidates>();
@@ -90,15 +92,19 @@ const MOST_FRONTS = 1 << 20;
 
 /**
  * Lists front cell `key` to look at again. Commands made while paused note
- * cells with no grower tick to look at them, so past `MOST_FRONTS` the list
+ * cells with no grower tick to look at them, so past `frontsCap` the list
  * keeps one of each key. Which keys it holds is what counts, not their order.
+ * A city with more distinct front cells than `MOST_FRONTS` keeps more than
+ * that after the drop, so the cap then doubles from what was left, and the
+ * sorts stay a fixed share of the notes.
  */
 function noteFront(c: Candidates, key: number): void {
   c.fronts.push(key);
-  if (c.fronts.length <= MOST_FRONTS) return;
+  if (c.fronts.length <= c.frontsCap) return;
   const sorted = Float64Array.from(c.fronts).sort();
   c.fronts.length = 0;
   for (let i = 0; i < sorted.length; i++) if (i === 0 || sorted[i] !== sorted[i - 1]) c.fronts.push(sorted[i] ?? 0);
+  c.frontsCap = Math.max(MOST_FRONTS, 2 * c.fronts.length);
 }
 
 /** Notes that a building came or went on these columns. */
@@ -221,6 +227,7 @@ function build(state: SimState, index: CellIndex, onCell: OnCell): Candidates {
     count: 0,
     segs: new Set(),
     fronts: [],
+    frontsCap: MOST_FRONTS,
   };
   for (let seg = 0; seg < limit; seg++) refreshSegment(c, state, onCell, seg);
   return c;
@@ -265,6 +272,7 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
   }
   c.segs.clear();
   c.fronts.length = 0;
+  c.frontsCap = MOST_FRONTS;
   return c;
 }
 
@@ -322,6 +330,11 @@ function expectSameCounts(kept: Candidates, fresh: Candidates): void {
     total += sum;
   }
   if (total !== kept.count || kept.count !== fresh.count) throw new Error(`kept ${kept.count} (${total} by block), fresh ${fresh.count}`);
+}
+
+/** How many front-cell keys wait to be looked at again, repeats included. For tests. */
+export function frontsWaiting(state: SimState): number {
+  return live.get(state.buildings)?.fronts.length ?? 0;
 }
 
 /** Drops the kept candidates, so the next use builds them afresh. For benches and tests. */
