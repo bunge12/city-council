@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "@city-council/sim";
 import { Matrix4, Quaternion, Vector3 } from "three";
-import { KINDS, chunkDistance, draws, fadeOf, formFor, isNear, mergeBoxes, mergeFlats, mergeModels, modelExtent, stepFade, type ChunkFade, type MergedItem } from "../src/render/building-lod";
+import { FLAT_GROUPS_PER_SIDE, FLAT_SLOTS, KINDS, chunkDistance, draws, fadeOf, flatGroupOf, flatSlotOf, flatSlots, formFor, isNear, mergeBoxes, mergeFlats, mergeModels, modelExtent, stepFade, type ChunkFade, type MergedItem } from "../src/render/building-lod";
 import { LOOKS } from "../src/render/building-tint";
 import { FACADE, ModelBuilder, SURFACE, simplify } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
@@ -31,6 +31,34 @@ describe("a chunk's form", () => {
     expect(isNear(c, x0 - 650, z0, false, 600, 150)).toBe(false);
     expect(isNear(c, x0 - 650, z0, true, 600, 150)).toBe(true);
     expect(isNear(c, x0 - 800, z0, true, 600, 150)).toBe(false);
+  });
+});
+
+describe("groups of flat blocks (issue #133)", () => {
+  it("puts every chunk in one group and one slot of it, no two chunks in the same slot of a group", () => {
+    const seen = new Set<string>();
+    for (let c = 0; c < CHUNKS_PER_SIDE * CHUNKS_PER_SIDE; c++) {
+      const g = flatGroupOf(c);
+      const slot = flatSlotOf(c);
+      expect(g).toBeGreaterThanOrEqual(0);
+      expect(g).toBeLessThan(FLAT_GROUPS_PER_SIDE * FLAT_GROUPS_PER_SIDE);
+      expect(slot).toBeGreaterThanOrEqual(0);
+      expect(slot).toBeLessThan(FLAT_SLOTS);
+      const key = `${g}/${slot}`;
+      expect(seen.has(key)).toBe(false);
+      seen.add(key);
+    }
+    // Neighbours within a group, and the group's corner chunks.
+    const at = (i: number, j: number) => j * CHUNKS_PER_SIDE + i;
+    const n = BUILDINGS.flatGroup;
+    expect(flatGroupOf(at(0, 0))).toBe(flatGroupOf(at(n - 1, n - 1)));
+    expect(flatGroupOf(at(n, 0))).toBe(1);
+    expect(flatGroupOf(at(0, n))).toBe(FLAT_GROUPS_PER_SIDE);
+    expect([flatSlotOf(at(0, 0)), flatSlotOf(at(1, 0)), flatSlotOf(at(0, 1)), flatSlotOf(at(n, n))]).toEqual([0, 1, n, 0]);
+  });
+
+  it("gives each block's four vertices its chunk's slot, in the order the blocks were merged", () => {
+    expect(Array.from(flatSlots([{ slot: 3, count: 1 }, { slot: 0, count: 0 }, { slot: 7, count: 2 }]))).toEqual([3, 3, 3, 3, 7, 7, 7, 7, 7, 7, 7, 7]);
   });
 });
 

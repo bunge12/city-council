@@ -370,7 +370,65 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     expect([layer.formOf(here), layer.formOf(mid), layer.formOf(far)]).toEqual(["simple", "simple", "box"]);
     run(layer, near, "city");
     expect([layer.formOf(here), layer.formOf(mid), layer.formOf(far)]).toEqual(["flat", "flat", "flat"]);
-    expect(layer.stats().forms).toMatchObject({ full: { buildings: 0, meshes: 0 }, simple: { meshes: 0 }, box: { meshes: 0 }, flat: { buildings: 3, meshes: 3 } });
+    // The near two chunks are in one group of flat blocks (issue #133), the far one in another: two meshes for three chunks.
+    expect(layer.stats().forms).toMatchObject({ full: { buildings: 0, meshes: 0 }, simple: { meshes: 0 }, box: { meshes: 0 }, flat: { chunks: 3, buildings: 3, meshes: 2 } });
+    layer.dispose();
+  });
+
+  it("draws the flat blocks of a group of chunks in one mesh, each chunk fading on its own, built once for a change to several (issue #133)", () => {
+    const { source, rows, put } = fakeSource();
+    // Chunks (8, 8) and (9, 8) share a group; slots 0 and 1 of it.
+    const a = put(1, 4004, 4004);
+    const b = put(2, 4504, 4004);
+    put(3, 4540, 4004);
+    expect(BUILDINGS.flatGroup).toBe(4);
+    const scene = new Scene();
+    const layer = createBuildingLayer(scene, source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "district");
+    type Blocks = { visible: boolean; userData: { fades: Float32Array }; geometry: { getAttribute(n: string): { array: ArrayLike<number> } } };
+    const blocks = () => {
+      const out: Blocks[] = [];
+      scene.traverse((o) => {
+        if (o.name.startsWith("building blocks ")) out.push(o as unknown as Blocks);
+      });
+      return out;
+    };
+    // Built ahead of a zoom out, and not drawn.
+    expect(blocks()).toHaveLength(1);
+    expect(blocks()[0]?.visible).toBe(false);
+    // Each vertex carries its chunk's slot: one building in slot 0, two in slot 1, four vertices each.
+    expect(Array.from(blocks()[0]?.geometry.getAttribute("mergedSlot").array ?? [])).toEqual([...new Array<number>(4).fill(0), ...new Array<number>(8).fill(1)]);
+    // One frame into the city band: both chunks fading in, the rest of the group's slots drawing nothing.
+    run(layer, near, "city", 1, 0.016);
+    const fades = blocks()[0]?.userData.fades ?? new Float32Array(0);
+    expect(blocks()[0]?.visible).toBe(true);
+    expect(fades[0]).toBeGreaterThan(0);
+    expect(fades[0]).toBeLessThan(1);
+    expect(fades[1]).toBe(fades[0]);
+    expect(Array.from(fades.subarray(2)).every((f) => f === 0)).toBe(true);
+    run(layer, near, "city");
+    expect(Array.from(fades.subarray(0, 2))).toEqual([1, 1]);
+    expect([layer.formOf(a), layer.formOf(b)]).toEqual(["flat", "flat"]);
+    // A building gone from each chunk: the group is built once, not once per chunk.
+    const merged = layer.stats().totalMerged;
+    rows.delete(1);
+    rows.delete(3);
+    layer.apply([a, b]);
+    run(layer, near, "city");
+    expect(layer.stats().totalMerged).toBe(merged + 1);
+    // Chunk a is empty now: its slot draws nothing, and the group's mesh holds chunk b's building alone.
+    expect(layer.formOf(a)).toBeNull();
+    expect(blocks()).toHaveLength(1);
+    expect(blocks()[0]?.userData.fades[0]).toBe(0);
+    expect(Array.from(blocks()[0]?.geometry.getAttribute("mergedSlot").array ?? [])).toEqual([1, 1, 1, 1]);
+    expect(layer.stats().forms.flat).toEqual({ chunks: 1, buildings: 1, meshes: 1 });
+    // The last building gone: the group's mesh goes too.
+    rows.delete(2);
+    layer.apply([b]);
+    run(layer, near, "city");
+    expect(blocks()).toHaveLength(0);
+    expect(layer.stats().mergedBytes.flat).toBe(0);
     layer.dispose();
   });
 
