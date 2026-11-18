@@ -1681,14 +1681,18 @@ export function cellsInBox(state: SimState, minX: number, minZ: number, maxX: nu
 let boxRanges = new Int32Array(64);
 let boxHits = new Int32Array(16);
 let bucketBoxes = new Int32Array(16);
+/** For each bucket, the call that last read it, so buckets under two boxes are read once. */
+let bucketSeen = new Int32Array(0);
+let bucketCall = 0;
 
 /**
  * Calls `visit` once with every open cell whose centre lies in at least one
  * of the `count` boxes in `boxes`, four numbers each (min x, min z, max x,
  * max z), with the cell's slot in `cells`, its centre, and the boxes it
  * lies in: the first `hitCount` of `hits`, in the order given. Each bucket
- * any box touches is read once, so boxes side by side cost what one box
- * over them all would, and a cell `skip` picks costs no geometry. Does not
+ * a box touches is read once, however many boxes touch it, and only those
+ * buckets: a stroke laid out in an L or along a diagonal reads no more than
+ * its own rectangles cover. A cell `skip` picks costs no geometry. Does not
  * bring the index up to date: the caller has called `syncCells`. For a
  * ZoneCells stroke of many rectangles (zone.ts).
  */
@@ -1704,13 +1708,18 @@ export function forOpenCellsInBoxes(
   if (boxRanges.length < count * 4) boxRanges = new Int32Array(count * 4);
   if (boxHits.length < count) boxHits = new Int32Array(count);
   if (bucketBoxes.length < count) bucketBoxes = new Int32Array(count);
+  const buckets = index.perSide * index.perSide;
+  if (bucketSeen.length < buckets) bucketSeen = new Int32Array(buckets);
+  // A fresh mark for this call; on wrapping round, every bucket is unread again.
+  if (++bucketCall > 0x3fffffff) {
+    bucketSeen.fill(0);
+    bucketCall = 1;
+  }
+  const call = bucketCall;
+  const seen = bucketSeen;
   const ranges = boxRanges;
   const hits = boxHits;
   const here = bucketBoxes;
-  let i0 = index.perSide;
-  let j0 = index.perSide;
-  let i1 = -1;
-  let j1 = -1;
   for (let b = 0; b < count; b++) {
     const bi0 = bucketOf(index, boxes[4 * b] ?? 0);
     const bj0 = bucketOf(index, boxes[4 * b + 1] ?? 0);
@@ -1720,43 +1729,44 @@ export function forOpenCellsInBoxes(
     ranges[4 * b + 1] = bj0;
     ranges[4 * b + 2] = bi1;
     ranges[4 * b + 3] = bj1;
-    if (bi0 < i0) i0 = bi0;
-    if (bj0 < j0) j0 = bj0;
-    if (bi1 > i1) i1 = bi1;
-    if (bj1 > j1) j1 = bj1;
   }
   const q = quadW;
   const list = index.openBuckets;
-  for (let j = j0; j <= j1; j++) {
-    for (let i = i0; i <= i1; i++) {
-      const head = list.heads[j * index.perSide + i] ?? -1;
-      if (head < 0) continue;
-      // The boxes that touch this bucket.
-      let n = 0;
-      for (let b = 0; b < count; b++) {
-        if (i >= (ranges[4 * b] ?? 0) && j >= (ranges[4 * b + 1] ?? 0) && i <= (ranges[4 * b + 2] ?? 0) && j <= (ranges[4 * b + 3] ?? 0)) here[n++] = b;
-      }
-      if (n === 0) continue;
-      for (let e = head; e >= 0; e = list.next[e] ?? -1) {
-        // A cell is filed in every bucket it touches: it is taken in the one its centre is in.
-        if (list.home[e] !== 1) continue;
-        const key = list.keys[e] ?? 0;
-        const seg = segOfKey(key);
-        const s = index.segs[seg];
-        if (!s) continue;
-        const local = key - seg * KEY_STRIDE;
-        const slot = (cells.offset[seg] ?? 0) + local;
-        if (skip(slot)) continue;
-        cellQuad(s, local, q);
-        const x = ((q[0] ?? 0) + (q[2] ?? 0) + (q[4] ?? 0) + (q[6] ?? 0)) / 4;
-        const z = ((q[1] ?? 0) + (q[3] ?? 0) + (q[5] ?? 0) + (q[7] ?? 0)) / 4;
-        let hitCount = 0;
-        for (let k = 0; k < n; k++) {
-          const b = here[k] ?? 0;
-          if (x < (boxes[4 * b] ?? 0) || z < (boxes[4 * b + 1] ?? 0) || x > (boxes[4 * b + 2] ?? 0) || z > (boxes[4 * b + 3] ?? 0)) continue;
-          hits[hitCount++] = b;
+  for (let box = 0; box < count; box++) {
+    for (let j = ranges[4 * box + 1] ?? 0; j <= (ranges[4 * box + 3] ?? -1); j++) {
+      for (let i = ranges[4 * box] ?? 0; i <= (ranges[4 * box + 2] ?? -1); i++) {
+        const bucket = j * index.perSide + i;
+        if (seen[bucket] === call) continue;
+        seen[bucket] = call;
+        const head = list.heads[bucket] ?? -1;
+        if (head < 0) continue;
+        // The boxes that touch this bucket.
+        let n = 0;
+        for (let b = 0; b < count; b++) {
+          if (i >= (ranges[4 * b] ?? 0) && j >= (ranges[4 * b + 1] ?? 0) && i <= (ranges[4 * b + 2] ?? 0) && j <= (ranges[4 * b + 3] ?? 0)) here[n++] = b;
         }
-        if (hitCount > 0) visit(slot, x, z, hits, hitCount);
+        if (n === 0) continue;
+        for (let e = head; e >= 0; e = list.next[e] ?? -1) {
+          // A cell is filed in every bucket it touches: it is taken in the one its centre is in.
+          if (list.home[e] !== 1) continue;
+          const key = list.keys[e] ?? 0;
+          const seg = segOfKey(key);
+          const s = index.segs[seg];
+          if (!s) continue;
+          const local = key - seg * KEY_STRIDE;
+          const slot = (cells.offset[seg] ?? 0) + local;
+          if (skip(slot)) continue;
+          cellQuad(s, local, q);
+          const x = ((q[0] ?? 0) + (q[2] ?? 0) + (q[4] ?? 0) + (q[6] ?? 0)) / 4;
+          const z = ((q[1] ?? 0) + (q[3] ?? 0) + (q[5] ?? 0) + (q[7] ?? 0)) / 4;
+          let hitCount = 0;
+          for (let k = 0; k < n; k++) {
+            const b = here[k] ?? 0;
+            if (x < (boxes[4 * b] ?? 0) || z < (boxes[4 * b + 1] ?? 0) || x > (boxes[4 * b + 2] ?? 0) || z > (boxes[4 * b + 3] ?? 0)) continue;
+            hits[hitCount++] = b;
+          }
+          if (hitCount > 0) visit(slot, x, z, hits, hitCount);
+        }
       }
     }
   }

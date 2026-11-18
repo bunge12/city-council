@@ -614,6 +614,7 @@ export function serializeStepsOf(
   partBytes: number,
   into?: SnapshotBuffer,
 ): SnapshotSteps {
+  if (!Number.isSafeInteger(partBytes) || partBytes < 1) throw new RangeError(`serializeStepsOf: partBytes ${partBytes} must be a whole number of bytes, 1 or more`);
   return write(state, pagedLog, into, partBytes);
 }
 

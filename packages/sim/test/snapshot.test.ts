@@ -45,6 +45,7 @@ import v13Fixture from "./fixtures/snapshots/v13.json";
 import v14Fixture from "./fixtures/snapshots/v14.json";
 import v15Fixture from "./fixtures/snapshots/v15.json";
 import { serializeStepsOf, snapshotChecksum, type SnapshotSteps } from "../src/snapshot";
+import { Fnv64 } from "../src/hash";
 import { checkConnections } from "../src/roads/connections";
 import { heldIds } from "../src/undo";
 import { addNode, addSegment, checkRoadNetwork, isSegment, removeSegment, segmentsAt } from "../src/roads/network";
@@ -714,6 +715,16 @@ describe("snapshots with a road network", () => {
       }
       expect(run(serializeStepsOf(state, pagedLog, 8)).parts).toBeGreaterThan(whole.byteLength / 16);
     }
+    // The bytes the build before #204 wrote for this state, so a split
+    // that changes them shows here and not only as a mismatch with itself.
+    const digest = (bytes: Uint8Array): string => {
+      const h = new Fnv64();
+      h.bytes(bytes);
+      return `${bytes.length}:${h.hex()}`;
+    };
+    expect(digest(serialize(state))).toBe("8712:6f83eca401065438");
+    expect(digest(serializeDetached(state))).toBe("8688:bf01e6c626a0925e");
+    expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 
   it("refuses a bad state on the first part", () => {
