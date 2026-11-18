@@ -30,7 +30,7 @@ declare const window: {
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 declare function requestAnimationFrame(callback: () => void): number;
 
-test.use({ viewport: { width: 1280, height: 800 } });
+test.use({ viewport: { width: 640, height: 400 } });
 test.setTimeout(240_000);
 
 const T = CONSTRUCTION.ticks;
