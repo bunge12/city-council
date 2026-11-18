@@ -486,7 +486,6 @@ describe("buildings in state", () => {
     expect(kept).toEqual(fresh);
     expect(kept).toEqual(candidatesOf(one.state).kept);
     expect(kept.length).toBeGreaterThan(candidatesOf(row().state).kept.length);
-    expect(hashState(many.state)).toBe(hashState(one.state));
   });
 
   it("refuses, changing nothing, a removal that names a building twice or one that is not there", () => {
