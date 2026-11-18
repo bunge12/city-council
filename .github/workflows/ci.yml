@@ -152,6 +152,10 @@ jobs:
           # the spread between runners (issue #154). deploy.yml and
           # nightly.yml hold it, where a failure does not block a merge.
           E2E_LOAD_BUDGET: report
+          # The zone tool's 50 ms task budget on the scale town is printed, not
+          # held: the slowest runners leave it less than two times headroom.
+          # A task over 200 ms still fails (issue #163).
+          E2E_TASK_BUDGET: report
         run: |
           files=""
           if [ -n "$FILES" ]; then

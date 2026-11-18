@@ -37,6 +37,15 @@ describe("cell chunk geometry", () => {
     expect(Array.from(g.positions.subarray(0, 3))).toEqual([0, 10, 0]);
   });
 
+  it("reads the building on each cell by the chunk's order, not by slot (issue #163)", () => {
+    const shapes = { ...twoCells(), slots: Int32Array.of(5, 2, 9) };
+    const zone = [0, 0, 1, 0, 0, 1, 0, 0, 0, 1];
+    const density = zone.map((z) => (z ? 2 : 0));
+    const g = buildCellChunk(shapes, zone, density, flat, Int32Array.of(-1, 7, -1));
+    expect(g.zoned).toBe(1);
+    expect(Array.from(g.positions.subarray(0, 3))).toEqual([0, 10, 0]);
+  });
+
   it("draws each open cell as a quad on the ground, and no blocked cell", () => {
     const g = buildCellChunk(twoCells(), [1, 0, 1], [2, 0, 2], (x, z) => x + z);
     expect(g.zoned).toBe(1);
@@ -144,7 +153,8 @@ describe("the city band's cells (issue #133)", () => {
       [24, 40],
     ]);
     expect(gap.cells).toBe(4);
-    const built = buildCityCells(row(shuffled), zones(5), zones(5), flat, Int32Array.of(-1, 9, -1, -1, -1));
+    // The building on each cell comes by the shapes' order (issue #163): the cell at slot 1 is fourth.
+    const built = buildCityCells(row(shuffled), zones(5), zones(5), flat, Int32Array.of(-1, -1, -1, 9, -1));
     expect(spans(built)).toEqual([
       [0, 8],
       [16, 40],

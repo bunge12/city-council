@@ -53,6 +53,10 @@ describe("the zoning overlay's city band (issue #133)", () => {
     const layer = createCellLayer(scene, source, () => 0);
     layer.setVisible(true);
     layer.setBand("district");
+    // The frame that turns the overlay on builds no chunk; the next builds them (issue #163).
+    layer.update(camera, Infinity);
+    expect(shown(scene, "cells ")).toEqual([]);
+    expect(layer.stats().totalRebuilt).toBe(0);
     layer.update(camera, Infinity);
     expect(shown(scene, "cells ")).toHaveLength(3);
     expect(shown(scene, "city cells ")).toEqual([]);
@@ -70,6 +74,7 @@ describe("the zoning overlay's city band (issue #133)", () => {
     const layer = createCellLayer(scene, source, () => 0);
     layer.setVisible(true);
     layer.setBand("city");
+    layer.update(camera, Infinity);
     layer.update(camera, Infinity);
     // A cell in the middle of chunk 1's row rezoned: that row is three runs now.
     zone[15] = 2;
@@ -115,6 +120,9 @@ describe("the zoning overlay's lot marks (issue #164)", () => {
     const scene = new Scene();
     const layer = createCellLayer(scene, marked, () => 0);
     layer.setVisible(true);
+    // The frame that turns the overlay on builds no chunk (issue #163).
+    layer.update({ x: 0, z: 0 }, 0);
+    expect(asked).toEqual([]);
     // With no time to spare a frame builds one chunk, the nearest: chunk 0, the first to ask for marks. The next frame builds the rest.
     layer.update({ x: 0, z: 0 }, 0);
     expect(asked.map((a) => a.chunk)).toEqual([0]);

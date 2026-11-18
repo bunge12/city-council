@@ -37,7 +37,7 @@ import {
 import buildingsJson from "../balance/buildings.json";
 import { BUILDING_ARRAYS, addBuilding, removeBuilding, removeBuildings } from "../src/buildings/buildings";
 import { candidateSets, frontsWaiting, noteFrontColumns } from "../src/buildings/candidates";
-import { cellBuildings, segmentBuildings } from "../src/buildings/where";
+import { buildingsOnSlots, cellBuildings, segmentBuildings } from "../src/buildings/where";
 import { CELL_KEY_STRIDE } from "../src/zoning/cell-changes";
 import { nextInt, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
@@ -577,6 +577,11 @@ describe("buildings in state", () => {
       }
       const fresh = cloneState(state);
       expect(cellBuildings(state)).toEqual(cellBuildings(fresh));
+      // The same answer slot by slot, in any order, for a view that asks a chunk at a time (issue #163).
+      const all = cellBuildings(state);
+      const asked = Int32Array.from(all.keys()).reverse();
+      expect(Array.from(buildingsOnSlots(state, asked))).toEqual(Array.from(asked, (slot) => all[slot]));
+      expect(Array.from(buildingsOnSlots(state, Int32Array.of(-1, all.length)))).toEqual([NO_BUILDING, NO_BUILDING]);
       for (let id = 0; id < state.buildings.flags.length; id++) expect(buildingInfo(state, id)).toEqual(buildingInfo(fresh, id));
     }
     expect(state.buildings.free.length).toBeGreaterThan(0);

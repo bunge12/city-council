@@ -389,6 +389,8 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
     let last = performance.now();
     let frame = 0;
     const tick = () => {
+      // Once the fill is done the test sets its own poses, and a frame still queued must not move the camera back (issue #163 made the fill shorter than the pan).
+      if (!w.recording) return;
       const now = performance.now();
       w.gaps.push(now - last);
       last = now;
