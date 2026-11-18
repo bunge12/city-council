@@ -51,6 +51,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The machine, as the e2e jobs print it (e2e/file-times-reporter.ts):
+      # runners on the same image are not the same speed, and the bench and
+      # soak hold steps to the 20 ms tick (issue #154).
+      - run: |
+          node -e "const os = require('os'); const c = os.cpus(); console.log('machine: ' + c.length + ' x ' + c[0].model + ', ' + Math.round(os.totalmem() / 2 ** 30) + ' GB')"
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm soak
@@ -142,6 +147,11 @@ jobs:
           ARGS: ${{ matrix.args }}
           FILES: ${{ matrix.files }}
           E2E_DEV_SERVER_ONLY: ${{ startsWith(matrix.id, 'walkthrough') && '0' || '1' }}
+          # The M0 walkthrough prints its cold load here and does not hold it
+          # to 5 s: on the slowest runners it has 1.3 times headroom, less than
+          # the spread between runners (issue #154). deploy.yml and
+          # nightly.yml hold it, where a failure does not block a merge.
+          E2E_LOAD_BUDGET: report
         run: |
           files=""
           if [ -n "$FILES" ]; then
