@@ -272,14 +272,44 @@ export function journalLostZones(net: RoadNetwork, cells: CellState, ops: readon
     }
   }
   if (lost.length === 0) return NO_JOURNALS;
-  // A segment the command added on the same anchor and build order carries
-  // the zones, as the cell layout does (cell-index.ts), so nothing is lost.
+  // Segments the command added on the same anchor and build order carry
+  // the zones, as the cell layout does (cell-index.ts), so nothing is lost
+  // where they cover the whole stretch of anchor the old segment had. Only
+  // those still standing at the end with cells count: a bulldoze of part of
+  // a road cuts it and removes the middle piece, whose zones go with it
+  // (issue 86), and so do those of a piece upgraded to a type with none.
+  // The pieces of one cut meet at exactly the same parameter, so the check
+  // needs no tolerance.
   const curveKey = (a: SegmentAnchor, order: number) => `${order},${a.ax},${a.az},${a.cx},${a.cz},${a.bx},${a.bz}`;
-  const carried = new Set<string>();
-  for (const op of ops) if (op.op === "addSeg") carried.add(curveKey(op.row.anchor, op.row.order));
+  const added = new Map<number, SegmentAnchor & { key: string }>();
+  for (const op of ops) {
+    if (op.op === "addSeg") added.set(op.id, { ...op.row.anchor, key: curveKey(op.row.anchor, op.row.order) });
+    else if (op.op === "removeSeg") added.delete(op.id);
+  }
+  const spans = new Map<string, [number, number][]>();
+  for (const [id, a] of added) {
+    if (!isSegment(net, id) || ROAD_TYPES[net.segType[id] ?? 0]?.zonable !== true) continue;
+    let list = spans.get(a.key);
+    if (!list) spans.set(a.key, (list = []));
+    list.push(a.tA < a.tB ? [a.tA, a.tB] : [a.tB, a.tA]);
+  }
+  for (const list of spans.values()) list.sort((p, q) => p[0] - q[0]);
+  const carried = (anchor: SegmentAnchor, order: number): boolean => {
+    const list = spans.get(curveKey(anchor, order));
+    if (!list) return false;
+    const lo = anchor.tA < anchor.tB ? anchor.tA : anchor.tB;
+    const hi = anchor.tA < anchor.tB ? anchor.tB : anchor.tA;
+    let reach = lo;
+    for (const [from, to] of list) {
+      if (to <= reach) continue;
+      if (from > reach) break;
+      reach = to;
+    }
+    return reach >= hi;
+  };
   journalLength = 0;
   for (const { seg, anchor, order, start, count } of lost) {
-    if (carried.has(curveKey(anchor, order))) continue;
+    if (carried(anchor, order)) continue;
     write(seg, anchorHash(anchor), cells, start, count, null);
   }
   return written();

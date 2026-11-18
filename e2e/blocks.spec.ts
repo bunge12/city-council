@@ -138,7 +138,10 @@ test("closes a loop of streets, sees the block and its area, bulldozes a side an
   // Bulldoze the east side. The block goes.
   await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
+  // Shift takes the whole side (issue 86).
+  await page.keyboard.down("Shift");
   await click(page, 4400, 4600);
+  await page.keyboard.up("Shift");
   await expect.poll(() => liveSegments(page)).toBe(before);
   await expect(readout).toHaveText("no blocks");
   await expect(page.locator(".block-label")).toHaveCount(0);

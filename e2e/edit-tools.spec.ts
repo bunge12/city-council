@@ -183,6 +183,8 @@ test("upgrades a street to an avenue and sees it widen, then bulldozes it, with 
   await page.keyboard.press("KeyX");
   await expect(page.locator("#upgrade-tool")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#road-type-avenue")).toHaveAttribute("aria-pressed", "true");
+  // Shift takes the whole segment (issue 86); without it the tools take a stretch.
+  await page.keyboard.down("Shift");
   await hover(page, 4300, MAIN_Z);
   expect(await picked(page)).toBe(seg);
   await expect(readout).toHaveAttribute("data-kind", "upgrade");
@@ -230,6 +232,8 @@ test("a drag across four segments bulldozes them in one log entry", async ({ pag
   const start = (await logEntries(page)).length;
   const ends = await endsOf(page, segs);
   await page.keyboard.press("KeyB");
+  // With Shift held a drag takes each segment it passes over whole (issue 86).
+  await page.keyboard.down("Shift");
   const a = await screenAt(page, 4165, MAIN_Z);
   const b = await screenAt(page, 4535, MAIN_Z);
   await page.mouse.move(a.x, a.y);
@@ -331,4 +335,92 @@ test("both tools' keys are listed with the other shortcuts", async ({ page }, te
   await page.keyboard.press("Escape");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "false");
   await attach(page, testInfo, "13 the shortcut list");
+});
+
+/** Each live, unfixed segment along z = 4600 as [west x, east x, type], west to east. */
+async function alongMain(page: Page): Promise<[number, number, number][]> {
+  return page.evaluate((z) => {
+    const net = window.cityCouncil.mirror.state?.roads;
+    if (!net) throw new Error("no state");
+    const out: [number, number, number][] = [];
+    for (let s = 0; s < net.segFlags.length; s++) {
+      if (((net.segFlags[s] ?? 0) & 1) === 0 || ((net.segFlags[s] ?? 0) & 2) !== 0) continue;
+      const a = net.segA[s] ?? 0;
+      const b = net.segB[s] ?? 0;
+      if (net.nodeZ[a] !== z || net.nodeZ[b] !== z) continue;
+      const xa = net.nodeX[a] ?? 0;
+      const xb = net.nodeX[b] ?? 0;
+      out.push([Math.min(xa, xb), Math.max(xa, xb), net.segType[s] ?? -1]);
+    }
+    return out.sort((p, q) => p[0] - q[0]);
+  }, MAIN_Z);
+}
+
+// Issue 86: both tools take a short stretch around the pointer, Shift the
+// whole segment, and a drag along a road grows its stretch.
+test("bulldozes and upgrades a stretch of a road, the whole road with Shift, and a drag's length", async ({ page }, testInfo) => {
+  const state = crossedCity();
+  await openCity(page, state);
+  await look(page, 4300, MAIN_Z, 160);
+  const start = (await logEntries(page)).length;
+
+  // The bulldozer marks 20 m around the pointer, not the 100 m segment.
+  await page.keyboard.press("KeyB");
+  await hover(page, 4300, MAIN_Z);
+  const tag = page.locator("#bulldoze-tag");
+  await expect(tag.locator(".what")).toHaveText("Bulldoze this stretch of road");
+  await expect(tag.locator(".price")).toHaveText(/^20 m · \$[\d.]+K?$/);
+  await attach(page, testInfo, "14 the bulldozer marks a stretch around the pointer");
+  // Shift marks the whole segment, as before.
+  await page.keyboard.down("Shift");
+  await frames(page);
+  await expect(tag.locator(".what")).toHaveText("Bulldoze this road");
+  await expect(tag.locator(".price")).toHaveText(/^100 m · /);
+  await attach(page, testInfo, "15 Shift marks the whole segment");
+  await page.keyboard.up("Shift");
+  await frames(page);
+  await expect(tag.locator(".price")).toHaveText(/^20 m · /);
+
+  await click(page, 4300, MAIN_Z);
+  await expect.poll(async () => (await alongMain(page)).length).toBe(5);
+  const cut = await alongMain(page);
+  // The segment from 4250 to 4350 now ends at the gap on each side.
+  const west = cut.find((s) => s[0] === 4250);
+  const east = cut.find((s) => s[1] === 4350);
+  expect(west && east && east[0] - west[1]).toBeCloseTo(20, 0);
+  const log = (await logEntries(page)).slice(start);
+  expect(log).toHaveLength(1);
+  expect(log[0]?.type).toBe("BulldozeRoad");
+  expect((log[0]?.payload as { sections?: number[][] }).sections).toHaveLength(1);
+  await page.mouse.move(640, 20);
+  await frames(page);
+  await attach(page, testInfo, "16 a 20 m gap, the rest of the road standing");
+
+  // The upgrade tool: a drag along the next segment grows its stretch, and one command upgrades it.
+  await page.keyboard.press("KeyV");
+  await page.keyboard.press("KeyX");
+  const a = await screenAt(page, 4370, MAIN_Z);
+  const b = await screenAt(page, 4430, MAIN_Z);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 20 });
+  await frames(page);
+  const readout = page.locator("#edit-readout");
+  const metres = Number(await readout.getAttribute("data-length"));
+  expect(metres).toBeGreaterThan(70);
+  expect(metres).toBeLessThan(90);
+  await attach(page, testInfo, "17 a drag along a road marks the stretch it covered");
+  await page.mouse.up();
+  await expect.poll(async () => (await alongMain(page)).filter((s) => s[2] === 1).length).toBe(1);
+  const avenue = (await alongMain(page)).find((s) => s[2] === 1);
+  expect(avenue && avenue[1] - avenue[0]).toBeCloseTo(metres, 0);
+  expect((await logEntries(page)).slice(start).map((e) => e.type)).toEqual(["BulldozeRoad", "UpgradeRoad"]);
+  await page.mouse.move(640, 20);
+  await frames(page);
+  await attach(page, testInfo, "18 the stretch upgraded to an avenue, the street either side");
+
+  // One undo takes back the upgrade and its cuts together.
+  await page.keyboard.press("Control+KeyZ");
+  await expect.poll(async () => (await alongMain(page)).filter((s) => s[2] === 1).length).toBe(0);
+  expect((await alongMain(page)).find((s) => s[0] === 4350)).toEqual([4350, 4450, 0]);
 });

@@ -214,7 +214,10 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   // Upgrade the west piece to an avenue.
   await page.keyboard.press("KeyV");
   await page.keyboard.press("KeyX");
+  // Shift takes the whole piece (issue 86).
+  await page.keyboard.down("Shift");
   await click(page, 4285, 4600);
+  await page.keyboard.up("Shift");
   await expect.poll(async () => (await segmentNear(page, 4285, 4600)).type).toBe(1);
   const upgraded = await roads(page);
   await away(page);
@@ -225,7 +228,9 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
 
   // Bulldoze the east piece, which takes its house.
   await page.keyboard.press("KeyB");
+  await page.keyboard.down("Shift");
   await click(page, 4415, 4600);
+  await page.keyboard.up("Shift");
   await expect.poll(async () => (await segmentNear(page, 4415, 4600)).id).toBe(-1);
   await page.keyboard.press("KeyB");
   await expect.poll(() => zonedCount(page)).toBe(0);

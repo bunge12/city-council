@@ -1030,6 +1030,8 @@ for (const variant of [
       // From straight above, so no tower beside the street stands in front of it on screen.
       const g = groundAt(BULLDOZED.x, BULLDOZED.z);
       await setPose(page, [BULLDOZED.x, g + 300, BULLDOZED.z + 1], [BULLDOZED.x, g, BULLDOZED.z]);
+      // Shift takes the whole street (issue 86).
+      await page.keyboard.down("Shift");
       await hover(page, BULLDOZED.x, BULLDOZED.z);
       const tag = page.locator("#bulldoze-tag");
       await expect(tag).toHaveAttribute("data-kind", "road");
@@ -1037,6 +1039,7 @@ for (const variant of [
       await shot(page, info, dir, "9-bulldoze-preview");
       await page.mouse.down();
       await page.mouse.up();
+      await page.keyboard.up("Shift");
       await expect.poll(() => segmentNear(page, BULLDOZED.x, BULLDOZED.z)).toBe(-1);
       expect((await logTypes(page)).at(-1)).toBe("BulldozeRoad");
       // Its cells go with it, and the buildings on them.

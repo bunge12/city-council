@@ -52,6 +52,8 @@ import {
 } from "../zoning/cell-index";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { localIndex } from "../zoning/cells";
+import { anchorSpan, measureCurve } from "../zoning/shape";
+import { readAnchor } from "../roads/network";
 
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
 
@@ -506,6 +508,38 @@ export function buildingsOnSegments(state: SimState, segs: Iterable<number>): nu
   const { bi } = indexOf(state);
   const out = new Set<number>();
   for (const seg of segs) collect(bi, seg, out);
+  return [...out].sort((p, q) => p - q);
+}
+
+/**
+ * The ids of the buildings filed on segment `seg` with a cell on the
+ * stretch from curve parameter `from` to `to` along it, ascending: those a
+ * cut there would leave on the piece between (roads/edit.ts). Each cell
+ * goes to the piece its anchor cell falls in, as when the cut is made.
+ */
+export function buildingsOnStretch(state: SimState, seg: number, from: number, to: number): number[] {
+  const { bi } = indexOf(state);
+  const cells = bi.segCells[seg];
+  if (!cells) return [];
+  const net = state.roads;
+  const anchor = readAnchor(net, seg);
+  const road = measureCurve(anchor.ax, anchor.az, anchor.cx, anchor.cz, anchor.bx, anchor.bz);
+  const along = (u: number) => (u === 0 ? anchor.tA : u === 1 ? anchor.tB : anchor.tA + u * (anchor.tB - anchor.tA));
+  const CELL = ZONING_BALANCE.cellSize;
+  const all = anchorSpan(road, anchor.tA, anchor.tB, CELL);
+  const part = anchorSpan(road, along(from), along(to), CELL);
+  const places = all.to - all.from;
+  const out = new Set<number>();
+  for (let place = 0; place < places; place++) {
+    const k = all.reversed ? all.from + places - 1 - place : all.from + place;
+    if (k < part.from || k >= part.to) continue;
+    for (let side = 0; side < 2; side++) {
+      for (let depth = 0; depth < DEPTH; depth++) {
+        const id = cells[localIndex(side, place, depth)] ?? NO_BUILDING;
+        if (id !== NO_BUILDING) out.add(id);
+      }
+    }
+  }
   return [...out].sort((p, q) => p - q);
 }
 

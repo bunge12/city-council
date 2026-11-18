@@ -13,7 +13,12 @@ function plural(n: number, one: string, many: string): string {
 /** What the tag's first line says the click removes. */
 export function bulldozeTitle(p: BulldozePreview): string {
   const n = p.ids.length;
-  if (p.kind === "road") return n === 1 ? "Bulldoze this road" : `Bulldoze ${plural(n, "road", "road segments")}`;
+  if (p.kind === "road") {
+    // Part of one road (issue 86): say so, since the mark alone is easy to read as the whole road.
+    const part = p.road?.sections.some((s) => s[0] > 0 || s[1] < 1) ?? false;
+    if (n === 1) return part ? "Bulldoze this stretch of road" : "Bulldoze this road";
+    return `Bulldoze ${plural(n, "road", "road segments")}`;
+  }
   if (n === 1 && p.building) return buildingLines(p.building).title;
   return `Bulldoze ${plural(n, "building", "buildings")}`;
 }

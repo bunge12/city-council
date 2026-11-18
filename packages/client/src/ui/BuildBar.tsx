@@ -31,13 +31,13 @@ function toolHint(mode: DrawMode, drawing: boolean, curving: boolean): string {
 /** What the hint says while the upgrade tool is on. */
 function editHint(dragging: boolean, type: string): string {
   if (dragging) return "Release to apply to every road marked. Esc drops the drag.";
-  return `Click a road to upgrade it to ${type.toLowerCase()}. Right-click a one-way to reverse it. Drag across roads to take several at once. Shift-drag orbits.`;
+  return `Click a road to upgrade the stretch marked to ${type.toLowerCase()}. Hold Shift for the whole road. Drag along or across roads to take more at once. Right-click a one-way to reverse it. Right-drag orbits.`;
 }
 
 /** What the hint says while the bulldozer is on. */
 function bulldozeHint(dragging: boolean): string {
   if (dragging) return "Release to remove everything marked. Esc drops the drag.";
-  return "Click what is under the pointer to remove it. Drag to take every thing of the kind the drag starts on. Shift-drag orbits.";
+  return "Click what is under the pointer to remove it: a stretch of road, or the whole road with Shift held. Drag to take every thing of the kind the drag starts on. Right-drag orbits.";
 }
 
 const ZONE_MODE_LABELS: Record<ZoneMode, { label: string; title: string }> = {

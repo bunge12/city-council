@@ -1197,29 +1197,7 @@ function splitPieces(net: RoadNetwork, stops: PlanStop[], seg: number, at: { sto
 export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan, age?: { order?: number }): number[] {
   const nodes = plan.stops.map((s) => (s.node !== NONE ? s.node : addNode(net, s.x, s.z, heightAt(terrain, s.x, s.z))));
   for (const { seg, at } of splitChains(plan.stops)) {
-    const shape = segmentQuad(net, seg);
-    const straight = isStraight(shape);
-    const ends = [net.segA[seg] ?? NONE, ...at.map((s) => nodes[s.stop] ?? NONE), net.segB[seg] ?? NONE];
-    const params = [0, ...at.map((s) => s.u), 1];
-    const base = {
-      type: net.segType[seg] ?? 0,
-      network: net.segNetwork[seg] ?? 0,
-      level: net.segLevelA[seg] ?? 0,
-      levelB: net.segLevelB[seg] ?? 0,
-      fixed: ((net.segFlags[seg] ?? 0) & SEG_FIXED) !== 0,
-      // The pieces are as old as the road they were cut from.
-      order: net.segOrder[seg] ?? 0,
-    };
-    // And keep its cells where they were: the same anchor, each piece over its own stretch of it.
-    const anchor = readAnchor(net, seg);
-    // The ends of the road land exactly on its own parameters, not on a sum that rounds.
-    const along = (u: number) => (u === 0 ? anchor.tA : u === 1 ? anchor.tB : anchor.tA + u * (anchor.tB - anchor.tA));
-    removeSegment(net, seg);
-    for (let k = 1; k < ends.length; k++) {
-      const c = straight ? null : subControl(shape, params[k - 1] ?? 0, params[k] ?? 1);
-      const piece = { ...base, anchor: { ...anchor, tA: along(params[k - 1] ?? 0), tB: along(params[k] ?? 1) } };
-      addSegment(net, ends[k - 1] ?? NONE, ends[k] ?? NONE, c ? { ...piece, cx: c.x, cz: c.z } : piece);
-    }
+    splitSegment(net, seg, at.map((s) => nodes[s.stop] ?? NONE), at.map((s) => s.u));
   }
   const road: number[] = [];
   for (let i = 1; i < nodes.length; i++) {
@@ -1231,4 +1209,43 @@ export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan, ag
     road.push(seg);
   }
   return road;
+}
+
+/**
+ * Cuts segment `seg` at nodes `cuts`, which stand along it at curve
+ * parameters `at`, ascending and strictly between 0 and 1. The segment is removed
+ * and its pieces added from its node A to its node B, so the first takes
+ * back the id the removal freed; returns the pieces' ids in that order. The
+ * pieces keep the segment's type, levels, build order and cell anchor, each
+ * over its own stretch of it, and a curve's pieces each take the control
+ * point of their part of the curve, so together they trace it. A road
+ * crossing it splits it this way (`buildRoad`), and so does a bulldoze or
+ * upgrade of part of it (edit.ts).
+ */
+export function splitSegment(net: RoadNetwork, seg: number, cuts: readonly number[], at: readonly number[]): number[] {
+  const shape = segmentQuad(net, seg);
+  const straight = isStraight(shape);
+  const ends = [net.segA[seg] ?? NONE, ...cuts, net.segB[seg] ?? NONE];
+  const params = [0, ...at, 1];
+  const base = {
+    type: net.segType[seg] ?? 0,
+    network: net.segNetwork[seg] ?? 0,
+    level: net.segLevelA[seg] ?? 0,
+    levelB: net.segLevelB[seg] ?? 0,
+    fixed: ((net.segFlags[seg] ?? 0) & SEG_FIXED) !== 0,
+    // The pieces are as old as the road they were cut from.
+    order: net.segOrder[seg] ?? 0,
+  };
+  // And keep its cells where they were: the same anchor, each piece over its own stretch of it.
+  const anchor = readAnchor(net, seg);
+  // The ends of the road land exactly on its own parameters, not on a sum that rounds.
+  const along = (u: number) => (u === 0 ? anchor.tA : u === 1 ? anchor.tB : anchor.tA + u * (anchor.tB - anchor.tA));
+  removeSegment(net, seg);
+  const pieces: number[] = [];
+  for (let k = 1; k < ends.length; k++) {
+    const c = straight ? null : subControl(shape, params[k - 1] ?? 0, params[k] ?? 1);
+    const piece = { ...base, anchor: { ...anchor, tA: along(params[k - 1] ?? 0), tB: along(params[k] ?? 1) } };
+    pieces.push(addSegment(net, ends[k - 1] ?? NONE, ends[k] ?? NONE, c ? { ...piece, cx: c.x, cz: c.z } : piece));
+  }
+  return pieces;
 }

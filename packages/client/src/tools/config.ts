@@ -165,3 +165,16 @@ export const PICK = {
   minSamples: 8,
   maxSamples: 160,
 } as const;
+
+/** Bulldozing and upgrading part of a road (issue 86). */
+export const EDIT_SECTION = {
+  /**
+   * Metres of road the pointer marks, centred on it. A drag along a road
+   * takes everything it passes over, so this only needs to be short. The
+   * sim moves an end within its minimum road length of a junction or a dead
+   * end onto it, so a short segment is taken whole.
+   */
+  metres: 20,
+  /** Points a curve is followed through to measure along it. */
+  curveSteps: 64,
+} as const;

@@ -6,8 +6,10 @@
 // ground and a right click without a drag is reported too, so a tool can
 // use it to cancel, and so is a double click, which ends a continuous road.
 // While a tool that drags is on (the bulldozer and upgrade, issue M1-13), a left
-// drag goes to that tool instead of panning; Shift and a left drag still
-// orbit, and the keys still pan. Keyboard: WASD or arrows pan, Q and E turn,
+// drag goes to that tool instead of panning, and the keys still pan. Shift
+// and a left drag orbit, unless the tool takes Shift drags too: the
+// bulldozer and upgrade do since issue 86, where Shift takes whole roads,
+// and the right drag orbits there. Keyboard: WASD or arrows pan, Q and E turn,
 // Page Up and Page Down tilt (issue 116; R is the road tool), + and - zoom
 // on the screen centre.
 
@@ -25,6 +27,8 @@ export interface CameraControls {
   pointer(): { x: number; y: number } | null;
   /** Whether Alt is held: the road tool draws free-hand while it is. */
   altHeld(): boolean;
+  /** Whether Shift is held: the bulldozer and upgrade take whole roads while it is. */
+  shiftHeld(): boolean;
   /**
    * Called with the ground point of each click, or null for a click on sky.
    * A press that ends a drag is not a click.
@@ -47,6 +51,8 @@ export interface CameraControls {
 export interface ToolDragHandler {
   /** Whether a left press now starts a tool drag. Asked at each press. */
   active(): boolean;
+  /** Whether a left press with Shift held does too, rather than orbiting. Asked at each press. */
+  takesShift?(): boolean;
   /** The press moved past the click slop. */
   start(): void;
   /** The pointer moved from `from` to `to`, CSS pixels over the canvas. The first call starts at the press. */
@@ -90,6 +96,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   let pointer: { x: number; y: number } | null = null;
   let cursorHit: GroundHit | null = null;
   let alt = false;
+  let shift = false;
   let toolDrag: ToolDragHandler | null = null;
 
   const marker = new Mesh(
@@ -110,7 +117,8 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   function onPointerDown(e: PointerEvent): void {
     if (e.pointerType === "touch") return;
     const p = local(e);
-    const left = e.button === 0 && !e.shiftKey;
+    shift = e.shiftKey;
+    const left = e.button === 0 && (!e.shiftKey || toolDrag?.takesShift?.() === true);
     const kind = left ? (toolDrag?.active() ? "tool" : "pan") : e.button === 0 || e.button === 1 || e.button === 2 ? "orbit" : null;
     if (!kind) return;
     e.preventDefault();
@@ -123,6 +131,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     const p = local(e);
     pointer = p;
     alt = e.altKey;
+    shift = e.shiftKey;
     if (!drag) return;
     const wasMoving = drag.moved;
     if (Math.abs(p.x - drag.startX) > CLICK_SLOP || Math.abs(p.y - drag.startY) > CLICK_SLOP) drag.moved = true;
@@ -180,6 +189,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   }
 
   function onKeyDown(e: KeyboardEvent): void {
+    if (e.key === "Shift") shift = true;
     if (e.key === "Alt") {
       alt = true;
       // Otherwise some browsers move focus to their menu bar on release.
@@ -193,6 +203,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   }
 
   function onKeyUp(e: KeyboardEvent): void {
+    if (e.key === "Shift") shift = false;
     if (e.key === "Alt") {
       alt = false;
       e.preventDefault();
@@ -205,6 +216,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
   function onBlur(): void {
     held.clear();
     alt = false;
+    shift = false;
     if (drag?.kind === "tool") {
       if (drag.moved) toolDrag?.cancel();
       drag = null;
@@ -271,6 +283,7 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     cursor: () => cursorHit,
     pointer: () => pointer,
     altHeld: () => alt,
+    shiftHeld: () => shift,
     onPick: (l) => pickListeners.push(l),
     onRightClick: (l) => rightClickListeners.push(l),
     onDoubleClick: (l) => doubleClickListeners.push(l),

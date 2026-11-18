@@ -201,6 +201,8 @@ test("the bulldozer: its own tool, a price tag on what it picks, clicks and drag
   });
 
   await test.step("hovering the street shows its price and the houses it takes, and marks them", async () => {
+    // Shift takes the whole road (issue 86); without it the bulldozer takes a stretch.
+    await page.keyboard.down("Shift");
     await moveTo(page, 4380, 4600);
     await expect(tag).toHaveAttribute("data-kind", "road");
     await expect(tag).toHaveAttribute("data-ok", "true");

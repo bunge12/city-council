@@ -1,0 +1,203 @@
+{
+  "description": "Bulldozing and upgrading part of a segment (issue 86): a zoned straight street cut in the middle, stretches of a curve and a street upgraded together, a one-way stretch undone, and a stretch to a dead end removed with its end node.",
+  "seed": 2026,
+  "untilTick": 28,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4600
+        },
+        "to": {
+          "x": 4500,
+          "z": 4600
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 4200,
+          "z": 4700
+        },
+        "to": {
+          "x": 4500,
+          "z": 4700
+        },
+        "type": "street",
+        "control": {
+          "x": 4350,
+          "z": 4800
+        }
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 3,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 4202,
+              "z": 4585
+            },
+            "to": {
+              "x": 4440,
+              "z": 4585
+            },
+            "width": 16
+          }
+        ]
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 4,
+      "playerId": "p1",
+      "type": "BulldozeRoad",
+      "payload": {
+        "segments": [
+          2
+        ],
+        "sections": [
+          [
+            0.3,
+            0.6
+          ]
+        ],
+        "ends": [
+          [
+            4200,
+            4600,
+            4500,
+            4600
+          ]
+        ],
+        "types": [
+          "street"
+        ]
+      }
+    },
+    {
+      "tick": 4,
+      "seq": 5,
+      "playerId": "p1",
+      "type": "UpgradeRoad",
+      "payload": {
+        "segments": [
+          3,
+          5
+        ],
+        "type": "avenue",
+        "sections": [
+          [
+            0.2,
+            0.8
+          ],
+          [
+            0,
+            0.5
+          ]
+        ],
+        "ends": [
+          [
+            4200,
+            4700,
+            4500,
+            4700
+          ],
+          [
+            4380,
+            4600,
+            4500,
+            4600
+          ]
+        ],
+        "types": [
+          "street",
+          "street"
+        ]
+      }
+    },
+    {
+      "tick": 5,
+      "seq": 6,
+      "playerId": "p1",
+      "type": "UpgradeRoad",
+      "payload": {
+        "segments": [
+          3
+        ],
+        "type": "oneWay",
+        "sections": [
+          [
+            0.25,
+            0.75
+          ]
+        ],
+        "ends": [
+          [
+            4200,
+            4700,
+            4260.000000000001,
+            4732.000000000001
+          ]
+        ],
+        "types": [
+          "street"
+        ]
+      }
+    },
+    {
+      "tick": 7,
+      "seq": 7,
+      "playerId": "p1",
+      "type": "Undo",
+      "payload": {}
+    },
+    {
+      "tick": 7,
+      "seq": 8,
+      "playerId": "p1",
+      "type": "BulldozeRoad",
+      "payload": {
+        "segments": [
+          2
+        ],
+        "sections": [
+          [
+            0.5,
+            1
+          ]
+        ],
+        "ends": [
+          [
+            4200,
+            4600,
+            4290,
+            4600
+          ]
+        ],
+        "types": [
+          "street"
+        ]
+      }
+    }
+  ],
+  "balance": "3afb32efaf00378f",
+  "hash": "632b63680108e559"
+}

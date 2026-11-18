@@ -93,6 +93,12 @@ export interface RoadBuildBalance {
    */
   editMaxSegments: number;
   /**
+   * Most of those segments that may be cut to edit only part of each
+   * (issue 86). A cut adds nodes and pieces, so it costs more than a whole
+   * segment.
+   */
+  editMaxSections: number;
+  /**
    * The last block along a side of a grid takes what is left. Smaller than
    * this share of the asked-for block, it joins its neighbour instead.
    */
@@ -256,6 +262,8 @@ export function checkRoadBalance(data: unknown): string[] {
     if (!Number.isSafeInteger(meeting) || (meeting as number) < 0) errors.push("build.gridMeetingSections must be a whole number of at least 0");
     const editMax = build["editMaxSegments"];
     if (!Number.isSafeInteger(editMax) || (editMax as number) < 1) errors.push("build.editMaxSegments must be a whole number of at least 1");
+    const sections = build["editMaxSections"];
+    if (!Number.isSafeInteger(sections) || (sections as number) < 1) errors.push("build.editMaxSections must be a whole number of at least 1");
     const share = build["gridMinBlockShare"];
     if (typeof share !== "number" || !(share > 0 && share <= 1)) errors.push("build.gridMinBlockShare must be a number over 0 and at most 1");
     // Positions are whole multiples of the step, so it must divide a metre

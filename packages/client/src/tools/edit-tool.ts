@@ -21,6 +21,14 @@
 // still has the final say. Tool state lives in the UI store (ui/store.ts);
 // nothing here writes sim state.
 //
+// Since issue 86 both act on part of a road: the pointer marks a short
+// stretch of the segment under it, Shift marks the whole segment, and a
+// drag grows each segment's stretch over everything it passes (see
+// edit-section.ts). The mark is drawn from `planSection`, the sim's own
+// cut, so it shows where the sim will cut. Reversing a one-way with a
+// right-click still takes the whole segment: half a road reversed would
+// meet the other half head on.
+//
 // A sent edit stays marked on screen until the sim has applied or refused
 // it. A refusal removes the mark and shows the reason, whether the sim
 // refused the command when it arrived or dropped it at the step.
@@ -39,15 +47,21 @@ import {
   SEG_FIXED,
   levelOffset,
   planBulldoze,
+  planSection,
   planUpgrade,
+  segmentQuad,
+  subQuad,
   segmentEnds,
   segmentTypeId,
   type CommandResult,
   type SegmentEnds,
   type RoadNetwork,
   type RoadType,
+  type Quad,
+  type Section,
   type Terrain,
 } from "@city-council/sim";
+import { WHOLE, isWhole, joinSections, sectionKey } from "./edit-section";
 import { isRaised, liveRoadSegment, roadTypeOf, type RoadNet } from "../render/road-geometry";
 import type { PreviewLook, PreviewShape } from "../render/road-preview-geometry";
 import type { RoadToolState, ToolRoadType } from "./road-tool";
@@ -60,6 +74,8 @@ export interface EditPreview {
   kind: EditKind;
   /** The segments, in the order they were picked. */
   segments: readonly number[];
+  /** The stretch of each, in the same order. `[0, 1]` for the whole. */
+  sections: readonly Section[];
   /** The type an upgrade changes to, or null for a bulldoze. A reversal keeps its one-way type. */
   type: RoadType | null;
   ok: boolean;
@@ -78,18 +94,32 @@ export interface EditPreview {
 /** The command an edit sends. */
 export interface EditCommand {
   type: "BulldozeRoad" | "UpgradeRoad";
-  payload: { segments: number[]; ends: SegmentEnds[]; types: string[]; type?: string };
+  payload: { segments: number[]; ends: SegmentEnds[]; types: string[]; type?: string; sections?: Section[] };
 }
 
-/** How the player saw a segment when they picked it: where its ends were, and its type. */
+/**
+ * How the player saw a segment when they picked it: where its ends were,
+ * its type, and the stretch of it they picked, the whole when left out.
+ */
 export interface SeenSegment {
   ends: SegmentEnds;
   type: string;
+  section?: Section;
 }
 
-/** Segment `seg` as it is in `net` now. */
-export function seeSegment(net: RoadNet, seg: number): SeenSegment {
-  return { ends: segmentEnds(net, seg), type: segmentTypeId(net, seg) };
+/** Segment `seg` as it is in `net` now, with stretch `section` of it picked. */
+export function seeSegment(net: RoadNet, seg: number, section?: Section): SeenSegment {
+  const seen: SeenSegment = { ends: segmentEnds(net, seg), type: segmentTypeId(net, seg) };
+  if (section && !isWhole(section)) seen.section = section;
+  return seen;
+}
+
+/** `seen` with its stretch grown to cover `section` too. */
+export function seeMore(seen: SeenSegment, section: Section | undefined): SeenSegment {
+  const joined = joinSections(seen.section ?? WHOLE, section ?? WHOLE);
+  const out: SeenSegment = { ends: seen.ends, type: seen.type };
+  if (!isWhole(joined)) out.section = joined;
+  return out;
 }
 
 /**
@@ -106,8 +136,10 @@ export function editCommand(
   const saw = segments.map((seg, i) => seen?.[i] ?? seeSegment(net, seg));
   const ends = saw.map((s) => s.ends);
   const types = saw.map((s) => s.type);
-  if (kind === "bulldoze") return { type: "BulldozeRoad", payload: { segments: [...segments], ends, types } };
-  return { type: "UpgradeRoad", payload: { segments: [...segments], ends, types, type: typeId } };
+  // Left out when every segment goes whole, so such a command is what it always was.
+  const parts = saw.some((s) => s.section) ? { sections: saw.map((s) => s.section ?? WHOLE) } : {};
+  if (kind === "bulldoze") return { type: "BulldozeRoad", payload: { segments: [...segments], ends, types, ...parts } };
+  return { type: "UpgradeRoad", payload: { segments: [...segments], ends, types, type: typeId, ...parts } };
 }
 
 function isFixed(net: RoadNet, seg: number): boolean {
@@ -136,7 +168,13 @@ export function previewEdit(
   const command = editCommand(net, kind, segments, typeId, seen);
   const type = kind === "bulldoze" ? null : (ROAD_TYPES.find((t) => t.id === typeId) ?? null);
   const fixed = segments.some((seg) => isFixed(net, seg));
-  const base = { kind, segments: [...segments], type, fixed, command };
+  // As the sim will cut them: a stretch whose ends would leave stubs is the whole segment.
+  const sections = (command.payload.sections ?? segments.map(() => WHOLE)).map((section, i): Section => {
+    if (isWhole(section)) return section;
+    const plan = planSection(asNetwork(net), segments[i] ?? NONE, section);
+    return typeof plan === "string" ? section : [plan.from, plan.to];
+  });
+  const base = { kind, segments: [...segments], sections, type, fixed, command };
   if (fixed) {
     // The sim refuses this too, naming the segment by id. A player does not know ids.
     const reason = kind === "bulldoze" ? "This road is fixed and cannot be removed" : "This road is fixed and cannot be changed";
@@ -231,10 +269,10 @@ export class EditToolController {
 
   /**
    * What the tool shows with the pointer over segment `seg` (NONE for none):
-   * the drag so far while one is on, otherwise that segment alone. Null when
-   * there is nothing to show.
+   * the drag so far while one is on, otherwise stretch `section` of that
+   * segment, the whole when left out. Null when there is nothing to show.
    */
-  preview(seg: number): EditPreview | null {
+  preview(seg: number, section?: Section): EditPreview | null {
     const tool = this.active();
     const world = this.host.world();
     if (!tool || !world) return null;
@@ -246,7 +284,13 @@ export class EditToolController {
       const reverse = this.reversePreview(seg);
       if (reverse) return reverse;
     }
-    return previewEdit(world.net, world.terrain, tool, segments, this.upgradeType(), drag ? this.dragSeen : undefined);
+    const seen = drag ? this.dragSeen : [seeSegment(world.net, seg, section)];
+    return previewEdit(world.net, world.terrain, tool, segments, this.upgradeType(), seen);
+  }
+
+  /** A key that changes whenever the drag's stretches do, for telling when its preview needs working out again. */
+  dragKey(): string {
+    return this.dragSeen.map((s) => sectionKey(s.section)).join(";");
   }
 
   /**
@@ -261,10 +305,10 @@ export class EditToolController {
     return previewEdit(world.net, world.terrain, "reverse", [seg], type.id);
   }
 
-  /** A left click with segment `seg` under the pointer, or NONE. */
-  click(seg: number): void {
+  /** A left click with segment `seg` under the pointer, or NONE, and stretch `section` of it marked. */
+  click(seg: number, section?: Section): void {
     if (!this.active()) return;
-    const preview = this.preview(seg);
+    const preview = this.preview(seg, section);
     if (!preview) return;
     this.sendIfOk(preview);
   }
@@ -292,19 +336,31 @@ export class EditToolController {
   }
 
   /**
-   * The drag passed over segment `seg`. It joins the drag unless it is
-   * there already or the tool could not act on it alone.
+   * The drag passed over stretch `section` of segment `seg`, the whole when
+   * left out. It joins the drag unless the tool could not act on it alone.
+   * A segment in the drag already has its stretch grown to cover this one.
    */
-  dragOver(seg: number): void {
+  dragOver(seg: number, section?: Section): void {
     const tool = this.active();
     const s = this.host.get();
     const world = this.host.world();
-    if (!tool || !s.editDrag || !world || seg === NONE || s.editDrag.includes(seg)) return;
+    if (!tool || !s.editDrag || !world || seg === NONE) return;
+    const at = s.editDrag.indexOf(seg);
+    if (at >= 0) {
+      const seen = this.dragSeen[at];
+      if (!seen) return;
+      const more = seeMore(seen, section);
+      if (sectionKey(more.section) === sectionKey(seen.section)) return;
+      this.dragSeen = this.dragSeen.map((x, i) => (i === at ? more : x));
+      // A new list, so the page works the preview out again.
+      this.host.set({ editDrag: [...s.editDrag] });
+      return;
+    }
     if (!liveRoadSegment(world.net, seg)) return;
     // Upgrading a road to the type it is already would refuse the whole drag, or reverse a one-way.
     if (tool === "upgrade" && roadTypeOf(world.net, seg).id === this.upgradeType()) return;
     if (!previewEdit(world.net, world.terrain, tool, [seg], this.upgradeType()).ok) return;
-    this.dragSeen = [...this.dragSeen.slice(0, s.editDrag.length), seeSegment(world.net, seg)];
+    this.dragSeen = [...this.dragSeen.slice(0, s.editDrag.length), seeSegment(world.net, seg, section)];
     this.host.set({ editDrag: [...s.editDrag, seg] });
   }
 
@@ -346,14 +402,37 @@ export class EditToolController {
 /**
  * The marks to draw for an edit: each segment as a strip, at the width of
  * the type an upgrade would give it, or of its own type otherwise, on its
- * bridge deck when it is a bridge.
+ * bridge deck when it is a bridge. Part of a segment is drawn where the
+ * sim would cut it (`planSection`), or as picked when the sim would refuse.
  */
 export function editShapes(net: RoadNet, preview: EditPreview, look: PreviewLook): PreviewShape[] {
   const out: PreviewShape[] = [];
-  for (const seg of preview.segments) {
-    if (!liveRoadSegment(net, seg)) continue;
+  preview.segments.forEach((seg, i) => {
+    if (!liveRoadSegment(net, seg)) return;
     const own = roadTypeOf(net, seg);
     const type = preview.ok && preview.kind === "upgrade" && preview.type ? preview.type : own;
+    const section = preview.sections[i] ?? WHOLE;
+    if (!isWhole(section)) {
+      const plan = planSection(asNetwork(net), seg, section);
+      const q: Quad =
+        typeof plan === "string" ? subQuad(segmentQuad(asNetwork(net), seg), section[0], section[1]) : plan.shape;
+      const straight = q.cx === (q.ax + q.bx) / 2 && q.cz === (q.az + q.bz) / 2;
+      const shape: PreviewShape = {
+        ax: q.ax,
+        az: q.az,
+        bx: q.bx,
+        bz: q.bz,
+        control: straight ? null : { x: q.cx, z: q.cz },
+        width: type.width,
+        look,
+        junctions: [],
+        bridges: [],
+      };
+      // Only a segment at one level is cut, so a raised one is raised the same at both ends.
+      if (isRaised(net, seg)) shape.raise = { a: levelOffset(net.segLevelA[seg] ?? 0), b: levelOffset(net.segLevelB[seg] ?? 0) };
+      out.push(shape);
+      return;
+    }
     const a = net.segA[seg] ?? 0;
     const b = net.segB[seg] ?? 0;
     const ax = net.nodeX[a] ?? 0;
@@ -380,6 +459,6 @@ export function editShapes(net: RoadNet, preview: EditPreview, look: PreviewLook
       shape.raise = { a: levelOffset(net.segLevelA[seg] ?? 0), b: levelOffset(net.segLevelB[seg] ?? 0) };
     }
     out.push(shape);
-  }
+  });
   return out;
 }
