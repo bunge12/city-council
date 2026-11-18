@@ -150,7 +150,10 @@ function gather(state: SimState, parsed: Parsed): Int32Array {
   const index = syncCells(state);
   const cells = state.cells;
   const { zone, density, rects } = parsed;
-  if (listed.length < cells.zone.length) listed = new Uint8Array(cells.zone.length);
+  // Grown with room to spare: sized to the cells exactly, every stroke after
+  // a road added cells made a new one, megabytes of buffer that only a full
+  // collection takes back (issue 166).
+  if (listed.length < cells.zone.length) listed = new Uint8Array(Math.max(cells.zone.length, Math.ceil(listed.length * 1.5)));
   const marks = listed;
   let count = 0;
   for (let at = 0; at < rects.length; at += RECT_FLOATS) {

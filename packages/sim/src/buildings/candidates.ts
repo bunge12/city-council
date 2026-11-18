@@ -203,16 +203,18 @@ function build(state: SimState, index: CellIndex, onCell: OnCell): Candidates {
  * give them now.
  */
 function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidates {
+  let c = live.get(state.buildings);
+  // Nearly every call, from a grower draw: nothing noted since the last, so nothing to allocate (issue 166).
+  const watch = index.watch;
+  if (c && c.index === index && c.segs.size === 0 && c.fronts.size === 0 && (!watch || (watch.segs.size === 0 && watch.nodes.size === 0 && watch.fronts.size === 0))) return c;
   let found: readonly (Int32Array | null)[] | null = null;
   const onCell = (): readonly (Int32Array | null)[] => (found ??= ask());
-  let c = live.get(state.buildings);
   if (!c || c.index !== index) {
     c = build(state, index, onCell);
     live.set(state.buildings, c);
     index.watch = { segs: new Set(), nodes: new Set(), fronts: new Set() };
     return c;
   }
-  const watch = index.watch;
   if (watch) {
     for (const seg of watch.segs) c.segs.add(seg);
     for (const node of watch.nodes) segmentsNear(c.index, state.roads, node, c.segs);

@@ -181,8 +181,18 @@ export const BUILDING_TYPES: readonly BuildingType[] = BUILDINGS_BALANCE.types.m
 }));
 
 /** The types that grow on a zone and density, in file order. Zone as a cell stores it. */
-export function typesFor(zone: number, density: number): BuildingType[] {
-  return BUILDING_TYPES.filter((t) => t.zoneNumber === zone && t.density === density);
+export function typesFor(zone: number, density: number): readonly BuildingType[] {
+  return TYPES_BY_ZONE.get(zone)?.get(density) ?? NO_TYPES;
+}
+
+const NO_TYPES: readonly BuildingType[] = [];
+
+/** `typesFor`'s lists by zone, then density, made once: the grower asks many times a draw (issue 166). */
+const TYPES_BY_ZONE = new Map<number, Map<number, readonly BuildingType[]>>();
+for (const t of BUILDING_TYPES) {
+  const byDensity = TYPES_BY_ZONE.get(t.zoneNumber) ?? new Map<number, readonly BuildingType[]>();
+  TYPES_BY_ZONE.set(t.zoneNumber, byDensity);
+  byDensity.set(t.density, [...(byDensity.get(t.density) ?? []), t]);
 }
 
 /** The widest lot of any kind, in cells: how far along a strip the lot finder looks. */

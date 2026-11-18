@@ -43,8 +43,8 @@
 
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "../zoning/balance";
-import { CELL_OPEN, columnStatus, nextColumn, syncCells, type Column } from "../zoning/cell-index";
-import { CELL_RIGHT, ZONE_NONE, cellSlot, fromLocal, localIndex, type CellRef } from "../zoning/cells";
+import { CELL_OPEN, cellSlotIn, columnStatus, nextColumn, nextColumnInto, syncCells, type CellIndex, type Column } from "../zoning/cell-index";
+import { CELL_RIGHT, ZONE_NONE, fromLocal, localIndex, type CellRef, type CellState } from "../zoning/cells";
 import { blockIndexOf, blockOnSide } from "../roads/blocks";
 import { NONE } from "../roads/network";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
@@ -123,6 +123,17 @@ function refuse(problem: LotProblem, reason: string, extra: Partial<Extract<LotR
   return { ok: false, problem, reason, ...extra };
 }
 
+/** One refusal per problem with no reason, made once, for callers that read only whether a lot fits. */
+const QUIET = new Map<LotProblem, Extract<LotResult, { ok: false }>>();
+
+/** `refuse`, or when `explain` is false the problem alone, shared and made once, with an empty reason. */
+function refuseIf(explain: boolean, problem: LotProblem, reason: string): Extract<LotResult, { ok: false }> {
+  if (explain) return refuse(problem, reason);
+  let quiet = QUIET.get(problem);
+  if (!quiet) QUIET.set(problem, (quiet = Object.freeze({ ok: false, problem, reason: "" }) as Extract<LotResult, { ok: false }>));
+  return quiet;
+}
+
 /** Every type that fits at a cell, each on its largest lot, and how deep the free ground at the cell runs. */
 export type LotOptions =
   | {
@@ -152,6 +163,55 @@ export interface Frontage {
 export const FRONTAGE_REACH = 128;
 
 /**
+ * The columns one walk along a strip has passed, as a small table kept
+ * between calls, so the grower's many walks a draw make no garbage (issue
+ * 166): a set of keys built per walk, as strings, was most of what the
+ * grower allocated. A column is its segment and its front cell's place in
+ * the segment's run. Clearing moves to the next generation rather than
+ * wiping the table. Scratch for one call at a time, never state.
+ */
+interface ColumnMarks {
+  seg: Int32Array;
+  local: Int32Array;
+  gen: Int32Array;
+  now: number;
+}
+
+/** A table for walks that mark up to `most` columns, at most a quarter full. */
+function columnMarks(most: number): ColumnMarks {
+  let size = 1;
+  while (size < 4 * most) size *= 2;
+  return { seg: new Int32Array(size), local: new Int32Array(size), gen: new Int32Array(size), now: 0 };
+}
+
+function clearMarks(m: ColumnMarks): void {
+  m.now++;
+  if (m.now < 0x7fffffff) return;
+  m.gen.fill(0);
+  m.now = 1;
+}
+
+/** Marks the column; false when it was marked already since the last clear. */
+function markColumn(m: ColumnMarks, seg: number, local: number): boolean {
+  const mask = m.seg.length - 1;
+  for (let h = (seg * 31 + local) & mask; ; h = (h + 1) & mask) {
+    if (m.gen[h] !== m.now) {
+      m.gen[h] = m.now;
+      m.seg[h] = seg;
+      m.local[h] = local;
+      return true;
+    }
+    if (m.seg[h] === seg && m.local[h] === local) return false;
+  }
+}
+
+/** A frontage walk marks its start and up to `FRONTAGE_REACH` columns each way. */
+const frontageMarks = columnMarks(2 * FRONTAGE_REACH + 1);
+
+/** A strip walk marks its start and each way up to `WIDEST_LOT - 1` columns and the one that stops it. */
+const stripMarks = columnMarks(2 * WIDEST_LOT + 1);
+
+/**
  * The free frontage `ref` lies on (issue 194): the run of free front cells
  * of `ref`'s zone and density along its strip, walked the way lots run
  * (`nextColumn`), so it runs on across a segment's end where a lot would.
@@ -167,54 +227,90 @@ export const FRONTAGE_REACH = 128;
  * ends the run and the free ground it leaves stays in one piece.
  */
 export function freeFrontage(state: SimState, ref: CellRef): Frontage {
-  const none: Frontage = { ends: [], width: 0 };
   const index = syncCells(state);
   const cells = state.cells;
-  const slot = cellSlot(state.roads, cells, { ...ref, depth: 0 });
-  if (slot < 0) return none;
+  const slot = cellSlotIn(index, cells, ref.segment, ref.side, ref.place, 0);
+  if (slot < 0) return { ends: [], width: 0 };
   const zone = cells.zone[slot] ?? ZONE_NONE;
   const density = cells.density[slot] ?? 0;
-  if (zone === ZONE_NONE) return none;
+  if (zone === ZONE_NONE) return { ends: [], width: 0 };
   const onCell = segmentBuildings(state);
-  const free = (col: Column): boolean => {
-    if (columnStatus(index, col, 0) !== CELL_OPEN) return false;
-    const local = localIndex(col.side, col.place, 0);
-    const at = (cells.offset[col.seg] ?? 0) + local;
-    return cells.zone[at] === zone && cells.density[at] === density && (onCell[col.seg]?.[local] ?? NO_BUILDING) === NO_BUILDING;
-  };
-  const start: Column = { seg: ref.segment, side: ref.side, place: ref.place, dir: 0 };
-  if (!free(start)) return none;
-  const key = (col: Column): number => col.seg * CELL_KEY_STRIDE + localIndex(col.side, col.place, 0);
-  const seen = new Set<number>([key(start)]);
-  /**
-   * The last free column walking `dir` from the start and how many steps
-   * on, with `open` set when the walk stopped at `FRONTAGE_REACH` and no
-   * end; null if the walk comes round again.
-   */
-  const walk = (dir: number): { col: Column; steps: number; open: boolean } | null => {
-    let col: Column = { ...start, dir };
-    let steps = 0;
-    for (let next = nextColumn(index, col); next !== null && free(next); next = nextColumn(index, col)) {
-      if (steps === FRONTAGE_REACH) return { col, steps, open: true };
-      const k = key(next);
-      if (seen.has(k)) return null;
-      seen.add(k);
-      col = next;
-      steps++;
-    }
-    return { col, steps, open: false };
-  };
-  const towardA = walk(1);
-  if (!towardA) return none;
-  const towardB = walk(0);
-  if (!towardB) return none;
-  const asRef = (col: Column): CellRef => ({ segment: col.seg, side: col.side, place: col.place, depth: 0 });
-  const found = [towardA, towardB].filter((w) => !w.open);
-  if (found.length < 2) return { ends: found.map((w) => asRef(w.col)), width: Infinity };
+  const start = frontageStart;
+  start.seg = ref.segment;
+  start.side = ref.side;
+  start.place = ref.place;
+  start.dir = 0;
+  if (!freeFront(index, cells, onCell, zone, density, start)) return { ends: [], width: 0 };
+  clearMarks(frontageMarks);
+  markColumn(frontageMarks, start.seg, localIndex(start.side, start.place, 0));
+  const towardA = frontageA;
+  const towardB = frontageB;
+  if (!walkFrontage(index, cells, onCell, zone, density, 1, towardA)) return { ends: [], width: 0 };
+  if (!walkFrontage(index, cells, onCell, zone, density, 0, towardB)) return { ends: [], width: 0 };
+  if (towardA.open || towardB.open) {
+    const ends: CellRef[] = [];
+    if (!towardA.open) ends.push(endRef(towardA.col));
+    if (!towardB.open) ends.push(endRef(towardB.col));
+    return { ends, width: Infinity };
+  }
   const width = towardA.steps + towardB.steps + 1;
-  if (width === 1) return { ends: [asRef(start)], width };
-  const [near, far] = towardA.steps <= towardB.steps ? [towardA, towardB] : [towardB, towardA];
-  return { ends: [asRef(near.col), asRef(far.col)], width };
+  if (width === 1) return { ends: [endRef(start)], width };
+  const near = towardA.steps <= towardB.steps ? towardA : towardB;
+  const far = near === towardA ? towardB : towardA;
+  return { ends: [endRef(near.col), endRef(far.col)], width };
+}
+
+/** Where one walk of `freeFrontage` stopped: the last free column, how many steps on, and whether it stopped at `FRONTAGE_REACH` with no end. */
+interface FrontageWalk {
+  col: Column;
+  steps: number;
+  open: boolean;
+}
+
+/** Scratch for `freeFrontage`, one call at a time, so its walks make no garbage (issue 166). */
+const frontageStart: Column = { seg: 0, side: 0, place: 0, dir: 0 };
+const frontageNext: Column = { seg: 0, side: 0, place: 0, dir: 0 };
+const frontageA: FrontageWalk = { col: { seg: 0, side: 0, place: 0, dir: 0 }, steps: 0, open: false };
+const frontageB: FrontageWalk = { col: { seg: 0, side: 0, place: 0, dir: 0 }, steps: 0, open: false };
+
+const endRef = (col: Column): CellRef => ({ segment: col.seg, side: col.side, place: col.place, depth: 0 });
+
+/** Whether the front cell of `col` is open, of `zone` and `density`, and has no building. */
+function freeFront(index: CellIndex, cells: CellState, onCell: readonly (Int32Array | null)[], zone: number, density: number, col: Column): boolean {
+  if (columnStatus(index, col, 0) !== CELL_OPEN) return false;
+  const local = localIndex(col.side, col.place, 0);
+  const at = (cells.offset[col.seg] ?? 0) + local;
+  return cells.zone[at] === zone && cells.density[at] === density && (onCell[col.seg]?.[local] ?? NO_BUILDING) === NO_BUILDING;
+}
+
+/**
+ * Walks `dir` from `frontageStart` while the front cells stay free, into
+ * `out`: the last free column and how many steps on, with `open` set when
+ * the walk stopped at `FRONTAGE_REACH` and no end. False if the walk comes
+ * round to a column already passed.
+ */
+function walkFrontage(index: CellIndex, cells: CellState, onCell: readonly (Int32Array | null)[], zone: number, density: number, dir: number, out: FrontageWalk): boolean {
+  const col = out.col;
+  col.seg = frontageStart.seg;
+  col.side = frontageStart.side;
+  col.place = frontageStart.place;
+  col.dir = dir;
+  out.steps = 0;
+  out.open = false;
+  const next = frontageNext;
+  while (nextColumnInto(index, col, next) && freeFront(index, cells, onCell, zone, density, next)) {
+    if (out.steps === FRONTAGE_REACH) {
+      out.open = true;
+      return true;
+    }
+    if (!markColumn(frontageMarks, next.seg, localIndex(next.side, next.place, 0))) return false;
+    col.seg = next.seg;
+    col.side = next.side;
+    col.place = next.place;
+    col.dir = next.dir;
+    out.steps++;
+  }
+  return true;
 }
 
 /**
@@ -248,22 +344,21 @@ export function findLot(state: SimState, ref: CellRef): LotResult {
  * takes the largest of these; the grower draws among them (grower.ts).
  * Settles cells as `findLot` does, with the same caution for systems.
  */
-export function lotOptions(state: SimState, ref: CellRef): LotOptions {
+export function lotOptions(state: SimState, ref: CellRef, explain = true): LotOptions {
   const index = syncCells(state);
   const cells = state.cells;
-  const slot = cellSlot(state.roads, cells, ref);
-  if (slot < 0) return refuse("no-cell", "There is no such cell");
+  const slot = cellSlotIn(index, cells, ref.segment, ref.side, ref.place, ref.depth);
+  if (slot < 0) return refuseIf(explain, "no-cell", "There is no such cell");
   const start: Column = { seg: ref.segment, side: ref.side, place: ref.place, dir: 0 };
-  if (columnStatus(index, start, ref.depth) !== CELL_OPEN) return refuse("blocked", "The ground is blocked");
+  if (columnStatus(index, start, ref.depth) !== CELL_OPEN) return refuseIf(explain, "blocked", "The ground is blocked");
   const zone = cells.zone[slot] ?? ZONE_NONE;
   const density = cells.density[slot] ?? 0;
-  if (zone === ZONE_NONE) return refuse("unzoned", "The ground is not zoned");
+  if (zone === ZONE_NONE) return refuseIf(explain, "unzoned", "The ground is not zoned");
   const onCell = segmentBuildings(state);
   const builtOn = (col: Column, depth: number): boolean => (onCell[col.seg]?.[localIndex(col.side, col.place, depth)] ?? NO_BUILDING) !== NO_BUILDING;
-  if (builtOn(start, ref.depth)) return refuse("built", "A building stands here");
-  const label = zoneLabel(zone, density);
+  if (builtOn(start, ref.depth)) return refuseIf(explain, "built", "A building stands here");
   const types = typesFor(zone, density);
-  if (types.length === 0) return refuse("no-types", `Nothing grows in ${label}`);
+  if (types.length === 0) return refuseIf(explain, "no-types", explain ? `Nothing grows in ${zoneLabel(zone, density)}` : "");
 
   /** Free cells from the road back in `col`, up to the zoning depth. */
   const freeDepth = (col: Column): number => {
@@ -285,16 +380,15 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
   // places, each column with the way that runs on along it. Columns with no
   // free cell at the road end it: no lot crosses them.
   const reach = WIDEST_LOT - 1;
-  const seen = new Set<string>([`${start.seg}/${start.side}/${start.place}`]);
+  clearMarks(stripMarks);
+  markColumn(stripMarks, start.seg, localIndex(start.side, start.place, 0));
   // Each way first as far as a lot on one strip reaches, then on as far as
   // a through-lot does, so on a strip that closes on itself the plain types
   // see the same columns either side as they would with no through-lots.
   const walk = (from: Column, out: { col: Column; free: number }[] = [], limit = reach): { col: Column; free: number }[] => {
     let col: Column | null = out.length > 0 ? (out[out.length - 1] as { col: Column }).col : from;
     while (out.length < limit && (col = nextColumn(index, col)) !== null) {
-      const key = `${col.seg}/${col.side}/${col.place}`;
-      if (seen.has(key)) break;
-      seen.add(key);
+      if (!markColumn(stripMarks, col.seg, localIndex(col.side, col.place, 0))) break;
       const free = freeDepth(col);
       if (free === 0) break;
       out.push({ col, free });
@@ -316,7 +410,7 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
   const strip = [...behind, { col: start, free: freeDepth(start) }, ...ahead];
   const at = behind.length;
   const own = strip[at]?.free ?? 0;
-  if (own <= ref.depth) return refuse("off-road", "The ground between here and the road is not free");
+  if (own <= ref.depth) return refuseIf(explain, "off-road", "The ground between here and the road is not free");
 
   /**
    * The lot behind `w` columns from `first`, each free `depth` deep to the
@@ -337,8 +431,10 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
    * Found once per column and reused for every width, since a failed search
    * on a deep strip with no partner is the slow case.
    */
-  const partners = new Map<number, { col: Column; depth: number; near: number }[]>();
+  // Only through-lots look for partners, so most calls make no map.
+  let partners: Map<number, { col: Column; depth: number; near: number }[]> | null = null;
   const partnersAt = (s: number, depth: number): { col: Column; depth: number; near: number }[] => {
+    partners ??= new Map();
     const known = partners.get(s);
     if (known) return known;
     const out: { col: Column; depth: number; near: number }[] = [];
@@ -450,40 +546,59 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
       continue;
     }
     // The type's largest lot; between lots of one area the deeper, then
-    // the one whose first column comes first along the strip.
-    let best: { lot: Lot; area: number } | null = null;
+    // the one whose first column comes first along the strip. Kept as
+    // numbers until the end, so trying sizes makes no garbage (issue 166).
+    let bestArea = 0;
+    let bestDepth = 0;
+    let bestWidth = 0;
+    let bestStart = -1;
     for (let w = type.width[0]; w <= type.width[1]; w++) {
       for (let d = Math.max(type.depth[0], ref.depth + 1); d <= type.depth[1]; d++) {
         const area = w * d;
-        if (best && (area < best.area || (area === best.area && d <= best.lot.depth))) continue;
+        if (bestStart >= 0 && (area < bestArea || (area === bestArea && d <= bestDepth))) continue;
         // The first start, along the strip, whose `w` columns are all free `d` deep.
         for (let s = Math.max(0, at - w + 1); s <= at && s + w <= strip.length; s++) {
           let fits = true;
           for (let i = s; i < s + w && fits; i++) fits = (strip[i]?.free ?? 0) >= d;
           if (!fits) continue;
-          const first = (strip[s] as { col: Column }).col;
-          best = { area, lot: { type: type.index, firstSeg: first.seg, firstSide: first.side, firstPlace: first.place, dir: first.dir, width: w, depth: d, ...NO_BACK } };
+          bestArea = area;
+          bestDepth = d;
+          bestWidth = w;
+          bestStart = s;
           break;
         }
       }
     }
-    if (best) lots.push(best.lot);
+    if (bestStart >= 0) {
+      const first = (strip[bestStart] as { col: Column }).col;
+      lots.push({ type: type.index, firstSeg: first.seg, firstSide: first.side, firstPlace: first.place, dir: first.dir, width: bestWidth, depth: bestDepth, ...NO_BACK });
+    }
   }
   if (lots.length > 0) return { ok: true, lots, free: own };
 
   // A lot holding the cell is at least `ref.depth + 1` deep, so only the
   // types that reach that far back count. A through-lot needs a second
-  // strip, which the reasons below do not go into.
-  const plain = types.filter((t) => !t.throughLot);
-  const reaching = plain.filter((t) => t.depth[1] > ref.depth);
-  if (reaching.length === 0) {
-    const deepest = Math.max(0, ...plain.map((t) => t.depth[1]));
-    return refuse("too-deep", `No ${label} building reaches ${ref.depth + 1} cells back from the road; the deepest lot is ${deepest}`);
+  // strip, which the reasons below do not go into. Counted in loops, so a
+  // refusal the grower reads no further than `ok` makes no garbage.
+  let deepest = 0;
+  let reaching = 0;
+  let needWidth = Infinity;
+  let needDepth = Infinity;
+  for (const t of types) {
+    if (t.throughLot) continue;
+    deepest = Math.max(deepest, t.depth[1]);
+    if (t.depth[1] <= ref.depth) continue;
+    reaching++;
+    needWidth = Math.min(needWidth, t.width[0]);
+    needDepth = Math.min(needDepth, Math.max(t.depth[0], ref.depth + 1));
   }
-  const need = {
-    width: Math.min(...reaching.map((t) => t.width[0])),
-    depth: Math.min(...reaching.map((t) => Math.max(t.depth[0], ref.depth + 1))),
-  };
+  const label = explain ? zoneLabel(zone, density) : "";
+  if (reaching === 0) {
+    return refuseIf(explain, "too-deep", explain ? `No ${label} building reaches ${ref.depth + 1} cells back from the road; the deepest lot is ${deepest}` : "");
+  }
+  const problem: LotProblem = own < needDepth ? "too-shallow" : "too-narrow";
+  if (!explain) return refuseIf(false, problem, "");
+  const need = { width: needWidth, depth: needDepth };
   // How wide the free ground runs through the cell at the depth needed.
   const deep = need.depth;
   let lo = at;
@@ -492,7 +607,6 @@ export function lotOptions(state: SimState, ref: CellRef): LotOptions {
   while (hi < strip.length - 1 && (strip[hi + 1]?.free ?? 0) >= deep) hi++;
   const room = { width: own >= deep ? hi - lo + 1 : 0, depth: own };
   const needs = `${label} needs a lot at least ${need.width} wide and ${need.depth} deep`;
-  if (own < need.depth) return refuse("too-shallow", `${needs}; the zoned ground here is ${own} deep`, { need, room });
+  if (problem === "too-shallow") return refuse("too-shallow", `${needs}; the zoned ground here is ${own} deep`, { need, room });
   return refuse("too-narrow", `${needs}; the zoned ground here is ${room.width} wide`, { need, room });
 }
-
