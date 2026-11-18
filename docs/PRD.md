@@ -684,6 +684,8 @@ The look to aim for is the first Cities: Skylines. That means clean, lightly sty
 
 **Colour variation.** One house model appears in many colours, as it does in that game. Each model marks which of its surfaces can be tinted, such as brick, siding, roof and trim. Each building picks a tint for each from a small palette that suits the building type. The pick comes from the building's id, so the same house is the same colour for every player and after every reload. With instanced drawing this is one extra colour per building and costs almost nothing.
 
+**Window variation.** Windows vary the same way (issue #137). Each building's id also picks its look: one of four window shapes for each kind of facade, such as square, tall, wide or paired windows, or a curtain wall with a grid, floor bands or deep fins, and one of the theme's glass tints. Each pane is a little lighter or darker than the next, lighter towards its top where it reflects the sky, and a few have a blind part way down. The glass stays well lighter and bluer than asphalt. The look travels with the tint, so it costs no extra draw calls.
+
 **Themes.** A theme is a data pack of models, palettes and street furniture, kept apart from the sim. v1 ships one North American theme. A European theme is planned for v2 and should need no code changes.
 
 | Zone | North American theme, v1 |
@@ -694,7 +696,7 @@ The look to aim for is the first Cities: Skylines. That means clean, lightly sty
 | Industrial | Workshops, warehouses, large plants with yards |
 | Mixed | Brick walk-ups over shops, podium towers with retail at the base |
 
-The model count stays small. Three or four models per zone and density, each with a few palettes, already give a varied street. They can start as simple shapes in M2 and be replaced with better models later without touching the sim.
+The model count stays small. Three to six models per building type, each with a few palettes and window looks, already give a varied street. The downtown types, the office slabs and the office, residential and podium towers, have five each, so a skyline mixes set-backs, split slabs, stepped and pyramid tops and ribbon windows (issue #137). They can start as simple shapes in M2 and be replaced with better models later without touching the sim.
 
 **Where the models come from.** Claude generates them, as code. Each building type is a small generator function that builds its geometry from parameters such as footprint, floors, roof shape, window rhythm and porch or storefront. Surface detail like brick, siding and glass comes from shaders, not image files.
 

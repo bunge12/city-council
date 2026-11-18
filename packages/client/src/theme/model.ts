@@ -21,9 +21,11 @@ export type Surface = (typeof SURFACE)[keyof typeof SURFACE];
  * What a wall face shows. `windows` is a grid of windows, one per floor and
  * per `spacing` metres; `storefront` large panes of glass at street level;
  * `curtain` a glass wall with thin frames; `doors` wide loading or garage
- * doors.
+ * doors; `bands` a ribbon of glass along each floor, broken only by thin
+ * mullions every `spacing` metres. The shapes of the panes vary from one
+ * building to the next by its look (render/building-meshes.ts).
  */
-export const FACADE = { none: 0, windows: 1, storefront: 2, curtain: 3, doors: 4 } as const;
+export const FACADE = { none: 0, windows: 1, storefront: 2, curtain: 3, doors: 4, bands: 5 } as const;
 export type FacadeKind = (typeof FACADE)[keyof typeof FACADE];
 
 /** How a box's walls are drawn: the pattern and its rhythm in metres. */
@@ -170,8 +172,9 @@ export class ModelBuilder {
       const e1 = x1 + eave;
       this.face([[e0, y, z1 + eave], [e1, y, z1 + eave], [e1, top, zm], [e0, top, zm]], roof, inside);
       this.face([[e1, y, z0 - eave], [e0, y, z0 - eave], [e0, top, zm], [e1, top, zm]], roof, inside);
-      this.face([[x0, y, z0], [x0, y, z1], [x0, top, zm]], wall, inside);
-      this.face([[x1, y, z1], [x1, y, z0], [x1, top, zm]], wall, inside);
+      // The gable ends reach out under the eaves, so no gap is left between an end and the slopes to see into the roof through.
+      this.face([[x0, y, z0 - eave], [x0, y, z1 + eave], [x0, top, zm]], wall, inside);
+      this.face([[x1, y, z1 + eave], [x1, y, z0 - eave], [x1, top, zm]], wall, inside);
     } else {
       const xm = (x0 + x1) / 2;
       const inside: Vec3 = [xm, y, (z0 + z1) / 2];
@@ -179,8 +182,8 @@ export class ModelBuilder {
       const e1 = z1 + eave;
       this.face([[x1 + eave, y, e1], [x1 + eave, y, e0], [xm, top, e0], [xm, top, e1]], roof, inside);
       this.face([[x0 - eave, y, e0], [x0 - eave, y, e1], [xm, top, e1], [xm, top, e0]], roof, inside);
-      this.face([[x0, y, z1], [x1, y, z1], [xm, top, z1]], wall, inside);
-      this.face([[x1, y, z0], [x0, y, z0], [xm, top, z0]], wall, inside);
+      this.face([[x0 - eave, y, z1], [x1 + eave, y, z1], [xm, top, z1]], wall, inside);
+      this.face([[x1 + eave, y, z0], [x0 - eave, y, z0], [xm, top, z0]], wall, inside);
     }
     this.close();
   }

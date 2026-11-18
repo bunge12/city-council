@@ -55,6 +55,35 @@ export function normalAt(terrain: Terrain, x: number, z: number, out: Float32Arr
   out[offset + 2] = -dhdz / len;
 }
 
+/**
+ * The height of the surface a chunk with `segments` quads per side draws at
+ * world (x, z): its two triangles per quad, split as `chunkGeometry` splits
+ * them, between vertices at `heightAt`. Where the terrain curves, a triangle
+ * stands above `heightAt` between its vertices, by most of a metre on rough
+ * ground, so anything that must stand clear of the drawn ground, such as a
+ * building's floor (issue #137), asks this and not `heightAt`.
+ */
+export function surfaceHeightAt(terrain: Terrain, x: number, z: number, segments: number): number {
+  const step = CHUNK_SIZE / segments;
+  const ci = Math.floor(x / CHUNK_SIZE);
+  const cj = Math.floor(z / CHUNK_SIZE);
+  const lx = x - ci * CHUNK_SIZE;
+  const lz = z - cj * CHUNK_SIZE;
+  const c = Math.min(segments - 1, Math.max(0, Math.floor(lx / step)));
+  const r = Math.min(segments - 1, Math.max(0, Math.floor(lz / step)));
+  const fx = lx / step - c;
+  const fz = lz / step - r;
+  const vx = ci * CHUNK_SIZE + c * step;
+  const vz = cj * CHUNK_SIZE + r * step;
+  // The quad's corners a (c, r), b (c + 1, r), d (c, r + 1), e (c + 1, r + 1), split along b to d.
+  const a = heightAt(terrain, vx, vz);
+  const b = heightAt(terrain, vx + step, vz);
+  const d = heightAt(terrain, vx, vz + step);
+  if (fx + fz <= 1) return a + (b - a) * fx + (d - a) * fz;
+  const e = heightAt(terrain, vx + step, vz + step);
+  return e + (d - e) * (1 - fx) + (b - e) * (1 - fz);
+}
+
 /** Builds the mesh for chunk (ci, cj) with `segments` quads per side. */
 export function buildChunk(terrain: Terrain, ci: number, cj: number, segments: number): ChunkGeometry {
   const n = segments + 1;

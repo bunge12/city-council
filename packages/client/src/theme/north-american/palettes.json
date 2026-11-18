@@ -1,6 +1,12 @@
 {
-  "_about": "The North American theme's palettes (issue M2-12, PRD \"Art direction\"): soft colours for each family of buildings, as sRGB hex. A building picks its wall, roof and trim colours from its type's family, by its id (render/building-tint.ts), so the same building has the same colours for every player and after every reload. `types` names each building type's family, by its id in the sim's buildings.json. `fixed` holds the colours no building tints. Presentation, not balance: no prices and no source years.",
-  "fixed": { "glass": "#41566b", "paving": "#8d8c86" },
+  "_about": "The North American theme's palettes (issue M2-12, PRD \"Art direction\"): soft colours for each family of buildings, as sRGB hex. A building picks its wall, roof and trim colours from its type's family, by its id (render/building-tint.ts), so the same building has the same colours for every player and after every reload. `types` names each building type's family, by its id in the sim's buildings.json. `fixed` holds the colours no building tints: the glass of skylights, the tints a window's glass takes, one per building, the sky the glass reflects, the blinds behind it, and paving. The glass is kept well lighter and bluer than the roads (issue #137), whose asphalt it was once mistaken for. Presentation, not balance: no prices and no source years.",
+  "fixed": {
+    "glass": "#6f8ca6",
+    "glassTints": ["#52789c", "#4f817e", "#80705a", "#6488ad"],
+    "sky": "#c3d6e6",
+    "blinds": "#e2d8c2",
+    "paving": "#8d8c86"
+  },
   "families": {
     "house": {
       "wall": ["#e8dcc4", "#c9d6d8", "#d9c2a6", "#f1ede2", "#b9c7b0", "#d8b9a7", "#a9b8c6", "#e3d29b"],

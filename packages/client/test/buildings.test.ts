@@ -6,7 +6,7 @@ import { BUILDING_TYPES, CHUNKS_PER_SIDE, CHUNK_SIZE, ZONING_BALANCE, type Build
 import { createBuildingLayer, type BuildingSource } from "../src/render/building-meshes";
 import { placeLot } from "../src/render/building-place";
 import { hashId, tintFor } from "../src/render/building-tint";
-import { MASK_SIDE, MASK_TREES } from "../src/render/road-geometry";
+import { MASK_GRASS, MASK_SIDE, MASK_TREES } from "../src/render/road-geometry";
 import { BUILDINGS, CELLS, CONSTRUCTION, ROADS } from "../src/render/config";
 import { FACADE, SURFACE } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
@@ -293,22 +293,59 @@ describe("the building layer", () => {
     b.dispose();
   });
 
-  it("keeps decoration off the lots it draws, and says which chunks they touch", () => {
+  it("keeps decoration off the lots it draws and trees off the ground round them, and says which chunks they touch", () => {
     const { source, put } = fakeSource();
     const chunk = put(1, 4004, 4004);
     const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
     expect(layer.lotMask(chunk)).toBeNull();
     layer.reset();
     settle(layer);
-    expect(layer.takeLotChunks()).toEqual([chunk]);
+    // The lot is 4 m from the chunk lines at x = 4000 and z = 4000, inside the trees' clearance, so the chunks over them are named too.
+    expect(BUILDINGS.treeClearance).toBeGreaterThan(4);
+    expect(layer.takeLotChunks().sort((a, b) => a - b)).toEqual([chunk - CHUNKS_PER_SIDE - 1, chunk - CHUNKS_PER_SIDE, chunk - 1, chunk]);
     expect(layer.takeLotChunks()).toEqual([]);
+    expect(layer.lotMask(chunk - 1)).not.toBeNull();
     const mask = layer.lotMask(chunk);
     expect(mask).not.toBeNull();
     const ci = chunk % CHUNKS_PER_SIDE;
     const cj = Math.floor(chunk / CHUNKS_PER_SIDE);
     const at = (x: number, z: number) => mask?.[Math.floor((z - cj * CHUNK_SIZE) / ROADS.maskCell) * MASK_SIDE + Math.floor((x - ci * CHUNK_SIZE) / ROADS.maskCell)] ?? 0;
     expect(at(4010, 4010) & MASK_TREES).toBe(MASK_TREES);
-    expect(at(4030, 4010)).toBe(0);
+    expect(at(4010, 4010) & MASK_GRASS).toBe(MASK_GRASS);
+    // The lot ends at x = 4020. Just past it, a tree's crown would reach the building (issue #137): no trees there, but grass.
+    expect(at(4023, 4010)).toBe(MASK_TREES);
+    expect(at(4020 + BUILDINGS.treeClearance + 3, 4010)).toBe(0);
+    layer.dispose();
+  });
+
+  it("keeps trees off the ground round a turned lot in a chunk none of its corners reach, and makes each mask once until a lot comes or goes", () => {
+    const { source, rows, put } = fakeSource();
+    const chunk = put(1, 4004, 4004);
+    // Turned 45 degrees about (4510, 4510), its corners 15 m out along the axes: the chunk over (4500, 4500) to the south-west holds
+    // none of them, but its corner is 7 m from the lot's middle, well inside the clearance.
+    const row = rows.get(1);
+    if (!row) throw new Error("no row");
+    row.corners = [4510, 4525, 4495, 4510, 4510, 4495, 4525, 4510];
+    const mid = 9 * CHUNKS_PER_SIDE + 9;
+    row.chunk = mid;
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    settle(layer, { x: 4510, z: 4510 });
+    expect(chunk).not.toBe(mid);
+    const corner = (9 - 1) * CHUNKS_PER_SIDE + 9 - 1;
+    expect(layer.takeLotChunks()).toContain(corner);
+    const mask = layer.lotMask(corner);
+    expect(mask).not.toBeNull();
+    // The cell at (4499, 4499) is about 4.6 m from the lot's nearest edge.
+    const at = (m: Uint8Array | null, c: number, x: number, z: number) =>
+      m?.[Math.floor((z - Math.floor(c / CHUNKS_PER_SIDE) * CHUNK_SIZE) / ROADS.maskCell) * MASK_SIDE + Math.floor((x - (c % CHUNKS_PER_SIDE) * CHUNK_SIZE) / ROADS.maskCell)] ?? 0;
+    expect(at(mask, corner, 4499, 4499)).toBe(MASK_TREES);
+    // Asked again with nothing changed, the same mask; a building gone, a new one.
+    expect(layer.lotMask(corner)).toBe(mask);
+    rows.delete(1);
+    layer.applyIds([1]);
+    settle(layer, { x: 4510, z: 4510 });
+    expect(layer.lotMask(corner)).toBeNull();
     layer.dispose();
   });
 });
