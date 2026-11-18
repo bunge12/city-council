@@ -9,7 +9,8 @@ import { groundAt } from "./road-fixtures";
 // in the city band. The
 // fixture city with every building type: the same district in all three
 // bands, screenshotted, at Balanced and at Low. The scale city's numbers
-// are in building-lod-scale.spec.ts and building-lod-memory.spec.ts.
+// are in building-lod-scale.spec.ts, building-lod-scale-balanced.spec.ts,
+// building-lod-overlay.spec.ts and building-lod-memory.spec.ts.
 
 declare const window: { cityCouncil: { view: Promise<{ buildingForm(chunk: number): Form | null }> } };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
