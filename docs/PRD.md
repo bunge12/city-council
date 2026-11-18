@@ -1471,8 +1471,8 @@ The performance targets are a floor and not a ceiling. Three presets let the gam
 
 | Preset | Aimed at | Frame rate at 500,000 residents | Adds |
 | --- | --- | --- | --- |
-| Low | Integrated graphics | 30 fps minimum | Flat lighting, no shadows, fewer cars drawn |
-| Balanced, the default | A recent laptop | 60 fps | Sun shadows near the camera, soft ambient shading |
+| Low | Integrated graphics, the Low reference class: a laptop of about 2019 with Intel UHD 620 class graphics and 8 GB of memory | 30 fps minimum | Flat lighting, no shadows, fewer cars drawn |
+| Balanced, the default | The Balanced reference class: an Apple M1 laptop or a desktop with a GTX 1660 class card | 60 fps | Sun shadows near the camera, soft ambient shading |
 | High | A discrete GPU | 60 fps | Longer shadow range, water reflections, more street detail |
 
 The game picks a preset on first run from a short benchmark, and the player can change it.
