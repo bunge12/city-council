@@ -185,14 +185,15 @@ export function typesFor(zone: number, density: number): readonly BuildingType[]
   return TYPES_BY_ZONE.get(zone)?.get(density) ?? NO_TYPES;
 }
 
-const NO_TYPES: readonly BuildingType[] = [];
+// Frozen: every grower draw reads these, and a list changed by a caller would change every city after it.
+const NO_TYPES: readonly BuildingType[] = Object.freeze([]);
 
 /** `typesFor`'s lists by zone, then density, made once: the grower asks many times a draw (issue 166). */
 const TYPES_BY_ZONE = new Map<number, Map<number, readonly BuildingType[]>>();
 for (const t of BUILDING_TYPES) {
   const byDensity = TYPES_BY_ZONE.get(t.zoneNumber) ?? new Map<number, readonly BuildingType[]>();
   TYPES_BY_ZONE.set(t.zoneNumber, byDensity);
-  byDensity.set(t.density, [...(byDensity.get(t.density) ?? []), t]);
+  byDensity.set(t.density, Object.freeze([...(byDensity.get(t.density) ?? []), t]));
 }
 
 /** The widest lot of any kind, in cells: how far along a strip the lot finder looks. */

@@ -362,10 +362,17 @@ test("soak: one hour of game time at 4x", async () => {
    * collection paused (issue 166). The page's collections run in its own
    * worker and pause no step.
    */
-  const collections: { start: number; ms: number; major: boolean }[] = [];
+  const collections: { start: number; ms: number; kind: string }[] = [];
+  const GC_KINDS: Record<number, string> = {
+    [constants.NODE_PERFORMANCE_GC_MAJOR]: "major",
+    [constants.NODE_PERFORMANCE_GC_MINOR]: "minor",
+    [constants.NODE_PERFORMANCE_GC_INCREMENTAL]: "incremental",
+    [constants.NODE_PERFORMANCE_GC_WEAKCB]: "weak callbacks",
+  };
   const takeCollections = (list: { getEntries(): readonly { startTime: number; duration: number; detail?: unknown }[] }) => {
     for (const e of list.getEntries()) {
-      collections.push({ start: e.startTime, ms: e.duration, major: (e.detail as { kind?: number } | undefined)?.kind === constants.NODE_PERFORMANCE_GC_MAJOR });
+      const kind = (e.detail as { kind?: number } | undefined)?.kind ?? 0;
+      collections.push({ start: e.startTime, ms: e.duration, kind: GC_KINDS[kind] ?? "other" });
     }
   };
   const gcObserver = new PerformanceObserver(takeCollections);
@@ -508,9 +515,9 @@ test("soak: one hour of game time at 4x", async () => {
   const wallMs = performance.now() - wallStart;
   takeCollections({ getEntries: () => gcObserver.takeRecords() });
   gcObserver.disconnect();
-  /** The collections that ran during a pump, as "major 7.1 ms". */
+  /** The collections that ran during a pump, as "major 7.1 ms": the step's, or the delta's sent after it in the same pump. */
   const pausedBy = (p: { start: number; end: number }): string[] =>
-    collections.filter((c) => c.start < p.end && c.start + c.ms > p.start).map((c) => `${c.major ? "major" : "minor"} ${ms(c.ms)} ms`);
+    collections.filter((c) => c.start < p.end && c.start + c.ms > p.start).map((c) => `${c.kind} ${ms(c.ms)} ms`);
   for (const p of slowPumps) if (p.step) p.step.gc = pausedBy(p);
   const fileStart = performance.now();
   const fileBytes = host.snapshotBytes().byteLength;
@@ -627,8 +634,8 @@ test("soak: one hour of game time at 4x", async () => {
     slowSteps,
     // Collections on the thread that hosts the sim. A major one pauses whichever step is running.
     gc: (() => {
-      const majors = collections.filter((c) => c.major).map((c) => c.ms).sort((x, y) => x - y);
-      return { minor: collections.length - majors.length, major: majors.length, majorMedianMs: ms(quantile(Float64Array.from(majors), 0.5)), majorMaxMs: ms(majors.at(-1) ?? 0) };
+      const majors = collections.filter((c) => c.kind === "major").map((c) => c.ms).sort((x, y) => x - y);
+      return { minor: collections.filter((c) => c.kind === "minor").length, major: majors.length, other: collections.length - majors.length - collections.filter((c) => c.kind === "minor").length, majorMedianMs: ms(quantile(Float64Array.from(majors), 0.5)), majorMaxMs: ms(majors.at(-1) ?? 0) };
     })(),
     checks: checks.map((c) => ({ ...c, medianMs: ms(c.medianMs), maxMs: ms(c.maxMs) })),
     snapshot: {
