@@ -44,7 +44,7 @@ import v12Fixture from "./fixtures/snapshots/v12.json";
 import v13Fixture from "./fixtures/snapshots/v13.json";
 import v14Fixture from "./fixtures/snapshots/v14.json";
 import v15Fixture from "./fixtures/snapshots/v15.json";
-import { snapshotChecksum } from "../src/snapshot";
+import { serializeStepsOf, snapshotChecksum, type SnapshotSteps } from "../src/snapshot";
 import { checkConnections } from "../src/roads/connections";
 import { heldIds } from "../src/undo";
 import { addNode, addSegment, checkRoadNetwork, isSegment, removeSegment, segmentsAt } from "../src/roads/network";
@@ -678,9 +678,41 @@ describe("snapshots with a road network", () => {
         parts++;
         part = steps.next();
       }
-      // Find the arrays, write the JSON, lay out the bytes, then the checksum.
-      expect(parts).toBe(3);
+      // Find the arrays, write the JSON, then lay out the bytes and take
+      // their checksum, which for a city this small fits in one part.
+      expect(parts).toBe(2);
       expect(toHex(part.value)).toBe(toHex(whole));
+    }
+  });
+
+  it("splits the layout and the checksum into parts of a few bytes each, to the same bytes (issue #204)", () => {
+    const state = withRoads();
+    const run = (steps: SnapshotSteps): { parts: number; bytes: Uint8Array } => {
+      let parts = 0;
+      for (;;) {
+        const part = steps.next();
+        if (part.done) return { parts, bytes: part.value };
+        parts++;
+      }
+    };
+    const into: SnapshotBuffer = { buffer: null };
+    for (const [pagedLog, whole] of [
+      [null, serializeDetached(state)],
+      [[], serialize(state)],
+    ] as const) {
+      let lastParts = Infinity;
+      // Sizes that split a section anywhere: a word, an odd number of words, part of the JSON.
+      for (const partBytes of [1, 8, 24, 40, 1000, 1 << 20]) {
+        const fresh = run(serializeStepsOf(state, pagedLog, partBytes));
+        expect(toHex(fresh.bytes), `${partBytes} bytes a part`).toBe(toHex(whole));
+        const kept = run(serializeStepsOf(state, pagedLog, partBytes, into));
+        expect(toHex(kept.bytes), `${partBytes} bytes a part, into a kept buffer`).toBe(toHex(whole));
+        expect(kept.parts).toBe(fresh.parts);
+        // Fewer parts as each holds more, and never one laying out more than its share.
+        expect(fresh.parts).toBeLessThanOrEqual(lastParts);
+        lastParts = fresh.parts;
+      }
+      expect(run(serializeStepsOf(state, pagedLog, 8)).parts).toBeGreaterThan(whole.byteLength / 16);
     }
   });
 

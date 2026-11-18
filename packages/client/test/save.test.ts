@@ -405,8 +405,10 @@ describe("saving and loading a hosted city", () => {
     command(3, "SetSpeed", { speed: 4 });
     run(2000);
     await saved;
-    // A pause the length of a pump after each part but the last.
-    expect(timers.mock.calls.filter(([, ms]) => ms === PUMP_INTERVAL_MS)).toHaveLength(3);
+    // A pause the length of a pump after each part but the last: the arrays
+    // found, the JSON written, then the bytes laid out and summed, which for
+    // a city this small fit in one part (issue #204).
+    expect(timers.mock.calls.filter(([, ms]) => ms === PUMP_INTERVAL_MS)).toHaveLength(2);
     timers.mockRestore();
     expect(steps).toHaveBeenCalledTimes(1);
     expect(host.tick).toBeGreaterThan(tick);
