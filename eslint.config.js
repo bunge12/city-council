@@ -15,6 +15,9 @@ const NO_MATH_RANDOM =
 const UI_IS_A_VIEW =
   "UI components read sim state through the SimMirror's read-only copy and change it only by sending commands. See CLAUDE.md rules 2 and 8.";
 
+const RENDER_IS_A_VIEW =
+  "Render code draws the SimMirror's read-only copy and never writes state or sends a command, so no graphics preset or animation can change the sim. See CLAUDE.md rules 2 and 8.";
+
 /** Sim exports that make, write or step a state. UI components may not import them. */
 const UI_WRITES_STATE = [
   "SimState",
@@ -183,6 +186,51 @@ export default tseslint.config(
             },
           ],
         },
+      ],
+    },
+  },
+
+  // Rules 2 and 8 for the renderer (issue #225): what it draws cannot change
+  // the sim, so the state hash is the same at every graphics preset and with
+  // the construction animation on or off. It may read the mirror's types but
+  // not import the mirror itself, the worker's host or the save code, or
+  // anything from the sim that writes a state, and it calls no
+  // `sendCommand`. This block repeats the entry rule because a later
+  // no-restricted-imports setting replaces an earlier one.
+  {
+    files: ["packages/client/src/render/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@city-council/sim",
+              importNames: UI_WRITES_STATE,
+              message: RENDER_IS_A_VIEW,
+            },
+          ],
+          patterns: [
+            {
+              group: ["@city-council/sim/*", "**/sim", "**/sim/**", "!@city-council/sim"],
+              message: SIM_ENTRY_ONLY,
+            },
+            {
+              group: ["**/protocol/host", "**/protocol/worker", "**/protocol/transport", "**/save/*", "**/tools/*", "!**/tools/snap"],
+              message: RENDER_IS_A_VIEW,
+            },
+            {
+              group: ["**/protocol/mirror"],
+              importNames: ["SimMirror"],
+              message: RENDER_IS_A_VIEW,
+            },
+          ],
+        },
+      ],
+      "no-restricted-properties": [
+        "error",
+        { property: "sendCommand", message: RENDER_IS_A_VIEW },
+        { property: "sendCommandSettled", message: RENDER_IS_A_VIEW },
       ],
     },
   },

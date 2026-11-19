@@ -1,7 +1,11 @@
-// Prints the chromium project's spec files for one CI runner, so that every
-// runner gets about the same minutes of tests.
+// Prints one Playwright project's spec files for one CI runner, so that
+// every runner gets about the same minutes of tests.
 //
-//   node scripts/e2e-shard.mjs 3/8
+//   node scripts/e2e-shard.mjs 3/6
+//   node scripts/e2e-shard.mjs 2/3 --project perf
+//
+// The project is chromium unless --project names perf or evidence (issue
+// #225), whose files are the lists of those names in e2e/projects.json.
 //
 // Playwright's own `--shard` deals out the same number of tests to each
 // runner, whatever they take. On CI a test that draws the 30,000 segment
@@ -11,7 +15,7 @@
 // each to the runner with the least so far. Every file goes to exactly one
 // runner, and a new file, not yet timed, counts as `defaultSeconds`.
 //
-// With --list it prints every runner's files and minutes instead.
+// With --list <total> it prints every runner's files and minutes instead.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { relative } from "node:path";
@@ -33,10 +37,28 @@ if (stray.length > 0) {
   process.exit(1);
 }
 
-/** The chromium project's spec files: every one the other projects do not run. */
-const files = readdirSync(new URL("e2e/", root))
-  .filter((f) => f.endsWith(".spec.ts") && !walkthrough.test(f) && !projects.roads.includes(f))
-  .sort();
+const args = process.argv.slice(2);
+const at = args.indexOf("--project");
+const project = at >= 0 ? args.splice(at, 2)[1] : "chromium";
+if (!["chromium", "perf", "evidence"].includes(project ?? "")) {
+  console.error(`--project takes chromium, perf or evidence, not ${project}`);
+  process.exit(1);
+}
+
+const specFiles = readdirSync(new URL("e2e/", root)).filter((f) => f.endsWith(".spec.ts"));
+const listed = [...projects.perf, ...projects.evidence];
+const missing = listed.filter((f) => !specFiles.includes(f));
+if (missing.length > 0) {
+  console.error(`e2e/projects.json lists spec files that do not exist: ${missing.join(", ")}`);
+  process.exit(1);
+}
+
+/** The project's spec files. The chromium project runs every one the other projects do not. */
+const files = (
+  project === "chromium"
+    ? specFiles.filter((f) => !walkthrough.test(f) && !projects.roads.includes(f) && !listed.includes(f))
+    : projects[project]
+).slice().sort();
 
 /** Seconds each file is expected to take on a CI runner. */
 const seconds = (f) => projects.seconds[f] ?? projects.defaultSeconds;
@@ -55,16 +77,16 @@ function deal(total) {
   return runners;
 }
 
-const arg = process.argv[2] ?? "";
+const arg = args[0] ?? "";
 if (arg === "--list") {
-  const total = Number(process.argv[3] ?? 8);
+  const total = Number(args[1] ?? 6);
   deal(total).forEach((r, i) => console.log(`${i + 1}/${total} ${Math.round(r.seconds / 6) / 10} min: ${r.files.join(" ")}`));
 } else {
   const match = /^(\d+)\/(\d+)$/.exec(arg);
   const current = Number(match?.[1]);
   const total = Number(match?.[2]);
   if (!match || current < 1 || current > total) {
-    console.error("usage: node scripts/e2e-shard.mjs <current>/<total>, for example 3/8, or --list <total>");
+    console.error("usage: node scripts/e2e-shard.mjs <current>/<total> [--project chromium|perf|evidence], for example 3/6, or --list <total>");
     process.exit(1);
   }
   const { files: mine } = deal(total)[current - 1];

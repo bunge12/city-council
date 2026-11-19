@@ -8,7 +8,9 @@ import { groundAt } from "./road-fixtures";
 // slabs and podiums, and the street of every type, drawn close up and from
 // further out, for the pull request: glass that does not read as asphalt,
 // no roof to see into, no tree through a wall, and towers that differ.
-// On WebGL 2, Balanced, in the chromium project.
+// On WebGL 2, Balanced, in the evidence project (issue #225), which takes
+// pictures and does not gate a merge. That every building is drawn, in many
+// models, is held in the required check by downtown.spec.ts.
 
 type Vec3 = [number, number, number];
 interface BuildingStats {

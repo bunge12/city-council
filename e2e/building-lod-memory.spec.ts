@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { heightAt } from "../packages/sim/src/index";
 import { openCity, scaleCity, setPose, settle, stats } from "./building-lod-helpers";
-import { memory } from "./measure";
+import { memory, perfFigures } from "./measure";
 
 // Issue M2-13: flying across the map does not grow memory without bound.
 // The scale city filled with buildings, flown round a loop at street height
@@ -38,6 +38,11 @@ test("flying a loop twice ends with no more memory than flying it once", async (
   const second = await fly();
   const report = { stops: loop.length, first, second };
   console.log(`M2-13 flying a loop twice: ${JSON.stringify(report, null, 2)}`);
+  perfFigures("building-lod-memory", "scale town, flying a loop twice", {
+    "page heap after one loop (MB)": first.memory.pageMb,
+    "page heap after two loops (MB)": second.memory.pageMb,
+    "geometries after two loops": second.geometries,
+  });
   await testInfo.attach("loop report", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
   // The same stops, so the same chunks in full at the end of each loop.
   expect(second.full).toEqual(first.full);

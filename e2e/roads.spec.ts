@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { decodePng, type Image } from "./png";
-import { CURVED_JUNCTION, FIVE_WAY, SIGNAL_CROSS, YIELD_TEE, curvedCity, decorationCity, fixtureCity, groundAt, scaleCity } from "./road-fixtures";
+import { CURVED_JUNCTION, FIVE_WAY, SIGNAL_CROSS, YIELD_TEE, curvedCity, decorationCity, fixtureCity, groundAt } from "./road-fixtures";
 
 // Issue M1-06: roads in the mirror appear on the map. It runs in the `roads`
 // project, headed with WebGPU on where the browser has an adapter (see
@@ -9,7 +9,8 @@ import { CURVED_JUNCTION, FIVE_WAY, SIGNAL_CROSS, YIELD_TEE, curvedCity, decorat
 // compared with the same screenshots.
 //
 // The city comes from road-fixtures.ts as a city file, so every run draws
-// the same roads on the same map.
+// the same roads on the same map. The frame time of a 30,000 segment
+// network is roads-scale.spec.ts, in the perf project (issue #225).
 
 type Vec3 = [number, number, number];
 interface RoadStats {
@@ -279,52 +280,3 @@ for (const { name, query } of BACKENDS) {
     expect(results.filter((r) => !r.endsWith(": 1")), results.join("\n")).toEqual([]);
   });
 }
-
-/** Mean time between `frames` animation frames, in ms. */
-async function frameTime(page: Page, frames: number): Promise<number> {
-  return page.evaluate(async (frames) => {
-    const times: number[] = [];
-    await new Promise<void>((resolve) => {
-      let last = -1;
-      const tick = (now: number) => {
-        if (last >= 0) times.push(now - last);
-        last = now;
-        if (times.length < frames) requestAnimationFrame(() => tick(performance.now()));
-        else resolve();
-      };
-      requestAnimationFrame(() => tick(performance.now()));
-    });
-    return times.reduce((a, b) => a + b, 0) / times.length;
-  }, frames);
-}
-declare const performance: { now(): number };
-
-test("a 30,000 segment network in the city band", async ({ page }, testInfo: TestInfo) => {
-  test.setTimeout(300_000);
-  const whole: { position: Vec3; target: Vec3 } = { position: [6000, 8400, 15_800], target: [6000, 0, 5600] };
-  const query = "?webgl";
-
-  await openCity(page, query, "Empty", scaleCity(0));
-  await setPose(page, whole.position, whole.target);
-  await settle(page);
-  const empty = await frameTime(page, 120);
-
-  const backend = await openCity(page, query, "Thirty thousand", scaleCity(30_000));
-  const stats = await roadStats(page);
-  await setPose(page, whole.position, whole.target);
-  await settle(page);
-  expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe("city");
-  const roads = await frameTime(page, 120);
-  const report = { backend, emptyFrameMs: empty, roadsFrameMs: roads, buildMs: stats.lastBuildMs, chunks: stats.chunks, segmentPieces: stats.segmentPieces };
-  console.log(`30,000 segments, city band: ${JSON.stringify(report)}`);
-  await testInfo.attach("frame times", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
-  await attach(testInfo, "30,000 segments, city band", await canvasShot(page));
-  expect(stats.segmentPieces).toBeGreaterThan(30_000);
-  // A machine with a GPU draws this at the display's rate. CI runners have
-  // no GPU and draw in software, where the roads add 45 to 55 percent to the
-  // empty map's frame from one run to the next, so a tight ratio only
-  // measures the runner. There the check only catches a gross regression,
-  // such as roads drawn without merged chunk meshes: the frame stays under
-  // three times the empty map's. The numbers are logged above either way.
-  expect(roads).toBeLessThan(Math.max(1000 / 55, empty * 3));
-});

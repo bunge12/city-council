@@ -22,7 +22,9 @@ import { SEED, buildRoads, groundAt } from "./road-fixtures";
 // north block is zoned C3 and the south one I3 on both strips, and each
 // takes a big building across the whole block from one street to the next,
 // with lots on one strip beside it. Built in Node with the sim and imported
-// as a city file, like the buildings walkthrough.
+// as a city file, like the buildings walkthrough. In the evidence project
+// (issue #225): the pictures are for the pull request, and the lots are the
+// sim's unit tests (packages/sim/test/through-lots.test.ts).
 
 type Vec3 = [number, number, number];
 declare const window: {
