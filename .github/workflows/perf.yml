@@ -96,8 +96,12 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.plan.outputs.playwright }}-noble
       options: --ipc=host
-    # Planned at about ten minutes a runner; a slow runner takes twice that
-    # and a failed test runs again.
+    # Planned at about ten minutes a runner; a slow runner takes twice that.
+    # The perf project does not retry; evidence does. Playwright stops the run
+    # at three times its plan (--global-timeout below), so a run that hangs
+    # still ends with its report. scripts/check-e2e-timeouts.mjs, in `pnpm
+    # lint`, reads this limit and fails on a test allowed more than a third
+    # of it (issue #228).
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -117,11 +121,18 @@ jobs:
           PROJECT: ${{ matrix.project }}
           FILES: ${{ matrix.files }}
           E2E_DEV_SERVER_ONLY: "1"
+          # Which runner this was and its share, for e2e-times.json.
+          E2E_RUNNER: ${{ matrix.id }}
+          E2E_SHARD: ${{ matrix.files }}
         run: |
-          files=$(node scripts/e2e-shard.mjs "$FILES" --project "$PROJECT")
+          files=$(node scripts/e2e-shard.mjs "$FILES" --project "$PROJECT" --planned-out e2e-planned.txt)
           echo "Spec files: $files"
+          E2E_PLANNED_SECONDS=$(cat e2e-planned.txt)
+          export E2E_PLANNED_SECONDS
+          limit=$(node scripts/e2e-shard.mjs "$FILES" --project "$PROJECT" --global-timeout)
+          echo "Playwright stops this run after $((limit / 60000)) minutes."
           status=0
-          xvfb-run -a pnpm e2e --project "$PROJECT" --no-deps --workers=1 $files || status=$?
+          xvfb-run -a pnpm e2e --project "$PROJECT" --no-deps --workers=1 --global-timeout="$limit" $files || status=$?
           # After the run: Playwright empties test-results when it starts.
           mkdir -p test-results/perf
           node -e "const os = require('os'); const c = os.cpus(); console.log(c.length + ' x ' + c[0].model)" > test-results/perf/machine.txt
@@ -131,6 +142,15 @@ jobs:
         with:
           name: perf-figures-${{ matrix.id }}
           path: test-results/perf
+          if-no-files-found: ignore
+          retention-days: 30
+      # Its CPU and each file's seconds, as in ci.yml (issue #229).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        continue-on-error: true
+        with:
+          name: e2e-times-${{ matrix.id }}
+          path: e2e-times.json
           if-no-files-found: ignore
           retention-days: 30
       # The report holds every test's screenshots and figures, passed or not.
@@ -143,6 +163,30 @@ jobs:
             test-results
           if-no-files-found: ignore
           retention-days: 14
+
+  # Each runner's minutes against its plan, and every test that needed a
+  # retry, as in ci.yml's `e2e-summary`.
+  e2e-summary:
+    needs: e2e
+    if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh run download "$RUN_ID" --pattern 'e2e-times-*' --dir e2e-times || echo "No e2e job uploaded its times."
+          mkdir -p e2e-times
+          node scripts/e2e-report.mjs e2e-times | tee -a "$GITHUB_STEP_SUMMARY"
 
   # This run's figures next to those of the last perf run on main that wrote
   # any, in the job summary.

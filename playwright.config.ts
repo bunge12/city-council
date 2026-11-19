@@ -42,12 +42,19 @@ export default defineConfig({
   // close to Playwright's 30 s default when two workers share the machine.
   timeout: 60_000,
   retries: isCI ? 1 : 0,
-  // In CI, file-times-reporter.ts prints the runner's CPU and each spec
-  // file's seconds, for e2e/projects.json (see scripts/e2e-timings.mjs).
+  // In CI, file-times-reporter.ts prints the runner's CPU and writes it,
+  // each file's and test's seconds and each retried test to e2e-times.json,
+  // which the CI jobs upload (issue #229, scripts/e2e-timings.mjs).
   reporter: isCI ? [["list"], ["html", { open: "never" }], ["./e2e/file-times-reporter.ts"]] : "list",
   use: {
     baseURL: "http://localhost:5173",
-    trace: "off",
+    // A test that fails on its first attempt keeps its trace, and every
+    // failure keeps a screenshot, both under test-results/ (issue #228). The
+    // trace has the steps, console, network and sources, but no screenshots
+    // or DOM snapshots: with snapshots grid-tool.spec.ts took 2.1 minutes on
+    // two cores instead of 1.4, without them 1.5.
+    trace: { mode: "retain-on-first-failure", screenshots: false, snapshots: false },
+    screenshot: "only-on-failure",
     // The Low preset kept, and per project below the test switch (e2e/browser-state.ts).
     storageState: PLAYER_STATE,
   },
@@ -66,9 +73,10 @@ export default defineConfig({
       // walkthrough, against the dev server. It starts after the chromium
       // project, since software WebGPU takes most of a CI runner's CPU.
       // In CI each project has runners of its own (see
-      // .github/workflows/ci.yml). There the tests of this one file are
-      // split over three of them with `--shard`, which only splits a file
-      // when the project is fully parallel, and each runs one worker.
+      // .github/workflows/ci.yml). There its tests are dealt out to three of
+      // them by scripts/e2e-shard.mjs, by each test's seconds, and each runs
+      // one worker. Fully parallel, so that the tests of one file can run
+      // apart.
       name: "roads",
       // With SCALE_WEBGPU set, the scale check runs here too, for its WebGPU numbers (see scale.spec.ts).
       testMatch: process.env["SCALE_WEBGPU"] ? [...projectFiles.roads, "scale.spec.ts"] : projectFiles.roads,
@@ -114,6 +122,9 @@ export default defineConfig({
       // `pnpm e2e --project perf --no-deps`. With SCALE_WEBGPU set, the
       // scale check runs in the roads project instead.
       name: "perf",
+      // A perf test that timed out on a slow runner times out again on its
+      // retry, and its figures come from a runner that was already slow.
+      retries: 0,
       testMatch: process.env["SCALE_WEBGPU"] ? projectFiles.perf.filter((f) => f !== "scale.spec.ts") : projectFiles.perf,
       dependencies: remoteBase ? [] : ["walkthrough"],
       // Every frame drawn at the real settings, and no autosave in a measurement (issue #226).

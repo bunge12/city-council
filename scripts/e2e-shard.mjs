@@ -1,29 +1,45 @@
-// Prints one Playwright project's spec files for one CI runner, so that
-// every runner gets about the same minutes of tests.
+// Prints what one CI runner of a Playwright project runs, so that every
+// runner gets about the same minutes of tests.
 //
 //   node scripts/e2e-shard.mjs 3/6
 //   node scripts/e2e-shard.mjs 2/3 --project perf
+//   node scripts/e2e-shard.mjs 1/3 --project roads --planned-out plan.txt
 //
-// The project is chromium unless --project names perf or evidence (issue
-// #225), whose files are the lists of those names in e2e/projects.json.
+// The project is chromium unless --project names roads, perf or evidence.
+// For chromium, perf and evidence it prints spec files. For roads, whose
+// three files go to three runners, it writes the runner's tests to
+// e2e-test-list.txt and prints `--test-list e2e-test-list.txt`.
 //
 // Playwright's own `--shard` deals out the same number of tests to each
 // runner, whatever they take. On CI a test that draws the 30,000 segment
 // city takes three minutes and a replay test a second, so its shards ran
-// from one minute to seventeen. This deals out whole files by the seconds
-// each took on CI (`seconds` in e2e/projects.json), the longest first,
-// each to the runner with the least so far. Every file goes to exactly one
-// runner, and a new file, not yet timed, counts as `defaultSeconds`.
+// from one minute to seventeen. This deals out files or tests by the
+// seconds each took on CI (`seconds` and `testSeconds` in e2e/projects.json),
+// the longest first, each to the runner with the least so far. Every one
+// goes to exactly one runner. One with no seconds fails the job, with a
+// message that says what to add (issue #229).
 //
-// With --list <total> it prints every runner's files and minutes instead.
+// With --planned-out <file> it writes the runner's planned seconds there,
+// for the run summary (scripts/e2e-report.mjs).
+//
+// With --list <total> it prints every runner's share and minutes instead.
+//
+// With --global-timeout it prints the milliseconds to give that runner's
+// Playwright run as --global-timeout instead of its share (issue #228):
+// `timesPlan` times its planned seconds and no less than `minMinutes`, from
+// `globalTimeout` in e2e/projects.json, and no less than its plan plus
+// every attempt of its longest test, so a test that times out still gets
+// its retry (scripts/e2e-limits.mjs).
+//
+//   node scripts/e2e-shard.mjs 3/6 --global-timeout
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { attemptsOf, configTimeoutMs, globalTimeoutMs, longestTestMs } from "./e2e-limits.mjs";
+import { countTestList, dealtProjects, deal, plan, readProjects, root, specFiles } from "./e2e-plan.mjs";
 
-const root = new URL("../", import.meta.url);
-const projects = JSON.parse(readFileSync(new URL("e2e/projects.json", root), "utf8"));
-const walkthrough = new RegExp(projects.walkthrough);
+const projects = readProjects();
 
 // Playwright finds tests in any `*.spec.*` or `*.test.*` file under e2e/,
 // in subfolders too. This deals out only `e2e/*.spec.ts`, so any other
@@ -38,62 +54,78 @@ if (stray.length > 0) {
 }
 
 const args = process.argv.slice(2);
-const at = args.indexOf("--project");
-const project = at >= 0 ? args.splice(at, 2)[1] : "chromium";
-if (!["chromium", "perf", "evidence"].includes(project ?? "")) {
-  console.error(`--project takes chromium, perf or evidence, not ${project}`);
+/** Takes `--name value` out of args. */
+function option(name) {
+  const at = args.indexOf(name);
+  return at >= 0 ? args.splice(at, 2)[1] : undefined;
+}
+const timeoutAt = args.indexOf("--global-timeout");
+const globalTimeout = timeoutAt >= 0;
+if (globalTimeout) args.splice(timeoutAt, 1);
+const project = option("--project") ?? "chromium";
+const plannedOut = option("--planned-out");
+if (!dealtProjects.includes(project)) {
+  console.error(`--project takes ${dealtProjects.join(", ")}, not ${project}`);
   process.exit(1);
 }
 
-const specFiles = readdirSync(new URL("e2e/", root)).filter((f) => f.endsWith(".spec.ts"));
-const listed = [...projects.perf, ...projects.evidence];
-const missing = listed.filter((f) => !specFiles.includes(f));
+const listed = [...projects.roads, ...projects.perf, ...projects.evidence];
+const missing = listed.filter((f) => !specFiles().includes(f));
 if (missing.length > 0) {
   console.error(`e2e/projects.json lists spec files that do not exist: ${missing.join(", ")}`);
   process.exit(1);
 }
 
-/** The project's spec files. The chromium project runs every one the other projects do not. */
-const files = (
-  project === "chromium"
-    ? specFiles.filter((f) => !walkthrough.test(f) && !projects.roads.includes(f) && !listed.includes(f))
-    : projects[project]
-).slice().sort();
-
-/** Seconds each file is expected to take on a CI runner. */
-const seconds = (f) => projects.seconds[f] ?? projects.defaultSeconds;
-
-/** Files dealt to `total` runners, longest first, each to the runner with the least. Ties go by name and by runner number, so every runner computes the same deal. */
-function deal(total) {
-  const runners = Array.from({ length: total }, () => ({ files: [], seconds: 0 }));
-  const order = files.slice().sort((a, b) => seconds(b) - seconds(a) || (a < b ? -1 : 1));
-  for (const f of order) {
-    let least = runners[0];
-    for (const r of runners) if (r.seconds < least.seconds) least = r;
-    least.files.push(f);
-    least.seconds += seconds(f);
-  }
-  for (const r of runners) r.files.sort();
-  return runners;
+let planned;
+try {
+  planned = plan(projects, project);
+} catch (e) {
+  console.error(e instanceof Error ? e.message : String(e));
+  process.exit(1);
 }
+const { items, secondsOf } = planned;
 
 const arg = args[0] ?? "";
 if (arg === "--list") {
   const total = Number(args[1] ?? 6);
-  deal(total).forEach((r, i) => console.log(`${i + 1}/${total} ${Math.round(r.seconds / 6) / 10} min: ${r.files.join(" ")}`));
+  deal(items, secondsOf, total).forEach((r, i) => console.log(`${i + 1}/${total} ${Math.round(r.seconds / 6) / 10} min: ${r.items.join(project === "roads" ? "\n    " : " ")}`));
 } else {
   const match = /^(\d+)\/(\d+)$/.exec(arg);
   const current = Number(match?.[1]);
   const total = Number(match?.[2]);
   if (!match || current < 1 || current > total) {
-    console.error("usage: node scripts/e2e-shard.mjs <current>/<total> [--project chromium|perf|evidence], for example 3/6, or --list <total>");
+    console.error(`usage: node scripts/e2e-shard.mjs <current>/<total> [--project ${dealtProjects.join("|")}] [--planned-out <file>] [--global-timeout], for example 3/6, or --list <total>`);
     process.exit(1);
   }
-  const { files: mine } = deal(total)[current - 1];
-  // No files would mean no filter, and Playwright would run them all.
-  if (mine.length === 0) {
-    console.error(`runner ${current} of ${total} has no spec files: use fewer runners`);
+  const mine = deal(items, secondsOf, total)[current - 1];
+  // Nothing would mean no filter, and Playwright would run it all.
+  if (mine.items.length === 0) {
+    console.error(`runner ${current} of ${total} has nothing to run: use fewer runners`);
     process.exit(1);
   }
-  console.log(mine.map((f) => `e2e/${f}`).join(" "));
+  if (plannedOut) writeFileSync(plannedOut, `${Math.round(mine.seconds)}\n`);
+  if (globalTimeout) {
+    // A roads item is `file › titles`; the limits are set per file.
+    const files = [...new Set(mine.items.map((i) => i.split(" › ")[0]))];
+    const defaultMs = configTimeoutMs(readFileSync(new URL("playwright.config.ts", root), "utf8"));
+    const longest = Math.max(...files.map((f) => longestTestMs(readFileSync(new URL(`e2e/${f}`, root), "utf8"), defaultMs)));
+    if (!Number.isFinite(longest)) {
+      console.error("a spec file sets a time limit that cannot be read: run node scripts/check-e2e-timeouts.mjs");
+      process.exit(1);
+    }
+    console.log(globalTimeoutMs(projects, mine.seconds, longest, attemptsOf(project)));
+  } else if (project === "roads") {
+    // Playwright's test list: `[project] › file › titles`, the file under e2e/.
+    writeFileSync("e2e-test-list.txt", mine.items.map((t) => `[roads] › ${t}\n`).join(""));
+    // A title Playwright's list format cannot hold (one with a `›` in it,
+    // say) would match nothing, and the runner would pass without it.
+    const matched = countTestList("e2e-test-list.txt");
+    if (matched !== mine.items.length) {
+      console.error(`Playwright selects ${matched} of this runner's ${mine.items.length} roads tests from e2e-test-list.txt: a title it cannot read back? ${mine.items.join(" | ")}`);
+      process.exit(1);
+    }
+    console.log("--test-list e2e-test-list.txt");
+  } else {
+    console.log(mine.items.map((f) => `e2e/${f}`).join(" "));
+  }
 }
