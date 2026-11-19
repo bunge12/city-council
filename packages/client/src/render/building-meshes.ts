@@ -123,7 +123,9 @@ export interface BuildingStats {
   /**
    * Instances written and chunks rebuilt by the last change, counted from
    * when chunks started waiting until none were left, and in all since the
-   * layer was made. A chunk is rebuilt when every building in it is placed
+   * layer was made. The writes of a frame that read chunks include the
+   * instances its forms wrote, so a building that comes to a chunk with
+   * none, written when that chunk is filled, is counted. A chunk is rebuilt when every building in it is placed
    * again, after a snapshot or a change of its roads; a delta that only
    * adds or removes buildings rebuilds none. `lastBuildMs` is the time the
    * last change took, summed over the frames it was spread across.
@@ -1637,11 +1639,10 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
           done++;
         }
       }
-      if (wasDirty) {
-        batchWrites += writes - writesBefore;
-        batchMs += performance.now() - start;
-      }
+      if (wasDirty) batchMs += performance.now() - start;
       forms(camera, view, start, budgetMs);
+      // A building that comes to a chunk with none is written when the forms fill that chunk, after the reads, so the writes count until here.
+      if (wasDirty) batchWrites += writes - writesBefore;
       finishConstruction();
       stats = {
         ...stats,
