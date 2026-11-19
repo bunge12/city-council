@@ -6,8 +6,8 @@ name: Nightly
 # than the spread between runners (issue #154). deploy.yml holds it after
 # every push to main; this run catches a slow load on days with no push. It
 # also holds the zone tool's 50 ms task budget on the scale town, which pull
-# request CI prints for the same reason (issue #163). A failure here is
-# reported and blocks nothing.
+# request CI prints for the same reason (issue #163). A failure here opens an
+# issue (the `report` job below, issue #233) and blocks nothing.
 
 on:
   schedule:
@@ -82,3 +82,27 @@ jobs:
           name: zone-open-nightly
           path: test-results/zone-open-report.json
           retention-days: 14
+
+  # When a job above failed, open an issue that names the commit, or comment
+  # on the one already open (scripts/report-failure.sh).
+  report:
+    needs: [playwright, load-budget, zone-tool-task-budget]
+    if: always() && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LOAD: ${{ needs.load-budget.result }}
+          ZONE: ${{ needs.zone-tool-task-budget.result }}
+        run: |
+          scripts/report-failure.sh "Nightly failed" "Nightly Failure" "The nightly load or task budget run failed" \
+            "The nightly run failed on \`main\`" \
+            "load-budget (M0 cold load under 5 s on the public address): $LOAD, zone-tool-task-budget (zone tool tasks under 50 ms on the scale town): $ZONE. Pull request CI only prints these budgets (issues #154 and #163). This blocks no merge."
