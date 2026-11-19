@@ -77,8 +77,8 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   const plain: Record<string, number> = {};
   for (const { band, position, target } of poses) {
     await setPose(page, position, target);
-    await frameTime(page, 5);
-    plain[band] = await frameTime(page, 20);
+    await frameTime(page, 3);
+    plain[band] = await frameTime(page, 10);
   }
   const city = zonedScaleCity(30_000);
   const backend = await openCity(page, city.bytes, { query, name: "Thirty thousand zoned" });
@@ -93,8 +93,10 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   // one frame for each of the 576 chunks. A slower runner then has both
   // slower frames and fewer chunks a frame: the fill took 1.5 to 2 minutes
   // on the faster runners and ran out of the test's time on the slower ones (issue
-  // #259). So the test measures the frames of the pan only, about 100, and
-  // builds whatever is left with `view.flush()`.
+  // #259). So the test measures the frames of the pan only, 50, and builds
+  // whatever is left with `view.flush()`. With the flush it still took 765
+  // of its 900 s on a slow runner, most of it in frames: 100 in the pan and
+  // 25 a band, twice over. Halving them brings it to about ten minutes.
   const district = poses.find((p) => p.band === "district");
   const cityBand = poses.find((p) => p.band === "city");
   if (!district || !cityBand) throw new Error("no district or city pose");
@@ -115,11 +117,11 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
       w.gaps.push(now - last);
       last = now;
       w.panFrames = frame;
-      // 2 km east and back, 40 m a frame, over its first 100 frames, then up to the city band.
-      if (frame <= 100) {
-        const dx = 40 * (frame < 50 ? frame : 100 - frame);
+      // 2 km east and back, 80 m a frame, over its first 50 frames, then up to the city band.
+      if (frame <= 50) {
+        const dx = 80 * (frame < 25 ? frame : 50 - frame);
         rig.setPose([position[0] - 1000 + dx, position[1], position[2]], [target[0] - 1000 + dx, target[1], target[2]]);
-      } else if (frame === 101) {
+      } else if (frame === 51) {
         rig.setPose(cityPosition, cityTarget);
       }
       frame++;
@@ -132,10 +134,9 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   await page.keyboard.press("k");
   await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe("true");
   // Until the pan is over and the camera is in the city band, or the fill
-  // is done first. About 100 frames, so two and a half minutes at most on
-  // the slowest runner.
+  // is done first. 50 frames, about a minute and a half on a slow runner.
   await page.waitForFunction(
-    () => (window as unknown as { panFrames: number }).panFrames > 101 || document.body.dataset["cellsPending"] === "0",
+    () => (window as unknown as { panFrames: number }).panFrames > 51 || document.body.dataset["cellsPending"] === "0",
     null,
     { timeout: 300_000 },
   );
@@ -156,9 +157,9 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   const overlay: Record<string, number> = {};
   for (const { band, position, target } of poses) {
     await setPose(page, position, target);
-    await frameTime(page, 5);
+    await frameTime(page, 3);
     expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
-    overlay[band] = await frameTime(page, 20);
+    overlay[band] = await frameTime(page, 10);
     await attach(testInfo, `30,000 segments, every cell zoned, ${band} band`, await canvasShot(page));
   }
   const report = {
