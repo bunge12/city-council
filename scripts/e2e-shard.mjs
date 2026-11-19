@@ -27,7 +27,7 @@
 import { readdirSync, writeFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dealtProjects, deal, plan, readProjects, root, specFiles } from "./e2e-plan.mjs";
+import { countTestList, dealtProjects, deal, plan, readProjects, root, specFiles } from "./e2e-plan.mjs";
 
 const projects = readProjects();
 
@@ -94,6 +94,13 @@ if (arg === "--list") {
   if (project === "roads") {
     // Playwright's test list: `[project] › file › titles`, the file under e2e/.
     writeFileSync("e2e-test-list.txt", mine.items.map((t) => `[roads] › ${t}\n`).join(""));
+    // A title Playwright's list format cannot hold (one with a `›` in it,
+    // say) would match nothing, and the runner would pass without it.
+    const matched = countTestList("e2e-test-list.txt");
+    if (matched !== mine.items.length) {
+      console.error(`Playwright selects ${matched} of this runner's ${mine.items.length} roads tests from e2e-test-list.txt: a title it cannot read back? ${mine.items.join(" | ")}`);
+      process.exit(1);
+    }
     console.log("--test-list e2e-test-list.txt");
   } else {
     console.log(mine.items.map((f) => `e2e/${f}`).join(" "));

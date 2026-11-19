@@ -282,9 +282,11 @@ jobs:
           eval "xvfb-run -a pnpm e2e --project \"\$PROJECT\" $ARGS $files"
       # Under `cancelled()` too, for a job stopped at its time limit: a
       # reporter that never reached its end writes nothing, and the upload
-      # finds no file.
+      # finds no file. An upload that fails does not fail the job: the
+      # times gate nothing.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
+        continue-on-error: true
         with:
           name: e2e-times-${{ matrix.id }}
           path: e2e-times.json

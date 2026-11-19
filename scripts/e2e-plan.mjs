@@ -55,14 +55,7 @@ export function timedFiles(projects) {
  * them, so a test added to one of its files is dealt out like the rest.
  */
 export function roadsTests() {
-  const bin = fileURLToPath(new URL("node_modules/.bin/playwright", root));
-  const out = execFileSync(bin, ["test", "--list", "--project", "roads", "--reporter=json"], {
-    cwd: fileURLToPath(root),
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-  const report = JSON.parse(out);
+  const report = listTests(["--project", "roads", "--no-deps"]);
   const tests = new Set();
   const walk = (suite, titles) => {
     for (const child of suite.suites ?? []) walk(child, [...titles, child.title]);
@@ -73,6 +66,34 @@ export function roadsTests() {
   // Each top-level suite is a file, titled with its path under e2e/.
   for (const file of report.suites) walk(file, [file.title]);
   return [...tests].sort();
+}
+
+/** Playwright's JSON list of the tests these arguments select. */
+function listTests(args) {
+  const bin = fileURLToPath(new URL("node_modules/.bin/playwright", root));
+  const out = execFileSync(bin, ["test", "--list", "--reporter=json", ...args], {
+    cwd: fileURLToPath(root),
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  return JSON.parse(out);
+}
+
+/**
+ * How many roads tests Playwright selects from a test list file. Playwright
+ * does not fail a run whose test list matches nothing, so the shard script
+ * checks the count itself.
+ */
+export function countTestList(path) {
+  const report = listTests(["--project", "roads", "--no-deps", "--test-list", path]);
+  let count = 0;
+  const walk = (suite) => {
+    for (const child of suite.suites ?? []) walk(child);
+    for (const spec of suite.specs ?? []) count += spec.tests.filter((t) => t.projectName === "roads").length;
+  };
+  for (const file of report.suites) walk(file);
+  return count;
 }
 
 /**

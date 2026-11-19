@@ -59,20 +59,27 @@ jobs:
           since=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
           echo "Runs since $since"
           mkdir -p runs/main runs/pr
+          # Runs on main give the timings; a pull request's runs only the
+          # flakes, since it may change the tests it times. Each is listed
+          # on its own, so a busy week of pull requests does not push main's
+          # runs off the list.
           for workflow in ci.yml perf.yml; do
-            # Runs on main give the timings; a pull request's runs only the
-            # flakes, since it may change the tests it times. Runs on other
-            # branches (a workflow_dispatch, say) are left out.
-            gh run list --workflow "$workflow" --status completed --limit 300 \
-              --json databaseId,event,headBranch,createdAt \
-              --jq ".[] | select(.createdAt >= \"$since\") | \"\(.databaseId) \(.event) \(.headBranch)\"" |
-            while read -r id event branch; do
-              if [ "$event" = pull_request ]; then where=pr
-              elif [ "$branch" = main ]; then where=main
-              else continue
+            for where in main pr; do
+              if [ "$where" = main ]; then
+                # Not a pull request's run: a fork's branch may be called main too.
+                filter='select(.event != "pull_request")'
+                branch=(--branch main)
+              else
+                filter='select(.event == "pull_request")'
+                branch=()
               fi
-              # A run from before issue #229, or with no e2e jobs, has none.
-              gh run download "$id" --pattern 'e2e-times-*' --dir "runs/$where/$id" 2>/dev/null || true
+              ids=$(gh run list --workflow "$workflow" --status completed --limit 500 --created ">=$since" "${branch[@]}" \
+                --json databaseId,event --jq ".[] | $filter | .databaseId")
+              echo "$workflow, $where: $(echo "$ids" | grep -c . || true) runs"
+              for id in $ids; do
+                # A run from before issue #229, or with no e2e jobs, has none.
+                gh run download "$id" --pattern 'e2e-times-*' --dir "runs/$where/$id" 2>/dev/null || true
+              done
             done
           done
           echo "main: $(find runs/main -name e2e-times.json | wc -l) files, pull requests: $(find runs/pr -name e2e-times.json | wc -l)"
@@ -111,7 +118,9 @@ jobs:
           else
             gh pr create --base main --head "$branch" --title "e2e: spec seconds from the last week of CI runs" --body-file pr-body.md
           fi
+      # Even when the pull request could not be opened.
       - name: Update the flaky tests issue
+        if: ${{ !cancelled() && hashFiles('flaky.md') != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

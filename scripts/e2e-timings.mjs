@@ -15,8 +15,9 @@
 // attempts in those runs, weighted so that each CPU model counts the same
 // however many of the runs it served. GitHub hands out fast and slow
 // runners (issue #152), and a figure taken mostly on fast ones would plan a
-// slow runner past its time limit. Runs stopped part way (timed out,
-// interrupted) are left out. A file or test no run timed keeps its figure,
+// slow runner past its time limit. Only jobs that passed count: one
+// stopped part way has not timed every file, and on a broken main every
+// test can fail in a second. A file or test no run timed keeps its figure,
 // and is listed. One that no longer exists is dropped.
 
 import { writeFileSync } from "node:fs";
@@ -62,9 +63,9 @@ function weightedP75(samples) {
 
 const projects = readProjects();
 const timed = timeDirs.flatMap((d) => readTimes(d));
-const complete = timed.filter(({ times }) => times.status === "passed" || times.status === "failed");
+const complete = timed.filter(({ times }) => times.status === "passed");
 const runIds = [...new Set(complete.map((t) => t.run).filter(Boolean))].sort();
-console.log(`${complete.length} e2e jobs from ${runIds.length} runs, ${timed.length - complete.length} left out as stopped part way`);
+console.log(`${complete.length} e2e jobs from ${runIds.length} runs, ${timed.length - complete.length} left out as not passed`);
 
 /** Samples per key, from one table of each complete job's times. */
 function samples(table) {
