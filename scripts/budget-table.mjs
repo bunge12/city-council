@@ -68,7 +68,10 @@ function num(v) {
 const unitOf = (row) => (row.unit === "ms" ? " ms" : row.unit === "steps" ? " steps" : "");
 const cell = (text) => String(text).replace(/\|/g, "\\|");
 const headroom = (row) => (row.headroom === null ? "no misses" : `${num(row.headroom)}x`);
-const low = (row) => row.headroom !== null && row.headroom < warnBelow;
+// A count of steps over a time already allows for a couple of runner
+// pauses, so 2 of 2 allowed is a pass with nothing to warn about; only the
+// timed figures and ratios are marked low.
+const low = (row) => row.statistic !== "count over" && row.headroom !== null && row.headroom < warnBelow;
 
 const rows = read();
 // Closest to its budget first, so the ones to watch head the table.
@@ -80,15 +83,15 @@ if (sorted.length === 0) {
 } else {
   const attempts = new Set(sorted.map((r) => r.attempt));
   lines.push(
-    `CPU: ${cpu}. Headroom is the budget over the measured figure; under ${warnBelow}x is marked. Budgets and statistics are in \`packages/sim/balance/budgets.json\`.`,
+    `Headroom is the budget over the measured figure; a timed figure under ${warnBelow}x is marked. Budgets and statistics are in \`packages/sim/balance/budgets.json\`.`,
     "",
-    `| | Figure | Case | Statistic | Measured | Budget | Headroom | Mode${attempts.size > 1 ? " | Attempt" : ""} |`,
-    `|---|---|---|---|---:|---:|---:|---${attempts.size > 1 ? "|---:" : ""}|`,
+    `| | Figure | Case | Statistic | Measured | Budget | Headroom | CPU | Mode${attempts.size > 1 ? " | Attempt" : ""} |`,
+    `|---|---|---|---|---:|---:|---:|---|---${attempts.size > 1 ? "|---:" : ""}|`,
   );
   for (const r of sorted) {
     const mark = !r.pass ? "**over**" : low(r) ? "**low**" : "ok";
     lines.push(
-      `| ${mark} | \`${cell(r.figure)}\` | ${cell(r.case)} | ${r.statistic} | ${num(r.measured)}${unitOf(r)} | ${num(r.budget)}${unitOf(r)} | ${headroom(r)} | ${r.mode}${attempts.size > 1 ? ` | ${r.attempt}` : ""} |`,
+      `| ${mark} | \`${cell(r.figure)}\` | ${cell(r.case)} | ${r.statistic} | ${num(r.measured)}${unitOf(r)} | ${num(r.budget)}${unitOf(r)} | ${headroom(r)} | ${cell(cpu)} | ${r.mode}${attempts.size > 1 ? ` | ${r.attempt}` : ""} |`,
     );
   }
   lines.push("");

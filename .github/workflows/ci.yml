@@ -212,25 +212,31 @@ jobs:
       contents: write
       actions: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: |
-          gh run download "$RUN_ID" --pattern 'budget-table-*' --dir rows || true
-          shopt -s nullglob
-          files=(rows/*/budget-table.jsonl)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No budget rows in this run."
-            exit 0
+          # This run's rows. A run whose jobs wrote none has no such
+          # artifact, and says so; any other failure to download fails here.
+          if ! gh run download "$RUN_ID" --pattern 'budget-table-*' --dir rows 2> download.err; then
+            if grep -q "no valid artifacts" download.err; then
+              echo "No budget rows in this run."
+              exit 0
+            fi
+            cat download.err
+            exit 1
           fi
+          files=(rows/*/budget-table.jsonl)
           branch=budget-history
           url="https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git"
           for try in 1 2 3 4; do
+            [ "$try" -gt 1 ] && sleep $((try * 5))
             rm -rf history
             if git ls-remote --exit-code --heads "$url" "$branch" > /dev/null; then
-              git clone --quiet --depth 1 --branch "$branch" "$url" history
+              git clone --quiet --depth 1 --branch "$branch" "$url" history || continue
             else
               git init --quiet -b "$branch" history
               git -C history remote add origin "$url"
@@ -242,16 +248,20 @@ jobs:
                 "budgets.jsonl has one JSON line for each held figure on each CI run on main: date, sha, run, job, cpu, figure, case, statistic, unit, measured, budget, headroom, mode, pass and attempt." \
                 > history/README.md
             fi
-            cat "${files[@]}" >> history/budgets.jsonl
-            git -C history add README.md budgets.jsonl 2> /dev/null || git -C history add budgets.jsonl
+            # Leaves out a job of this run already in the file, as after "Re-run failed jobs".
+            added=$(node scripts/budget-append.mjs history/budgets.jsonl "${files[@]}")
+            git -C history add -A
+            if git -C history diff --cached --quiet; then
+              echo "Nothing new to append."
+              exit 0
+            fi
             git -C history -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit --quiet -m "Budgets from run $RUN_ID at $SHA"
             if git -C history push --quiet origin "$branch"; then
-              echo "Appended $(cat "${files[@]}" | wc -l) rows to $branch."
+              echo "Appended $added rows to $branch."
               exit 0
             fi
-            echo "Push rejected, trying again ($try)."
-            sleep $((try * 5))
+            echo "Push failed, trying again ($try)."
           done
           exit 1
 

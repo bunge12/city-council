@@ -17,6 +17,12 @@ describe("budgets.json", () => {
     expect(unused).toEqual([]);
   });
 
+  test("the soak's figures share one step time, which its report counts against", () => {
+    const soak = Object.entries(BUDGETS).filter(([id]) => id.startsWith("soak."));
+    expect(soak.length).toBeGreaterThan(0);
+    expect(new Set(soak.map(([, f]) => f.overMs)).size).toBe(1);
+  });
+
   test("warns below more than 1x headroom", () => {
     expect(BUDGET_WARN_BELOW_HEADROOM).toBeGreaterThan(1);
   });

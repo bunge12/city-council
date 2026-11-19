@@ -119,7 +119,8 @@ const SAMPLE_EVERY = (60 * 1000) / TICK_MS;
 /**
  * Tick budget from M0.md: 20 ms of worker time. It and how many steps of
  * each source may pass it are in the sim's balance/budgets.json, as the
- * `soak.*` figures (issue #232).
+ * `soak.*` figures (issue #232), which share this one step time
+ * (budgets.test.ts holds them to that).
  *
  * A source may pass it a couple of times in a run: random pauses of the
  * runner. Runs on CI and on a slower machine met up to two in a source, and
