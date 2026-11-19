@@ -1,20 +1,31 @@
 name: CI
 
-# Runs on pull requests only. main requires branches to be up to date before
-# merging, so a passing PR is already the merged result, and deploy.yml builds
+# Runs on every pull request and on every push to main. main does not require
+# branches to be up to date before merging (issue #219): with several pull
+# requests open, that sent each of them through a rebase and a full run after
+# every merge. A pull request's run tests it merged with main as main stood at
+# its last push. The run on main tests the merged result, and when it fails
+# the `report` job opens an issue naming the commit. deploy.yml also builds
 # and walks through every push to main.
 on:
   pull_request:
+  push:
+    branches: [main]
 
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels its older run. Every commit on main
+# gets a run of its own, so a failure names the merge that caused it.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Decides whether the tests need to run. A pull request that only touches
-  # Markdown files skips them. The jobs are skipped through `if:` rather than
-  # `paths-ignore`, because a required check that never starts would block
-  # the merge.
+  # Decides whether the tests need to run. A pull request or a push to main
+  # that only touches Markdown files skips them. The jobs are skipped through
+  # `if:` rather than `paths-ignore`, because a required check that never
+  # starts would block the merge.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -23,11 +34,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The pull request merge commit and its two parents.
+          # The pull request merge commit and its two parents, or the pushed
+          # commit and the one before it.
           fetch-depth: 2
       - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
         run: |
-          changed=$(git diff --name-only HEAD^1 HEAD)
+          # A push to main diffs against what main was before the push, which
+          # covers a push of more than one commit. A new branch has no before.
+          base=HEAD^1
+          if [ "$EVENT" = push ]; then
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ] \
+              || ! git fetch --depth=1 origin "$BEFORE"; then
+              echo "No commit before the push, running the check."
+              echo "code=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            base=$BEFORE
+          fi
+          changed=$(git diff --name-only "$base" HEAD)
           echo "Changed files:"
           echo "$changed"
           if echo "$changed" | grep -qv '\.md$'; then
@@ -177,7 +204,7 @@ jobs:
           retention-days: 7
 
   # The one required check. It passes when every job above passed, or when
-  # the pull request only changes Markdown and they were skipped.
+  # the change is Markdown only and they were skipped.
   check:
     needs: [changes, unit, e2e]
     if: always()
@@ -194,4 +221,32 @@ jobs:
           [ "$CHANGES" = success ] || exit 1
           if [ "$CODE" = true ]; then
             [ "$UNIT" = success ] && [ "$E2E" = success ] || exit 1
+          fi
+
+  # On main only: when the check fails, open an issue that names the merge, or
+  # comment on the one already open so a broken main does not open one issue
+  # per merge. Two pull requests that each pass alone can fail together.
+  report:
+    needs: check
+    if: always() && github.event_name == 'push' && needs.check.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="CI failed on main"
+          subject=$(printf '%s\n' "$MESSAGE" | head -n 1)
+          body=$(printf 'CI failed on `main` at %s, "%s".\n\nRun: %s\n\nThe pull request passed on its own, so it most likely conflicts with one merged since its last push. Fix it on `main` before merging more.' "$SHA" "$subject" "$RUN_URL")
+          open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "$body"
+          else
+            gh issue create --title "$title: $subject" --body "$body"
           fi
