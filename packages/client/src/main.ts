@@ -22,6 +22,7 @@ import {
 import { Vector3 } from "three/webgpu";
 import { SimMirror, type MirrorUpdate } from "./protocol/mirror";
 import { LOCAL_PLAYER_ID } from "./protocol/player";
+import { ClockClient } from "./protocol/clock";
 import { createWorkerTransport } from "./protocol/transport";
 import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
 import type { SaveStatus } from "./save/channel";
@@ -84,6 +85,11 @@ let switching = false;
 const worker = createWorkerTransport(tabCity());
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
 const saves = new SaveClient(worker.saves);
+const simClock = new ClockClient(worker.clock);
+// For tests: with `?heldclock` the sim steps only when the page says, from
+// the first step (issue #224). Sent before anything else, so it is in place
+// before the worker's clock can step.
+if (new URLSearchParams(location.search).has("heldclock")) simClock.hold().catch(() => undefined);
 
 saves.subscribe((status) => {
   document.body.dataset["saveLoaded"] = "true";
@@ -643,7 +649,9 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     if (update.kind === "snapshot") clock.reset(state.tick, state.speed, performance.now());
     else clock.observe(state.tick, state.speed, performance.now());
   };
-  if (construction) view.onBeforeFrame(() => view.setGameTick(mirror.state ? clock.at(performance.now()) : null));
+  // With the worker's clock held (tests, issue #224) the next tick comes only
+  // when the test asks, so the screen shows the mirror's tick and does not run on.
+  if (construction) view.onBeforeFrame(() => view.setGameTick(mirror.state ? (simClock.held ? mirror.state.tick : clock.at(performance.now())) : null));
   mirror.subscribe((update) => {
     watchClock(update);
     showMap();
@@ -1240,6 +1248,22 @@ function connectionsCheck(seed: number): { x: number; z: number; innerX: number;
   });
 }
 
+/**
+ * Resolves with `tick` once the mirror is at it. The delta an `advance` made
+ * is normally in the copy already; if the copy had fallen out of step, it
+ * waits for the snapshot that puts it back.
+ */
+function untilMirrorAt(tick: number): Promise<number> {
+  if ((mirror.state?.tick ?? -1) >= tick) return Promise.resolve(tick);
+  return new Promise((resolve) => {
+    const stop = mirror.subscribe(() => {
+      if ((mirror.state?.tick ?? -1) < tick) return;
+      stop();
+      resolve(tick);
+    });
+  });
+}
+
 // For Playwright and the console. It only reads the mirror and sends
 // commands, the same as the UI does.
 declare global {
@@ -1257,6 +1281,12 @@ declare global {
       view: Promise<View>;
       camera: Promise<CameraHooks>;
       renderStatus: () => RenderStatus | null;
+      /** Stops the worker's clock stepping the sim. Commands then wait for `advance`. */
+      holdClock: () => Promise<number>;
+      /** Runs that many steps and resolves with the tick once their delta is in `mirror`. */
+      advance: (steps: number) => Promise<number>;
+      /** Hands stepping back to the worker's clock. */
+      releaseClock: () => Promise<number>;
     };
   }
 }
@@ -1273,4 +1303,7 @@ window.cityCouncil = {
   view: viewReady,
   camera: cameraReady,
   renderStatus: () => status,
+  holdClock: () => simClock.hold(),
+  advance: (steps) => simClock.advance(steps).then((tick) => untilMirrorAt(tick)),
+  releaseClock: () => simClock.release(),
 };

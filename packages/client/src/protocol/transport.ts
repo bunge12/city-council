@@ -1,6 +1,7 @@
 import type { FromSimMessage, ToSimMessage } from "@city-council/sim";
 import { isSaveMessage, type FromSaver, type PageSaveTransport, type ToSaver } from "../save/channel";
 import { workerName } from "../save/lock";
+import { isClockMessage, type FromClock, type ToClock } from "./clock";
 
 /**
  * A two-way message channel to or from the sim. Nothing above this knows
@@ -78,10 +79,16 @@ export function bufferUntilListening<Send, Receive>(inner: SimTransport<Send, Re
   };
 }
 
-/** The worker's two channels as the page sees them: the sim protocol and saves. */
+/** True for a message on the sim protocol rather than one of the worker's side channels. */
+export function isSimMessage(data: unknown): boolean {
+  return !isSaveMessage(data) && !isClockMessage(data);
+}
+
+/** The worker's channels as the page sees them: the sim protocol, saves, and the test clock. */
 export interface WorkerChannels {
   sim: ClientTransport;
   saves: PageSaveTransport;
+  clock: SimTransport<ToClock, FromClock>;
   terminate(): void;
 }
 
@@ -97,8 +104,9 @@ export function createWorkerTransport(cityId: string | null = null): WorkerChann
     name: workerName(cityId),
   });
   return {
-    sim: portTransport<ToSimMessage, FromSimMessage>(worker, (data) => !isSaveMessage(data)),
+    sim: portTransport<ToSimMessage, FromSimMessage>(worker, isSimMessage),
     saves: portTransport<ToSaver, FromSaver>(worker, isSaveMessage),
+    clock: portTransport<ToClock, FromClock>(worker, isClockMessage),
     terminate: () => worker.terminate(),
   };
 }
