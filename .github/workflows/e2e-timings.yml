@@ -1,0 +1,129 @@
+name: e2e timings
+
+# Weekly, from the e2e-times.json files that the e2e jobs of ci.yml and
+# perf.yml upload (e2e/file-times-reporter.ts), issue #229:
+#
+# - A pull request that updates `seconds` and `testSeconds` in
+#   e2e/projects.json, by which scripts/e2e-shard.mjs deals spec files and
+#   roads tests out to runners. Each figure is the 75th percentile over the
+#   week's runs on main, each CPU model weighted the same
+#   (scripts/e2e-timings.mjs). Nobody edits them by hand.
+# - The issue titled "Flaky tests", with every test that failed and then
+#   passed on a retry in the week's runs, on main and on pull requests.
+#
+# A pull request opened with the workflow's own token starts no workflow,
+# so CI does not run on it until someone closes and reopens it. Save a
+# fine-grained token with contents and pull requests write access as the
+# E2E_TIMINGS_TOKEN secret and CI runs on it as on any other. Either way the
+# repository has to allow GitHub Actions to create pull requests (Settings,
+# Actions, General).
+
+on:
+  schedule:
+    - cron: "37 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-timings
+  cancel-in-progress: false
+
+jobs:
+  timings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          token: ${{ secrets.E2E_TIMINGS_TOKEN || github.token }}
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      # For Playwright, which lists the roads project's tests.
+      - run: pnpm install --frozen-lockfile
+      - name: Download the week's e2e times
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          since=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          echo "Runs since $since"
+          mkdir -p runs/main runs/pr
+          for workflow in ci.yml perf.yml; do
+            # Runs on main give the timings; a pull request's runs only the
+            # flakes, since it may change the tests it times. Runs on other
+            # branches (a workflow_dispatch, say) are left out.
+            gh run list --workflow "$workflow" --status completed --limit 300 \
+              --json databaseId,event,headBranch,createdAt \
+              --jq ".[] | select(.createdAt >= \"$since\") | \"\(.databaseId) \(.event) \(.headBranch)\"" |
+            while read -r id event branch; do
+              if [ "$event" = pull_request ]; then where=pr
+              elif [ "$branch" = main ]; then where=main
+              else continue
+              fi
+              # A run from before issue #229, or with no e2e jobs, has none.
+              gh run download "$id" --pattern 'e2e-times-*' --dir "runs/$where/$id" 2>/dev/null || true
+            done
+          done
+          echo "main: $(find runs/main -name e2e-times.json | wc -l) files, pull requests: $(find runs/pr -name e2e-times.json | wc -l)"
+      - name: Work out the seconds and the flaky tests
+        run: |
+          node scripts/e2e-timings.mjs --times runs/main --flakes runs/pr --write --flaky-out flaky.md | tee timings.txt
+      - name: Open or update the pull request
+        env:
+          GH_TOKEN: ${{ secrets.E2E_TIMINGS_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if git diff --quiet e2e/projects.json; then
+            echo "The seconds in e2e/projects.json are as they were."
+            exit 0
+          fi
+          branch=e2e-timings-update
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add e2e/projects.json
+          git commit -m "e2e: spec seconds from the last week of CI runs" -m "From $RUN_URL (issue #229)."
+          git push --force origin "$branch"
+          {
+            echo "The seconds by which scripts/e2e-shard.mjs deals spec files and roads tests out to CI runners, from the last week of runs on main: the 75th percentile of each one's first attempts, each CPU model weighted the same (issue #229)."
+            echo
+            echo "Written by $RUN_URL. The next weekly run replaces this branch."
+            echo
+            echo '```text'
+            head -c 60000 timings.txt
+            echo '```'
+          } > pr-body.md
+          open=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh pr edit "$open" --body-file pr-body.md
+          else
+            gh pr create --base main --head "$branch" --title "e2e: spec seconds from the last week of CI runs" --body-file pr-body.md
+          fi
+      - name: Update the flaky tests issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          title="Flaky tests"
+          label="Flaky test"
+          open=$(gh issue list --state open --search "\"$title\" in:title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)
+          if [ -n "$open" ]; then
+            gh issue edit "$open" --body-file flaky.md
+          elif grep -q '^| ' flaky.md; then
+            gh label create "$label" --color FBCA04 --description "A test that passed only on a retry" --force
+            gh issue create --title "$title" --body-file flaky.md --label "$label"
+          else
+            echo "No flaky tests and no issue open."
+          fi
