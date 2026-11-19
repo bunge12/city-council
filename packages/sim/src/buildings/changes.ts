@@ -31,7 +31,10 @@ export function drainBuildingChanges(b: BuildingState): { ids: number[]; free: b
   const free = rec.free !== b.free;
   if (rec.ids.size === 0 && !free) return null;
   const ids = [...rec.ids].sort((p, q) => p - q);
-  rec.ids.clear();
+  // A new set rather than clear(): V8 gives a set that has lived long a new
+  // table in the old generation on every clear and every growth, garbage
+  // that only a major collection takes back (issue #209).
+  rec.ids = new Set();
   rec.free = b.free;
   return { ids, free };
 }
