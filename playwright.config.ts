@@ -115,7 +115,9 @@ export default defineConfig({
     },
     {
       // Frame time, draw calls and memory on the scale cities (issue #225),
-      // headless on WebGL 2 like the chromium project. Each spec writes its
+      // on WebGL 2, headless like the chromium project except the two
+      // 30,000 segment specs that came from the roads project, which ask
+      // for headed Chromium themselves (see cells-scale.spec.ts). Each spec writes its
       // figures to test-results/perf/, which .github/workflows/perf.yml sets
       // beside main's. It does not gate a merge: CI runs it nightly, after
       // each push to main and on pull requests that touch the renderer or

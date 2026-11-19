@@ -33,7 +33,11 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 declare function requestAnimationFrame(callback: () => void): number;
 declare const performance: { now(): number };
 
-test.use({ viewport: { width: 1280, height: 800 } });
+// Headed in the full Chromium build, as it ran in the roads project before
+// issue #225, under `xvfb-run` on Linux. Headless, this city's frames came
+// slower in software: on the development container the cells test ran out
+// of its ten minutes twice headless and took 9.4 minutes headed.
+test.use({ viewport: { width: 1280, height: 800 }, headless: false, channel: "chromium" });
 
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
