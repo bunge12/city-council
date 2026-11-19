@@ -240,11 +240,12 @@ export class SimMirror {
   /**
    * By the order of `cellShapesInChunk(chunk)`, 1 for each free zoned cell
    * where no building type fits, as the zoning overlay marks it (issue
-   * M2-15). Worked out by the sim's own lot finder on the copy. Null until
-   * the first snapshot.
+   * M2-15). Worked out by the sim's own lot finder on the copy. `shapes` is
+   * what `cellShapesInChunk(chunk)` just gave, so the chunk's cells are not
+   * read twice (issue #164). Null until the first snapshot.
    */
-  lotMarksInChunk(chunk: number): Uint8Array | null {
-    return this.current ? lotMarksInChunk(this.current, chunk) : null;
+  lotMarksInChunk(chunk: number, shapes?: ChunkCellShapes): Uint8Array | null {
+    return this.current ? lotMarksInChunk(this.current, chunk, shapes) : null;
   }
 
   /** Why no building type fits on the free ground at (x, z), as the overlay marks it, or null where it is not marked. */

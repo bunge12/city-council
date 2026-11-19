@@ -575,7 +575,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     cells: () => mirror.state?.cells ?? null,
     built: () => mirror.cellBuildings(),
     // Free zoned ground where no building type fits, hatched (issue M2-15).
-    marks: (chunk) => mirror.lotMarksInChunk(chunk),
+    marks: (chunk, shapes) => mirror.lotMarksInChunk(chunk, shapes),
   });
   // Buildings come from the mirror alone too: a snapshot draws them all,
   // nearest the camera first, and a delta the chunks it changed.
@@ -611,7 +611,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
     if (!cells || cells.totalRebuilt === 0) return;
     setViewReadout({
       cells: `${cells.zoned} zoned and ${cells.unzoned} unzoned in ${cells.chunks} chunks`,
-      cellRebuilds: `${cells.lastRebuilt} last, ${cells.totalRebuilt} total, ${cells.lastBuildMs.toFixed(1)} ms`,
+      cellRebuilds: `${cells.lastRebuilt} last, ${cells.totalRebuilt} total, ${cells.lastBuildMs.toFixed(1)} ms; at most ${cells.slowestFrameMs.toFixed(1)} ms a frame and ${cells.slowestMarksMs.toFixed(1)} ms of lot marks a chunk, after a first ${cells.firstFrameMs.toFixed(1)} and ${cells.firstMarksMs.toFixed(1)}`,
     });
   };
   const showCells = (update: MirrorUpdate) => {

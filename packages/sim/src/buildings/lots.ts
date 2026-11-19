@@ -610,3 +610,89 @@ export function lotOptions(state: SimState, ref: CellRef, explain = true): LotOp
   if (problem === "too-shallow") return refuse("too-shallow", `${needs}; the zoned ground here is ${own} deep`, { need, room });
   return refuse("too-narrow", `${needs}; the zoned ground here is ${room.width} wide`, { need, room });
 }
+
+
+/**
+ * Whether a type that stands on one strip fits a lot holding the front
+ * cell of `ref`'s column, worked out more cheaply than `lotOptions` does
+ * (issue #164). True only where `lotOptions` at that front cell finds a lot.
+ * False says nothing either way: the caller asks the finder. The zoning
+ * overlay asks this of every free column in a chunk and the finder only of
+ * the rest, which are few.
+ *
+ * It walks the strip as `lotOptions` does, each way as far as a lot on one
+ * strip reaches, and a type fits when the run of columns round the cell
+ * free to one of its depths is as wide as its narrowest lot. `known` keeps
+ * each column's free run from the road, with its zone and density, by the
+ * slot of its front cell. Neighbouring columns share it, so pass one map
+ * for every call on one unchanged state.
+ */
+export function plainLotFits(state: SimState, ref: Pick<CellRef, "segment" | "side" | "place">, known: Map<number, number>): boolean {
+  const index = syncCells(state);
+  const cells = state.cells;
+  if (cellSlotIn(index, cells, ref.segment, ref.side, ref.place, 0) < 0) return false;
+  const onCell = segmentBuildings(state);
+  /** A column's free run from the road, as `(zone * 16 + density) * 16 + depth`, or 0 where its front cell is not free. */
+  const run = (col: Column): number => {
+    const front = (cells.offset[col.seg] ?? 0) + localIndex(col.side, col.place, 0);
+    let r = known.get(front);
+    if (r === undefined) {
+      const zone = cells.zone[front] ?? ZONE_NONE;
+      const density = cells.density[front] ?? 0;
+      const built = onCell[col.seg];
+      const local = localIndex(col.side, col.place, 0);
+      let d = 0;
+      while (
+        d < DEPTH &&
+        columnStatus(index, col, d) === CELL_OPEN &&
+        cells.zone[front + d] === zone &&
+        cells.density[front + d] === density &&
+        (built?.[local + d] ?? NO_BUILDING) === NO_BUILDING
+      ) {
+        d++;
+      }
+      r = zone === ZONE_NONE || d === 0 ? 0 : (zone * 16 + density) * 16 + d;
+      known.set(front, r);
+    }
+    return r;
+  };
+  const start: Column = { seg: ref.segment, side: ref.side, place: ref.place, dir: 0 };
+  const own = run(start);
+  if (own === 0) return false;
+  const kind = Math.floor(own / 16);
+  const types = typesFor(Math.floor(kind / 16), kind % 16).filter((t) => !t.throughLot);
+  if (types.length === 0) return false;
+  // As `lotOptions` walks: ahead first, then behind, never a column twice.
+  const reach = BUILDINGS_BALANCE.maxLotWidth - 1;
+  const key = (col: Column): number => col.seg * CELL_KEY_STRIDE + localIndex(col.side, col.place, 0);
+  const seen = new Set<number>([key(start)]);
+  const walk = (dir: number): number[] => {
+    const out: number[] = [];
+    let col: Column | null = { ...start, dir };
+    while (out.length < reach && (col = nextColumn(index, col)) !== null) {
+      const k = key(col);
+      if (seen.has(k)) break;
+      seen.add(k);
+      const r = run(col);
+      const free = Math.floor(r / 16) === kind ? r % 16 : 0;
+      if (free === 0) break;
+      out.push(free);
+    }
+    return out;
+  };
+  const ahead = walk(0);
+  const behind = walk(1);
+  /** Columns from the cell, not counting it, free at least `d` deep. */
+  const within = (list: readonly number[], d: number): number => {
+    let n = 0;
+    while (n < list.length && (list[n] ?? 0) >= d) n++;
+    return n;
+  };
+  const free = own % 16;
+  for (const t of types) {
+    for (let d = Math.max(t.depth[0], 1); d <= Math.min(t.depth[1], free); d++) {
+      if (within(behind, d) + 1 + within(ahead, d) >= t.width[0]) return true;
+    }
+  }
+  return false;
+}

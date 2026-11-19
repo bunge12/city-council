@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILDING_TYPES,
+  CELL_OPEN,
   CHUNKS_PER_SIDE,
   CHUNK_SIZE,
   ZONING_BALANCE,
+  buildScaleCity,
   cellAt,
   cellsInChunk,
+  cellsSettled,
   createState,
   findLot,
   hashState,
@@ -18,6 +21,9 @@ import {
   type SimState,
 } from "../src/index";
 import { addBuilding } from "../src/buildings/buildings";
+import { growOne } from "../src/buildings/grower";
+import { plainLotFits } from "../src/buildings/lots";
+import { nextFloat, seedRng } from "../src/rng";
 
 // M2-15: the zoning overlay's marks on free zoned ground where no building
 // type fits, with the lot finder's reason.
@@ -63,7 +69,7 @@ function refAt(state: SimState, [x, z]: [number, number]): CellRef {
 function marked(state: SimState): string[] {
   const chunk = Math.floor(4570 / CHUNK_SIZE) * CHUNKS_PER_SIDE + Math.floor(4300 / CHUNK_SIZE);
   const cells = cellsInChunk(state, chunk);
-  const flags = lotMarksInChunk(state, chunk, cells);
+  const flags = lotMarksInChunk(state, chunk);
   const out: string[] = [];
   cells.forEach((cell, k) => {
     if (flags[k]) out.push(`${cell.place},${cell.depth}`);
@@ -133,4 +139,48 @@ describe("lot marks", () => {
     ok(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: x0 - 2, z: (z3 + z5) / 2 }, to: { x: x1 + 2, z: (z3 + z5) / 2 }, width: CELL * 2 + 4 }] });
     expect(marked(state)).toEqual(all(4, 3, 3));
   });
+
+  // Issue #164: the overlay settles most columns with `plainLotFits` and asks
+  // the finder only of the rest. Zoning that changes every few cells along a
+  // strip and now and then within a column, on a city of curves, junctions
+  // and bridges, part built, must mark exactly as `lotMarkAt` does.
+  it("marks as lotMarkAt does on zoning that changes every few cells", () => {
+    const state = buildScaleCity(8_000).state;
+    while (!cellsSettled(state)) step(state);
+    const rng = seedRng(164);
+    const { zone, density } = state.cells;
+    const depth = ZONING_BALANCE.zoneDepthCells;
+    const zones = ZONING_BALANCE.zones.length;
+    let z = 1;
+    let d = 1;
+    for (let i = 0; i < zone.length; i++) {
+      if (nextFloat(rng) < 0.08) {
+        z = nextFloat(rng) < 0.15 ? 0 : 1 + Math.floor(nextFloat(rng) * zones);
+        d = z ? 1 + Math.floor(nextFloat(rng) * 3) : 0;
+      }
+      const inColumn = i % depth > 0 && nextFloat(rng) < 0.06;
+      zone[i] = inColumn ? 1 + Math.floor(nextFloat(rng) * zones) : z;
+      density[i] = inColumn ? 1 + Math.floor(nextFloat(rng) * 3) : d;
+    }
+    for (let i = 0; i < 6_000; i++) growOne(state);
+    let fits = 0;
+    let marked = 0;
+    const known = new Map<number, number>();
+    for (let chunk = 0; chunk < CHUNKS_PER_SIDE * CHUNKS_PER_SIDE; chunk++) {
+      const cells = cellsInChunk(state, chunk);
+      const flags = lotMarksInChunk(state, chunk);
+      cells.forEach((cell, k) => {
+        // The quick check says yes only where the finder finds a lot.
+        if (cell.depth === 0 && plainLotFits(state, cell, known)) {
+          fits++;
+          if (!findLot(state, cell).ok) throw new Error(`plainLotFits says a type fits at ${JSON.stringify(cell)}, the finder says none does`);
+        }
+        const want = cell.status === CELL_OPEN && (zone[cell.index] ?? 0) > 0 && lotMarkAt(state, cell) !== null ? 1 : 0;
+        if (flags[k] !== want) throw new Error(`chunk ${chunk}, cell ${JSON.stringify(cell)}: marked ${flags[k]}, lotMarkAt says ${want}`);
+        marked += want;
+      });
+    }
+    expect(fits).toBeGreaterThan(1000);
+    expect(marked).toBeGreaterThan(1000);
+  }, 120_000);
 });

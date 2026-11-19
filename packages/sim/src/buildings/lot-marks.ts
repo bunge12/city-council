@@ -16,16 +16,51 @@
 // of every zoned street.
 //
 // Read only, like the lot finder, so the client runs it on its copy.
+//
+// The overlay builds a chunk's marks with its mesh (issue #164). It passes
+// the cells it has read for the mesh, since reading a chunk's cells again
+// took most of the time, and most free columns are settled by
+// `plainLotFits`, a quick walk of the strip, before the finder is asked.
 
 import type { SimState } from "../state";
-import { CELL_OPEN, cellsInChunk, type CellInfo } from "../zoning/cell-index";
-import { ZONE_NONE, cellSlot, type CellRef } from "../zoning/cells";
+import { CELL_OPEN, cellShapesInChunk, syncCells, type ChunkCellShapes } from "../zoning/cell-index";
+import { ZONING_BALANCE } from "../zoning/balance";
+import { ZONE_NONE, cellSlot, fromLocal, segmentOfSlot, type CellRef } from "../zoning/cells";
+import { blockIndexOf } from "../roads/blocks";
 import { BUILDING_TYPES } from "./balance";
-import { findLot, type LotResult } from "./lots";
+import { findLot, plainLotFits, type LotResult } from "./lots";
 
 /** Whether a finder's answer at a front cell is one the overlay marks. */
 function marks(result: LotResult): result is Extract<LotResult, { ok: false }> {
   return !result.ok && (result.problem === "too-shallow" || result.problem === "too-narrow" || result.problem === "no-types");
+}
+
+/** Zone and density pairs, as `zone * 16 + density`, that some building type grows on. */
+const GROWS = new Set(BUILDING_TYPES.map((t) => t.zoneNumber * 16 + t.density));
+
+const DEPTH = ZONING_BALANCE.zoneDepthCells;
+
+/** Whether nothing grows on the zoned cell at `slot`: then it is marked wherever it is free, whatever lies in front of it. */
+function barren(state: SimState, slot: number): boolean {
+  const zone = state.cells.zone[slot] ?? ZONE_NONE;
+  return zone !== ZONE_NONE && !GROWS.has(zone * 16 + (state.cells.density[slot] ?? 0));
+}
+
+/** The barren cell's own reason, which the finder gives as "no-types", or null. */
+function barrenReason(state: SimState, ref: CellRef): string | null {
+  const own = findLot(state, ref);
+  return !own.ok && own.problem === "no-types" ? own.reason : null;
+}
+
+/**
+ * The mark of a free cell `depth` back in a column, from the answer at the
+ * column's front cell, where null means a type fits there.
+ */
+function markFrom(front: LotResult | null, depth: number): string | null {
+  if (front === null || !marks(front)) return null;
+  if (depth === 0) return front.reason;
+  // Behind the front cell, only the free run of the front cell's zone and density.
+  return front.problem !== "no-types" && depth < (front.room?.depth ?? 0) ? front.reason : null;
 }
 
 /**
@@ -37,44 +72,54 @@ function marks(result: LotResult): result is Extract<LotResult, { ok: false }> {
  */
 export function lotMarkAt(state: SimState, ref: CellRef): string | null {
   const slot = cellSlot(state.roads, state.cells, ref);
-  return slot < 0 ? null : markWith(state, ref, slot, new Map());
-}
-
-/** Zone and density pairs, as `zone * 16 + density`, that some building type grows on. */
-const GROWS = new Set(BUILDING_TYPES.map((t) => t.zoneNumber * 16 + t.density));
-
-function markWith(state: SimState, ref: CellRef, slot: number, fronts: Map<number, LotResult>): string | null {
-  const zone = state.cells.zone[slot] ?? ZONE_NONE;
-  if (ref.depth > 0 && zone !== ZONE_NONE && !GROWS.has(zone * 16 + (state.cells.density[slot] ?? 0))) {
-    // Nothing grows on it: marked wherever it is free, whatever lies in front of it.
-    const own = findLot(state, ref);
-    return !own.ok && own.problem === "no-types" ? own.reason : null;
-  }
-  // One entry a column: segment, side and place, as the cell index keys them less the depth.
-  const key = (ref.segment * 2 + ref.side) * 1_000_000 + ref.place;
-  let front = fronts.get(key);
-  if (!front) {
-    front = findLot(state, { segment: ref.segment, side: ref.side, place: ref.place, depth: 0 });
-    fronts.set(key, front);
-  }
-  if (!marks(front)) return null;
-  if (ref.depth === 0) return front.reason;
-  // Behind the front cell, only the free run of the front cell's zone and density.
-  return front.problem !== "no-types" && ref.depth < (front.room?.depth ?? 0) ? front.reason : null;
+  if (slot < 0) return null;
+  if (ref.depth > 0 && barren(state, slot)) return barrenReason(state, ref);
+  return markFrom(findLot(state, { ...ref, depth: 0 }), ref.depth);
 }
 
 /**
  * For each cell of chunk `chunk`, in `cellsInChunk` order, 1 where the
- * overlay marks it as `lotMarkAt` says and 0 elsewhere. One finder call per
- * column with a free zoned cell, not one per cell.
+ * overlay marks it as `lotMarkAt` says and 0 elsewhere. `shapes` is the
+ * chunk's cells as `cellShapesInChunk` gives them, read from this same
+ * state; pass the ones already read for the chunk's mesh rather than have
+ * them read again. One question a column with a free zoned cell, not one
+ * a cell, and the finder only where `plainLotFits` cannot say.
  */
-export function lotMarksInChunk(state: SimState, chunk: number, cells: readonly CellInfo[] = cellsInChunk(state, chunk)): Uint8Array {
-  const out = new Uint8Array(cells.length);
-  const fronts = new Map<number, LotResult>();
-  const zone = state.cells.zone;
-  cells.forEach((cell, k) => {
-    if (cell.status !== CELL_OPEN || (zone[cell.index] ?? ZONE_NONE) === ZONE_NONE) return;
-    if (markWith(state, cell, cell.index, fronts) !== null) out[k] = 1;
-  });
+export function lotMarksInChunk(state: SimState, chunk: number, shapes: Pick<ChunkCellShapes, "slots" | "statuses"> = cellShapesInChunk(state, chunk)): Uint8Array {
+  syncCells(state);
+  const { slots, statuses } = shapes;
+  const out = new Uint8Array(slots.length);
+  // The answer at each column's front cell, by that cell's slot: a column's cells sit in a row from it.
+  const fronts = new Map<number, LotResult | null>();
+  const known = new Map<number, number>();
+  const { zone, offset } = state.cells;
+  // The finder needs the block index for through-lots, and builds it on first use. Built here, so
+  // that one-off lands on the first chunk's marks, whichever chunk is first to ask the finder.
+  blockIndexOf(state.roads);
+  let seg = -1;
+  const open = CELL_OPEN;
+  const n = slots.length;
+  for (let k = 0; k < n; k++) {
+    // Most cells of a chunk can be blocked, so this test comes first and alone.
+    if (statuses[k] !== open) continue;
+    const slot = slots[k] ?? -1;
+    if (slot < 0 || (zone[slot] ?? ZONE_NONE) === ZONE_NONE) continue;
+    // Slots come segment by segment, so mostly the last cell's segment again.
+    seg = segmentOfSlot(offset, slot, seg);
+    const local = slot - (offset[seg] ?? 0);
+    const depth = local % DEPTH;
+    if (depth > 0 && barren(state, slot)) {
+      if (barrenReason(state, { segment: seg, ...fromLocal(local) }) !== null) out[k] = 1;
+      continue;
+    }
+    const frontSlot = slot - depth;
+    let front = fronts.get(frontSlot);
+    if (front === undefined) {
+      const ref: CellRef = { segment: seg, ...fromLocal(local - depth) };
+      front = plainLotFits(state, ref, known) ? null : findLot(state, ref);
+      fronts.set(frontSlot, front);
+    }
+    if (markFrom(front, depth) !== null) out[k] = 1;
+  }
   return out;
 }
