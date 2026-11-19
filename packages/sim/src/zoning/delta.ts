@@ -55,6 +55,12 @@ export function recordCellChanges(state: SimState): void {
   recordCellChangesOf(state.roads);
 }
 
+// Scratch for the keys of the cells a delta carries, sorted to drop the
+// repeats, kept between deltas. Made new each time, it was about 60 MB an
+// hour of buffers in the soak, which set off major collections on the
+// sim's thread (issue #209). Not state: nothing outlives the call.
+let keyScratch = new Float64Array(1 << 12);
+
 /**
  * The cells of `state` that changed since the last call, or since recording
  * started, read as they are now. Null if none changed or nothing is
@@ -71,7 +77,8 @@ export function drainCellDelta(state: SimState): CellDelta | null {
   const relaid = Int32Array.from([...changes.relaid].filter((seg) => seg < limit)).sort();
   let room = changes.painted.length;
   for (const seg of relaid) room += runOf(seg);
-  const keys = new Float64Array(room);
+  if (keyScratch.length < room) keyScratch = new Float64Array(Math.max(room, Math.ceil(keyScratch.length * 1.5)));
+  const keys = keyScratch;
   let n = 0;
   for (const seg of relaid) {
     const start = cells.offset[seg] ?? 0;

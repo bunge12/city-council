@@ -345,8 +345,9 @@ function catchUp(state: SimState, bi: BuildingIndex): void {
     if (file(bi, b, id)) bi.toCheck.add(id);
     else if (!index.follows) bi.lost.add(id);
   }
-  watch.relaid.clear();
-  watch.nodes.clear();
+  // New ones rather than clear(): see `CellWatch` in zoning/cell-index.ts.
+  watch.relaid = new Map();
+  watch.nodes = new Set();
 }
 
 /**
@@ -609,7 +610,8 @@ export function buildingWorkDue(state: SimState): boolean {
 export function takeLostBuildings(state: SimState): number[] {
   const { bi } = indexOf(state, false);
   const ids = [...bi.lost].sort((p, q) => p - q);
-  bi.lost.clear();
+  // A new set rather than clear(): see `CellWatch` in zoning/cell-index.ts.
+  if (bi.lost.size > 0) bi.lost = new Set();
   return ids;
 }
 
@@ -626,7 +628,8 @@ export function takeBuildingsToCheck(state: SimState): number[] {
   if (watch) for (const seg of watch.blocked) collect(bi, seg, set);
   const ids = [...set].sort((p, q) => p - q);
   bi.toCheck = new Set();
-  watch?.blocked.clear();
+  // A new set rather than clear(): see `CellWatch` in zoning/cell-index.ts.
+  if (watch && watch.blocked.size > 0) watch.blocked = new Set();
   return ids;
 }
 

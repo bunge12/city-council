@@ -148,8 +148,11 @@ export function drainRoadChanges(net: RoadNetwork): RoadChanges | null {
     nodeFree,
     segFree,
   };
-  rec.nodes.clear();
-  rec.segs.clear();
+  // New sets rather than clear(): a set that lives long gets each new
+  // table in the old generation, garbage only a major collection takes
+  // back (zoning/cell-index.ts, `CellWatch`; issue #209).
+  rec.nodes = new Set();
+  rec.segs = new Set();
   rec.nodeFree = net.nodeFree;
   rec.segFree = net.segFree;
   return changes;

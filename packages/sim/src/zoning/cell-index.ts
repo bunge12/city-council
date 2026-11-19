@@ -293,7 +293,7 @@ export interface CellIndex {
   /** Each segment id as last seen, null where none was live. */
   segs: (SegShape | null)[];
   /** Segment ids the network has added or removed since the index last looked. */
-  readonly touched: Set<number>;
+  touched: Set<number>;
   /** A change of roads still settling; null when settled. */
   pending: SettleJob | null;
   /**
@@ -302,7 +302,7 @@ export interface CellIndex {
    * new one for every road would keep the garbage collector busy enough to
    * stall the sim for tens of milliseconds at a time.
    */
-  spare: { zone: Uint8Array; density: Uint8Array } | null;
+  spare: { offset: Int32Array; zone: Uint8Array; density: Uint8Array } | null;
   /**
    * Zoning an undo is bringing back with the segments it puts back
    * (zone-undo.ts), for the next layout to give them. Set and used within
@@ -348,6 +348,15 @@ export interface BuildingWatch {
   /** Segments with a cell whose status changed to anything but CELL_OPEN. */
   blocked: Set<number>;
 }
+
+// The sets in an index and its watches live as long as the index, so V8
+// keeps them in the old generation. Clearing such a set, or growing it past
+// its table, gives it a new table there too, garbage that only a major
+// collection takes back. So each is replaced by a new set where it would be
+// cleared: the new one is young, and filled and emptied again before it
+// gets old. Cleared, they were most of what the old generation took in
+// during the soak, and set off most of the major collections on the sim's
+// thread (issue #209).
 
 /** See `CellIndex.watch`. */
 export interface CellWatch {
@@ -986,13 +995,19 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   const net = index.net;
   const limit = segmentIdLimit(net);
   const oldLimit = index.segs.length;
-  const changed: Before[] = [];
   const restore = index.restore;
   index.restore = null;
   // Nearly every call, from a query between changes: nothing to look at, and no garbage made finding that out (issue 166).
+  // So nothing is allocated above this line. The list below lives on into
+  // the walk, so V8 learns to make it in the old generation: made before
+  // this return, the empty lists the grower's queries threw away were most
+  // of what the old generation took in, and set off most of its major
+  // collections (issue #209).
   if (index.touched.size === 0 && limit === oldLimit) return null;
+  const changed: Before[] = [];
   const look = [...index.touched];
-  index.touched.clear();
+  // A new set rather than clear(): see `CellWatch`.
+  index.touched = new Set();
   for (let id = Math.min(limit, oldLimit); id < Math.max(limit, oldLimit); id++) look.push(id);
   look.sort((p, r) => p - r);
   for (let i = 0; i < look.length; i++) {
@@ -1288,7 +1303,8 @@ function relayout(
   restore: Int32Array | null,
 ): CellState {
   const limit = index.segs.length;
-  const offset = new Int32Array(limit + 1);
+  // Not cleared: every entry is written below.
+  const offset = offsetBuffer(index.spare?.offset, cells.offset, limit + 1);
   // Up to the first changed id the runs start where they did.
   const first = Math.min(changed[0]?.id ?? limit, limit, cells.offset.length - 1);
   offset.set(cells.offset.subarray(0, first + 1));
@@ -1367,7 +1383,7 @@ function relayout(
     }
   }
   // State lets go of the old arrays, so they become the spare.
-  index.spare = { zone: cells.zone, density: cells.density };
+  index.spare = { offset: cells.offset, zone: cells.zone, density: cells.density };
   return { offset, zone, density };
 }
 
@@ -1384,6 +1400,19 @@ function layoutBuffer(spare: Uint8Array | undefined, current: Uint8Array, length
     return new Uint8Array(spare.buffer, 0, length);
   }
   return new Uint8Array(new ArrayBuffer(ceilOf(length * 1.25) + 1024), 0, length);
+}
+
+/**
+ * The offsets of a new layout, as `layoutBuffer` gives the zones: on the
+ * spare buffer when it can be. A new one for each road change was about
+ * 80 MB an hour of buffers in the soak, enough to set off major
+ * collections on the sim's thread (issue #209).
+ */
+function offsetBuffer(spare: Int32Array | undefined, current: Int32Array, length: number): Int32Array {
+  if (spare && spare.buffer !== current.buffer && spare.buffer.byteLength >= length * 4) {
+    return new Int32Array(spare.buffer, 0, length);
+  }
+  return new Int32Array(new ArrayBuffer((ceilOf(length * 1.25) + 256) * 4), 0, length);
 }
 
 // Live indexes by network object, like the spatial index and the blocks. A
@@ -1591,7 +1620,8 @@ export function followCells(state: SimState, segs: ArrayLike<number>, painted: A
     index.dirty.add(chunkAt(x, z));
   }
   const chunks = [...index.dirty].sort((a, b) => a - b);
-  index.dirty.clear();
+  // A new set rather than clear(): see `CellWatch`.
+  index.dirty = new Set();
   return chunks;
 }
 
