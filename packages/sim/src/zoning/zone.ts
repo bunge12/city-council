@@ -139,14 +139,18 @@ let found = new Int32Array(1 << 12);
 let boxes = new Float64Array(4 * 64);
 
 /**
- * Where every cell the command would change sits in the zone and density
- * arrays, ascending: the open cells with their centre inside a rectangle
+ * Finds every cell the command would change: the open cells with their centre inside a rectangle
  * whose zone or density is not already the one asked for. The cells under
  * all the rectangles are read in one pass, so a cell under two is looked at
  * once and listed once (issue #204: a pass per rectangle read the buckets
  * where two meet twice).
+ *
+ * Returns how many cells; where each sits is left in the first that many
+ * entries of `found`, in no order, until the next call. Each stroke used to
+ * copy that list out twice, at submit and when it applied: about 60 MB an
+ * hour of buffers in the soak (issue #209).
  */
-function gather(state: SimState, parsed: Parsed): Int32Array {
+function gather(state: SimState, parsed: Parsed): number {
   const index = syncCells(state);
   const cells = state.cells;
   const { zone, density, rects } = parsed;
@@ -199,7 +203,12 @@ function gather(state: SimState, parsed: Parsed): Int32Array {
       }
     },
   );
-  return found.slice(0, n).sort();
+  return n;
+}
+
+/** The cells `gather` found, ascending, as a view on its scratch: read it before the next `gather`. */
+function gathered(count: number): Int32Array {
+  return found.subarray(0, count).sort();
 }
 
 const NOTHING = "no cell would change: nothing open lies under the rectangles, or it is zoned this way already";
@@ -212,15 +221,26 @@ export function checkZoneCellsPayload(payload: unknown): string | null {
 
 /**
  * What a ZoneCells command with this payload would do to `state`, or why it
- * would be refused. Changes nothing a player set. For the command itself
- * and for the zone tool's preview on the client's copy of the city.
+ * would be refused. Changes nothing a player set. For the zone tool's
+ * preview on the client's copy of the city.
  */
 export function planZoneCells(state: SimState, payload: unknown): ZonePlanResult {
   const parsed = parse(payload);
   if (typeof parsed === "string") return { ok: false, reason: parsed };
-  const slots = gather(state, parsed);
-  if (slots.length === 0) return { ok: false, reason: NOTHING };
-  return { ok: true, plan: { zone: parsed.zone, density: parsed.density, cells: slots } };
+  const count = gather(state, parsed);
+  if (count === 0) return { ok: false, reason: NOTHING };
+  return { ok: true, plan: { zone: parsed.zone, density: parsed.density, cells: gathered(count).slice() } };
+}
+
+/**
+ * Why a ZoneCells command with this payload would be refused by `state`,
+ * or null: what `planZoneCells` says, without the list of cells. For the
+ * check at submit, which needs only whether any cell would change.
+ */
+export function checkZoneCells(state: SimState, payload: unknown): string | null {
+  const parsed = parse(payload);
+  if (typeof parsed === "string") return parsed;
+  return gather(state, parsed) === 0 ? NOTHING : null;
 }
 
 /**
@@ -228,7 +248,9 @@ export function planZoneCells(state: SimState, payload: unknown): ZonePlanResult
  * reason, with the city as it was. Refuses exactly what `planZoneCells`
  * refuses and changes exactly the cells it lists. `before`, when given, is
  * called with the cells it is about to paint, ascending, and the zone and
- * density they get, while they still hold what they had, for the undo record.
+ * density they get, while they still hold what they had, for the undo
+ * record. The cells are a view on scratch that the next stroke writes over,
+ * so `before` must not keep it.
  */
 export function zoneCellsIfValid(
   state: SimState,
@@ -237,8 +259,9 @@ export function zoneCellsIfValid(
 ): string | null {
   const parsed = parse(payload);
   if (typeof parsed === "string") return parsed;
-  const slots = gather(state, parsed);
-  if (slots.length === 0) return NOTHING;
+  const count = gather(state, parsed);
+  if (count === 0) return NOTHING;
+  const slots = gathered(count);
   before?.(slots, parsed.zone, parsed.density);
   const { zone, density } = state.cells;
   for (let i = 0; i < slots.length; i++) {
