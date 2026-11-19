@@ -166,7 +166,8 @@ jobs:
           # The newest finished run on main other than this one whose figures
           # can still be downloaded. A run that failed still wrote the
           # figures of the tests that passed.
-          for id in $(gh run list --workflow perf.yml --branch main --status completed --limit 10 --json databaseId --jq '.[].databaseId'); do
+          # Not a pull request's run: a fork's branch may be called main too.
+          for id in $(gh run list --workflow perf.yml --branch main --status completed --limit 20 --json databaseId,event --jq '.[] | select(.event != "pull_request") | .databaseId'); do
             [ "$id" = "$RUN_ID" ] && continue
             if gh run download "$id" --pattern 'perf-figures-*' --dir baseline 2>/dev/null; then
               echo "Main's figures from run $id."
@@ -178,12 +179,14 @@ jobs:
           { cat table.md; echo; cat baseline-note.md 2>/dev/null || true; } >> "$GITHUB_STEP_SUMMARY"
           cat table.md
 
-  # Off a pull request, a failed run opens an issue, or comments on the one
-  # already open, so a slow night does not open one issue per run. It blocks
-  # nothing: the required check is ci.yml's.
+  # On main, after a push or at night, a failed run opens an issue, or
+  # comments on the one already open, so a slow night does not open one
+  # issue per run. It blocks nothing: the required check is ci.yml's.
   report:
-    needs: [plan, e2e]
-    if: always() && github.event_name != 'pull_request' && (needs.e2e.result == 'failure' || needs.e2e.result == 'cancelled')
+    needs: [plan, e2e, table]
+    if: >-
+      always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
+      (needs.plan.result == 'failure' || needs.e2e.result == 'failure' || needs.e2e.result == 'cancelled' || needs.table.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

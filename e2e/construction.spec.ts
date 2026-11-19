@@ -9,8 +9,8 @@ import { groundAt } from "./road-fixtures";
 // over CONSTRUCTION.ticks of game time: scaffolding up, the building rising
 // inside it, the scaffolding down. Client only: the sim builds the building
 // whole on one tick. The animation lives in packages/client/src/render,
-// which lint keeps from writing state or sending commands (rule 8), so the
-// state hash cannot depend on it. The frame time at Balanced with a few
+// which lint keeps from importing what writes state and from calling
+// sendCommand (rule 8, issue #225), in place of a test of the state hash. The frame time at Balanced with a few
 // hundred buildings under construction is construction-frame-time.spec.ts,
 // in the perf project (issue #225).
 //

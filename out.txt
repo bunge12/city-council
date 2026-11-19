@@ -1,4 +1,0 @@
-perf=true
-runners=[{"id":"perf-1","project":"perf","files":"1/3"},{"id":"perf-2","project":"perf","files":"2/3"},{"id":"perf-3","project":"perf","files":"3/3"},{"id":"evidence-1","project":"evidence","files":"1/2"},{"id":"evidence-2","project":"evidence","files":"2/2"}]
-perf=false
-runners=[{"id":"evidence-1","project":"evidence","files":"1/2"},{"id":"evidence-2","project":"evidence","files":"2/2"}]

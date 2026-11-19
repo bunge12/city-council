@@ -5,9 +5,10 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 // per browser, and the settings that change the preset and keep the choice.
 // The same forest edge at Low, Balanced and High is presets-forest.spec.ts,
 // in the evidence project (issue #225); which lighting each preset gets is
-// packages/client/test/presets.test.ts. No preset changes the sim: the
-// render code that applies one may not write state or send commands, which
-// lint holds (rule 8), so no test here compares state hashes.
+// packages/client/test/presets.test.ts. No preset changes the sim: lint
+// keeps the render code that applies one from importing what writes state
+// and from calling sendCommand (rule 8, issue #225), in place of a test of
+// the state hash.
 //
 // playwright.config.ts starts every test with Low kept in the browser. The
 // tests here that need a first visit clear it.
