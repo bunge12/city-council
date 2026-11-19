@@ -3,14 +3,17 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { buildingCount, serialize } from "../packages/sim/src/index";
 import { builtFixtureCity } from "./building-fixtures";
-import { frameTime } from "./measure";
 import { groundAt } from "./road-fixtures";
 import { buildingsDrawn, canvasShot, openCity, ready, settle } from "./helpers";
 
 // Issue 136: construction on screen. A new building draws in three stages
 // over CONSTRUCTION.ticks of game time: scaffolding up, the building rising
 // inside it, the scaffolding down. Client only: the sim builds the building
-// whole on one tick, so the state hash is the same with the animation off.
+// whole on one tick. The animation lives in packages/client/src/render,
+// which lint keeps from importing what writes state and from calling
+// sendCommand (rule 8, issue #225), in place of a test of the state hash.
+// The frame time at Balanced with a few hundred buildings under
+// construction is construction-frame-time.spec.ts, in the perf project.
 //
 // The city is the building fixture (building-fixtures.ts) with every
 // building's builtAt set to the tick it is saved at, so all of them are new
@@ -21,7 +24,6 @@ declare const window: {
   cityCouncil: {
     sendCommand(type: string, payload?: unknown): Promise<{ ok: boolean; reason?: string }>;
     saveNow(): Promise<unknown>;
-    downloadCity(): Promise<{ hash: string; tick: number }>;
     mirror: { state: { tick: number; speed: number } | null };
     view: Promise<{ decorCounts(): unknown; onFrame(listener: () => void): void; renderer: { domElement: { toDataURL(type: string): string } } }>;
     camera: Promise<{ rig: { setPose(position: Vec3, target: Vec3): void } }>;
@@ -78,15 +80,13 @@ const CLOSE: { position: Vec3; target: Vec3 } = { position: [GRID.x + 10, ground
 // The two that run the city at 4x draw at Low. In software, at Balanced, a
 // frame of this street under construction takes seconds and the page falls
 // so far behind the worker that a pause sent at tick 128 landed at tick 4080.
-// Scaffolding draws the same at every preset; only the frame-time test is
-// about Balanced.
+// Scaffolding draws the same at every preset.
 //
 // They also draw at a quarter of the pixels. #202's glass made a frame of
 // this street dearer in software, and on the slowest runners (EPYC 7763) the
 // pause test ran past eight minutes on both attempts. At 640 x 400 it takes
 // half as long. The bands, counts and still-picture check do not depend on
-// the size; the frame-time test keeps 1280 x 800 so its figure stays
-// comparable.
+// the size.
 const RUN_TIMEOUT = 480_000;
 const RUN_VIEWPORT = { width: 640, height: 400 };
 /**
@@ -210,46 +210,4 @@ test("pausing freezes a building half way up, and running again finishes it", as
   await expect.poll(() => dataset(page, "zoomBand"), { timeout: FRAME_WAIT }).toBe("district");
   await settle(page, { buildings: true });
   await attach(testInfo, "run on at 4x, finished, district band", await canvasShot(page));
-});
-
-test("the state hash is the same with the animation and without it", async ({ page }, testInfo) => {
-  const hashes: Record<string, string> = {};
-  for (const query of ["?webgl&preset=low", "?webgl&preset=low&noconstruction"]) {
-    await openCity(page, city.bytes, { query, name: "new" });
-    await setPose(page, CLOSE.position, CLOSE.target);
-    await buildingsDrawn(page, city.buildings);
-    await settle(page, { buildings: true });
-    const off = query.includes("noconstruction");
-    expect(Number(await dataset(page, "scaffolds")) > 0, query).toBe(!off);
-    // The same commands on the same paused tick.
-    expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 0 }))).toEqual({ ok: true });
-    const downloaded = await page.evaluate(() => window.cityCouncil.downloadCity());
-    expect(downloaded.tick).toBe(city.tick);
-    hashes[query] = downloaded.hash;
-    await attach(testInfo, off ? "animation off" : "animation on", await canvasShot(page));
-  }
-  const [on, off] = Object.values(hashes);
-  expect(on).toBe(off);
-  await testInfo.attach("hashes", { body: JSON.stringify(hashes, null, 2), contentType: "application/json" });
-});
-
-test("frame time with a few hundred buildings under construction, at Balanced", async ({ page }, testInfo) => {
-  test.setTimeout(RUN_TIMEOUT);
-  const results: Record<string, number> = {};
-  const far: { position: Vec3; target: Vec3 } = { position: [GRID.x - 60, ground + 210, GRID.z + 230], target: [GRID.x + 20, ground, GRID.z + 10] };
-  // Every building mid-rise, under scaffolding. Paused, so a slow runner measures the same stage throughout: the stages are worked out per vertex every frame, running or not.
-  const mid = newCity(Math.round(T * 0.4));
-  for (const query of ["?webgl&preset=balanced", "?webgl&preset=balanced&noconstruction"]) {
-    await openCity(page, mid.bytes, { query, name: "new" });
-    await setPose(page, far.position, far.target);
-    await buildingsDrawn(page, mid.buildings);
-    await settle(page, { buildings: true });
-    const off = query.includes("noconstruction");
-    expect(Number(await dataset(page, "buildingsUnderConstruction"))).toBe(off ? 0 : mid.buildings);
-    results[off ? "off" : "on"] = await frameTime(page, 30);
-    await attach(testInfo, off ? "animation off" : "under construction", await canvasShot(page));
-  }
-  const report = { buildings: mid.buildings, frameMs: results, ticks: T };
-  await testInfo.attach("frame time", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
-  console.log(`frame time with ${mid.buildings} buildings under construction at Balanced: ${results["on"]?.toFixed(1)} ms; animation off: ${results["off"]?.toFixed(1)} ms`);
 });

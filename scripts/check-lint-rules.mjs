@@ -1,4 +1,4 @@
-// Proves the rule-1/2/3/4/6 lint rules still fire. Each case lints a snippet as if
+// Proves the rule-1/2/3/4/6/8 lint rules still fire. Each case lints a snippet as if
 // it lived at `file` and checks which rule reports it. Run by `pnpm lint`.
 import { ESLint } from "eslint";
 
@@ -40,6 +40,13 @@ const cases = [
   ["packages/client/src/ui/x.tsx", 'import { CityStore } from "../save/store";\nexport const a = CityStore;', "no-restricted-imports"],
   ["packages/client/src/ui/x.tsx", 'import { a } from "../../../sim/src/state";\nexport { a };', "no-restricted-imports"],
   ["packages/client/src/ui/x.tsx", 'import { gameDate, type Speed } from "@city-council/sim";\nexport const a: [typeof gameDate, Speed] = [gameDate, 1];', null],
+  // Rules 2 and 8 for the renderer (issue #225): nothing it draws can change the sim, so no preset or animation changes the state hash.
+  ["packages/client/src/render/x.ts", 'import { submit } from "@city-council/sim";\nexport const a = submit;', "no-restricted-imports"],
+  ["packages/client/src/render/x.ts", 'import { SimHost } from "../protocol/host";\nexport const a = SimHost;', "no-restricted-imports"],
+  ["packages/client/src/render/x.ts", 'import { SimMirror } from "../protocol/mirror";\nexport const a = SimMirror;', "no-restricted-imports"],
+  ["packages/client/src/render/x.ts", 'import { saveNow } from "../save/saver";\nexport const a = saveNow;', "no-restricted-imports"],
+  ["packages/client/src/render/x.ts", 'export const a = (m: { sendCommand(t: string): void }) => m.sendCommand("SetSpeed");', "no-restricted-properties"],
+  ["packages/client/src/render/x.ts", 'import type { ReadonlyDeep } from "../protocol/mirror";\nimport type { Snap } from "../tools/snap";\nimport { CHUNK_SIZE } from "@city-council/sim";\nexport type A = [ReadonlyDeep<number[]>, Snap, typeof CHUNK_SIZE];', null],
 ];
 
 const eslint = new ESLint();

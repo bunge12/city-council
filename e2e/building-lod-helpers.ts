@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import { finishConstruction } from "./building-fixtures";
 import { buildingsDrawn, canvasShot, frames, openCity, settle } from "./helpers";
-import { frameTime, mb, memory } from "./measure";
+import { frameTime, mb, memory, perfFigures } from "./measure";
 import { BUILDINGS } from "../packages/client/src/render/config";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE, buildScaleCity, generateTerrain, growScaleCity, heightAt, serialize } from "../packages/sim/src/index";
 
@@ -186,6 +186,20 @@ export function checkBands(bands: Record<string, BandReport>): void {
   // The PRD budgets 500 MB for the tab at full size.
   const m = bands["city"]?.memoryMb;
   expect((m?.pageMb ?? 0) + (m?.workerMb ?? 0) + (m?.merged.simpleMb ?? 0) + (m?.merged.boxMb ?? 0) + (m?.merged.flatMb ?? 0)).toBeLessThan(500);
+}
+
+/** Each band's frame time and draw calls, for the perf run's table (issue #225). */
+export function bandFigures(name: string, title: string, bands: Record<string, BandReport>): void {
+  perfFigures(
+    name,
+    title,
+    Object.fromEntries(
+      Object.entries(bands).flatMap(([band, b]) => [
+        [`${band} band (ms)`, b.frameMs],
+        [`${band} band, draw calls`, b.drawCalls],
+      ]),
+    ),
+  );
 }
 
 /** Back to `MEASURE_VIEWPORT` from waiting small: two frames drawn at full size. */

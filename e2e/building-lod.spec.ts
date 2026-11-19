@@ -3,15 +3,19 @@ import { builtFixtureCity } from "./building-fixtures";
 import { attachCanvas, chunkAt, openFixture, setPose, stats, type Form, type Vec3 } from "./building-lod-helpers";
 import { settle } from "./helpers";
 import { groundAt } from "./road-fixtures";
+import { ZONING_BALANCE } from "../packages/sim/src/index";
 
 // Issue M2-13: buildings across the zoom bands. Full models near the camera
 // in the street band, simplified models merged per chunk within 2 km in the
 // street and district bands and boxes beyond, and flat blocks coloured by zone
 // in the city band. The
 // fixture city with every building type: the same district in all three
-// bands, screenshotted, at Balanced and at Low. The scale city's numbers
-// are in building-lod-scale.spec.ts, building-lod-scale-balanced.spec.ts,
-// building-lod-overlay.spec.ts and building-lod-memory.spec.ts.
+// bands, screenshotted, at Balanced and at Low, and the top bar's homes
+// figure. The scale city's numbers are in building-lod-scale.spec.ts,
+// building-lod-scale-balanced.spec.ts, building-lod-overlay.spec.ts and
+// building-lod-memory.spec.ts, in the perf project (issue #225), which does
+// not gate a merge: the forms each band draws and the homes count are held
+// here instead.
 
 declare const window: { cityCouncil: { view: Promise<{ buildingForm(chunk: number): Form | null }> } };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
@@ -35,6 +39,11 @@ test.describe("the fixture city", () => {
     test(`the same district in all three bands, at ${preset}`, async ({ page }, testInfo) => {
       await openFixture(page, `webgl&debug&preset=${preset}`, "Built", fixture.bytes);
       const chunk = chunkAt(target[0], target[2]);
+      // The top bar's homes (M2-18): every residential building of the fixture.
+      const residential = ZONING_BALANCE.zones.findIndex((z) => z.id === "residential") + 1;
+      const homes = fixture.state.buildings.zone.reduce((n, zone, id) => n + (fixture.state.buildings.flags[id] && zone === residential ? 1 : 0), 0);
+      expect(homes).toBeGreaterThan(0);
+      await expect(page.locator("#homes-count")).toHaveText(homes.toLocaleString("en-US"));
       for (const { band, position, form } of BANDS) {
         await setPose(page, position, target);
         await settle(page, { buildings: true });

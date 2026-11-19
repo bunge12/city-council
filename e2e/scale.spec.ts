@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { buildScaleCity, createState, heightAt, generateTerrain, serialize } from "../packages/sim/src/index";
 import { canvasShot, openCity, settle } from "./helpers";
-import { frameTime, memory } from "./measure";
+import { frameTime, memory, perfFigures } from "./measure";
 
 // The M1 scale check in the browser (issue M1-17): the city `buildScaleCity`
 // makes through commands, 30,000 road segments of street grids, curves and
@@ -123,6 +123,13 @@ test("the M1 scale city: frame time in each zoom band, and the tab's memory", as
   mkdirSync("test-results", { recursive: true });
   writeFileSync(`test-results/${reportName}`, `${JSON.stringify(report, null, 2)}\n`);
   await testInfo.attach("scale report", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
+  perfFigures(reportName.replace(/\.json$/, ""), `M1 scale city, ${backend}, ${report.preset ?? "?"}`, {
+    ...Object.fromEntries(BANDS.flatMap(({ band }) => [
+      [`${band} band, empty map (ms)`, empty[band]],
+      [`${band} band, 30,000 segments (ms)`, roads[band]],
+    ])),
+    "tab memory, city (MB)": cityMemory.pageMb + (cityMemory.workerMb ?? 0),
+  });
 
   expect(stats?.segmentPieces ?? 0).toBeGreaterThan(30_000);
   // Gross regressions only: no band's frame more than three times the
