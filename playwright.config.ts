@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { PLAYER_STATE, TEST_STATE } from "./e2e/browser-state";
+import { MEASURE_STATE, PLAYER_STATE, TEST_STATE } from "./e2e/browser-state";
 import projectFiles from "./e2e/projects.json" with { type: "json" };
 
 const isCI = Boolean(process.env["CI"]);
@@ -56,8 +56,8 @@ export default defineConfig({
       name: "chromium",
       // Every file the other projects do not run. In CI its files are dealt
       // out to runners by scripts/e2e-shard.mjs, by how long each takes.
-      testIgnore: [walkthroughFiles, ...projectFiles.roads, ...(process.env["SCALE_WEBGPU"] ? ["scale.spec.ts"] : [])],
-      // Cheap frames and no autosave on an interval (issue #226). Specs that time frames or test saving override it.
+      testIgnore: [walkthroughFiles, ...projectFiles.roads, ...projectFiles.perf, ...projectFiles.evidence],
+      // Cheap frames and no autosave on an interval (issue #226). A spec that tests saving overrides it.
       use: { ...devices["Desktop Chrome"], storageState: TEST_STATE },
     },
     {
@@ -100,6 +100,34 @@ export default defineConfig({
         baseURL: walkthroughBase,
         launchOptions: { args: webGpuArgs },
       },
+    },
+    {
+      // Frame time, draw calls and memory on the scale cities (issue #225),
+      // on WebGL 2, headless like the chromium project except the two
+      // 30,000 segment specs that came from the roads project, which ask
+      // for headed Chromium themselves (see cells-scale.spec.ts). Each spec writes its
+      // figures to test-results/perf/, which .github/workflows/perf.yml sets
+      // beside main's. It does not gate a merge: CI runs it nightly, after
+      // each push to main and on pull requests that touch the renderer or
+      // carry the `perf` label. It starts after the walkthrough so nothing
+      // else shares the machine while it measures; run it alone with
+      // `pnpm e2e --project perf --no-deps`. With SCALE_WEBGPU set, the
+      // scale check runs in the roads project instead.
+      name: "perf",
+      testMatch: process.env["SCALE_WEBGPU"] ? projectFiles.perf.filter((f) => f !== "scale.spec.ts") : projectFiles.perf,
+      dependencies: remoteBase ? [] : ["walkthrough"],
+      // Every frame drawn at the real settings, and no autosave in a measurement (issue #226).
+      use: { ...devices["Desktop Chrome"], storageState: MEASURE_STATE },
+    },
+    {
+      // Pictures for a pull request that changes what the city looks like
+      // (issue #225), with no check a unit or chromium test does not make.
+      // It runs where perf does, and with the `evidence` label.
+      name: "evidence",
+      testMatch: projectFiles.evidence,
+      dependencies: remoteBase ? [] : ["perf"],
+      // Pictures at the real settings, as a player sees them (issue #226).
+      use: { ...devices["Desktop Chrome"], storageState: MEASURE_STATE },
     },
   ],
   // Against a public address nothing local is needed. Run only the

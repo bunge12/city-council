@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import { finishConstruction } from "./building-fixtures";
 import { buildingsDrawn, canvasShot, frames, openCity, settle } from "./helpers";
-import { frameTime, mb, memory } from "./measure";
+import { frameTime, mb, memory, perfFigures } from "./measure";
 import { BUILDINGS } from "../packages/client/src/render/config";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE, buildScaleCity, generateTerrain, growScaleCity, heightAt, serialize } from "../packages/sim/src/index";
 
@@ -120,7 +120,7 @@ export const WAIT_VIEWPORT = { width: 160, height: 100 } as const;
 export async function poseAndSettle(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.setViewportSize(WAIT_VIEWPORT);
   await setPose(page, position, target);
-  await settle(page, { buildings: true, timeout: 300_000 });
+  await settle(page, { timeout: 300_000 });
   // A resize builds nothing: two frames drawn at full size, and the buildings still settled.
   await fullSize(page);
   await page.waitForFunction(() => document.body.dataset["buildingsSettled"] === "true", null, { timeout: 300_000 });
@@ -190,6 +190,20 @@ export function checkBands(bands: Record<string, BandReport>): void {
   expect((m?.pageMb ?? 0) + (m?.workerMb ?? 0) + (m?.merged.simpleMb ?? 0) + (m?.merged.boxMb ?? 0) + (m?.merged.flatMb ?? 0)).toBeLessThan(500);
 }
 
+/** Each band's frame time and draw calls, for the perf run's table (issue #225). */
+export function bandFigures(name: string, title: string, bands: Record<string, BandReport>): void {
+  perfFigures(
+    name,
+    title,
+    Object.fromEntries(
+      Object.entries(bands).flatMap(([band, b]) => [
+        [`${band} band (ms)`, b.frameMs],
+        [`${band} band, draw calls`, b.drawCalls],
+      ]),
+    ),
+  );
+}
+
 /** Back to `MEASURE_VIEWPORT` from waiting small: two frames drawn at full size. */
 export async function fullSize(page: Page): Promise<void> {
   await page.setViewportSize(MEASURE_VIEWPORT);
@@ -210,6 +224,9 @@ export async function openTown(page: Page): Promise<void> {
   const { town, bytes } = scaleCity();
   await page.setViewportSize(WAIT_VIEWPORT);
   await openFixture(page, "webgl&preset=low", "Town", bytes);
-  // Every chunk read from the mirror: a snapshot fills in over frames.
-  await buildingsDrawn(page, town.buildings, 300_000);
+  // Every chunk read from the mirror. Players see a snapshot fill in over
+  // frames, at least one chunk a frame, which on the town is 576 frames; the
+  // flush reads them all at once (issue #223).
+  await settle(page, { timeout: 300_000 });
+  await buildingsDrawn(page, town.buildings, 60_000);
 }

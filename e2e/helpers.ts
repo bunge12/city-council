@@ -17,11 +17,26 @@ declare const window: {
   cityCouncil: {
     renderStatus(): RenderStatus | null;
     saves: { status: { city: { name: string }; problem: string | null } | null };
-    view: Promise<{ decorCounts(): unknown }>;
+    view: Promise<{ flush?: () => void }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
+declare const document: {
+  body: { dataset: Record<string, string | undefined> };
+  querySelector(selector: string): { getAttribute(name: string): string | null } | null;
+};
 declare function requestAnimationFrame(callback: () => void): number;
+declare function setTimeout(callback: () => void, ms: number): number;
+declare const performance: { now(): number };
+
+/**
+ * `url` with the `flush` switch in its query, so the page has
+ * `view.flush()` (issue #223). `openPage` and `openCity` add it.
+ */
+export function withFlush(url: string): string {
+  const [path, query = ""] = url.split("?", 2) as [string, string?];
+  const rest = query.split("&").filter((p) => p !== "" && p !== "flush");
+  return `${path}?${["flush", ...rest].join("&")}`;
+}
 
 /** Waits until the page has drawn its first frame with terrain. */
 export async function ready(page: Page, timeout = 60_000): Promise<void> {
@@ -54,7 +69,7 @@ export async function renderStatus(page: Page): Promise<RenderStatus> {
 
 /** Goes to `url` and waits until the page is `ready`, then returns its render status. */
 export async function openPage(page: Page, url = "./", timeout = 60_000): Promise<RenderStatus> {
-  await page.goto(url);
+  await page.goto(withFlush(url));
   await ready(page, timeout);
   return renderStatus(page);
 }
@@ -90,7 +105,7 @@ export async function openCity(page: Page, city: SimState | Uint8Array, options:
   const address = `e2e-fixture/${++served}/${encodeURIComponent(name)}.city`;
   await page.route(`**/${address}`, (route) => route.fulfill({ body: Buffer.from(bytes), contentType: "application/octet-stream" }), { times: 1 });
   const flags = query.replace(/^\/?\??/, "");
-  await page.goto(`./?${flags ? `${flags}&` : ""}load=${encodeURIComponent(address)}`);
+  await page.goto(withFlush(`./?${flags ? `${flags}&` : ""}load=${encodeURIComponent(address)}`));
   await ready(page, timeout);
   // A file that could not be had opens the tab's usual city with a note, so check it was this one.
   await page.waitForFunction(() => document.body.dataset["saveLoaded"] === "true", null, { timeout });
@@ -125,34 +140,44 @@ export async function frames(page: Page, n = 2): Promise<void> {
 }
 
 export interface SettleOptions {
-  /** Also waits, before and after, until every chunk of buildings shows the form it wants with no fade under way. */
-  buildings?: boolean;
-  /** The most frames to wait for decoration to hold still. */
-  maxFrames?: number;
   timeout?: number;
 }
 
 /**
- * Waits until decoration near the camera has finished building: its counts
- * hold for ten frames, or `maxFrames` pass.
+ * Builds everything the camera needs now and waits until the canvas says
+ * every build queue is empty (issue #223): buildings read and in the form
+ * they want with no fade under way, the forms kept for a zoom built, the
+ * decoration in range and the overlay's cells while it is shown. The page
+ * builds chunks a few a frame within a budget, and in software WebGL a frame
+ * takes a second or more, so `view.flush()`, which `openPage` and `openCity`
+ * switch on, builds them all at once instead. If a delta from the sim marks
+ * chunks again, it flushes again. Usually the first flush settles it.
+ * building-lod.spec.ts keeps one test that fills a scene through the budget.
  */
 export async function settle(page: Page, options: SettleOptions = {}): Promise<void> {
-  const { buildings = false, maxFrames = 600, timeout = 120_000 } = options;
-  const buildingsSettled = () => page.waitForFunction(() => document.body.dataset["buildingsSettled"] === "true", null, { timeout });
-  if (buildings) await buildingsSettled();
-  await page.evaluate(async (maxFrames) => {
+  const { timeout = 120_000 } = options;
+  // One round trip: the page answers between frames of a second or more, and a `waitForFunction` costs several.
+  const settled = await page.evaluate(async (timeout) => {
     const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < maxFrames && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
+    if (!view.flush) throw new Error("the page has no view.flush(): open it with openPage, openCity or withFlush(url)");
+    const canvas = document.querySelector("#view");
+    const end = performance.now() + timeout;
+    for (;;) {
+      // Always, even when the queues look empty: right after a camera move they still describe the last frame's view.
+      view.flush();
+      if (canvas?.getAttribute("data-render-settled") === "true") return true;
+      if (performance.now() > end) return false;
+      await new Promise<void>((r) => setTimeout(r, 250));
     }
-  }, maxFrames);
-  if (buildings) await buildingsSettled();
+  }, timeout);
+  if (!settled) throw new Error(`the view did not settle in ${timeout} ms`);
+}
+
+/** Waits, without flushing, until the per-frame budget has built every pending chunk: the path players get. */
+export async function settleThroughFrames(page: Page, timeout = 120_000): Promise<void> {
+  // The signal is set after each frame, so one drawn after the camera moved.
+  await frames(page, 2);
+  await page.waitForFunction(() => document.querySelector("#view")?.getAttribute("data-render-settled") === "true", null, { timeout });
 }
 
 /**

@@ -392,6 +392,53 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     layer.dispose();
   });
 
+  it("with no budget and no fade, shows every chunk in the form it wants in one update, and builds ahead (issue #223)", () => {
+    const { source, put } = fakeSource();
+    const here = put(1, 4004, 4004);
+    const mid = put(2, 5004, 4004);
+    const far = put(3, 9004, 9004);
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    expect(layer.idle()).toBe(false);
+    layer.update(near, Infinity, { band: "street", seconds: Infinity });
+    expect([layer.formOf(here), layer.formOf(mid), layer.formOf(far)]).toEqual(["full", "simple", "box"]);
+    expect(layer.idle()).toBe(true);
+    // The flat blocks for a zoom out later are built ahead too, as frames with time left would.
+    expect(layer.stats().mergedBytes.flat).toBeGreaterThan(0);
+    // A zoom out: one update fades straight to the blocks.
+    layer.update(near, Infinity, { band: "city", seconds: Infinity });
+    expect([layer.formOf(here), layer.formOf(mid), layer.formOf(far)]).toEqual(["flat", "flat", "flat"]);
+    expect(layer.idle()).toBe(true);
+    // A building that comes is waiting until the next update reads it.
+    layer.applyIds([1]);
+    expect(layer.idle()).toBe(false);
+    layer.update(near, Infinity, { band: "city", seconds: Infinity });
+    expect(layer.idle()).toBe(true);
+    layer.dispose();
+  });
+
+  it("is not idle while a stale form still drawn waits for budget to build it again (issue #223)", () => {
+    const { source, rows, put } = fakeSource();
+    const a = put(1, 5004, 4004);
+    const b = put(2, 5504, 4004);
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    run(layer, near, "street");
+    expect([layer.formOf(a), layer.formOf(b)]).toEqual(["simple", "simple"]);
+    expect(layer.idle()).toBe(true);
+    // A building comes to each chunk: both simplified meshes are stale, still drawn, and a zero budget rebuilds one a frame.
+    put(3, 5040, 4004);
+    put(4, 5540, 4004);
+    layer.apply([a, b]);
+    layer.update(near, 0, { band: "street", seconds: 1 });
+    expect(layer.idle()).toBe(false);
+    layer.update(near, 0, { band: "street", seconds: 1 });
+    layer.update(near, 0, { band: "street", seconds: 1 });
+    expect(layer.idle()).toBe(true);
+    void rows;
+    layer.dispose();
+  });
+
   it("draws the flat blocks of a group of chunks in one mesh, each chunk fading on its own, built once for a change to several (issue #133)", () => {
     const { source, rows, put } = fakeSource();
     // Chunks (8, 8) and (9, 8) share a group; slots 0 and 1 of it.

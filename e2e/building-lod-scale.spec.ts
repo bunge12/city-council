@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ZONING_BALANCE } from "../packages/sim/src/index";
-import { MEASURE_STATE } from "./browser-state";
-import { MEASURE_VIEWPORT, checkBands, fullSize, measureBands, openTown, scaleCity, writeReport } from "./building-lod-helpers";
+import { MEASURE_VIEWPORT, bandFigures, checkBands, fullSize, measureBands, openTown, scaleCity, writeReport } from "./building-lod-helpers";
 
 // Issue M2-13: the M1 scale city filled with buildings through commands and
 // the grower (growScaleCity). Frame time, draw calls, what each level of
@@ -24,9 +23,6 @@ declare const window: {
 declare const performance: { now(): number };
 
 test.use({ viewport: MEASURE_VIEWPORT });
-// Times frames: every frame drawn at the real settings (issue #226).
-test.use({ storageState: MEASURE_STATE });
-
 // About 4 minutes on a fast CI runner and up to 8 on a slow one (issue #217), so 20 leaves twice the headroom #154 asks for.
 test.setTimeout(1_200_000);
 
@@ -58,5 +54,6 @@ test("frame time, draw calls and memory in each band, at Low", async ({ page }, 
   const low = await measureBands(page, testInfo, "low");
   report["low"] = low;
   await writeReport(testInfo, "M2-13 scale city with buildings, at Low", "building-lod-report.json", report);
+  bandFigures("building-lod-low", `scale town, Low, ${backend}`, low);
   checkBands(low);
 });

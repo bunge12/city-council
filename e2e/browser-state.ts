@@ -8,8 +8,10 @@
 //
 // The chromium project also turns on the test switch
 // (packages/client/src/test-switch.ts, issue #226): cheap frames and no
-// autosave on an interval. The roads and walkthrough projects draw at the
-// real settings: roads compares WebGPU with WebGL 2 pixel for pixel.
+// autosave on an interval. The perf and evidence projects draw every frame
+// at the real settings, with no autosave. The roads and walkthrough projects
+// draw as a player's page does: roads compares WebGPU with WebGL 2 pixel for
+// pixel.
 
 import { TEST_SWITCH_KEY, type TestSwitch } from "../packages/client/src/test-switch";
 
@@ -33,9 +35,10 @@ export const PLAYER_STATE = state(null);
 export const TEST_STATE = state({ cheapFrames: true, autosave: false });
 
 /**
- * For a spec that times frames: every frame drawn, antialiased, at the real
- * pixel ratio, so its figures compare with earlier runs. Autosave stays off,
- * so a save does not land in a measurement.
+ * For the perf and evidence projects, and a chromium spec that times the
+ * page's work: every frame drawn, antialiased, at the real pixel ratio, so
+ * figures compare with earlier runs and pictures look as a player sees them.
+ * Autosave stays off, so a save does not land in a measurement.
  */
 export const MEASURE_STATE = state({ cheapFrames: false, autosave: false });
 

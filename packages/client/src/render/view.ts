@@ -136,6 +136,22 @@ export interface View {
    * See PRESET_BENCHMARK.
    */
   benchmark(): Promise<number>;
+  /**
+   * Whether every build queue is empty: no chunk of buildings, cells or
+   * decoration waits to be built and no building fade is under way. It
+   * describes the view as of the last frame or flush: after a camera move
+   * it is stale until the next. The canvas carries it as
+   * `data-render-settled` after each frame.
+   */
+  settled(): boolean;
+  /**
+   * Only with `?flush`, for tests (issue #223): builds every pending
+   * building, cell and decoration chunk now, with no budget, shows each
+   * chunk's buildings in the form it wants without the fade, builds the
+   * forms kept ahead for a later zoom, as frames with time left would, and
+   * draws once. Players get the per-frame budget.
+   */
+  flush?: () => void;
 }
 
 /** Two decoration masks as one: a cell either masks is masked. */
@@ -154,12 +170,21 @@ export function wantsWebGL(search: string): boolean {
 
 const WATER = 0x3a6f8f;
 
+/** Rounds of building `View.flush` runs at most before it draws, settled or not. */
+const FLUSH_ROUNDS = 8;
+
+/** Test hooks a page asks for in its query: `?flush` adds `View.flush`. */
+export function viewOptions(search: string): { flush: boolean } {
+  return { flush: new URLSearchParams(search).has("flush") };
+}
+
 /**
  * `cheapFrames` is the test switch's (test-switch.ts, issue #226): no
  * antialiasing, a pixel ratio of 1, and a frame drawn only when something
  * changed or is animating. A player's page has it off.
  */
-export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean, cheapFrames = false): Promise<View> {
+export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean, options: { flush: boolean; cheapFrames?: boolean } = { flush: false }): Promise<View> {
+  const cheapFrames = options.cheapFrames ?? false;
   const useWebGL = forceWebGL || !("gpu" in navigator);
   const renderer = new WebGPURenderer({ canvas, antialias: !cheapFrames, forceWebGL: useWebGL });
   const pixelRatio = () => (cheapFrames ? 1 : Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
@@ -317,19 +342,17 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
   let gapCount = 0;
   let gapSum = 0;
   let last = -1;
-  let drawnSignature = 0;
-  let drawnTick: number | null = null;
-  // three.js zeroes renderer.info at the start of every animation frame, so a
-  // skipped frame reports what the last frame drawn drew.
-  let drawCalls = 0;
-  let triangles = 0;
-  renderer.setAnimationLoop((time: number) => {
-    const seconds = last >= 0 ? (time - last) / 1000 : 0;
-    for (const b of before) b(seconds);
+  /**
+   * One frame's building work: buildings, then the decoration and cells
+   * their lots touched, each within its budget. `flush` builds everything
+   * pending with no budget and ends any fade at once.
+   */
+  function build(seconds: number, flush: boolean): void {
     camera.updateMatrixWorld();
     viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     frustum.setFromProjectionMatrix(viewProjection, camera.coordinateSystem);
-    terrainRoot?.buildings?.update(camera.position, BUILDINGS.buildBudgetMs, { band, seconds, frustum, ...(gameTick !== null ? { tick: gameTick } : {}) });
+    const view = { band, seconds: flush ? Infinity : seconds, frustum, ...(gameTick !== null ? { tick: gameTick } : {}) };
+    terrainRoot?.buildings?.update(camera.position, flush ? Infinity : BUILDINGS.buildBudgetMs, view);
     // Cells under a lot that reaches over a chunk line are in a chunk the delta did not name.
     const lots = terrainRoot?.buildings?.takeLotChunks() ?? [];
     if (lots.length > 0) {
@@ -337,27 +360,67 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
       terrainRoot?.decor.refresh(lots);
     }
     // After the refresh, so a chunk whose lots or roads changed this frame is built again before it is drawn (issue 141).
-    terrainRoot?.decor.update(camera.position);
-    terrainRoot?.cells?.update(camera.position, CELLS.buildBudgetMs);
+    terrainRoot?.decor.update(camera.position, flush ? Infinity : undefined);
+    terrainRoot?.cells?.update(camera.position, flush ? Infinity : CELLS.buildBudgetMs);
+  }
+
+  /** Whether every build queue is empty: buildings, their forms and fades, the decoration in range, and the overlay's cells while it is shown. */
+  function settled(): boolean {
+    const root = terrainRoot;
+    if (!root) return false;
+    if (root.buildings && !root.buildings.idle()) return false;
+    if (root.decor.pending() > 0) return false;
+    const cells = root.cells?.stats();
+    return !cells?.visible || cells.pending === 0;
+  }
+
+  let drawnSignature = 0;
+  let drawnTick: number | null = null;
+  // three.js zeroes renderer.info at the start of every animation frame, so a
+  // skipped frame reports what the last frame drawn drew.
+  let drawCalls = 0;
+  let triangles = 0;
+
+  /** Under cheap frames, whether anything on screen changed since the last frame drawn. */
+  function changed(): boolean {
+    const signature = frameSignature(scene, camera);
+    // The construction tick moves only what is under construction.
+    const ticking = gameTick !== drawnTick && (terrainRoot?.buildings?.stats().building ?? 0) > 0;
+    const yes = dirty || ticking || signature !== drawnSignature;
+    if (yes) {
+      dirty = false;
+      drawnSignature = signature;
+      drawnTick = gameTick;
+    }
+    return yes;
+  }
+
+  /** Draws the frame, or under cheap frames only when something changed. A flush always draws. */
+  function draw(always: boolean): FrameStats {
     const shown = terrainRoot?.terrain;
     lighting.update(camera, shown ? (x, z) => heightAt(shown, x, z) : null);
-    let draw = true;
-    if (cheapFrames) {
-      const signature = frameSignature(scene, camera);
-      // The construction tick moves only what is under construction.
-      const ticking = gameTick !== drawnTick && (terrainRoot?.buildings?.stats().building ?? 0) > 0;
-      draw = dirty || ticking || signature !== drawnSignature;
-      if (draw) {
-        dirty = false;
-        drawnSignature = signature;
-        drawnTick = gameTick;
-      }
-    }
-    if (draw) {
+    const drawn = !cheapFrames || changed() || always;
+    if (drawn) {
       renderer.render(scene, camera);
       drawCalls = renderer.info.render.drawCalls;
       triangles = renderer.info.render.triangles;
     }
+    canvas.dataset["renderSettled"] = String(settled());
+    const frames = Math.min(gapCount, FRAME_TIME_WINDOW);
+    const frameMs = frames > 0 ? gapSum / frames : 0;
+    return {
+      frameMs,
+      fps: frameMs > 0 ? 1000 / frameMs : 0,
+      drawCalls,
+      triangles,
+      drawn,
+    };
+  }
+
+  renderer.setAnimationLoop((time: number) => {
+    const seconds = last >= 0 ? (time - last) / 1000 : 0;
+    for (const b of before) b(seconds);
+    build(seconds, false);
     if (last >= 0) {
       const slot = gapCount % FRAME_TIME_WINDOW;
       gapSum += time - last - (gaps[slot] ?? 0);
@@ -365,17 +428,25 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
       gapCount++;
     }
     last = time;
-    const frames = Math.min(gapCount, FRAME_TIME_WINDOW);
-    const frameMs = frames > 0 ? gapSum / frames : 0;
-    const stats: FrameStats = {
-      frameMs,
-      fps: frameMs > 0 ? 1000 / frameMs : 0,
-      drawCalls,
-      triangles,
-      drawn: draw,
-    };
+    const stats = draw(false);
     for (const l of listeners) l(stats);
   });
+
+  /**
+   * Builds every pending chunk now, ends every fade, and draws once (issue
+   * #223). A fade that ends can start another, and a lot built can mark
+   * decoration and cells, so it builds again until nothing is left, a few
+   * rounds at most. The frame clock does not see it.
+   */
+  function flush(): void {
+    for (const b of before) b(0);
+    for (let round = 0; round < FLUSH_ROUNDS; round++) {
+      build(0, true);
+      if (settled()) break;
+    }
+    const stats = draw(true);
+    for (const l of listeners) l(stats);
+  }
 
   return {
     backend,
@@ -451,6 +522,8 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
       dirty = true;
     },
     lighting: () => lighting.report(),
+    settled,
+    ...(options.flush ? { flush } : {}),
     async benchmark() {
       const size = renderer.getDrawingBufferSize(new Vector2());
       const target = new RenderTarget(Math.max(1, size.x), Math.max(1, size.y));

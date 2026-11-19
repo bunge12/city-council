@@ -165,6 +165,9 @@ jobs:
   # every page is drawn in software and the suite is bound by CPU: more
   # workers on one runner do not help, more runners do.
   #
+  # The perf and evidence projects are not here: they measure and take
+  # pictures, and run in perf.yml without blocking a merge (issue #225).
+  #
   # Each job runs one project with `--no-deps`. The dependencies between
   # projects in playwright.config.ts only keep them from sharing a machine,
   # and here each has its own.
@@ -190,8 +193,8 @@ jobs:
       image: mcr.microsoft.com/playwright:v${{ needs.changes.outputs.playwright }}-noble
       # Chromium's shared memory, as Playwright's Docker guide asks.
       options: --ipc=host
-    # A runner planned at about ten minutes takes twice that on a slow
-    # machine, and a test that fails once is run again. 35 minutes leaves
+    # A runner planned at about eight to ten minutes takes twice that on a
+    # slow machine, and a test that fails once is run again. 35 minutes leaves
     # room for both, and still stops a run that hangs.
     # The M2 walkthrough takes its own limit (see its matrix entry).
     timeout-minutes: ${{ matrix.timeout || 35 }}
@@ -204,19 +207,19 @@ jobs:
           # page in the other worker on a slow runner, and its locators and
           # screenshots time out.
           #
-          # Eight shards, not six (issue #152): runners on the same image are
-          # not the same speed, and on a slow one the same files took 1.5 to
-          # 2 times as long, so six ran into the job's time limit. The shard
-          # script balances on seconds measured on CI, slow runners and fast
-          # ones alike, so each runner here is planned at about ten minutes.
-          - { id: chromium-1, files: "1/8", args: "--project chromium --workers=1" }
-          - { id: chromium-2, files: "2/8", args: "--project chromium --workers=1" }
-          - { id: chromium-3, files: "3/8", args: "--project chromium --workers=1" }
-          - { id: chromium-4, files: "4/8", args: "--project chromium --workers=1" }
-          - { id: chromium-5, files: "5/8", args: "--project chromium --workers=1" }
-          - { id: chromium-6, files: "6/8", args: "--project chromium --workers=1" }
-          - { id: chromium-7, files: "7/8", args: "--project chromium --workers=1" }
-          - { id: chromium-8, files: "8/8", args: "--project chromium --workers=1" }
+          # Six shards, each planned at about eight minutes. Issue #152 went
+          # from six to eight because runners on the same image are not the
+          # same speed, and on a slow one the same files took 1.5 to 2 times
+          # as long. Issue #225 then moved the perf and evidence specs, about
+          # 2,250 planned seconds, to .github/workflows/perf.yml, which does
+          # not gate a merge. The shard script balances on seconds measured
+          # on CI, slow runners and fast ones alike.
+          - { id: chromium-1, files: "1/6", args: "--project chromium --workers=1" }
+          - { id: chromium-2, files: "2/6", args: "--project chromium --workers=1" }
+          - { id: chromium-3, files: "3/6", args: "--project chromium --workers=1" }
+          - { id: chromium-4, files: "4/6", args: "--project chromium --workers=1" }
+          - { id: chromium-5, files: "5/6", args: "--project chromium --workers=1" }
+          - { id: chromium-6, files: "6/6", args: "--project chromium --workers=1" }
           # One worker: software WebGPU takes most of a runner's CPU. In CI
           # the roads project is fully parallel, so its one file is dealt
           # out test by test.

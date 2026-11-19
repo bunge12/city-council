@@ -31,7 +31,7 @@ A new street lines up with the streets around it, and a street drawn beside anot
 - [ ] A Playwright walkthrough draws a street, then a second one beside it with clicks up to 10 pixels off. The gap between the road edges is 96 m
 - [ ] The walkthrough draws a third street whose end lines up with a node two blocks away
 - [ ] With both toggles off, neither guide draws or snaps
-- [ ] Drawing in a network of 30,000 segments keeps the frame time it had without guides
+- [ ] Drawing in a network of 30,000 segments keeps the frame time it had without guides. Since #225 this is `guides-scale.spec.ts` in the perf run, which does not gate a merge
 - [ ] Screenshots of both guides attached to the pull request
 
 ## Notes

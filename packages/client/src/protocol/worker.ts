@@ -7,15 +7,18 @@ import { newCityFallback, openLatestCity, openLoadedFile, type OpenedCity } from
 import { claimCity, startFromWorkerName } from "../save/lock";
 import { Saver } from "../save/saver";
 import { CityStore } from "../save/store";
+import { serveClock, isClockMessage, type FromClock } from "./clock";
 import { PUMP_INTERVAL_MS, SimHost } from "./host";
 import { LOCAL_PLAYER_ID } from "./player";
-import { bufferUntilListening, portTransport, type MessagePortLike } from "./transport";
+import { bufferUntilListening, isSimMessage, portTransport, type MessagePortLike } from "./transport";
 
 const port = self as unknown as MessagePortLike;
 // The page asks for a snapshot as soon as it starts, before the save has
 // loaded. Hold its messages until the host and saver are listening.
-const simTransport = bufferUntilListening(portTransport(port, (data) => !isSaveMessage(data)));
+const simTransport = bufferUntilListening(portTransport(port, isSimMessage));
 const saveTransport = bufferUntilListening(portTransport<FromSaver, unknown>(port, isSaveMessage));
+// A test can hold the clock before the city has loaded, so it holds from the first step.
+const clockTransport = bufferUntilListening(portTransport<FromClock, unknown>(port, isClockMessage));
 
 /** What the page put in this worker's name. */
 const asked = startFromWorkerName(self.name);
@@ -68,6 +71,8 @@ async function start(): Promise<void> {
     problem: city.problem,
     wallClock: () => Date.now(),
   });
+  // Before the pump starts, so a hold sent as the page started is in place for the first step.
+  serveClock(host, clockTransport);
   if (host) {
     setInterval(() => host.pump(), PUMP_INTERVAL_MS);
     // Off only under the test switch (issue #226): the page still saves on request.

@@ -49,16 +49,17 @@ pnpm build
 
 ## How work is organised
 
-- Name the Claude Code session after the ticket - a number (M1-01) if exists, or describing a ticket otherwise
+- Name the Claude Code session after the ticket - a number (M1-01) if exists, or ticket number + short title
 - One issue is one pull request. Keep it small enough to finish and test in one session.
 - Name the branch after the change, for example `m0-terrain-generation`.
 - Right before every push, run `pnpm typecheck`, `pnpm lint` and `pnpm test`. `main` does not require a branch to be up to date before it merges, so do not rebase only because `main` moved. Rebase onto `main` when GitHub shows a conflict, or when the change needs something that landed there. CI on a pull request tests it merged with `main` as of its last push. CI runs again on every commit to `main` and opens an issue titled "CI failed on main", labelled `CI Failure`, when that run fails. If one is open, fixing `main` comes before merging anything else.
 - A pull request needs passing unit tests, a passing replay test, and a Playwright walkthrough with screenshots for anything a player can see.
 - Every pull request that changes what users see in the browser gets browser evidence for the feature it changes. Publish the evidence as a Claude Artifact and post its link as a comment on the pull request. Back-end and simulation-only changes need no evidence.
+- When a pull request is marked "ready for review" you must fetch the latest `main` to verify if there are any merge conflicts
 - If a decision in the PRD changes, update `docs/PRD.md` in the same pull request.
 - Do not start work that belongs to a later milestone, even when it looks easy.
 - If you think something is a bad idea (or not worth doing), say no, challenge it, present it to me.
-- For any change over 300 LOC, you must launch a fresh Opus review subagent (instructions: "Review the code from this session. No need to run specs. Do not focus on nits") before opening the PR
+- For any change over 200 LOC, you must launch a fresh Opus review subagent (instructions: "Review the code from this session. No need to run specs. Do not focus on nits") before opening the PR
 
 ## Things this project does not do
 

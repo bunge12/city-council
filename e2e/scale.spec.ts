@@ -1,9 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { buildScaleCity, createState, heightAt, generateTerrain, serialize } from "../packages/sim/src/index";
-import { MEASURE_STATE } from "./browser-state";
 import { canvasShot, openCity, settle } from "./helpers";
-import { frameTime, memory } from "./measure";
+import { frameTime, memory, perfFigures } from "./measure";
 
 // The M1 scale check in the browser (issue M1-17): the city `buildScaleCity`
 // makes through commands, 30,000 road segments of street grids, curves and
@@ -33,8 +32,6 @@ declare const window: {
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: { width: 1280, height: 800 } });
-// Times frames: every frame drawn at the real settings (issue #226).
-test.use({ storageState: MEASURE_STATE });
 
 // Two cities, three bands each, drawn in software on a CI runner at about
 // 2 fps. On main it took 294.7 s of the old 300 s (run 43548591694), so the
@@ -76,7 +73,7 @@ async function bandTimes(page: Page, testInfo?: TestInfo): Promise<Record<string
   const out: Record<string, number> = {};
   for (const { band, position, target } of BANDS) {
     await setPose(page, position, target);
-    await settle(page, { maxFrames: 120 });
+    await settle(page);
     expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
     out[band] = Math.round((await frameTime(page, 40)) * 10) / 10;
     if (testInfo) await attach(page, testInfo, `scale city, ${band} band`);
@@ -127,6 +124,13 @@ test("the M1 scale city: frame time in each zoom band, and the tab's memory", as
   mkdirSync("test-results", { recursive: true });
   writeFileSync(`test-results/${reportName}`, `${JSON.stringify(report, null, 2)}\n`);
   await testInfo.attach("scale report", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
+  perfFigures(reportName.replace(/\.json$/, ""), `M1 scale city, ${backend}, ${report.preset ?? "?"}`, {
+    ...Object.fromEntries(BANDS.flatMap(({ band }) => [
+      [`${band} band, empty map (ms)`, empty[band]],
+      [`${band} band, 30,000 segments (ms)`, roads[band]],
+    ])),
+    "tab memory, city (MB)": cityMemory.pageMb + (cityMemory.workerMb ?? 0),
+  });
 
   expect(stats?.segmentPieces ?? 0).toBeGreaterThan(30_000);
   // Gross regressions only: no band's frame more than three times the
