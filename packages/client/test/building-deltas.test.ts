@@ -112,12 +112,20 @@ describe("building deltas in the mirror", () => {
     const zs = [1, 3, 5, 7].map((i) => house?.corners?.[i] ?? 0);
     expect([Math.min(...xs), Math.max(...xs)]).toEqual([4224, 4240]);
     expect([Math.min(...zs), Math.max(...zs)]).toEqual([4700 - HALF - 4 * CELL, 4700 - HALF]);
+    // The building on each cell of a chunk, by the chunk's own order (issue #163).
+    const shapes = mirror.cellShapesInChunk(here);
+    if (!shapes) throw new Error("no cells");
+    const built = Array.from(mirror.buildingsOnSlots(shapes.slots) ?? []);
+    expect(built).toHaveLength(shapes.slots.length);
+    expect(built.filter((id) => id === 0)).toHaveLength(2 * 4);
+    expect(Array.from(mirror.buildingsOnSlots(Int32Array.of(-1, 1e9)) ?? [])).toEqual([-1, -1]);
 
     // Now it has been asked, removing the house reports its chunk.
     inject({ limit: 1, ids: Int32Array.of(0), rows: houseRows(0, false), free: Int32Array.of(0) });
     last = updates.at(-1);
     expect(last?.kind === "delta" && last.buildingChunks).toEqual([here]);
     expect(mirror.buildingsInChunk(here)).toEqual([]);
+    expect(Array.from(mirror.buildingsOnSlots(shapes.slots) ?? []).every((id) => id < 0)).toBe(true);
     expect(Array.from(mirror.state?.buildings.free ?? [])).toEqual([0]);
 
     // A delta whose rows do not fit makes the mirror ask for a snapshot.

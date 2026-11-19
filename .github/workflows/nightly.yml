@@ -4,8 +4,10 @@ name: Nightly
 # cold load to its 5 s budget. Pull request CI prints the load and does not
 # hold it, since on the slowest runners it has about 1.3 times headroom, less
 # than the spread between runners (issue #154). deploy.yml holds it after
-# every push to main; this run catches a slow load on days with no push. A
-# failure here is reported and blocks nothing.
+# every push to main; this run catches a slow load on days with no push. It
+# also holds the zone tool's 50 ms task budget on the scale town, which pull
+# request CI prints for the same reason (issue #163). A failure here is
+# reported and blocks nothing.
 
 on:
   schedule:
@@ -35,4 +37,27 @@ jobs:
         with:
           name: walkthrough-m0-nightly
           path: walkthrough-screenshots
+          retention-days: 14
+
+  zone-tool-task-budget:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/playwright-browsers
+      - name: Opening the zone tool on the scale town, every task under 50 ms
+        env:
+          E2E_DEV_SERVER_ONLY: "1"
+        run: xvfb-run -a pnpm e2e --project chromium --workers=1 e2e/zone-open-scale.spec.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zone-open-nightly
+          path: test-results/zone-open-report.json
           retention-days: 14

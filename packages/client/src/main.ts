@@ -297,6 +297,10 @@ const bulldozeTool = new BulldozeToolController({
 /** Counts every snapshot and delta, so the zone tool knows when what it worked out from the copy is stale. */
 let cityVersion = 0;
 mirror.subscribe(() => cityVersion++);
+// What the tools and the zoning overlay need is built after each snapshot, in a task of its own, so opening a tool never waits for it (issue #163).
+mirror.subscribe((update) => {
+  if (update.kind === "snapshot") setTimeout(() => mirror.prepareTools(), 0);
+});
 const zoneTool = new ZoneToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
@@ -573,7 +577,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) =>
   view.setCellSource({
     shapes: (chunk) => mirror.cellShapesInChunk(chunk),
     cells: () => mirror.state?.cells ?? null,
-    built: () => mirror.cellBuildings(),
+    built: (shapes) => mirror.buildingsOnSlots(shapes.slots),
     // Free zoned ground where no building type fits, hatched (issue M2-15).
     marks: (chunk, shapes) => mirror.lotMarksInChunk(chunk, shapes),
   });

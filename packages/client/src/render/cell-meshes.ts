@@ -2,14 +2,17 @@
 // built from the mirror by cell-geometry.ts. A chunk is rebuilt only when
 // the mirror says a cell in it changed.
 //
-// The overlay is drawn only while it is on. Nothing is built until it is
-// first turned on, and a chunk that changes while it is off is rebuilt when
-// it comes back on, so a player who never opens it pays nothing. Chunks are
-// built a few at a time, nearest the camera first, within a time budget per
-// frame (`CELLS.buildBudgetMs`), so turning it on over a big city fills it
-// in over frames instead of stopping the page. The first chunk still waits
-// for the client's cell index, which the mirror builds on its first question
-// about cells (PRD, "Cells in the protocol").
+// The overlay is drawn only while it is on. No chunk mesh is built until it
+// is first turned on, and a chunk that changes while it is off is rebuilt
+// when it comes back on. Chunks are built a few at a time, nearest the
+// camera first, within a time budget per frame (`CELLS.buildBudgetMs`), so
+// turning it on over a big city fills it in over frames instead of stopping
+// the page. What the first chunk needs is ready by then (issue #163): the
+// client's cell index and building index are built when the city loads
+// (PRD, "Cells in the protocol"), the mirror builds the block index the lot
+// marks need after each snapshot, and the shader is compiled at load
+// (`precompile`). Each chunk looks up buildings and lot marks for its own
+// cells only (issues #163 and #164).
 //
 // Zoom bands (PRD, "Zoom bands"): the street and district bands show each
 // cell's lines; the city band shows flat colour with no lines, so an
@@ -41,8 +44,8 @@ export interface CellSource {
   shapes(chunk: number): ChunkCellShapes | null;
   /** The copy's zone and density arrays, or null before the first snapshot. */
   cells(): { zone: ArrayLike<number>; density: ArrayLike<number> } | null;
-  /** By the same slots, the building on each cell or -1, or null for none at all. Cells with a building are not drawn. */
-  built?(): ArrayLike<number> | null;
+  /** By the order of `shapes(chunk)`, the building on each cell or -1, or null for none at all. Cells with a building are not drawn. */
+  built?(shapes: ChunkCellShapes): ArrayLike<number> | null;
   /** By the order of `shapes`, which `shapes(chunk)` just gave, 1 for a cell where no building type fits, hatched. Null for none. */
   marks?(chunk: number, shapes: ChunkCellShapes): ArrayLike<number> | null;
 }
@@ -101,8 +104,18 @@ export interface CellLayer {
   update(camera: { x: number; z: number }, budgetMs: number): void;
   setBand(band: ZoomBand): void;
   stats(): CellStats;
+  /**
+   * Compiles the overlay's shaders with `compile`, the detailed one and the
+   * city band's, each on a stand-in quad, so the first frame the overlay
+   * shows does not build them (issue #163). The renderer caches programs by
+   * their code, so the real chunks find them ready.
+   */
+  precompile(compile: (object: Object3D) => Promise<void>): Promise<void>;
   dispose(): void;
 }
+
+/** A cell's corners as `buildCellChunk` lays them out, for the stand-in quad `precompile` draws. */
+const CORNER_UVS = [0, 0, 255, 0, 255, 255, 0, 255];
 
 /** Furthest a vertex moves in the shader, in metres, so frustum culling allows for it. */
 const SHADER_REACH = 20;
@@ -311,7 +324,7 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     const shapes = source.shapes(c);
     const cells = source.cells();
     if (!shapes || !cells || shapes.slots.length === 0) return;
-    const built = source.built?.() ?? null;
+    const built = source.built?.(shapes) ?? null;
     const runs = buildCityCells(shapes, cells.zone, cells.density, height, built);
     if (runs.runs > 0) {
       cityParts[c] = runs;
@@ -359,11 +372,23 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
   }
 
   /**
+   * True from when the overlay is turned on until the next frame. That frame
+   * builds no chunk: it already holds the zone tool's first preview and its
+   * panel, and a chunk on top took it to about 40 ms on the scale town
+   * (issue #163).
+   */
+  let shown = false;
+
+  /**
    * Builds dirty chunks, nearest the camera first, until `budgetMs` has
-   * gone; at least one a frame, so the overlay always fills in. Nothing
-   * while the overlay is off.
+   * gone; at least one a frame, so the overlay always fills in, except on
+   * the frame after it is turned on. Nothing while the overlay is off.
    */
   function update(camera: { x: number; z: number }, budgetMs: number): void {
+    if (shown) {
+      shown = false;
+      return;
+    }
     if (!root.visible || dirty.size === 0) return;
     const start = performance.now();
     const centre = (c: number) => {
@@ -406,6 +431,7 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
 
   return {
     setVisible(on) {
+      if (on && !root.visible) shown = true;
       root.visible = on;
       stats = { ...stats, visible: on };
     },
@@ -422,6 +448,32 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
       city.visible = band === "city";
     },
     stats: () => stats,
+    async precompile(compile) {
+      // One cell, with every attribute the chunks carry, in their formats.
+      const geometry = geometryOf({
+        positions: new Float32Array(12),
+        fills: new Uint8Array(16),
+        corners: Uint8Array.from(CORNER_UVS),
+        marks: new Float32Array(4),
+        indices: Uint16Array.of(0, 1, 2, 0, 2, 3),
+        zoned: 0,
+        unzoned: 1,
+        marked: 0,
+      });
+      // And one city band run, for the coarse material.
+      const run = cityGeometryOf([{ positions: new Float32Array(12), fills: new Uint8Array(16), indices: Uint32Array.of(0, 1, 2, 0, 2, 3), runs: 1, cells: 1 }]);
+      const stands = [geometry && new Mesh(geometry, material), run && new Mesh(run, coarse)].flatMap((m) => m ?? []);
+      try {
+        for (const stand of stands) {
+          stand.renderOrder = 1.5;
+          stand.frustumCulled = false;
+          await compile(stand);
+        }
+      } finally {
+        geometry?.dispose();
+        run?.dispose();
+      }
+    },
     dispose() {
       for (let c = 0; c < chunks.length; c++) clear(c);
       for (const g of [...cityMeshes.keys()]) clearGroup(g);

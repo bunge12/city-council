@@ -60,7 +60,7 @@ import {
   type ZoneCellsPayload,
 } from "../src/index";
 import { grow } from "../src/buildings/grower";
-import { buildingsOnSegments } from "../src/buildings/where";
+import { buildingsOnSegments, buildingsOnSlots } from "../src/buildings/where";
 import { nextFloat, seedRng } from "../src/rng";
 import { isSegment, segmentIdLimit, SEG_FIXED } from "../src/roads/network";
 import { submit } from "./seen-ends";
@@ -265,6 +265,10 @@ test("the M2 scale town", async ({ bench, annotate }) => {
     "lotMarksInChunk, a built chunk's lot marks for the overlay, from the cells read for its mesh": () => {
       const c = chunk();
       lotMarksInChunk(state, c, chunkShapes.get(c));
+    },
+    "buildingsOnSlots, the buildings on a built chunk's cells for the overlay": () => {
+      const c = chunk();
+      buildingsOnSlots(state, (chunkShapes.get(c) ?? cellShapesInChunk(state, c)).slots);
     },
     "lotMarkAt, why one cell has no building": () => void lotMarkAt(state, front()),
     "findLot, the lot the grower would take at a cell": () => void findLot(state, front()),

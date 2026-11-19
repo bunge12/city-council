@@ -71,9 +71,9 @@ const CORNER_UV = [0, 0, 255, 0, 255, 255, 0, 255] as const;
 /**
  * The overlay mesh for one chunk's cells. `zone` and `density` are the
  * mirror's `state.cells` arrays and `height` gives the ground under a point.
- * `built`, by the same slots, is the building on each cell, or -1 for none
- * (`cellBuildings`); a cell with a building is not drawn. `marks`, by
- * the same order as `shapes`, is 1 for a cell where no building type fits
+ * `built`, by the order of `shapes`, is the building on each cell, or -1
+ * for none (`buildingsOnSlots`); a cell with a building is not drawn.
+ * `marks`, by the same order, is 1 for a cell where no building type fits
  * (`lotMarksInChunk`), drawn hatched.
  */
 export function buildCellChunk(
@@ -85,7 +85,7 @@ export function buildCellChunk(
   marks: ArrayLike<number> | null = null,
 ): CellArrays {
   const { slots, statuses, corners } = shapes;
-  const shown = (k: number) => statuses[k] === CELL_OPEN && (built === null || (built[slots[k] ?? 0] ?? -1) < 0);
+  const shown = (k: number) => statuses[k] === CELL_OPEN && (built === null || (built[k] ?? -1) < 0);
   let drawn = 0;
   for (let k = 0; k < statuses.length; k++) if (shown(k)) drawn++;
   const positions = new Float32Array(drawn * 12);
@@ -143,7 +143,8 @@ export interface CityCellArrays {
 
 /**
  * The city band's mesh for one chunk's cells (issue #133). Only zoned open
- * cells with no building are drawn, as `buildCellChunk` fills them. Cells
+ * cells with no building are drawn, as `buildCellChunk` fills them, with
+ * `built` likewise by the order of `shapes`. Cells
  * of one colour that follow each other along a road, one's end edge the
  * next one's start edge exactly, are joined into one quad from the first
  * one's start edge to the last one's end edge, while the run's two sides
@@ -175,7 +176,7 @@ export function buildCityCells(
   for (let k = 0; k < n; k++) {
     if (statuses[k] !== CELL_OPEN) continue;
     const slot = slots[k] ?? 0;
-    if (built !== null && (built[slot] ?? -1) >= 0) continue;
+    if (built !== null && (built[k] ?? -1) >= 0) continue;
     const z = zone[slot] ?? ZONE_NONE;
     const d = density[slot] ?? DENSITY_NONE;
     if (z === ZONE_NONE || d === DENSITY_NONE) continue;

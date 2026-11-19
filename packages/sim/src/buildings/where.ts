@@ -52,7 +52,7 @@ import {
 } from "../zoning/cell-index";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
-import { localIndex } from "../zoning/cells";
+import { localIndex, segmentOfSlot } from "../zoning/cells";
 import { anchorSpan, measureCurve } from "../zoning/shape";
 import { readAnchor } from "../roads/network";
 
@@ -497,6 +497,28 @@ export function buildingOnSlot(state: SimState, slot: number): number {
     else hi = mid;
   }
   return bi.segCells[lo]?.[slot - (offset[lo] ?? 0)] ?? NO_BUILDING;
+}
+
+/**
+ * The building standing on each cell of `slots`, slots of `state.cells.zone`,
+ * in the same order, NO_BUILDING where none stands or the slot is not a
+ * cell's. For a view that draws one chunk at a time: the cost follows the
+ * cells asked about, not the city (issue #163).
+ */
+export function buildingsOnSlots(state: SimState, slots: ArrayLike<number>): Int32Array {
+  const { bi } = indexOf(state);
+  const offset = state.cells.offset;
+  const end = offset[offset.length - 1] ?? 0;
+  const out = new Int32Array(slots.length).fill(NO_BUILDING);
+  // A chunk's slots come a segment's run at a time, so the last segment found is tried first.
+  let seg = -1;
+  for (let k = 0; k < slots.length; k++) {
+    const slot = slots[k] ?? -1;
+    if (!(Number.isInteger(slot) && slot >= 0 && slot < end)) continue;
+    seg = segmentOfSlot(offset, slot, seg);
+    out[k] = bi.segCells[seg]?.[slot - (offset[seg] ?? 0)] ?? NO_BUILDING;
+  }
+  return out;
 }
 
 /** By slot in `state.cells.zone`, the building on each cell or NO_BUILDING. A new array each call. For tests. */
