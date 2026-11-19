@@ -16,14 +16,16 @@ import {
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
 import { finishConstruction } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
-import { settleView, withFlush } from "./settle";
+import { buildingsDrawn, canvasShot, openCity, settle } from "./helpers";
 
 // Issue M2-14: through-lots. Two blocks between three parallel streets
 // twelve cells apart, closed at both ends, on seed 2026's flat square. The
 // north block is zoned C3 and the south one I3 on both strips, and each
 // takes a big building across the whole block from one street to the next,
 // with lots on one strip beside it. Built in Node with the sim and imported
-// as a city file, like the buildings walkthrough.
+// as a city file, like the buildings walkthrough. In the evidence project
+// (issue #225): the pictures are for the pull request, and the lots are the
+// sim's unit tests (packages/sim/test/through-lots.test.ts).
 
 type Vec3 = [number, number, number];
 declare const window: {
@@ -32,7 +34,6 @@ declare const window: {
     view: Promise<{ buildingStats(): { buildings: number } | null; decorCounts(): { trees: number; grass: number } }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
 test.setTimeout(180_000);
@@ -95,33 +96,13 @@ function throughLotCity(): Fixture {
 
 const fixture = throughLotCity();
 
-async function openCity(page: Page, query: string): Promise<void> {
-  await page.goto(withFlush(`/${query}`));
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Through-lots.city", mimeType: "application/octet-stream", buffer: fixture.bytes });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.waitForFunction(
-    (count) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(count),
-    fixture.buildings,
-    { timeout: 120_000 },
-  );
-}
-
 async function look(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
-  // Decoration fills in near the camera over a few frames: wait for its counts to hold.
-  await settleView(page);
+  await settle(page);
 }
 
 async function shoot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  // The canvas fills the page, so the page's screenshot is the view's. A
-  // locator's waits for the canvas to hold still over animation frames,
-  // which in software WebGL take most of a second each: 15 s a shot against 6.
-  const shot = await page.screenshot();
-  await page.addStyleTag({ content: "#ui { display: block !important; }" });
+  const shot = await canvasShot(page);
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, shot);
   await testInfo.attach(name, { path, contentType: "image/png" });
@@ -142,7 +123,8 @@ test("through-lot buildings draw across their blocks", async ({ page }, testInfo
   // About 2 minutes on a fast CI runner, from three poses that each wait for
   // decoration to settle in software WebGL: 3 minutes left no room for a slow one.
   test.setTimeout(300_000);
-  await openCity(page, "?webgl&preset=balanced");
+  await openCity(page, fixture.bytes, { query: "webgl&preset=balanced", name: "Through-lots", notes: true });
+  await buildingsDrawn(page, fixture.buildings);
   const stats = await page.evaluate(async () => (await window.cityCouncil.view).buildingStats());
   expect(stats?.buildings).toBe(fixture.buildings);
   const cx = (WEST + EAST) / 2;

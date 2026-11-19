@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { buildScaleCity, createState, heightAt, generateTerrain, serialize } from "../packages/sim/src/index";
-import { frameTime, memory } from "./measure";
-import { settleView, withFlush } from "./settle";
+import { canvasShot, openCity, settle } from "./helpers";
+import { frameTime, memory, perfFigures } from "./measure";
 
 // The M1 scale check in the browser (issue M1-17): the city `buildScaleCity`
 // makes through commands, 30,000 road segments of street grids, curves and
@@ -63,23 +63,6 @@ const scalePreset = process.env["SCALE_PRESET"];
 const scaleQuery = [process.env["SCALE_WEBGPU"] ? "" : "webgl", scalePreset ? `preset=${scalePreset}` : ""].filter(Boolean).join("&");
 const reportName = `scale-report${scalePreset ? `-${scalePreset}` : ""}${process.env["SCALE_WEBGPU"] ? "-webgpu" : ""}.json`;
 
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 120_000 });
-}
-
-/** Opens the page, imports `bytes` as a city and waits for it to be drawn. */
-async function openCity(page: Page, name: string, bytes: Buffer): Promise<void> {
-  await page.goto(withFlush(`/?${scaleQuery}`));
-  await ready(page);
-  await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-  await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
 }
@@ -89,7 +72,7 @@ async function bandTimes(page: Page, testInfo?: TestInfo): Promise<Record<string
   const out: Record<string, number> = {};
   for (const { band, position, target } of BANDS) {
     await setPose(page, position, target);
-    await settleView(page);
+    await settle(page);
     expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
     out[band] = Math.round((await frameTime(page, 40)) * 10) / 10;
     if (testInfo) await attach(page, testInfo, `scale city, ${band} band`);
@@ -99,21 +82,21 @@ async function bandTimes(page: Page, testInfo?: TestInfo): Promise<Record<string
 
 async function attach(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
-  writeFileSync(path, await page.locator("#view").screenshot());
+  writeFileSync(path, await canvasShot(page));
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
 test("the M1 scale city: frame time in each zoom band, and the tab's memory", async ({ page }, testInfo) => {
   const t0 = Date.now();
   const lap = (what: string) => console.log(`scale spec: ${what} at ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  await openCity(page, "Empty", Buffer.from(serialize(createState(scale.state.seed))));
+  await openCity(page, createState(scale.state.seed), { query: scaleQuery, name: "Empty", presetSettled: true, timeout: 120_000 });
   lap("empty city open");
   const empty = await bandTimes(page);
   const emptyMemory = await memory(page);
   lap("empty city measured");
 
-  const bytes = Buffer.from(serialize(scale.state));
-  await openCity(page, "Scale", bytes);
+  const bytes = serialize(scale.state);
+  await openCity(page, bytes, { query: scaleQuery, name: "Scale", presetSettled: true, timeout: 120_000 });
   lap("scale city open");
   const backend = (await page.evaluate(() => window.cityCouncil.renderStatus()))?.backend ?? "none";
   const segments = await page.evaluate(() => {
@@ -140,6 +123,13 @@ test("the M1 scale city: frame time in each zoom band, and the tab's memory", as
   mkdirSync("test-results", { recursive: true });
   writeFileSync(`test-results/${reportName}`, `${JSON.stringify(report, null, 2)}\n`);
   await testInfo.attach("scale report", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
+  perfFigures(reportName.replace(/\.json$/, ""), `M1 scale city, ${backend}, ${report.preset ?? "?"}`, {
+    ...Object.fromEntries(BANDS.flatMap(({ band }) => [
+      [`${band} band, empty map (ms)`, empty[band]],
+      [`${band} band, 30,000 segments (ms)`, roads[band]],
+    ])),
+    "tab memory, city (MB)": cityMemory.pageMb + (cityMemory.workerMb ?? 0),
+  });
 
   expect(stats?.segmentPieces ?? 0).toBeGreaterThan(30_000);
   // Gross regressions only: no band's frame more than three times the

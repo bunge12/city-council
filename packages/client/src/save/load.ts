@@ -12,7 +12,8 @@ import {
   type SimState,
 } from "@city-council/sim";
 import { NEW_CITY_NAME, NEW_CITY_SEED } from "./config";
-import type { LoadedFrom } from "./channel";
+import type { LoadFileMessage, LoadedFrom } from "./channel";
+import { storeCityFile } from "./city-file";
 import { lastOpened, type CityMeta, type CityStore } from "./store";
 
 export interface OpenedCity {
@@ -78,6 +79,28 @@ export async function openLatestCity(
   const meta = cities.reduce<CityMeta | undefined>((best, c) => (!best || lastOpened(c) > lastOpened(best) ? c : best), undefined);
   if (!meta) return newCityFallback(null, makeId, opening);
   return openCity(store, meta, makeId, opening);
+}
+
+/**
+ * Stores the city file the page fetched from its `?load=` address as a new
+ * city and opens it, as an import does but without the reload. A file that
+ * could not be fetched or is not a good city is reported in `problem`, and
+ * the city the worker would have opened opens instead.
+ */
+export async function openLoadedFile(
+  store: CityStore,
+  file: LoadFileMessage,
+  now: number,
+  makeId: () => string = randomId,
+  preferredId: string | null = null,
+  opening: OpeningSeed = () => undefined,
+): Promise<OpenedCity> {
+  const stored = file.bytes
+    ? await storeCityFile(store, undefined, file.fileName, new Uint8Array(file.bytes), now, makeId)
+    : { ok: false as const, error: `Could not open "${file.fileName}". ${file.error ?? "It could not be fetched."}` };
+  const city = await openLatestCity(store, makeId, stored.ok ? stored.city.id : preferredId, opening);
+  if (stored.ok) return city;
+  return { ...city, problem: city.problem ? `${stored.error} ${city.problem}` : stored.error };
 }
 
 interface Decoded {

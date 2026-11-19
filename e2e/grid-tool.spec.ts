@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { createState, generateTerrain, heightAt, serialize, type SimState } from "../packages/sim/src/index";
+import { createState, generateTerrain, heightAt, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-21: the grid tool. A player draws a grid's first side along a
 // street that came with the city, sets how far it reaches, confirms, and gets a grid joined to that street as
@@ -23,7 +24,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -38,22 +38,6 @@ function startCity(): SimState {
   const state = createState(SEED);
   buildRoads(state, [[[4350, 4450], [4350, 4750], "street"]]);
   return state;
-}
-
-async function openCity(page: Page, state: SimState): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  const buffer = Buffer.from(serialize(state));
-  await page.locator("#import-file").setInputFiles({ name: "Grid.city", mimeType: "application/octet-stream", buffer });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  // Hide the import note so screenshots show the map.
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
@@ -145,7 +129,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 }
 
 test("lays a grid with its first side along a street, joined to it, and one Ctrl+Z takes it all back", async ({ page }, testInfo) => {
-  await openCity(page, startCity());
+  await openCity(page, startCity(), { name: "Grid" });
   await look(page, 4240, 4610, 420);
   await page.keyboard.press("KeyL");
   const start = await roads(page);
@@ -190,7 +174,7 @@ test("lays a grid with its first side along a street, joined to it, and one Ctrl
 });
 
 test("shows where water cuts a grid's streets and builds what it showed", async ({ page }, testInfo) => {
-  await openCity(page, createState(SEED));
+  await openCity(page, createState(SEED), { name: "Grid" });
   await look(page, 3550, 6620, 560);
   const before = new Set(segments(await roads(page)).map(key));
   const startLog = (await logTypes(page)).length;
@@ -223,7 +207,7 @@ test("shows where water cuts a grid's streets and builds what it showed", async 
 });
 
 test("a grid over the cap shows the reason and cannot be confirmed", async ({ page }, testInfo) => {
-  await openCity(page, createState(SEED));
+  await openCity(page, createState(SEED), { name: "Grid" });
   await look(page, 4400, 4700, 480);
   const startLog = (await logTypes(page)).length;
 

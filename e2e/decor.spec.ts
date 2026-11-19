@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { settleView, withFlush } from "./settle";
+import { openPage, settle } from "./helpers";
 
 // The hook packages/client/src/main.ts puts on the page. The tooling
 // tsconfig has no DOM types, so the parts used here are declared.
@@ -21,14 +21,9 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
-async function ready(page: Page, url = "/"): Promise<void> {
-  await page.goto(withFlush(url));
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 15_000 });
-}
-
-/** Decoration drawn once the layer has built every chunk in range. */
+/** Decoration drawn once the layer has built every chunk in range: the counts hold for ten frames. */
 async function settledCounts(page: Page): Promise<Counts> {
-  await settleView(page);
+  await settle(page);
   return page.evaluate(async () => (await window.cityCouncil.view).decorCounts());
 }
 
@@ -69,7 +64,7 @@ async function lookAtForestEdge(page: Page, height: number, back: number): Promi
 }
 
 test("no trees or grass are drawn over the whole map", async ({ page }) => {
-  await ready(page);
+  await openPage(page, "/", 15_000);
   // A new city opens on an outside connection (issue M1-16). Look at the whole map.
   await page.evaluate(async () => (await window.cityCouncil.camera).rig.setPose([6000, 8400, 15_840], [6000, 0, 5640]));
   expect(await settledCounts(page)).toEqual({ trees: 0, grass: 0 });
@@ -81,7 +76,7 @@ test("trees and grass stand on the land near the camera, the same after a reload
   // runner shared with a second worker it takes anywhere from 1.2 to over
   // 2.5 minutes, so it gets twice that.
   test.setTimeout(300_000);
-  await ready(page, "/?webgl");
+  await openPage(page, "/?webgl", 15_000);
   await lookAtForestEdge(page, 160, 420);
   const first = await settledCounts(page);
   expect(first.trees).toBeGreaterThan(1000);

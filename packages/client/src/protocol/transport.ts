@@ -89,12 +89,13 @@ export interface WorkerChannels {
  * Starts the sim in a Web Worker and returns the page's ends of it.
  * `cityId` is the city this tab last ran, which the worker opens if it is
  * still saved. It travels in the worker's name, so the worker has it before
- * any message arrives.
+ * any message arrives. With `loadsFile` the worker instead waits for the
+ * page to send it a city file to open (`LoadFileMessage`).
  */
-export function createWorkerTransport(cityId: string | null = null): WorkerChannels {
+export function createWorkerTransport(cityId: string | null = null, loadsFile = false): WorkerChannels {
   const worker = new Worker(new URL("./worker.ts", import.meta.url), {
     type: "module",
-    name: workerName(cityId),
+    name: workerName(cityId, loadsFile),
   });
   return {
     sim: portTransport<ToSimMessage, FromSimMessage>(worker, (data) => !isSaveMessage(data)),

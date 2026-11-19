@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ZONING_BALANCE } from "../packages/sim/src/index";
-import { MEASURE_VIEWPORT, checkBands, fullSize, measureBands, openTown, scaleCity, writeReport } from "./building-lod-helpers";
+import { MEASURE_VIEWPORT, bandFigures, checkBands, fullSize, measureBands, openTown, scaleCity, writeReport } from "./building-lod-helpers";
 
 // Issue M2-13: the M1 scale city filled with buildings through commands and
 // the grower (growScaleCity). Frame time, draw calls, what each level of
@@ -54,5 +54,6 @@ test("frame time, draw calls and memory in each band, at Low", async ({ page }, 
   const low = await measureBands(page, testInfo, "low");
   report["low"] = low;
   await writeReport(testInfo, "M2-13 scale city with buildings, at Low", "building-lod-report.json", report);
+  bandFigures("building-lod-low", `scale town, Low, ${backend}`, low);
   checkBands(low);
 });

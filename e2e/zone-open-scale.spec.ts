@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { canvasShot, openCity, scaleCity, setPose, settle } from "./building-lod-helpers";
+import { attachCanvas, openFixture, scaleCity, setPose } from "./building-lod-helpers";
+import { buildingsDrawn, settle } from "./helpers";
 
 // Issue #163: opening the zone tool on the scale town, 54,163 buildings on
 // 2.9 million cells, must not stop the page. Every main-thread task from
@@ -85,13 +86,13 @@ const longest = (tasks: readonly Task[], n: number): Task[] => [...tasks].sort((
 
 test("opening the zone tool on the scale town runs no main-thread task over 50 ms", async ({ page, browser }, testInfo) => {
   const { town, bands, bytes } = scaleCity();
-  await openCity(page, "webgl&preset=low", "Town", bytes);
-  await page.waitForFunction((n) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(n), town.buildings, { timeout: 300_000 });
+  await openFixture(page, "webgl&preset=low", "Town", bytes);
+  await buildingsDrawn(page, town.buildings, 300_000);
   const street = bands.find((b) => b.band === "street");
   if (!street) throw new Error("no street band pose");
   await setPose(page, street.position, street.target);
   // Buildings and decoration near the camera finish building first: that work comes with the move, not the tool.
-  await settle(page, 300_000);
+  await settle(page, { timeout: 300_000 });
   await page.locator("#view").hover({ position: { x: 640, y: 400 } });
 
   // Drawing stops.
@@ -131,7 +132,7 @@ test("opening the zone tool on the scale town runs no main-thread task over 50 m
     const view = await window.cityCouncil.view;
     if (window.zoneOpenRender) view.renderer.render = window.zoneOpenRender;
   });
-  await canvasShot(page, testInfo, "scale town with the zone tool open, street band");
+  await attachCanvas(page, testInfo, "scale town with the zone tool open, street band");
 
   const over = opening.filter((t) => t.ms > LONG_TASK_MS);
   if (ENFORCE_TASK_BUDGET) expect(over).toEqual([]);

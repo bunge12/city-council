@@ -17,12 +17,12 @@ import {
 } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { bufferUntilListening, memoryTransportPair, type SimTransport } from "../src/protocol/transport";
-import { SAVES_CHANNEL, parseSaveRequest, type FromSaver, type SaveStatus } from "../src/save/channel";
+import { SAVES_CHANNEL, parseLoadFile, parseSaveRequest, type FromSaver, type LoadFileMessage, type SaveStatus } from "../src/save/channel";
 import { cityFileName, cityNameFromFile, uniqueCityName, wantsExportReminder } from "../src/save/city-file";
 import { NEW_CITY_SEED } from "../src/save/config";
-import { openLatestCity } from "../src/save/load";
-import { SaveClient } from "../src/save/page";
-import { cityFromWorkerName, cityLockName, claimCity, workerName, type LockManagerLike } from "../src/save/lock";
+import { openLatestCity, openLoadedFile } from "../src/save/load";
+import { SaveClient, fetchCityFile, takeLoadAddress } from "../src/save/page";
+import { cityFromWorkerName, cityLockName, claimCity, loadsFileFromWorkerName, workerName, type LockManagerLike } from "../src/save/lock";
 import { Saver } from "../src/save/saver";
 import { CityStore, type CityMeta } from "../src/save/store";
 
@@ -594,6 +594,94 @@ describe("city files", () => {
     expect(result.error).toMatch(error);
     expect(await store.list()).toEqual(listBefore);
     expect(statuses.length).toBe(statusesBefore);
+  });
+});
+
+// `?load=`: a city file opened in the page load that names it, without the
+// import's reload. Playwright opens its fixtures this way (#227).
+describe("opening a city file from the page's address", () => {
+  const loadOf = (fileName: string, bytes: Uint8Array | null, error: string | null = null): LoadFileMessage => ({
+    channel: SAVES_CHANNEL,
+    type: "load",
+    fileName,
+    bytes: bytes ? bytes.slice().buffer : null,
+    error,
+  });
+
+  it("reads the address and leaves the rest of the query as it was", () => {
+    expect(takeLoadAddress("?webgl&debug&load=%2Fe2e%2FMy%20town.city")).toEqual({ address: "/e2e/My town.city", rest: "?webgl&debug" });
+    expect(takeLoadAddress("?load=/a.city")).toEqual({ address: "/a.city", rest: "" });
+    expect(takeLoadAddress("?webgl&preset=low")).toEqual({ address: null, rest: "?webgl&preset=low" });
+    expect(takeLoadAddress("")).toEqual({ address: null, rest: "" });
+    // A malformed escape is kept as it is rather than stopping the page.
+    expect(takeLoadAddress("?load=%zz")).toEqual({ address: "%zz", rest: "" });
+  });
+
+  it("fetches a file on the same site, named after its path", async () => {
+    const bytes = snapshotAt(3);
+    const fetcher = vi.fn(async () => new Response(bytes.slice()));
+    const file = await fetchCityFile("/e2e/Elm%20Street.city", "http://localhost:5173/?webgl", fetcher);
+    expect(fetcher).toHaveBeenCalledWith(new URL("http://localhost:5173/e2e/Elm%20Street.city"));
+    expect(file).toMatchObject({ fileName: "Elm Street.city", error: null });
+    expect(Array.from(new Uint8Array(file.bytes ?? new ArrayBuffer(0)))).toEqual(Array.from(bytes));
+  });
+
+  it("does not fetch from another site, and says why a fetch failed", async () => {
+    const fetcher = vi.fn(async () => new Response("no", { status: 404 }));
+    expect(await fetchCityFile("https://example.com/a.city", "http://localhost:5173/", fetcher)).toMatchObject({
+      fileName: "a.city",
+      bytes: null,
+      error: expect.stringMatching(/on this site/),
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await fetchCityFile("/a.city", "http://localhost:5173/", fetcher)).toMatchObject({ bytes: null, error: "The server answered 404." });
+    const offline = vi.fn(async (): Promise<Response> => { throw new Error("offline"); });
+    expect((await fetchCityFile("/a.city", "http://localhost:5173/", offline)).error).toMatch(/could not be fetched: offline/);
+    // The path keeps an escape the URL parser leaves alone, and naming the file must not throw on it.
+    expect(await fetchCityFile("/a%25zz.city", "http://localhost:5173/", fetcher)).toMatchObject({ fileName: "a%zz.city" });
+  });
+
+  it("parses only a well-formed load message", () => {
+    expect(parseLoadFile(loadOf("a.city", snapshotAt(1)))).not.toBeNull();
+    expect(parseLoadFile(loadOf("a.city", null, "gone"))).not.toBeNull();
+    expect(parseLoadFile({ channel: "saves", type: "load", fileName: "a.city", bytes: "nope", error: null })).toBeNull();
+    expect(parseLoadFile({ channel: "saves", type: "import", requestId: 1, fileName: "a.city", bytes: new ArrayBuffer(4) })).toBeNull();
+    // The saver does not take it for one of its requests.
+    expect(parseSaveRequest(loadOf("a.city", snapshotAt(1)))).toBeNull();
+  });
+
+  it("names the worker so it waits for the file, and keeps the tab's city", () => {
+    expect(loadsFileFromWorkerName(workerName("abc", true))).toBe(true);
+    expect(loadsFileFromWorkerName(workerName(null, true))).toBe(true);
+    expect(loadsFileFromWorkerName(workerName("abc"))).toBe(false);
+    expect(cityFromWorkerName(workerName("abc", true))).toBe("abc");
+    expect(cityFromWorkerName(workerName(null, true))).toBeNull();
+  });
+
+  it("stores the file as a new city and opens it, as an import does", async () => {
+    const store = await openStore();
+    await store.save({ ...meta("tab", 5, 1), openedAt: 1 }, snapshotAt(5));
+    const bytes = snapshotAt(42, 7);
+    const city = await openLoadedFile(store, loadOf("Elm Street.city", bytes), 2_000, nextId, "tab");
+    expect(city).toMatchObject({ name: "Elm Street", from: "latest save", problem: null });
+    expect(city.id).not.toBe("tab");
+    expect(city.state.tick).toBe(42);
+    expect(hashState(city.state)).toBe(hashState(deserialize(bytes).state));
+    expect((await store.list()).find((c) => c.id === city.id)).toMatchObject({ seed: 7, openedAt: 2_000, exportedAt: 2_000 });
+  });
+
+  it.each([
+    ["could not be fetched", null, "The server answered 404.", /^Could not open "Bad\.city"\. The server answered 404\.$/],
+    ["is not a city", new TextEncoder().encode("hello"), null, /^Could not import "Bad\.city"\. .*not a City Council save/],
+  ] as const)("opens the tab's city and says why when the file %s", async (_, bytes, error, problem) => {
+    const store = await openStore();
+    await store.save(meta("tab", 5, 1), snapshotAt(5));
+    await store.save(meta("other", 9, 2), snapshotAt(9));
+    const listBefore = await store.list();
+    const city = await openLoadedFile(store, loadOf("Bad.city", bytes, error), 2_000, nextId, "tab");
+    expect(city.id).toBe("tab");
+    expect(city.problem).toMatch(problem);
+    expect(await store.list()).toEqual(listBefore);
   });
 });
 

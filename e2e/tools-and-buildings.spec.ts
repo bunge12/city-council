@@ -1,10 +1,11 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_TYPES, cellAt, createState, generateTerrain, heightAt, serialize, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_TYPES, cellAt, createState, generateTerrain, heightAt, syncCells, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
 import { finishConstruction } from "./building-fixtures";
 import { lotProblem } from "../packages/sim/src/buildings/where";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M2-15: the tools and buildings. The road tool marks the houses a
 // road would clear and counts them before the click, and after it they are
@@ -20,7 +21,7 @@ import { SEED, buildRoads, groundAt } from "./road-fixtures";
 type Vec3 = readonly [number, number, number];
 declare const window: {
   cityCouncil: {
-    mirror: { state: { buildings: { flags: Uint8Array }; log: { type: string }[] } | null };
+    mirror: { state: { tick: number; buildings: { flags: Uint8Array; builtAt: Float64Array }; log: { type: string }[] } | null };
     view: Promise<{ cellStats(): { marked: number; pending: number; visible: boolean } | null }>;
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
@@ -29,7 +30,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(180_000);
@@ -76,23 +76,6 @@ function houseCity(): { state: SimState; houses: number } {
   return { state, houses };
 }
 
-async function openCity(page: Page, state: SimState): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Houses.city", mimeType: "application/octet-stream", buffer: Buffer.from(serialize(state)) });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page, n = 2): Promise<void> {
-  await page.evaluate((n) => new Promise<void>((r) => {
-    const step = (left: number) => (left <= 0 ? r() : requestAnimationFrame(() => step(left - 1)));
-    step(n);
-  }), n);
-}
-
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
   const g = groundAt(x, z);
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [[x, g + height, z + height * 0.75], [x, g, z]] as const);
@@ -126,6 +109,26 @@ async function live(page: Page): Promise<number[]> {
   });
 }
 
+/** The tick of the client's copy of the city. */
+async function tickNow(page: Page): Promise<number> {
+  return page.evaluate(() => window.cityCouncil.mirror.state?.tick ?? 0);
+}
+
+/**
+ * The live buildings built on or before `tick`. The cells a road or grid
+ * clears stay zoned, so the grower can put a house back on them a few game
+ * seconds later, often under a freed id. Counted with the rest, that house
+ * can land in the same update as the clearing on a slow runner, and the
+ * count never shows the houses gone (issue #245).
+ */
+async function standingSince(page: Page, tick: number): Promise<number[]> {
+  return page.evaluate((tick) => {
+    const b = window.cityCouncil.mirror.state?.buildings;
+    if (!b) return [];
+    return Array.from(b.flags.keys()).filter((id) => ((b.flags[id] ?? 0) & 1) !== 0 && (b.builtAt[id] ?? 0) <= tick);
+  }, tick);
+}
+
 async function attach(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, await page.screenshot());
@@ -135,9 +138,10 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 test("a road through a row of houses marks and counts them before the click, and they are gone after", async ({ page }, testInfo) => {
   const { state, houses } = houseCity();
   expect(houses).toBeGreaterThan(8);
-  await openCity(page, state);
+  await openCity(page, state, { name: "Houses" });
   await look(page, 4300, 4560, 260);
   const before = await live(page);
+  const beforeTick = await tickNow(page);
   expect(before).toHaveLength(houses);
 
   await page.keyboard.press("KeyR");
@@ -156,7 +160,7 @@ test("a road through a row of houses marks and counts them before the click, and
 
   await page.mouse.down();
   await page.mouse.up();
-  await expect.poll(async () => (await live(page)).length, { timeout: 30_000 }).toBe(houses - count);
+  await expect.poll(async () => (await standingSince(page, beforeTick)).length, { timeout: 30_000 }).toBe(houses - count);
   await page.keyboard.press("Escape");
   await page.mouse.move(640, 20);
   await frames(page, 6);
@@ -165,9 +169,10 @@ test("a road through a row of houses marks and counts them before the click, and
 
 test("the grid tool counts the buildings its rectangle would clear", async ({ page }, testInfo) => {
   const { state } = houseCity();
-  await openCity(page, state);
+  await openCity(page, state, { name: "Houses" });
   await look(page, 4300, 4590, 300);
   const before = await live(page);
+  const beforeTick = await tickNow(page);
 
   await page.keyboard.press("KeyG");
   // The first side west to east along the near edge, then the grid reaches
@@ -198,12 +203,12 @@ test("the grid tool counts the buildings its rectangle would clear", async ({ pa
   await attach(page, testInfo, "the grid preview counts the buildings it would clear");
 
   await page.locator("#grid-confirm").click();
-  await expect.poll(async () => (await live(page)).length, { timeout: 30_000 }).toBe(before.length - count);
+  await expect.poll(async () => (await standingSince(page, beforeTick)).length, { timeout: 30_000 }).toBe(before.length - count);
 });
 
 test("hovering a building with no tool on reads it out", async ({ page }, testInfo) => {
   const { state } = houseCity();
-  await openCity(page, state);
+  await openCity(page, state, { name: "Houses" });
   await look(page, 4300, 4590, 160);
   const [x, z] = cellCentre(12, 1, true);
   await moveTo(page, x, z);
@@ -225,7 +230,7 @@ test("hovering a building with no tool on reads it out", async ({ page }, testIn
 
 test("an R3 strip of 3 x 6 is hatched, and the zone tool says why", async ({ page }, testInfo) => {
   const { state } = houseCity();
-  await openCity(page, state);
+  await openCity(page, state, { name: "Houses" });
   await look(page, 4300, 4640, 160);
   await page.keyboard.press("KeyK");
   await page.waitForFunction(async () => {

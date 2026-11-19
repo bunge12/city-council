@@ -121,12 +121,12 @@ describe("the decoration layer", () => {
     let mask: Uint8Array | null = null;
     const scene = new Scene();
     const layer = createDecorLayer(terrain, scene, (c) => (c === chunk ? mask : null));
-    // Every chunk in range built, a few a frame.
-    let last = -1;
-    for (let f = 0; f < 500 && treesDrawn(scene) !== last; f++) {
-      last = treesDrawn(scene);
-      layer.update(eye);
-    }
+    // Every chunk in range built, a few a frame. A fixed count of frames, as in
+    // the next test: how many chunks a frame builds depends on how fast the
+    // machine is (BUILD_MS_PER_FRAME), and stopping at the first frame that
+    // adds no trees stopped early on a busy runner, when that frame built only
+    // a chunk with none, before the forest chunk was built (issue #230).
+    for (let f = 0; f < 500; f++) layer.update(eye);
     const before = treesDrawn(scene);
     expect(before).toBeGreaterThan(0);
 

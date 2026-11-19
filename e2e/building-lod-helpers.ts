@@ -9,10 +9,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import { finishConstruction } from "./building-fixtures";
-import { frameTime, mb, memory } from "./measure";
+import { buildingsDrawn, canvasShot, frames, openCity, settle } from "./helpers";
+import { frameTime, mb, memory, perfFigures } from "./measure";
 import { BUILDINGS } from "../packages/client/src/render/config";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE, buildScaleCity, generateTerrain, growScaleCity, heightAt, serialize } from "../packages/sim/src/index";
-import { settleView, withFlush } from "./settle";
 
 export type Vec3 = readonly [number, number, number];
 export type Form = "full" | "simple" | "box" | "flat";
@@ -55,34 +55,10 @@ interface SceneNode {
   children: SceneNode[];
 }
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
-
-export async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 120_000 });
-}
-
-/** Opens the page, imports `bytes` as a city and waits for it to be drawn. */
-export async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<void> {
-  await page.goto(withFlush(`/?${query}`));
-  await ready(page);
-  await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-  await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
 
 export async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
 }
-
-/**
- * Waits until every chunk of buildings shows the form it wants, with no fade
- * under way, and decoration near the camera has been built (settle.ts).
- */
-export const settle = settleView;
 
 export async function stats(page: Page): Promise<BuildingStats> {
   const s = await page.evaluate(async () => (await window.cityCouncil.view).buildingStats());
@@ -90,18 +66,16 @@ export async function stats(page: Page): Promise<BuildingStats> {
   return s;
 }
 
-/**
- * The canvas, which fills the page, without the UI over it. A screenshot of
- * the page, not of the canvas element: an element screenshot first waits
- * for the element to hold still over animation frames, which took about 10 s
- * on the scale town in software WebGL (issue #217), against 3 s for the page.
- */
-export async function canvasShot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
+/** The canvas without the UI over it, attached to the test as `name`. */
+export async function attachCanvas(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
-  writeFileSync(path, await page.screenshot());
-  await page.addStyleTag({ content: "#ui { display: block !important; }" });
+  writeFileSync(path, await canvasShot(page));
   await testInfo.attach(name, { path, contentType: "image/png" });
+}
+
+/** The fixture or scale town, opened and drawn with the graphics preset settled, and the notes hidden. */
+export async function openFixture(page: Page, query: string, name: string, bytes: Uint8Array): Promise<void> {
+  await openCity(page, bytes, { query, name, presetSettled: true, timeout: 120_000 });
 }
 
 export const chunkAt = (x: number, z: number): number => Math.floor(z / CHUNK_SIZE) * CHUNKS_PER_SIDE + Math.floor(x / CHUNK_SIZE);
@@ -144,7 +118,7 @@ export const WAIT_VIEWPORT = { width: 160, height: 100 } as const;
 export async function poseAndSettle(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.setViewportSize(WAIT_VIEWPORT);
   await setPose(page, position, target);
-  await settle(page, 300_000);
+  await settle(page, { timeout: 300_000 });
   // A resize builds nothing: two frames drawn at full size, and the buildings still settled.
   await fullSize(page);
   await page.waitForFunction(() => document.body.dataset["buildingsSettled"] === "true", null, { timeout: 300_000 });
@@ -195,7 +169,7 @@ export async function measureBands(page: Page, testInfo: TestInfo, preset: "low"
     // The heap leaves out typed-array storage, so the merged meshes' geometry is reported on its own.
     const merged = { simpleMb: mb(s.mergedBytes.simple), boxMb: mb(s.mergedBytes.box), flatMb: mb(s.mergedBytes.flat) };
     bands[band] = { frameMs, ...drawn, forms: s.forms, memoryMb: { ...(await memory(page)), merged } };
-    await canvasShot(page, testInfo, `scale city with buildings, ${band} band, ${preset}`);
+    await attachCanvas(page, testInfo, `scale city with buildings, ${band} band, ${preset}`);
   }
   return bands;
 }
@@ -214,10 +188,24 @@ export function checkBands(bands: Record<string, BandReport>): void {
   expect((m?.pageMb ?? 0) + (m?.workerMb ?? 0) + (m?.merged.simpleMb ?? 0) + (m?.merged.boxMb ?? 0) + (m?.merged.flatMb ?? 0)).toBeLessThan(500);
 }
 
+/** Each band's frame time and draw calls, for the perf run's table (issue #225). */
+export function bandFigures(name: string, title: string, bands: Record<string, BandReport>): void {
+  perfFigures(
+    name,
+    title,
+    Object.fromEntries(
+      Object.entries(bands).flatMap(([band, b]) => [
+        [`${band} band (ms)`, b.frameMs],
+        [`${band} band, draw calls`, b.drawCalls],
+      ]),
+    ),
+  );
+}
+
 /** Back to `MEASURE_VIEWPORT` from waiting small: two frames drawn at full size. */
 export async function fullSize(page: Page): Promise<void> {
   await page.setViewportSize(MEASURE_VIEWPORT);
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await frames(page);
 }
 
 /** Prints a scale town report, writes it to test-results/`file` for the pull request and attaches it. */
@@ -233,10 +221,10 @@ export async function writeReport(testInfo: TestInfo, title: string, file: strin
 export async function openTown(page: Page): Promise<void> {
   const { town, bytes } = scaleCity();
   await page.setViewportSize(WAIT_VIEWPORT);
-  await openCity(page, "webgl&preset=low", "Town", bytes);
+  await openFixture(page, "webgl&preset=low", "Town", bytes);
   // Every chunk read from the mirror. Players see a snapshot fill in over
   // frames, at least one chunk a frame, which on the town is 576 frames; the
   // flush reads them all at once (issue #223).
-  await settleView(page, 300_000);
-  await page.waitForFunction((n) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(n), town.buildings, { timeout: 60_000 });
+  await settle(page, { timeout: 300_000 });
+  await buildingsDrawn(page, town.buildings, 60_000);
 }

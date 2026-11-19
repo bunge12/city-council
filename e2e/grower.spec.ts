@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { zonedFixtureCity } from "./cell-fixtures";
 import { groundAt } from "./road-fixtures";
-import { settleView, withFlush } from "./settle";
+import { openCity, settle } from "./helpers";
 
 // Issue M2-10: the grower. Buildings are not drawn until issue 12, so this
 // checks what the page can show now: buildings arrive in the page's copy of
@@ -33,11 +33,6 @@ declare const window: {
   };
   growthFrames?: { trees: number; buildings: number; shot: string | null }[];
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
 
 /** Live buildings in the page's copy of the city, and the residents they hold room for. */
 async function grown(page: Page): Promise<{ buildings: number; residents: number }> {
@@ -56,12 +51,7 @@ async function grown(page: Page): Promise<{ buildings: number; residents: number
 
 test("buildings grow on zoned cells over game time, and the debug panel times the grower", async ({ page }, info) => {
   const { bytes } = zonedFixtureCity();
-  await page.goto("/?debug&webgl&preset=low");
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "zoned.city", mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
+  await openCity(page, bytes, { query: "debug&webgl&preset=low", name: "zoned", notes: true });
   expect(await grown(page)).toEqual({ buildings: 0, residents: 0 });
 
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 4 }))).toEqual({ ok: true });
@@ -85,12 +75,7 @@ test("buildings grow on zoned cells over game time, and the debug panel times th
 // growth counts the trees drawn: none may dip for a frame and come back.
 test("trees near new buildings stay drawn while the city grows", async ({ page }, info) => {
   const { bytes } = zonedFixtureCity();
-  await page.goto(withFlush("/?webgl&preset=low"));
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "zoned.city", mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
+  await openCity(page, bytes, { query: "webgl&preset=low", name: "zoned", notes: true });
   await page.addStyleTag({ content: "#ui { display: none !important; }" });
   // Low over the fixture's street grid, where the zoned blocks have trees on them.
   const grid = { x: 4250, z: 4600 };
@@ -99,8 +84,8 @@ test("trees near new buildings stay drawn while the city grows", async ({ page }
     [grid.x + 40, ground + 90, grid.z + 150],
     [grid.x + 10, ground + 5, grid.z + 40],
   ] as [Vec3, Vec3]);
-  // Decoration in range finished building.
-  await settleView(page);
+  // Decoration in range finished building: its counts hold for ten frames.
+  await settle(page);
   // After each frame is drawn: the tree instances in the scene, and every tenth frame's picture for the pull request.
   await page.evaluate(async () => {
     const view = await window.cityCouncil.view;

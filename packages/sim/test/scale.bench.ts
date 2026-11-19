@@ -15,7 +15,6 @@ import {
   COMMANDS,
   NETWORKS_ROAD,
   ZONING_BALANCE,
-  buildScaleCity,
   deserialize,
   findRouteBetween,
   planRoad,
@@ -32,6 +31,7 @@ import {
   type Command,
   type ZoneCellsPayload,
 } from "../src/index";
+import { loadScaleCity } from "./scale-fixture";
 import { blockById, blockIndexOf, buildBlockIndex, listBlocks } from "../src/roads/blocks";
 import { buildRoad, type RoadPlan } from "../src/roads/build";
 import { buildRoadGrid, checkRoadGrid } from "../src/roads/grid";
@@ -46,7 +46,7 @@ const TICK_BUDGET_MS = 20;
 const LINE = 96;
 const SPAN = 6 * LINE;
 
-const { state, counts, grids } = buildScaleCity();
+const { state, counts, grids } = loadScaleCity();
 const net = state.roads;
 const terrain = terrainOf(state.seed);
 // Everything a host keeps current, so each change pays for all of it.
