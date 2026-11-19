@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { ROAD_TYPES, ZONING_BALANCE, createState, generateTerrain, heightAt, serialize, step, submit, type SimState } from "../packages/sim/src/index";
+import { ROAD_TYPES, ZONING_BALANCE, createState, generateTerrain, heightAt, step, submit, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M2-08: the road tool snaps to zoned cells. A player draws a street
 // along the back of a zoned strip, both clicks a few pixels off its
@@ -35,7 +36,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -71,20 +71,6 @@ function zonedStrip(): SimState {
   if (!result.ok) throw new Error(result.reason);
   for (let i = 0; i < 5; i++) step(state);
   return state;
-}
-
-async function openCity(page: Page, state: SimState): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Cells.city", mimeType: "application/octet-stream", buffer: Buffer.from(serialize(state)) });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
@@ -132,7 +118,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 }
 
 test("a street drawn along the back of a zoned strip snaps to its corners and leaves every cell whole", async ({ page }, testInfo) => {
-  await openCity(page, zonedStrip());
+  await openCity(page, zonedStrip(), { name: "Cells" });
   await look(page, (X0 + X1) / 2, BACK + 10, 150);
   // The zone tool shows the strip, for the first screenshot.
   await page.locator("#view").focus();
@@ -177,7 +163,7 @@ test("a street drawn along the back of a zoned strip snaps to its corners and le
 });
 
 test("the Cells toggle turns the source off", async ({ page }, testInfo) => {
-  await openCity(page, zonedStrip());
+  await openCity(page, zonedStrip(), { name: "Cells" });
   await look(page, (X0 + X1) / 2, BACK + 10, 150);
   await page.locator("#view").focus();
   await page.keyboard.press("KeyR");

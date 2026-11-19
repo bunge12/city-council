@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-19: guide lines and parallel offset. A player draws a street
 // beside an existing one with every click up to 10 pixels off, and it lands
@@ -39,8 +40,6 @@ declare const window: {
     }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: (now: number) => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -53,20 +52,6 @@ function streetCity(): Buffer {
   const state = createState(SEED);
   buildRoads(state, [[[4220, 4600], [4524, 4600], "street"]]);
   return Buffer.from(serialize(state));
-}
-
-async function openCity(page: Page, bytes: Buffer, name = "Guides"): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
@@ -135,7 +120,7 @@ const MISS: [number, number][] = [
 
 /** Opens the one-street city from above, with the road tool on and a street picked. */
 async function overStreet(page: Page): Promise<void> {
-  await openCity(page, streetCity());
+  await openCity(page, streetCity(), { name: "Guides" });
   const g = groundAt(4372, 4730);
   await setPose(page, [4372, g + 470, 4730 + 150], [4372, g, 4730]);
   await page.keyboard.press("KeyR");

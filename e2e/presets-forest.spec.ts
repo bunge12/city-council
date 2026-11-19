@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { canvasShot, openPage, settle } from "./helpers";
 
 // Issue M2-02: the sun and shadows. The same forest edge at Low, Balanced
 // and High, for the pull request: no shadows, shadows near the camera,
@@ -18,8 +19,7 @@ interface LightingReport {
 }
 declare const window: {
   cityCouncil: {
-    renderStatus(): { backend: string; readyMs: number } | null;
-    view: Promise<{ lighting(): LightingReport; decorCounts(): { trees: number; grass: number } }>;
+    view: Promise<{ lighting(): LightingReport }>;
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
       terrain: { samples: number; spacing: number; heights: Float32Array; forest: Uint8Array; waterLevel: number };
@@ -27,18 +27,10 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
 const PRESETS = ["low", "balanced", "high"] as const;
-
-async function ready(page: Page): Promise<{ backend: string; readyMs: number }> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const status = await page.evaluate(() => window.cityCouncil.renderStatus());
-  if (!status) throw new Error("render status missing after ready");
-  return status;
-}
 
 /** Waits until the preset on screen is the one wanted and no benchmark runs. */
 async function presetSettled(page: Page): Promise<void> {
@@ -47,22 +39,6 @@ async function presetSettled(page: Page): Promise<void> {
 
 async function lighting(page: Page): Promise<LightingReport> {
   return page.evaluate(async () => (await window.cityCouncil.view).lighting());
-}
-
-/** Waits until decoration near the camera is built: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
 }
 
 /** Looks at the lowland forest edge nearest the middle of the map, from `height` metres up and `back` metres south. */
@@ -104,12 +80,6 @@ async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<v
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-/** The canvas alone, without the page's panels over it. */
-async function canvasShot(page: Page): Promise<Buffer> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  return page.locator("#view").screenshot();
-}
-
 // On `?webgl`: the evidence project is headless, where the default backend is
 // WebGL 2 as well. WebGPU's frame times per preset come from scale.spec.ts.
 test("the same forest edge at each preset: no shadows, shadows near the camera, shadows further out", async ({ page }, testInfo) => {
@@ -119,8 +89,7 @@ test("the same forest edge at each preset: no shadows, shadows near the camera, 
   const reports: Record<string, LightingReport> = {};
   let target: Vec3 = [0, 0, 0];
   for (const preset of PRESETS) {
-    await page.goto(`/?${query}preset=${preset}`);
-    const status = await ready(page);
+    const status = await openPage(page, `/?${query}preset=${preset}`);
     testInfo.annotations.push({ type: `${preset} backend`, description: status.backend });
     // The first frame is lit as Low and waits for no shadow shaders, so it
     // comes as soon at every preset. Printed, not held to the M0 exit test's

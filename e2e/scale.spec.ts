@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { buildScaleCity, createState, heightAt, generateTerrain, serialize } from "../packages/sim/src/index";
+import { canvasShot, openCity, settle } from "./helpers";
 import { frameTime, memory, perfFigures } from "./measure";
 
 // The M1 scale check in the browser (issue M1-17): the city `buildScaleCity`
@@ -29,7 +30,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Two cities, three bands each, drawn in software on a CI runner at about
@@ -63,41 +63,8 @@ const scalePreset = process.env["SCALE_PRESET"];
 const scaleQuery = [process.env["SCALE_WEBGPU"] ? "" : "webgl", scalePreset ? `preset=${scalePreset}` : ""].filter(Boolean).join("&");
 const reportName = `scale-report${scalePreset ? `-${scalePreset}` : ""}${process.env["SCALE_WEBGPU"] ? "-webgpu" : ""}.json`;
 
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 120_000 });
-}
-
-/** Opens the page, imports `bytes` as a city and waits for it to be drawn. */
-async function openCity(page: Page, name: string, bytes: Buffer): Promise<void> {
-  await page.goto(`/?${scaleQuery}`);
-  await ready(page);
-  await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-  await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
-}
-
-/** Waits until decoration near the camera has finished building: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 120 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
 }
 
 /** Frame time in each band, after the view settles there, with a screenshot of each when `testInfo` is given. */
@@ -105,7 +72,7 @@ async function bandTimes(page: Page, testInfo?: TestInfo): Promise<Record<string
   const out: Record<string, number> = {};
   for (const { band, position, target } of BANDS) {
     await setPose(page, position, target);
-    await settle(page);
+    await settle(page, { maxFrames: 120 });
     expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
     out[band] = Math.round((await frameTime(page, 40)) * 10) / 10;
     if (testInfo) await attach(page, testInfo, `scale city, ${band} band`);
@@ -115,21 +82,21 @@ async function bandTimes(page: Page, testInfo?: TestInfo): Promise<Record<string
 
 async function attach(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
-  writeFileSync(path, await page.locator("#view").screenshot());
+  writeFileSync(path, await canvasShot(page));
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
 test("the M1 scale city: frame time in each zoom band, and the tab's memory", async ({ page }, testInfo) => {
   const t0 = Date.now();
   const lap = (what: string) => console.log(`scale spec: ${what} at ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  await openCity(page, "Empty", Buffer.from(serialize(createState(scale.state.seed))));
+  await openCity(page, createState(scale.state.seed), { query: scaleQuery, name: "Empty", presetSettled: true, timeout: 120_000 });
   lap("empty city open");
   const empty = await bandTimes(page);
   const emptyMemory = await memory(page);
   lap("empty city measured");
 
-  const bytes = Buffer.from(serialize(scale.state));
-  await openCity(page, "Scale", bytes);
+  const bytes = serialize(scale.state);
+  await openCity(page, bytes, { query: scaleQuery, name: "Scale", presetSettled: true, timeout: 120_000 });
   lap("scale city open");
   const backend = (await page.evaluate(() => window.cityCouncil.renderStatus()))?.backend ?? "none";
   const segments = await page.evaluate(() => {

@@ -4,6 +4,7 @@ import { CELL_OPEN, CHUNKS_PER_SIDE, CHUNK_SIZE, ZONING_BALANCE, cellShapesInChu
 import { zonedFixtureCity } from "./cell-fixtures";
 import { decodePng, type Image } from "./png";
 import { SEED, groundAt } from "./road-fixtures";
+import { canvasShot, frames, openCity, settle } from "./helpers";
 
 // Issue M2-06: the zoning overlay. It runs in the `roads` project, headed
 // with WebGPU on where the browser has an adapter (see playwright.config.ts),
@@ -46,7 +47,6 @@ declare const document: {
   querySelectorAll(selector: string): ArrayLike<{ getAttribute(name: string): string | null }>;
 };
 declare function getComputedStyle(element: unknown): { backgroundColor: string };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(240_000);
@@ -55,22 +55,6 @@ const BACKENDS = [
   { name: "default backend", query: "?preset=low" },
   { name: "?webgl", query: "?webgl&preset=low" },
 ] as const;
-
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
-
-/** Opens the page, then imports `bytes` as a city and waits for it to be drawn. */
-async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<string> {
-  await page.goto(`/${query}`);
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-  const status = await page.evaluate(() => window.cityCouncil.renderStatus());
-  return status?.backend ?? "none";
-}
 
 async function cellStats(page: Page): Promise<CellStats> {
   const stats = await page.evaluate(async () => (await window.cityCouncil.view).cellStats());
@@ -99,41 +83,17 @@ async function setOverlay(page: Page, on: boolean): Promise<void> {
   await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe(String(on));
   if (on) await cellsBuilt(page);
   // The next frame draws it.
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await frames(page);
 }
 
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
 }
 
-/** Waits until decoration has finished building near the camera: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
-}
-
 async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, body);
   await testInfo.attach(name, { path, contentType: "image/png" });
-}
-
-/** The canvas alone, without the page's panels over it. */
-async function canvasShot(page: Page): Promise<Buffer> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  const shot = await page.locator("#view").screenshot();
-  await page.addStyleTag({ content: "#ui { display: block !important; }" });
-  return shot;
 }
 
 const ground = groundAt(4250, 4600);
@@ -156,7 +116,7 @@ test("the fixture paints every zone at every density", () => {
 
 for (const { name, query } of BACKENDS) {
   test(`the zoning overlay draws the same in every zoom band (${name})`, async ({ page }, testInfo) => {
-    const backend = await openCity(page, query, "Zoned", fixture.bytes);
+    const backend = await openCity(page, fixture.bytes, { query, name: "Zoned" });
     if (query.startsWith("?webgl")) expect(backend).toBe("webgl2");
     else if (process.env["CI"]) expect(backend).toBe("webgpu");
     testInfo.annotations.push({ type: "backend", description: backend });
@@ -187,7 +147,7 @@ for (const { name, query } of BACKENDS) {
 }
 
 test("painting one strip rebuilds only the chunks it touches and their neighbours", async ({ page }, testInfo) => {
-  await openCity(page, "?webgl&debug", "Zoned", fixture.bytes);
+  await openCity(page, fixture.bytes, { query: "?webgl&debug", name: "Zoned" });
   await overlayOn(page);
   const paint = async (from: [number, number], to: [number, number]) => {
     const result = await page.evaluate(
@@ -251,7 +211,7 @@ const asphalt = (r: number, g: number, b: number) => Math.max(r, g, b) - Math.mi
 
 for (const preset of ["low", "high"] as const) {
   test(`cells show the legend's colours, unlit and unshaded, over the ground and under the roads (${preset})`, async ({ page }, testInfo) => {
-    await openCity(page, `?webgl&preset=${preset}`, "Zoned", fixture.bytes);
+    await openCity(page, fixture.bytes, { query: `?webgl&preset=${preset}`, name: "Zoned" });
     await expect.poll(() => page.evaluate(() => document.body.dataset["presetSettled"])).toBe("true");
     await overlayOn(page);
     // The legend's swatches, by "zone,density", as the page draws them.

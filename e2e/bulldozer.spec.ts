@@ -1,10 +1,11 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_TYPES, SEG_FIXED, cellAt, createState, generateTerrain, heightAt, serialize, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_TYPES, SEG_FIXED, cellAt, createState, generateTerrain, heightAt, syncCells, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
 import { lotProblem } from "../packages/sim/src/buildings/where";
 import { finishConstruction } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue 116: the bulldozer, a tool of its own. B turns it on, R the road
 // tool, Page Up and Page Down tilt. Whatever is under the pointer lights up
@@ -33,7 +34,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(240_000);
@@ -76,23 +76,6 @@ function houseCity(): { state: SimState; houses: number } {
   }
   finishConstruction(state);
   return { state, houses };
-}
-
-async function openCity(page: Page, state: SimState): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Houses.city", mimeType: "application/octet-stream", buffer: Buffer.from(serialize(state)) });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page, n = 2): Promise<void> {
-  await page.evaluate((n) => new Promise<void>((r) => {
-    const step = (left: number) => (left <= 0 ? r() : requestAnimationFrame(() => step(left - 1)));
-    step(n);
-  }), n);
 }
 
 /** Looks at (x, z) from `height` up, from the south, or from the north with `fromNorth`. */
@@ -185,7 +168,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 test("the bulldozer: its own tool, a price tag on what it picks, clicks and drags of roads and houses", async ({ page }, testInfo) => {
   const { state, houses } = houseCity();
   expect(houses).toBeGreaterThan(8);
-  await openCity(page, state);
+  await openCity(page, state, { name: "Houses" });
   await look(page, 4296, 4570, 220);
   const tag = page.locator("#bulldoze-tag");
 

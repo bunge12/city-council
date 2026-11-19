@@ -1,44 +1,35 @@
-// The M1 scale network (issue M1-17): the generated city itself, the
-// crossing rule on it, and a save and resume half way through a scripted
-// session on it. Since M2-13 it is filled with buildings too, and since
-// M2-17 a second save and resume runs a session of zoning, clearing and
-// growth on it. Timings are in scale.bench.ts and town.bench.ts.
+// The M1 scale network (issue M1-17): the generated city itself and the
+// crossing rule on it. The city is built once per run by scale-setup.ts and
+// loaded here; the second test builds it again from its commands and holds
+// it to that snapshot. The save and resume sessions, the fill with
+// buildings and the lot marks on it are in scale-*.test.ts, a file each so
+// that Vitest runs them side by side (issue #230). Timings are in
+// scale.bench.ts and town.bench.ts.
 
 import { beforeAll, describe, expect, it } from "vitest";
 import {
-  CELL_OPEN,
-  CHUNKS_PER_SIDE,
   NETWORKS_ROAD,
-  SCALE_BUILDINGS,
   SCALE_SEED,
   SCALE_SEGMENTS,
   buildScaleCity,
-  buildingCount,
-  cellsInChunk,
-  cellsSettled,
   deserialize,
-  growScaleCity,
   hashState,
-  lotMarkAt,
-  lotMarksInChunk,
   planRoad,
   replay,
-  seeBuilding,
   serialize,
   step,
-  type BuildingSeen,
   type ScaleCity,
-  type SimState,
 } from "../src/index";
 import { submit } from "./seen-ends";
-import { LEVEL_ELEVATED_1, SEG_FIXED, isSegment, segmentCount, segmentIdLimit } from "../src/roads/network";
+import { LEVEL_ELEVATED_1, isSegment, segmentCount, segmentIdLimit } from "../src/roads/network";
 import { findRouteBetween, routingGraphOf } from "../src/roads/routing";
 import { terrainOf } from "../src/terrain/cache";
+import { loadScaleCity, scaleCityMeta } from "./scale-fixture";
 
 let city: ScaleCity;
 beforeAll(() => {
-  city = buildScaleCity();
-}, 60_000);
+  city = loadScaleCity();
+});
 
 describe("the scale city", () => {
   it("has 30,000 segments built through commands, with grids, curves and bridges", () => {
@@ -55,9 +46,15 @@ describe("the scale city", () => {
   });
 
   it("is the same city every time, and replays from its log to the same hash", () => {
+    // Every scale test and bench loads the city from the snapshot
+    // scale-setup.ts saved. Built again from its commands here, it must
+    // match that snapshot, or the shortcut has drifted.
     const again = buildScaleCity();
-    const hash = hashState(city.state);
+    const hash = scaleCityMeta().hash;
+    expect(hashState(city.state)).toBe(hash);
     expect(hashState(again.state)).toBe(hash);
+    expect(again.counts).toEqual(city.counts);
+    expect(again.grids).toEqual(city.grids);
     expect(hashState(replay(SCALE_SEED, city.state.log, city.state.tick))).toBe(hash);
     // Builds the city twice more, keeping its 2.9 million zoning cells current through every command.
   }, 120_000);
@@ -108,265 +105,3 @@ describe("the scale city", () => {
   }, 60_000);
 });
 
-/**
- * One tick of a scripted session on the scale city: every 20 ticks a road
- * command picked from the state as it stands, so two runs that reach a tick
- * with the same state send the same command. Builds, grids, upgrades,
- * bulldozes and undos, all of which read the spatial index, the routing
- * graph or the blocks that a load has to rebuild.
- */
-function scriptedTick(state: SimState, grids: readonly { x: number; z: number }[], seq: { n: number }): void {
-  const t = state.tick;
-  const send = (type: string, payload: unknown) => submit(state, { seq: ++seq.n, playerId: t % 200 < 100 ? "p1" : "p2", type, payload });
-  /** The first live segment at or after `from` that a player may change. */
-  const liveFrom = (from: number): number => {
-    const limit = segmentIdLimit(state.roads);
-    for (let k = 0; k < limit; k++) {
-      const id = (from + k) % limit;
-      if (isSegment(state.roads, id) && ((state.roads.segFlags[id] ?? 0) & SEG_FIXED) === 0) return id;
-    }
-    return 0;
-  };
-  if (t % 20 === 0) {
-    const g = grids[(t * 7) % grids.length] ?? { x: 0, z: 0 };
-    const k = (t / 20) % 5;
-    switch (k) {
-      case 0: {
-        // A quarter of the way into a row of blocks, clear of the avenues
-        // the generator laid along their middles.
-        const z = g.z + 96 * ((t / 100) % 6) + 24;
-        send("BuildRoad", { from: { x: g.x - 24, z }, to: { x: g.x + 3 * 96 + 24, z }, type: "street" });
-        break;
-      }
-      case 1:
-        send("BulldozeRoad", { segments: [liveFrom((t * 7919) % segmentIdLimit(state.roads))] });
-        break;
-      case 2:
-        send("UpgradeRoad", { segments: [liveFrom((t * 104_729) % segmentIdLimit(state.roads))], type: "avenue" });
-        break;
-      case 3:
-        send("Undo", {});
-        break;
-      default:
-        // A quarter of a block in from the grid's corner, so its lines run
-        // between the city's own and clear of the curved one-ways, which bow
-        // east from the middle of their blocks.
-        send("BuildRoadGrid", {
-          origin: { x: g.x + 24, z: g.z + 24 },
-          along: { x: g.x + 24 + 3 * 96, z: g.z + 24 },
-          across: { x: g.x + 24, z: g.z + 24 + 3 * 96 },
-          depth: 86,
-          width: 86,
-          type: "street",
-        });
-    }
-  }
-  step(state);
-}
-
-describe("save and resume on the scale city", () => {
-  const TICKS = 1000;
-
-  it("a session saved and reloaded half way ends on the same hash as one that ran straight through", () => {
-    // Straight through, on the city as the generator left it, with every
-    // piece of derived data kept current since the first road. Its cells
-    // are settled first: an undo that puts roads back waits for them, and
-    // the generator's last grids leave a walk of thousands of ticks (M2
-    // review, #147).
-    const fresh = (): SimState => {
-      const state = buildScaleCity().state;
-      while (!cellsSettled(state)) step(state);
-      return state;
-    };
-    const straight = fresh();
-    const start = straight.tick;
-    const seqA = { n: 100_000 };
-    while (straight.tick < start + TICKS) scriptedTick(straight, city.grids, seqA);
-
-    // Half way, then a save, a load into a new state with no derived data,
-    // and the rest.
-    let resumed = fresh();
-    const seqB = { n: 100_000 };
-    while (resumed.tick < start + TICKS / 2) scriptedTick(resumed, city.grids, seqB);
-    const bytes = serialize(resumed);
-    resumed = deserialize(bytes).state;
-    while (resumed.tick < start + TICKS) scriptedTick(resumed, city.grids, seqB);
-
-    const sessionEntries = straight.log.filter((e) => e.tick >= start);
-    // Enough of each command applied for the check to mean something.
-    for (const type of ["BuildRoad", "BulldozeRoad", "UpgradeRoad", "Undo", "BuildRoadGrid"]) {
-      expect(sessionEntries.filter((e) => e.type === type).length, type).toBeGreaterThan(2);
-    }
-    expect(resumed.tick).toBe(straight.tick);
-    expect(hashState(resumed)).toBe(hashState(straight));
-    expect(resumed.log).toEqual(straight.log);
-    // And a replay of the whole log agrees with both.
-    expect(hashState(replay(SCALE_SEED, [...straight.log], straight.tick))).toBe(hashState(straight));
-  }, 120_000);
-});
-
-describe("the scale city filled with buildings (issue M2-13)", () => {
-  it("zones the map through commands and grows tens of thousands of buildings, the same every time", () => {
-    const fill = () => {
-      const copy = { ...city, state: deserialize(serialize(city.state)).state };
-      return { town: growScaleCity(copy), state: copy.state };
-    };
-    const { town, state } = fill();
-    // The zoning is in the log, as commands.
-    expect(state.log.filter((e) => e.type === "ZoneCells").length).toBe(town.zoneCommands);
-    expect(town.zonedCells).toBeGreaterThan(600_000);
-    // Short of SCALE_BUILDINGS: the network's frontage runs out first (scale.ts).
-    expect(town.buildings).toBeGreaterThan(50_000);
-    expect(town.buildings).toBeLessThan(SCALE_BUILDINGS);
-    expect(buildingCount(state.buildings)).toBe(town.buildings);
-    // Every zone and density grew something.
-    const types = new Set<number>();
-    state.buildings.flags.forEach((f, id) => {
-      if (f !== 0) types.add(state.buildings.type[id] ?? -1);
-    });
-    expect(types.size).toBeGreaterThan(30);
-    expect(hashState(fill().state)).toBe(hashState(state));
-  }, 120_000);
-});
-
-describe("lot marks on the scale city (issue #164)", () => {
-  // The overlay settles most columns with a quick walk of the strip and asks
-  // the lot finder only of the rest. Every cell must come out as `lotMarkAt`,
-  // which asks the finder, says: on the city zoned and bare, and part grown.
-  it("marks every chunk's cells as lotMarkAt does, before and while it grows", () => {
-    const copy = { ...city, state: deserialize(serialize(city.state)).state };
-    growScaleCity(copy, 0);
-    const state = copy.state;
-    const check = (): number => {
-      let marked = 0;
-      for (let chunk = 0; chunk < CHUNKS_PER_SIDE * CHUNKS_PER_SIDE; chunk++) {
-        const flags = lotMarksInChunk(state, chunk);
-        cellsInChunk(state, chunk).forEach((cell, k) => {
-          const want = cell.status === CELL_OPEN && (state.cells.zone[cell.index] ?? 0) > 0 && lotMarkAt(state, cell) !== null ? 1 : 0;
-          if (flags[k] !== want) throw new Error(`chunk ${chunk}, cell ${JSON.stringify(cell)}: marked ${flags[k]}, lotMarkAt says ${want}`);
-          marked += want;
-        });
-      }
-      return marked;
-    };
-    expect(check(), "marked cells on the bare zoning").toBeGreaterThan(1000);
-    growScaleCity(copy, 20_000);
-    expect(buildingCount(state.buildings)).toBeGreaterThanOrEqual(20_000);
-    expect(check(), "marked cells part grown").toBeGreaterThan(1000);
-  }, 240_000);
-});
-
-/**
- * One tick of a scripted session with zoning and growth on the scale city
- * (issue M2-17): every 10 ticks a command picked from the state as it
- * stands, so two runs that reach a tick with the same state send the same
- * command. It zones a grid's blocks, rezones some of them, clears
- * buildings the grower put up, runs a street through them, bulldozes a
- * built street and undoes, while the grower builds on every tick.
- */
-function zoningTick(state: SimState, grids: readonly { x: number; z: number }[], seq: { n: number }): void {
-  const t = state.tick;
-  const send = (type: string, payload: unknown) => submit(state, { seq: ++seq.n, playerId: t % 200 < 100 ? "p1" : "p2", type, payload });
-  if (t % 10 === 0) {
-    const slot = t / 10;
-    const g = grids[(Math.floor(slot / 6) * 11) % grids.length] ?? { x: 0, z: 0 };
-    const zones = ["residential", "commercial", "industrial", "office", "mixed"];
-    // Sixteen 256 m squares over the grid and the ground around it, each at the largest a rectangle may be.
-    const square = (zone: string, density: number) => ({
-      zone,
-      density,
-      rects: Array.from({ length: 16 }, (_, k) => {
-        const x = g.x - 256 + (k % 4) * 256;
-        const z = g.z - 128 + Math.floor(k / 4) * 256;
-        return { from: { x, z }, to: { x: x + 256, z }, width: 256 };
-      }),
-    });
-    switch (slot % 6) {
-      case 0:
-        send("ZoneCells", square(zones[slot % zones.length] ?? "residential", 1 + (slot % 3)));
-        break;
-      case 1:
-        // A rezone of the middle of the same ground, which leaves what stands there standing.
-        send("ZoneCells", { zone: "commercial", density: 2, rects: [{ from: { x: g.x + 96, z: g.z + 128 }, to: { x: g.x + 288, z: g.z + 128 }, width: 96 }] });
-        break;
-      case 2: {
-        // Clears up to five of the buildings standing, from an id that moves with the tick.
-        const seen: BuildingSeen[] = [];
-        const b = state.buildings;
-        for (let id = (t * 31) % Math.max(1, b.flags.length); id < b.flags.length && seen.length < 5; id++) {
-          {
-          const one = seeBuilding(b, id);
-          if (one) seen.push(one);
-        }
-        }
-        if (seen.length > 0) send("BulldozeBuilding", { buildings: seen });
-        break;
-      }
-      case 3: {
-        // Through the zoned rows of the grid the previous round zoned, 60 ticks back, where houses stand.
-        const round = Math.floor(slot / 6);
-        const old = grids[(Math.max(0, round - 1) * 11) % grids.length] ?? g;
-        const z = old.z + 96 * (round % 6) + 24;
-        send("BuildRoad", { from: { x: old.x - 24, z }, to: { x: old.x + 3 * 96 + 24, z }, type: "street" });
-        break;
-      }
-      case 4: {
-        // A built street, if any: the first segment from a point in the id range with a building on it.
-        const limit = segmentIdLimit(state.roads);
-        const b = state.buildings;
-        let seg = -1;
-        for (let id = 0; id < b.flags.length && seg < 0; id++) {
-          const s = b.firstSeg[(id + t) % b.flags.length] ?? -1;
-          if (b.flags[(id + t) % b.flags.length] && s >= 0 && s < limit && isSegment(state.roads, s) && ((state.roads.segFlags[s] ?? 0) & SEG_FIXED) === 0) seg = s;
-        }
-        if (seg >= 0) send("BulldozeRoad", { segments: [seg] });
-        break;
-      }
-      default:
-        send("Undo", {});
-    }
-  }
-  step(state);
-}
-
-describe("save and resume with zoning and growth on the scale city (issue M2-17)", () => {
-  const TICKS = 1000;
-
-  /** The scale city with its cells settled: its last grids leave a walk of a few thousand ticks, and the grower waits for it. */
-  const settledCity = (): SimState => {
-    const state = buildScaleCity().state;
-    while (!cellsSettled(state)) step(state);
-    return state;
-  };
-
-  it("a session saved and reloaded half way ends on the same hash as one that ran straight through", () => {
-    const straight = settledCity();
-    const start = straight.tick;
-    const seqA = { n: 100_000 };
-    let mostBuildings = 0;
-    while (straight.tick < start + TICKS) {
-      zoningTick(straight, city.grids, seqA);
-      mostBuildings = Math.max(mostBuildings, buildingCount(straight.buildings));
-    }
-
-    let resumed = settledCity();
-    const seqB = { n: 100_000 };
-    while (resumed.tick < start + TICKS / 2) zoningTick(resumed, city.grids, seqB);
-    // Half way the grower has buildings up and lots half built: the save must carry all of it.
-    expect(buildingCount(resumed.buildings)).toBeGreaterThan(100);
-    resumed = deserialize(serialize(resumed)).state;
-    while (resumed.tick < start + TICKS) zoningTick(resumed, city.grids, seqB);
-
-    const sessionEntries = straight.log.filter((e) => e.tick >= start);
-    for (const type of ["ZoneCells", "BulldozeBuilding", "BuildRoad", "BulldozeRoad", "Undo"]) {
-      expect(sessionEntries.filter((e) => e.type === type).length, type).toBeGreaterThan(5);
-    }
-    expect(mostBuildings).toBeGreaterThan(500);
-    expect(resumed.tick).toBe(straight.tick);
-    expect(buildingCount(resumed.buildings)).toBe(buildingCount(straight.buildings));
-    expect(hashState(resumed)).toBe(hashState(straight));
-    expect(resumed.log).toEqual(straight.log);
-    // A replay of the whole log grows the same buildings.
-    expect(hashState(replay(SCALE_SEED, [...straight.log], straight.tick))).toBe(hashState(straight));
-  }, 300_000);
-});

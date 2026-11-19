@@ -92,6 +92,32 @@ export interface OpenCityRequest {
   id: string;
 }
 
+/**
+ * Page to worker, once, when the page was opened with a city file's address
+ * (`?load=`): the file, for the worker to store and open in place of the
+ * city it would otherwise open, so the page does not reload into it. `bytes`
+ * is null when the page could not fetch the file, and `error` says why. A
+ * worker started with `workerName(_, true)` waits for this before it opens
+ * any city.
+ */
+export interface LoadFileMessage {
+  channel: typeof SAVES_CHANNEL;
+  type: "load";
+  fileName: string;
+  bytes: ArrayBuffer | null;
+  error: string | null;
+}
+
+/** Checks a `LoadFileMessage`. */
+export function parseLoadFile(raw: unknown): LoadFileMessage | null {
+  if (!isSaveMessage(raw)) return null;
+  const message = raw as Record<string, unknown>;
+  const { type, fileName, bytes, error } = message;
+  if (type !== "load" || typeof fileName !== "string") return null;
+  if (!(bytes === null || bytes instanceof ArrayBuffer) || !(error === null || typeof error === "string")) return null;
+  return { channel: SAVES_CHANNEL, type: "load", fileName, bytes, error };
+}
+
 export type ToSaver = SaveRequest | ExportRequest | ImportRequest | NewCityRequest | OpenCityRequest;
 
 /** Worker to page. */
@@ -146,7 +172,7 @@ export interface OpeningMessage {
 
 export type FromSaver = StatusMessage | ExportReply | ImportReply | SwitchReply | OpeningMessage;
 
-export type PageSaveTransport = SimTransport<ToSaver, FromSaver>;
+export type PageSaveTransport = SimTransport<ToSaver | LoadFileMessage, FromSaver>;
 export type WorkerSaveTransport = SimTransport<FromSaver, unknown>;
 
 export function isSaveMessage(data: unknown): boolean {

@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-08: snapping. A player draws a block of four streets with every
 // click up to 10 pixels off where they aim, and gets four nodes and right
@@ -36,8 +37,6 @@ declare const window: {
     }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -54,24 +53,6 @@ function streetCity(): Buffer {
   const state = createState(SEED);
   buildRoads(state, [[[4220, 4600], [4524, 4600], "street"]]);
   return Buffer.from(serialize(state));
-}
-
-async function openCity(page: Page, bytes: Buffer = emptyCity()): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({
-    name: "Snapping.city",
-    mimeType: "application/octet-stream",
-    buffer: bytes,
-  });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function setPose(page: Page, position: Vec3, target: Vec3, shift = MENU_SHIFT): Promise<void> {
@@ -175,7 +156,7 @@ const MISS: [number, number][] = [
 ];
 
 test("draws a square block with clicks up to 10 pixels off target", async ({ page }, testInfo) => {
-  await openCity(page);
+  await openCity(page, emptyCity(), { name: "Snapping" });
   const g = groundAt(4350, 4610);
   await setPose(page, [4350, g + 170, 4740], [4350, g, 4610]);
   // Close enough that 10 px is well under half a cell, as a player zooms in to place a block.
@@ -238,7 +219,7 @@ test("draws a square block with clicks up to 10 pixels off target", async ({ pag
 
 /** Opens the one-street city over its east end, with the road tool on. Returns the east end. */
 async function overStreet(page: Page): Promise<NodeInfo> {
-  await openCity(page, streetCity());
+  await openCity(page, streetCity(), { name: "Snapping" });
   const g = groundAt(4400, 4640);
   // Its tests work around the street's middle, clear of the road menu, and
   // their pixel reaches are tuned to this exact view, so it is not shifted.

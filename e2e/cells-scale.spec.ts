@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { zonedScaleCity } from "./cell-fixtures";
+import { canvasShot, openCity } from "./helpers";
 import { frameTime, perfFigures } from "./measure";
 import { groundAt, scaleCity } from "./road-fixtures";
 
@@ -24,7 +25,6 @@ interface CellStats {
 }
 declare const window: {
   cityCouncil: {
-    renderStatus(): { backend: string } | null;
     view: Promise<{ cellStats(): CellStats | null }>;
     camera: Promise<{ rig: { setPose(position: Vec3, target: Vec3): void } }>;
   };
@@ -38,22 +38,6 @@ declare const performance: { now(): number };
 // slower in software: on the development container the cells test ran out
 // of its ten minutes twice headless and took 9.4 minutes headed.
 test.use({ viewport: { width: 1280, height: 800 }, headless: false, channel: "chromium" });
-
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
-
-/** Opens the page, then imports `bytes` as a city and waits for it to be drawn. */
-async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<string> {
-  await page.goto(`/${query}`);
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-  const status = await page.evaluate(() => window.cityCouncil.renderStatus());
-  return status?.backend ?? "none";
-}
 
 async function cellStats(page: Page): Promise<CellStats> {
   const stats = await page.evaluate(async () => (await window.cityCouncil.view).cellStats());
@@ -71,14 +55,6 @@ async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<v
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-/** The canvas alone, without the page's panels over it. */
-async function canvasShot(page: Page): Promise<Buffer> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  const shot = await page.locator("#view").screenshot();
-  await page.addStyleTag({ content: "#ui { display: block !important; }" });
-  return shot;
-}
-
 test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band", async ({ page }, testInfo: TestInfo) => {
   // Ten minutes: since issue #164 the overlay fills in while the camera
   // pans the district band, which takes this test from about 2.8 to 3.6
@@ -93,7 +69,7 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
     { band: "city", position: [6000, 8400, 15_800], target: [6000, 0, 5600] },
   ];
   // The same roads with nothing zoned and the overlay off, for comparison.
-  await openCity(page, query, "Thirty thousand", scaleCity(30_000));
+  await openCity(page, scaleCity(30_000), { query, name: "Thirty thousand" });
   // Fixed short waits, not `settle`: in software a frame of this city takes
   // half a second, and waiting for the trees to settle took a minute a pose.
   const plain: Record<string, number> = {};
@@ -103,7 +79,7 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
     plain[band] = await frameTime(page, 20);
   }
   const city = zonedScaleCity(30_000);
-  const backend = await openCity(page, query, "Thirty thousand zoned", city.bytes);
+  const backend = await openCity(page, city.bytes, { query, name: "Thirty thousand zoned" });
   // The overlay goes on in the district band, and the camera pans across
   // the band while it fills in (issue #164). Every free zoned cell is ground
   // the lot finder has to look at, and the zones change from one segment to

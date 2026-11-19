@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import fixture from "../packages/sim/test/fixtures/connections.json" with { type: "json" };
 import { decodePng, type Image } from "./png";
 import { ROAD_TYPES } from "../packages/sim/src/index";
+import { frames } from "./helpers";
 
 // Issue M1-16: outside connections. A new city starts with two or three
 // highway stubs at the map edge, the camera looks at one, each is marked
@@ -38,7 +39,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -49,10 +49,6 @@ for (const { seed, connections } of fixture.seeds) {
     await page.waitForFunction(() => "cityCouncil" in globalThis);
     expect(await page.evaluate((s) => window.cityCouncil.connectionsCheck(s), seed)).toEqual(connections);
   });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function attach(page: Page, testInfo: TestInfo, name: string): Promise<Image> {

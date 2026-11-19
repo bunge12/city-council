@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { frames, openPage } from "./helpers";
 
 // The hook packages/client/src/main.ts puts on the page. The tooling
 // tsconfig has no DOM types, so the parts used here are declared.
@@ -12,16 +13,6 @@ declare const window: {
     }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
-
-async function ready(page: Page, url: string) {
-  await page.goto(url);
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 15_000 });
-  const status = await page.evaluate(() => window.cityCouncil.renderStatus());
-  if (!status) throw new Error("render status missing after ready");
-  return status;
-}
 
 /** The whole map from the south, as the camera started before cities had connections. */
 const WHOLE_MAP: { position: Vec3; target: Vec3 } = { position: [6000, 8400, 15_840], target: [6000, 0, 5640] };
@@ -32,7 +23,7 @@ async function setCamera(page: Page, position: Vec3, target: Vec3): Promise<void
 
 async function lodCounts(page: Page): Promise<number[]> {
   // Wait two frames so the LODs have updated for the new camera.
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await frames(page);
   return page.evaluate(async () => (await window.cityCouncil.view).lodCounts());
 }
 
@@ -41,7 +32,7 @@ for (const { name, url, backend } of [
   { name: "?webgl", url: "/?webgl", backend: /^webgl2$/ },
 ]) {
   test(`the whole map renders in chunks (${name})`, async ({ page }, testInfo) => {
-    const status = await ready(page, url);
+    const status = await openPage(page, url, 15_000);
     expect(status.backend).toMatch(backend);
     // readyMs is printed below, not held to the M0 exit test's 5 seconds. This
     // is a headless copy of walkthrough.spec.ts step 1 without the throttled
@@ -59,7 +50,7 @@ for (const { name, url, backend } of [
 }
 
 test("chunks near the camera switch to full detail", async ({ page }, testInfo) => {
-  await ready(page, "/?webgl");
+  await openPage(page, "/?webgl", 15_000);
   await setCamera(page, [3000, 250, 9000], [4500, 60, 7500]);
   const [near = 0, mid = 0, far = 0] = await lodCounts(page);
   expect(near).toBeGreaterThan(0);
@@ -70,7 +61,7 @@ test("chunks near the camera switch to full detail", async ({ page }, testInfo) 
 });
 
 test("the canvas follows the window size", async ({ page }) => {
-  await ready(page, "/?webgl");
+  await openPage(page, "/?webgl", 15_000);
   await page.setViewportSize({ width: 900, height: 600 });
   await expect.poll(() => page.locator("#view").evaluate((c: { width: number }) => c.width)).toBe(900);
   const height = await page.locator("#view").evaluate((c: { height: number }) => c.height);

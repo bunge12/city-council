@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { cellAt, cellsSettled, createState, segmentEnds, segmentTypeId, serialize, step, submit, type SimState } from "../packages/sim/src/index";
+import { cellAt, cellsSettled, createState, segmentEnds, segmentTypeId, step, submit, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // M2 review (#147): an undo that would take ground a building stands on is
 // refused. The city file has a street at z = 4600 zoned R1 along its north
@@ -26,8 +27,6 @@ declare const window: {
     camera: Promise<{ rig: { setPose(position: Vec3, target: Vec3): void } }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(180_000);
@@ -48,10 +47,6 @@ function startCity(): { state: SimState; cross: { segments: number[]; ends: numb
   const seg = cellAt(state, CROSS_X + 9, 4520)?.segment;
   if (seg === undefined) throw new Error("no street from the north");
   return { state, cross: { segments: [seg], ends: [segmentEnds(state.roads, seg)], types: [segmentTypeId(state.roads, seg)] } };
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function attach(page: Page, testInfo: TestInfo, name: string): Promise<void> {
@@ -77,13 +72,7 @@ async function houses(page: Page): Promise<{ id: number; segment: number; side: 
 
 test("an undo that would put a street back over a house is refused, and goes through once the house is cleared", async ({ page }, testInfo) => {
   const { state, cross } = startCity();
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Undo.city", mimeType: "application/octet-stream", buffer: Buffer.from(serialize(state)) });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
+  await openCity(page, state, { name: "Undo" });
   const g = groundAt(CROSS_X, 4560);
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [
     [CROSS_X, g + 170, 4560 + 130],

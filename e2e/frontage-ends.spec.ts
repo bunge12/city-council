@@ -1,8 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { TIME_BALANCE, buildingCount, createState, readBuilding, serialize, step, submit, type SimState } from "../packages/sim/src/index";
+import { TIME_BALANCE, buildingCount, createState, readBuilding, step, submit, type SimState } from "../packages/sim/src/index";
 import { finishConstruction } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { buildingsDrawn, frames, openCity } from "./helpers";
 
 // Issue 194: the grower builds at an end of the free frontage it draws a
 // cell on, so a building stands against a road end, a neighbour or other
@@ -24,8 +25,6 @@ declare const window: {
     camera: Promise<{ rig: { setPose(position: Vec3, target: Vec3): void } }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(180_000);
@@ -74,17 +73,6 @@ function northPlaces(state: SimState): number[][] {
   return out;
 }
 
-async function frames(page: Page, n = 2): Promise<void> {
-  await page.evaluate(
-    (n) =>
-      new Promise<void>((r) => {
-        const step = (left: number) => (left <= 0 ? r() : requestAnimationFrame(() => step(left - 1)));
-        step(n);
-      }),
-    n,
-  );
-}
-
 async function attach(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, await page.screenshot());
@@ -102,13 +90,7 @@ test("each 7-wide O3 lot is built from end to end, with no cell left over", () =
 });
 
 test("the grown street from above, with the zone tool's hatching on ground nothing fits", async ({ page }, testInfo) => {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Frontage.city", mimeType: "application/octet-stream", buffer: Buffer.from(serialize(city)) });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
+  await openCity(page, city, { name: "Frontage" });
   const x = WEST + 12 * CELL;
   const z = 4600;
   const g = groundAt(x, z);
@@ -116,11 +98,7 @@ test("the grown street from above, with the zone tool's hatching on ground nothi
     [x, g + 230, z + 120],
     [x, g, z],
   ] as const);
-  await page.waitForFunction(
-    (count) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(count),
-    buildingCount(city.buildings),
-    { timeout: 120_000 },
-  );
+  await buildingsDrawn(page, buildingCount(city.buildings));
   await frames(page, 4);
   await attach(page, testInfo, "the grown street");
 

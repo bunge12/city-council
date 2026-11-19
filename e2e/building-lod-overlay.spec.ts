@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { MEASURE_VIEWPORT, WAIT_VIEWPORT, canvasShot, drawnNow, openTown, poseAndSettle, scaleCity, writeReport } from "./building-lod-helpers";
+import { MEASURE_VIEWPORT, WAIT_VIEWPORT, attachCanvas, drawnNow, openTown, poseAndSettle, scaleCity, writeReport } from "./building-lod-helpers";
 import { frameTime, perfFigures } from "./measure";
 
 // Issue #133: the zoning overlay over the whole scale town in the city band,
@@ -41,7 +41,7 @@ test("the zoning overlay over the whole town in the city band", async ({ page },
   const drawn = await drawnNow(page);
   const cells = await page.evaluate(async () => (await window.cityCouncil.view).cellStats());
   const backend = (await page.evaluate(() => window.cityCouncil.renderStatus()))?.backend ?? "none";
-  await canvasShot(page, testInfo, "scale city with buildings, city band, low, zoning overlay");
+  await attachCanvas(page, testInfo, "scale city with buildings, city band, low, zoning overlay");
   await writeReport(testInfo, "#133 zoning overlay over the scale town, city band, Low", "building-lod-overlay-report.json", { backend, cityOverlay: { frameMs, ...drawn, cells } });
   perfFigures("building-lod-overlay", `scale town, zoning overlay, Low, ${backend}`, { "city band (ms)": frameMs, "city band, draw calls": drawn.drawCalls });
 });

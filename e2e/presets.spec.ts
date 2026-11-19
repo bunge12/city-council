@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { ready } from "./helpers";
 
 // Issue M2-02: graphics presets. The first-run benchmark, which runs once
 // per browser, and the settings that change the preset and keep the choice.
@@ -14,10 +15,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 // tests here that need a first visit clear it.
 
 declare const window: {
-  cityCouncil: {
-    renderStatus(): { backend: string; readyMs: number } | null;
-    view: Promise<{ lighting(): { preset: string } }>;
-  };
+  cityCouncil: { view: Promise<{ lighting(): { preset: string } }> };
   localStorage: { getItem(key: string): string | null };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
@@ -25,13 +23,6 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Page loads of the whole map, drawn in software on a CI runner.
 test.setTimeout(240_000);
-
-async function ready(page: Page): Promise<{ backend: string; readyMs: number }> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const status = await page.evaluate(() => window.cityCouncil.renderStatus());
-  if (!status) throw new Error("render status missing after ready");
-  return status;
-}
 
 /** Waits until the preset on screen is the one wanted and no benchmark runs. */
 async function presetSettled(page: Page): Promise<void> {

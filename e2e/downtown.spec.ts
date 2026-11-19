@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { BUILDING_TYPES } from "../packages/sim/src/index";
 import { downtownFixtureCity } from "./building-fixtures";
+import { buildingsDrawn, openCity } from "./helpers";
 
 // Issue #137: a downtown's towers are drawn in many shapes. The downtown
 // fixture of towers, slabs and podiums at Low, with no pictures: every
@@ -11,23 +12,14 @@ import { downtownFixtureCity } from "./building-fixtures";
 declare const window: {
   cityCouncil: { view: Promise<{ buildingStats(): { buildings: number; models: number } | null }> };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(180_000);
 
 test("a downtown's towers are drawn in many models", async ({ page }, testInfo) => {
   const city = downtownFixtureCity();
-  await page.goto("/?webgl&preset=low");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Downtown.city", mimeType: "application/octet-stream", buffer: city.bytes });
-  await loaded;
-  await page.waitForFunction(
-    (count) => document.body.dataset["renderReady"] === "true" && document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(count),
-    city.buildings,
-    { timeout: 120_000 },
-  );
+  await openCity(page, city.bytes, { query: "webgl&preset=low", name: "Downtown" });
+  await buildingsDrawn(page, city.buildings);
   const stats = await page.evaluate(async () => (await window.cityCouncil.view).buildingStats());
   expect(stats?.buildings).toBe(city.buildings);
   // Many models in use: each type's buildings draw several of its shapes.

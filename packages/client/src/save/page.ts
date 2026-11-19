@@ -7,6 +7,7 @@ import {
   type ExportReply,
   type FromSaver,
   type ImportReply,
+  type LoadFileMessage,
   type PageSaveTransport,
   type SaveReason,
   type SaveStatus,
@@ -120,5 +121,58 @@ export async function requestPersistence(storage: StorageManager | undefined = n
     return (await storage.persist()) ? "persisted" : "declined";
   } catch {
     return "declined";
+  }
+}
+
+/** `text` with its percent escapes decoded, or as it is when they are malformed. */
+function decodeOr(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * The `?load=` address in query string `search`, and `search` without it.
+ * The page takes it out of its own address once read, so a reload goes back
+ * to the city the tab is running rather than loading the file again.
+ */
+export function takeLoadAddress(search: string): { address: string | null; rest: string } {
+  let address: string | null = null;
+  const rest = search
+    .replace(/^\?/, "")
+    .split("&")
+    .filter((part) => {
+      if (!part.startsWith("load=")) return part !== "";
+      address = decodeOr(part.slice("load=".length).replace(/\+/g, " "));
+      return false;
+    })
+    .join("&");
+  return { address, rest: rest ? `?${rest}` : "" };
+}
+
+/**
+ * Fetches the city file at `address` for the worker to open
+ * (`LoadFileMessage`). Only an address on `base`'s own origin is fetched.
+ * Never rejects: a file that cannot be had comes back with no bytes and the
+ * reason, since the worker waits for this message before it opens anything.
+ */
+export async function fetchCityFile(address: string, base: string, fetcher: typeof fetch = fetch): Promise<LoadFileMessage> {
+  const failed = (fileName: string, error: string): LoadFileMessage => ({ channel: SAVES_CHANNEL, type: "load", fileName, bytes: null, error });
+  let url: URL;
+  try {
+    url = new URL(address, base);
+  } catch {
+    return failed(address, "Its address is not valid.");
+  }
+  const fileName = decodeOr(url.pathname.split("/").pop() ?? "") || "City.city";
+  if (url.origin !== new URL(base).origin) return failed(fileName, "Only a city file on this site can be opened from the address.");
+  try {
+    const response = await fetcher(url);
+    if (!response.ok) return failed(fileName, `The server answered ${response.status}.`);
+    return { channel: SAVES_CHANNEL, type: "load", fileName, bytes: await response.arrayBuffer(), error: null };
+  } catch (error) {
+    return failed(fileName, `It could not be fetched: ${error instanceof Error ? error.message : String(error)}.`);
   }
 }
