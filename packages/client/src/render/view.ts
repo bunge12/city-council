@@ -319,6 +319,10 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
   let last = -1;
   let drawnSignature = 0;
   let drawnTick: number | null = null;
+  // three.js zeroes renderer.info at the start of every animation frame, so a
+  // skipped frame reports what the last frame drawn drew.
+  let drawCalls = 0;
+  let triangles = 0;
   renderer.setAnimationLoop((time: number) => {
     const seconds = last >= 0 ? (time - last) / 1000 : 0;
     for (const b of before) b(seconds);
@@ -349,7 +353,11 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
         drawnTick = gameTick;
       }
     }
-    if (draw) renderer.render(scene, camera);
+    if (draw) {
+      renderer.render(scene, camera);
+      drawCalls = renderer.info.render.drawCalls;
+      triangles = renderer.info.render.triangles;
+    }
     if (last >= 0) {
       const slot = gapCount % FRAME_TIME_WINDOW;
       gapSum += time - last - (gaps[slot] ?? 0);
@@ -362,8 +370,8 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
     const stats: FrameStats = {
       frameMs,
       fps: frameMs > 0 ? 1000 / frameMs : 0,
-      drawCalls: renderer.info.render.drawCalls,
-      triangles: renderer.info.render.triangles,
+      drawCalls,
+      triangles,
       drawn: draw,
     };
     for (const l of listeners) l(stats);
