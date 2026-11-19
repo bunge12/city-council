@@ -22,6 +22,11 @@
     "presets-forest.spec.ts",
     "through-lots.spec.ts"
   ],
+  "globalTimeout": {
+    "_about": "Each CI runner's Playwright run stops at timesPlan times its planned minutes, and at no less than minMinutes, with --global-timeout from scripts/e2e-shard.mjs (issue #228). Playwright then fails the run and writes its report, where GitHub's job limit would stop the job with no report. A runner's plan is the sum of its files' seconds, or for a runner without files the plan its matrix entry gives. In the 156 chromium runners of the last 25 CI runs, first attempts took 1.33 times their files' seconds at the median, 2.17 at the 90th percentile and 2.68 at the 95th, and 1.6 at the median on an EPYC 7763. At 1.5 times, as the issue first asked, about four runners in ten that passed would have been stopped. minMinutes covers starting the servers and the production build. A runner also never gets less than its plan plus every attempt of its longest test (scripts/e2e-limits.mjs), so a test that times out still gets its retry.",
+    "timesPlan": 3,
+    "minMinutes": 10
+  },
   "seconds": {
     "blocks.spec.ts": 34,
     "bridges.spec.ts": 62,
@@ -75,27 +80,27 @@
     "zone-tool.spec.ts": 112
   },
   "testSeconds": {
-    "buildings.spec.ts \u203a a building keeps its colours after a reload, and two houses on one street differ": 8,
-    "buildings.spec.ts \u203a a building the grower adds writes one instance and rebuilds no chunk": 8,
-    "buildings.spec.ts \u203a every building type draws the same at balanced (?webgl)": 19,
-    "buildings.spec.ts \u203a every building type draws the same at balanced (default backend)": 18,
-    "buildings.spec.ts \u203a every building type draws the same at low (?webgl)": 10,
-    "buildings.spec.ts \u203a every building type draws the same at low (default backend)": 13,
-    "buildings.spec.ts \u203a the fixture has buildings of every type": 0,
-    "cells.spec.ts \u203a cells show the legend's colours, unlit and unshaded, over the ground and under the roads (high)": 36,
-    "cells.spec.ts \u203a cells show the legend's colours, unlit and unshaded, over the ground and under the roads (low)": 24,
-    "cells.spec.ts \u203a painting one strip rebuilds only the chunks it touches and their neighbours": 6,
-    "cells.spec.ts \u203a the fixture paints every zone at every density": 0,
-    "cells.spec.ts \u203a the zoning overlay draws the same in every zoom band (?webgl)": 13,
-    "cells.spec.ts \u203a the zoning overlay draws the same in every zoom band (default backend)": 25,
-    "roads.spec.ts \u203a adding one segment rebuilds only the chunks it touches": 4,
-    "roads.spec.ts \u203a junctions get rounded kerbs, crossings, lights and signs, and tapers join two widths (?webgl)": 5,
-    "roads.spec.ts \u203a junctions get rounded kerbs, crossings, lights and signs, and tapers join two widths (default backend)": 11,
-    "roads.spec.ts \u203a roads stay on top of the terrain at every zoom (?webgl)": 31,
-    "roads.spec.ts \u203a roads stay on top of the terrain at every zoom (default backend)": 60,
-    "roads.spec.ts \u203a the curved fixture city draws curves and curved junctions (?webgl)": 6,
-    "roads.spec.ts \u203a the curved fixture city draws curves and curved junctions (default backend)": 8,
-    "roads.spec.ts \u203a the fixture city draws the same in every zoom band (?webgl)": 8,
-    "roads.spec.ts \u203a the fixture city draws the same in every zoom band (default backend)": 14
+    "buildings.spec.ts › a building keeps its colours after a reload, and two houses on one street differ": 8,
+    "buildings.spec.ts › a building the grower adds writes one instance and rebuilds no chunk": 8,
+    "buildings.spec.ts › every building type draws the same at balanced (?webgl)": 19,
+    "buildings.spec.ts › every building type draws the same at balanced (default backend)": 18,
+    "buildings.spec.ts › every building type draws the same at low (?webgl)": 10,
+    "buildings.spec.ts › every building type draws the same at low (default backend)": 13,
+    "buildings.spec.ts › the fixture has buildings of every type": 0,
+    "cells.spec.ts › cells show the legend's colours, unlit and unshaded, over the ground and under the roads (high)": 36,
+    "cells.spec.ts › cells show the legend's colours, unlit and unshaded, over the ground and under the roads (low)": 24,
+    "cells.spec.ts › painting one strip rebuilds only the chunks it touches and their neighbours": 6,
+    "cells.spec.ts › the fixture paints every zone at every density": 0,
+    "cells.spec.ts › the zoning overlay draws the same in every zoom band (?webgl)": 13,
+    "cells.spec.ts › the zoning overlay draws the same in every zoom band (default backend)": 25,
+    "roads.spec.ts › adding one segment rebuilds only the chunks it touches": 4,
+    "roads.spec.ts › junctions get rounded kerbs, crossings, lights and signs, and tapers join two widths (?webgl)": 5,
+    "roads.spec.ts › junctions get rounded kerbs, crossings, lights and signs, and tapers join two widths (default backend)": 11,
+    "roads.spec.ts › roads stay on top of the terrain at every zoom (?webgl)": 31,
+    "roads.spec.ts › roads stay on top of the terrain at every zoom (default backend)": 60,
+    "roads.spec.ts › the curved fixture city draws curves and curved junctions (?webgl)": 6,
+    "roads.spec.ts › the curved fixture city draws curves and curved junctions (default backend)": 8,
+    "roads.spec.ts › the fixture city draws the same in every zoom band (?webgl)": 8,
+    "roads.spec.ts › the fixture city draws the same in every zoom band (default backend)": 14
   }
 }

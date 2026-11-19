@@ -48,7 +48,13 @@ export default defineConfig({
   reporter: isCI ? [["list"], ["html", { open: "never" }], ["./e2e/file-times-reporter.ts"]] : "list",
   use: {
     baseURL: "http://localhost:5173",
-    trace: "off",
+    // A test that fails on its first attempt keeps its trace, and every
+    // failure keeps a screenshot, both under test-results/ (issue #228). The
+    // trace has the steps, console, network and sources, but no screenshots
+    // or DOM snapshots: with snapshots grid-tool.spec.ts took 2.1 minutes on
+    // two cores instead of 1.4, without them 1.5.
+    trace: { mode: "retain-on-first-failure", screenshots: false, snapshots: false },
+    screenshot: "only-on-failure",
     // The Low preset kept, and per project below the test switch (e2e/browser-state.ts).
     storageState: PLAYER_STATE,
   },
@@ -116,6 +122,9 @@ export default defineConfig({
       // `pnpm e2e --project perf --no-deps`. With SCALE_WEBGPU set, the
       // scale check runs in the roads project instead.
       name: "perf",
+      // A perf test that timed out on a slow runner times out again on its
+      // retry, and its figures come from a runner that was already slow.
+      retries: 0,
       testMatch: process.env["SCALE_WEBGPU"] ? projectFiles.perf.filter((f) => f !== "scale.spec.ts") : projectFiles.perf,
       dependencies: remoteBase ? [] : ["walkthrough"],
       // Every frame drawn at the real settings, and no autosave in a measurement (issue #226).

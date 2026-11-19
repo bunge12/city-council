@@ -34,7 +34,7 @@ docs/             PRD and milestone specs
 
 ## Commands
 
-`pnpm lint` also runs `scripts/check-lint-rules.mjs`, which proves the boundary, clock and randomness rules still fire, and `scripts/check-node-version.mjs`, which checks `.nvmrc` and `.node-version` agree.
+`pnpm lint` also runs `scripts/check-lint-rules.mjs`, which proves the boundary, clock and randomness rules still fire, `scripts/check-node-version.mjs`, which checks `.nvmrc` and `.node-version` agree, and `scripts/check-e2e-timeouts.mjs`, which fails on an e2e test allowed more than a third of its CI job.
 
 ```
 pnpm install

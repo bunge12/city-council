@@ -42,6 +42,33 @@ The specs that measure frame time and memory are the `perf` project, and the one
 
 CI deals spec files, and the roads project's tests, out to its runners by the seconds in `e2e/projects.json`. A new spec file, or a new test in `roads.spec.ts`, `cells.spec.ts` or `buildings.spec.ts`, fails CI until it has a figure there, and the message says what to add: its seconds with one worker on your machine, times 1.5. Don't change the other figures by hand. A weekly workflow replaces them with what CI measured, and lists every test that passed only on a retry in the issue titled "Flaky tests". See `node scripts/e2e-shard.mjs --list 6` for the current plan.
 
+### When an e2e test fails in CI
+
+Every e2e job uploads `playwright-report-<runner>`, whatever its result. In it, `test-results/` holds a screenshot of each failed attempt and the trace of each test that failed its first attempt: its steps, console, network and source, with no screenshots or DOM snapshots, which would slow every test by about half on a runner drawing in software. Open the trace with `npx playwright show-trace <path>/trace.zip`, or open `playwright-report/index.html`. A test still running when Playwright's time limit stops the run gets a screenshot but no trace.
+
+Each runner's Playwright run stops at three times its planned minutes, with a ten minute floor (`globalTimeout` in `e2e/projects.json`), and never before its plan plus every attempt of its longest test, so a retry still fits. It then fails with its report, before GitHub's job limit would stop it with none. The walkthrough runners have nothing to deal and set their limit in minutes as `limit:` in `ci.yml`. `pnpm lint` runs `scripts/check-e2e-timeouts.mjs`, which fails when a test's limit is over a third of its CI job's: a test that times out runs again, and the runner's other files need the rest. It also fails when a `limit:` cannot hold every attempt of its runner's longest test with two minutes to spare, or leaves less than three minutes of the job. The perf project does not retry, since a perf test that timed out on a slow runner times out again.
+
+### Running a spec at CI speed
+
+CI runners have 4 virtual CPUs and no GPU, and they are not all the same speed. The e2e jobs print their CPU as `machine:` near the top of the test step. Over 300 e2e jobs in the 25 CI runs before 19 November 2026, with each runner's time as a multiple of its files' planned seconds (the median per CPU):
+
+| CPU | Share of runners | Time against plan | Against the fastest |
+| --- | ---: | ---: | ---: |
+| AMD EPYC 9V45 | 15% | 0.76 | 1.0 |
+| Intel Xeon 6975P-C | 10% | 0.96 | 1.3 |
+| AMD EPYC 9V74 | 33% | 1.18 | 1.6 |
+| Intel Xeon Platinum 8370C | 3% | 1.52 | 2.0 |
+| AMD EPYC 7763 | 30% | 1.60 | 2.1 |
+| Intel Xeon Platinum 8573C | 8% | 1.60 | 2.1 |
+
+To run a spec on as many cores as a runner, pin it with `taskset` and give it a display:
+
+```bash
+E2E_DEV_SERVER_ONLY=1 taskset -c 0-1 xvfb-run -a pnpm e2e --project chromium --workers=1 --trace off e2e/grid-tool.spec.ts
+```
+
+`E2E_DEV_SERVER_ONLY=1` skips the production build that only the walkthrough needs. In the development container (Intel Xeon at 2.1 GHz), `e2e/grid-tool.spec.ts` took 87 seconds on two cores and 106 on one, about what it takes on an EPYC 9V45. It took 189 seconds on an EPYC 7763. So a spec that only just passes on two local cores is likely to time out on a slow runner: give it about 2.5 times what it takes here.
+
 The replay tests feed a recorded command log and a seed to the sim and compare a hash of the final state. If one fails after your change, the sim has become nondeterministic or its behaviour changed. Both need an explanation in the pull request.
 
 Fixtures live in `packages/sim/test/fixtures/replay/`. Each holds a seed, a log, the tick to replay to and the expected hash. When a change to the sim is meant to change the result, the failing test prints the new hash. Put it in the fixture and say why in the pull request.

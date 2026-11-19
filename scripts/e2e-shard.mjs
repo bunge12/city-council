@@ -23,10 +23,20 @@
 // for the run summary (scripts/e2e-report.mjs).
 //
 // With --list <total> it prints every runner's share and minutes instead.
+//
+// With --global-timeout it prints the milliseconds to give that runner's
+// Playwright run as --global-timeout instead of its share (issue #228):
+// `timesPlan` times its planned seconds and no less than `minMinutes`, from
+// `globalTimeout` in e2e/projects.json, and no less than its plan plus
+// every attempt of its longest test, so a test that times out still gets
+// its retry (scripts/e2e-limits.mjs).
+//
+//   node scripts/e2e-shard.mjs 3/6 --global-timeout
 
-import { readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { attemptsOf, configTimeoutMs, globalTimeoutMs, longestTestMs } from "./e2e-limits.mjs";
 import { countTestList, dealtProjects, deal, plan, readProjects, root, specFiles } from "./e2e-plan.mjs";
 
 const projects = readProjects();
@@ -49,6 +59,9 @@ function option(name) {
   const at = args.indexOf(name);
   return at >= 0 ? args.splice(at, 2)[1] : undefined;
 }
+const timeoutAt = args.indexOf("--global-timeout");
+const globalTimeout = timeoutAt >= 0;
+if (globalTimeout) args.splice(timeoutAt, 1);
 const project = option("--project") ?? "chromium";
 const plannedOut = option("--planned-out");
 if (!dealtProjects.includes(project)) {
@@ -81,7 +94,7 @@ if (arg === "--list") {
   const current = Number(match?.[1]);
   const total = Number(match?.[2]);
   if (!match || current < 1 || current > total) {
-    console.error(`usage: node scripts/e2e-shard.mjs <current>/<total> [--project ${dealtProjects.join("|")}] [--planned-out <file>], for example 3/6, or --list <total>`);
+    console.error(`usage: node scripts/e2e-shard.mjs <current>/<total> [--project ${dealtProjects.join("|")}] [--planned-out <file>] [--global-timeout], for example 3/6, or --list <total>`);
     process.exit(1);
   }
   const mine = deal(items, secondsOf, total)[current - 1];
@@ -91,7 +104,17 @@ if (arg === "--list") {
     process.exit(1);
   }
   if (plannedOut) writeFileSync(plannedOut, `${Math.round(mine.seconds)}\n`);
-  if (project === "roads") {
+  if (globalTimeout) {
+    // A roads item is `file › titles`; the limits are set per file.
+    const files = [...new Set(mine.items.map((i) => i.split(" › ")[0]))];
+    const defaultMs = configTimeoutMs(readFileSync(new URL("playwright.config.ts", root), "utf8"));
+    const longest = Math.max(...files.map((f) => longestTestMs(readFileSync(new URL(`e2e/${f}`, root), "utf8"), defaultMs)));
+    if (!Number.isFinite(longest)) {
+      console.error("a spec file sets a time limit that cannot be read: run node scripts/check-e2e-timeouts.mjs");
+      process.exit(1);
+    }
+    console.log(globalTimeoutMs(projects, mine.seconds, longest, attemptsOf(project)));
+  } else if (project === "roads") {
     // Playwright's test list: `[project] › file › titles`, the file under e2e/.
     writeFileSync("e2e-test-list.txt", mine.items.map((t) => `[roads] › ${t}\n`).join(""));
     // A title Playwright's list format cannot hold (one with a `›` in it,
