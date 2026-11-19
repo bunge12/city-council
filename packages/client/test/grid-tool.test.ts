@@ -417,7 +417,8 @@ describe("the grid tool", () => {
     expect(state().gridWidthCells).toBe(2);
   });
 
-  it("previews a grid at the cap well inside a frame", () => {
+  // How long the preview takes is held in grid-tool.bench.ts, under `pnpm bench` (issue #231).
+  it("previews a grid at the cap", () => {
     const { mirror } = setup();
     const net = mirror.state?.roads;
     if (!net) throw new Error("no state");
@@ -428,9 +429,5 @@ describe("the grid tool", () => {
     expect(first.ok, first.reason ?? "").toBe(true);
     expect(first.streets).toHaveLength(27);
     expect(first.streets.reduce((n, s) => n + s.points.length - 1, 0)).toBe(337);
-    const t0 = performance.now();
-    for (let i = 0; i < 10; i++) previewGrid(net, terrain, payload);
-    // Generous for a slow CI runner; on the development container it is a few milliseconds.
-    expect((performance.now() - t0) / 10).toBeLessThan(16);
   });
 });

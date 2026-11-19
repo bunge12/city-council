@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "vitest run",
-    "bench": "vitest bench --run --reporter verbose"
+    "bench": "node ../../scripts/budget-retry.mjs --keep bench-results -- bench --run --reporter verbose"
   },
   "devDependencies": {
     "vitest": "5.1.0"

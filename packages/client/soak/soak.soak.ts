@@ -48,6 +48,14 @@
 // At the end a replay of the full log from the
 // seed, the scale city's own commands included, must give the same state
 // hash as the live city.
+//
+// The hour runs once, and two tests judge it (issue #231). "the replay and
+// the page agree with the live city" holds the hashes: a failure there means
+// the sim or the page went wrong, and running it again will not help. "every
+// source inside the tick budget" holds the step times: a failure there can
+// be the runner. Its message carries `[budget]`, so `pnpm soak`, through
+// scripts/budget-retry.mjs, runs the soak once more and fails only when the
+// second hour misses as well.
 
 import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,7 +82,7 @@ import {
   step,
   type FromSimMessage,
 } from "@city-council/sim";
-import { expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { PUMP_INTERVAL_MS, SimHost, type PendingSave } from "../src/protocol/host";
 import { build } from "vite";
 import { countHomes } from "../src/protocol/homes";
@@ -220,7 +228,7 @@ function writeSummary(checks: readonly BudgetCheck[], over: number, steps: numbe
     (c) => `| ${c.pass ? "pass" : "**over**"} | ${c.name} | ${c.overBudget} of ${c.steps} | ${c.allowed} | ${ms(c.medianMs)} | ${ms(c.maxMs)} |`,
   );
   const lines = [
-    `### Soak: the ${BUDGET_MS} ms tick budget`,
+    `### Soak: the ${BUDGET_MS} ms tick budget${process.env["BUDGET_ATTEMPT"] ? `, attempt ${process.env["BUDGET_ATTEMPT"]}` : ""}`,
     "",
     "| | Source | Over the budget | Allowed | Median ms | Max ms |",
     "|---|---|---:|---:|---:|---:|",
@@ -246,13 +254,40 @@ interface BudgetCheck {
 const mb = (bytes: number): number => Math.round((bytes / 1024 / 1024) * 10) / 10;
 const ms = (value: number): number => Math.round(value * 1000) / 1000;
 
+/** What the hour leaves for the two tests to judge. */
+interface SoakRun {
+  /** The live city, the replay of its log, and the page's copy, each hashed. */
+  hashes: {
+    replay: string;
+    live: string;
+    tick: number;
+    endTick: number;
+    logEntries: number;
+    page: { roads: string; cells: string; buildings: string; homes: number | null } | null;
+    roads: string;
+    cells: string;
+    buildings: string;
+    /** A save written in parts gave the same bytes as one written at once. */
+    savePartsMatch: boolean;
+    homesMismatches: number;
+    homes: number;
+  };
+  budgets: {
+    checks: BudgetCheck[];
+    autosaves: number;
+    settleSteps: number;
+    applied: Record<string, number>;
+    mostBuildings: number;
+  };
+}
+
 /** Runs a full GC first when node was started with --expose-gc. */
 function heapUsed(): number {
   (globalThis as { gc?: () => void }).gc?.();
   return memoryUsage().heapUsed;
 }
 
-test("soak: one hour of game time at 4x", async () => {
+async function soakHour(): Promise<SoakRun> {
   const page = pageInWorker(await bundleMirrorWorker());
   let offset = 0;
   let pumpStart = 0;
@@ -282,7 +317,7 @@ test("soak: one hour of game time at 4x", async () => {
     ready = await ask<boolean>({ q: "ready" });
     if (!ready) await new Promise((r) => setTimeout(r, 10));
   }
-  expect(ready, "the page has its snapshot").toBe(true);
+  if (!ready) throw new Error("the page never had its snapshot");
 
   let seq = 0;
   const command = (type: string, payload: unknown = {}, playerId = "soak"): void =>
@@ -527,17 +562,8 @@ test("soak: one hour of game time at 4x", async () => {
   // The live city and a replay of its full log from the seed must agree.
   const live = deserialize(host.snapshotBytes());
   const replayed = replay(SEED, host.fullLog, host.tick);
-  // A command still waiting for the cells to settle (M2 review, #147) is in
-  // the live queue and not yet in the log, so the queue is left out.
-  expect(hashState(replayed)).toBe(hashState({ ...live.state, pending: [] }));
-  expect(host.tick).toBe(startTick + TICKS);
-  expect(host.fullLog.length).toBeGreaterThan(LOG_LIVE_LIMIT);
-  // The page kept up with every road, cell and building change.
   const pageHashes = await ask<{ roads: string; cells: string; buildings: string; homes: number | null } | null>({ q: "hashes" });
   await page.stop();
-  expect(pageHashes?.roads).toBe(hashState(live.state.roads));
-  expect(pageHashes?.cells).toBe(hashState(live.state.cells));
-  expect(pageHashes?.buildings).toBe(hashState(live.state.buildings));
 
   const sorted = stepMs.slice(0, steps).sort();
   const over = sorted.filter((t) => t > BUDGET_MS).length;
@@ -583,7 +609,7 @@ test("soak: one hour of game time at 4x", async () => {
   // A save written in parts from a copy is the save written at once.
   // A save written in parts into the kept buffers is the save written at once.
   const lastSave = host.startSave(0);
-  expect(Buffer.from(finishSave(lastSave)).equals(Buffer.from(host.saveBytes(0).bytes))).toBe(true);
+  const savePartsMatch = Buffer.from(finishSave(lastSave)).equals(Buffer.from(host.saveBytes(0).bytes));
   lastSave.release();
   const report = {
     seed: SEED,
@@ -664,22 +690,72 @@ test("soak: one hour of game time at 4x", async () => {
   writeFileSync(REPORT, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`soak report (also in ${REPORT}):\n${JSON.stringify(report, null, 2)}`);
   writeSummary(checks, over, steps);
-  // The tick budget is an exit number. Checked after the report is
-  // written, so a failure still leaves one. A part of an autosave runs in
-  // the worker between two steps, so it holds up the next one and gets the
-  // same budget as a step (issue #83).
-  expect(snapshotParts.length, "autosaves taken").toBeGreaterThan(20);
-  expect(settleSorted.length, "steps that walked a slice of zoning cells").toBeGreaterThan(20);
-  const failed = checks.filter((c) => !c.pass);
-  expect(
-    failed.map((c) => `${c.name}: ${c.overBudget} of ${c.steps} over, ${c.allowed} allowed, max ${ms(c.maxMs)} ms`),
-    `sources that passed the ${BUDGET_MS} ms tick budget more often than a runner's pauses explain`,
-  ).toEqual([]);
-  // Every kind of road and zoning command applied often enough to be measured.
-  for (const [type, c] of Object.entries(byCommand)) expect(c.applied, `${type} applied`).toBeGreaterThan(20);
-  // The grower built a town on the zoning, and the clearing took some of it away again.
-  expect(report.grower.mostBuildings, "buildings grown").toBeGreaterThan(10_000);
-  // The top bar's homes counter, kept from the deltas, never strayed from a count from scratch, and ends on the live city's.
-  expect(homesMismatches, "samples where the homes counter strayed").toBe(0);
-  expect(pageHashes?.homes).toBe(countHomes(live.state.buildings).count);
+  return {
+    hashes: {
+      replay: hashState(replayed),
+      // A command still waiting for the cells to settle (M2 review, #147) is
+      // in the live queue and not yet in the log, so the queue is left out.
+      live: hashState({ ...live.state, pending: [] }),
+      tick: host.tick,
+      endTick: startTick + TICKS,
+      logEntries: host.fullLog.length,
+      page: pageHashes,
+      roads: hashState(live.state.roads),
+      cells: hashState(live.state.cells),
+      buildings: hashState(live.state.buildings),
+      savePartsMatch,
+      homesMismatches,
+      homes: countHomes(live.state.buildings).count,
+    },
+    budgets: {
+      checks,
+      autosaves: snapshotParts.length,
+      settleSteps: settleSorted.length,
+      applied: Object.fromEntries(Object.entries(byCommand).map(([type, c]) => [type, c.applied])),
+      mostBuildings: report.grower.mostBuildings,
+    },
+  };
+}
+
+describe("soak: one hour of game time at 4x", () => {
+  let run: SoakRun;
+  beforeAll(async () => {
+    run = await soakHour();
+  }, 600_000);
+
+  test("the replay and the page agree with the live city", () => {
+    const h = run.hashes;
+    expect(h.replay, "the replay of the full log from the seed").toBe(h.live);
+    expect(h.tick).toBe(h.endTick);
+    expect(h.logEntries).toBeGreaterThan(LOG_LIVE_LIMIT);
+    // The page kept up with every road, cell and building change.
+    expect(h.page?.roads, "the page's roads").toBe(h.roads);
+    expect(h.page?.cells, "the page's cells").toBe(h.cells);
+    expect(h.page?.buildings, "the page's buildings").toBe(h.buildings);
+    // A save written in parts into the kept buffers is the save written at once.
+    expect(h.savePartsMatch, "a save in parts, against one at once").toBe(true);
+    // The top bar's homes counter, kept from the deltas, never strayed from a count from scratch, and ends on the live city's.
+    expect(h.homesMismatches, "samples where the homes counter strayed").toBe(0);
+    expect(h.page?.homes, "the page's homes").toBe(h.homes);
+  });
+
+  test(`every source inside the ${BUDGET_MS} ms tick budget`, () => {
+    const b = run.budgets;
+    // Enough of each source ran for its count over the budget to mean
+    // something. These are the same every run, so they carry no `[budget]`
+    // mark and a miss is not run again.
+    expect(b.autosaves, "autosaves taken").toBeGreaterThan(20);
+    expect(b.settleSteps, "steps that walked a slice of zoning cells").toBeGreaterThan(20);
+    for (const [type, applied] of Object.entries(b.applied)) expect(applied, `${type} applied`).toBeGreaterThan(20);
+    // The grower built a town on the zoning, and the clearing took some of it away again.
+    expect(b.mostBuildings, "buildings grown").toBeGreaterThan(10_000);
+    // The tick budget is an exit number. A part of an autosave runs in the
+    // worker between two steps, so it holds up the next one and gets the
+    // same budget as a step (issue #83).
+    const failed = b.checks.filter((c) => !c.pass);
+    expect(
+      failed.map((c) => `${c.name}: ${c.overBudget} of ${c.steps} over, ${c.allowed} allowed, max ${ms(c.maxMs)} ms`),
+      `[budget] sources that passed the ${BUDGET_MS} ms tick budget more often than a runner's pauses explain`,
+    ).toEqual([]);
+  });
 });
