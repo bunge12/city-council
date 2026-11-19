@@ -38,7 +38,7 @@ declare const document: {
 declare function requestAnimationFrame(callback: () => void): number;
 declare const PointerEvent: new (type: string, init: Record<string, unknown>) => unknown;
 
-test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
+test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
 
 const terrain = generateTerrain(SEED);

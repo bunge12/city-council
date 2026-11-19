@@ -4,7 +4,7 @@
 import { AUTOSAVE_INTERVAL_MS } from "../save/config";
 import { SAVES_CHANNEL, isSaveMessage, type FromSaver } from "../save/channel";
 import { newCityFallback, openLatestCity, type OpenedCity } from "../save/load";
-import { cityFromWorkerName, claimCity } from "../save/lock";
+import { claimCity, startFromWorkerName } from "../save/lock";
 import { Saver } from "../save/saver";
 import { CityStore } from "../save/store";
 import { PUMP_INTERVAL_MS, SimHost } from "./host";
@@ -18,13 +18,14 @@ const simTransport = bufferUntilListening(portTransport(port, (data) => !isSaveM
 const saveTransport = bufferUntilListening(portTransport<FromSaver, unknown>(port, isSaveMessage));
 
 async function start(): Promise<void> {
+  const asked = startFromWorkerName(self.name);
   let store: CityStore | null = null;
   let storeError: string | undefined;
   let city: OpenedCity;
   const opening = (seed: number): void => saveTransport.send({ channel: SAVES_CHANNEL, type: "opening", seed, requestId: null });
   try {
     store = await CityStore.open();
-    city = await openLatestCity(store, undefined, cityFromWorkerName(self.name), opening);
+    city = await openLatestCity(store, undefined, asked.cityId, opening);
   } catch (error) {
     storeError = `saved cities could not be opened (${error instanceof Error ? error.message : String(error)})`;
     city = newCityFallback(`Saved cities could not be opened, so a new city was started. ${storeError}.`, undefined, opening);
@@ -48,7 +49,8 @@ async function start(): Promise<void> {
   });
   if (host) {
     setInterval(() => host.pump(), PUMP_INTERVAL_MS);
-    setInterval(() => void saver.save("autosave"), AUTOSAVE_INTERVAL_MS);
+    // Off only under the test switch (issue #226): the page still saves on request.
+    if (asked.autosave) setInterval(() => void saver.save("autosave"), AUTOSAVE_INTERVAL_MS);
   }
   await saver.start();
 }

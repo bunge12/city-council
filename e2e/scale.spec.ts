@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { buildScaleCity, createState, heightAt, generateTerrain, serialize } from "../packages/sim/src/index";
+import { MEASURE_STATE } from "./browser-state";
 import { frameTime, memory } from "./measure";
 
 // The M1 scale check in the browser (issue M1-17): the city `buildScaleCity`
@@ -32,6 +33,9 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
+// Times frames: every frame drawn at the real settings (issue #226).
+test.use({ storageState: MEASURE_STATE });
+
 // Two cities, three bands each, drawn in software on a CI runner at about
 // 2 fps. On main it took 294.7 s of the old 300 s (run 43548591694), so the
 // wait for the graphics preset (issue M2-02) tipped it over. Seven minutes

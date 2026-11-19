@@ -28,6 +28,7 @@ import type { ZoomBand } from "../camera/zoom-band";
 import { createBuildingLayer, type BuildingLayer, type BuildingSource, type BuildingStats } from "./building-meshes";
 import { createCellLayer, type CellLayer, type CellSource, type CellStats } from "./cell-meshes";
 import { createDecorLayer, type DecorLayer } from "./decor-meshes";
+import { frameSignature } from "./frame-signature";
 import { createLighting, skyColour, type LightingReport } from "./lighting";
 import type { Preset } from "./presets";
 import { neighbourhood, type RoadNet } from "./road-geometry";
@@ -46,6 +47,12 @@ export interface FrameStats {
   fps: number;
   drawCalls: number;
   triangles: number;
+  /**
+   * Whether this frame was drawn. Always true for a player. Under the test
+   * switch's cheap frames a frame where nothing changed is skipped, and the
+   * canvas keeps the last one drawn.
+   */
+  drawn: boolean;
 }
 
 export interface View {
@@ -147,10 +154,16 @@ export function wantsWebGL(search: string): boolean {
 
 const WATER = 0x3a6f8f;
 
-export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean): Promise<View> {
+/**
+ * `cheapFrames` is the test switch's (test-switch.ts, issue #226): no
+ * antialiasing, a pixel ratio of 1, and a frame drawn only when something
+ * changed or is animating. A player's page has it off.
+ */
+export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean, cheapFrames = false): Promise<View> {
   const useWebGL = forceWebGL || !("gpu" in navigator);
-  const renderer = new WebGPURenderer({ canvas, antialias: true, forceWebGL: useWebGL });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+  const renderer = new WebGPURenderer({ canvas, antialias: !cheapFrames, forceWebGL: useWebGL });
+  const pixelRatio = () => (cheapFrames ? 1 : Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+  renderer.setPixelRatio(pixelRatio());
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   await renderer.init();
   const backendObj = renderer.backend as { isWebGPUBackend?: boolean };
@@ -181,7 +194,12 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   let buildingSource: BuildingSource | null = null;
   let cellsVisible = false;
 
+  // Under cheap frames: set when something the frame signature does not see
+  // has changed, so the next frame is drawn.
+  let dirty = true;
+
   function showTerrain(terrain: Terrain): void {
+    dirty = true;
     terrainRoot?.dispose();
     const material = createTerrainMaterial(terrain);
     const per = chunksPerSide(terrain);
@@ -275,7 +293,9 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   }
 
   function resize(): void {
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
+    // A resize clears the canvas.
+    dirty = true;
+    renderer.setPixelRatio(pixelRatio());
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -291,6 +311,8 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
   let gapCount = 0;
   let gapSum = 0;
   let last = -1;
+  let drawnSignature = 0;
+  let drawnTick: number | null = null;
   renderer.setAnimationLoop((time: number) => {
     const seconds = last >= 0 ? (time - last) / 1000 : 0;
     for (const b of before) b(seconds);
@@ -309,7 +331,19 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     terrainRoot?.cells?.update(camera.position, CELLS.buildBudgetMs);
     const shown = terrainRoot?.terrain;
     lighting.update(camera, shown ? (x, z) => heightAt(shown, x, z) : null);
-    renderer.render(scene, camera);
+    let draw = true;
+    if (cheapFrames) {
+      const signature = frameSignature(scene, camera);
+      // The construction tick moves only what is under construction.
+      const ticking = gameTick !== drawnTick && (terrainRoot?.buildings?.stats().building ?? 0) > 0;
+      draw = dirty || ticking || signature !== drawnSignature;
+      if (draw) {
+        dirty = false;
+        drawnSignature = signature;
+        drawnTick = gameTick;
+      }
+    }
+    if (draw) renderer.render(scene, camera);
     if (last >= 0) {
       const slot = gapCount % FRAME_TIME_WINDOW;
       gapSum += time - last - (gaps[slot] ?? 0);
@@ -324,6 +358,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
       fps: frameMs > 0 ? 1000 / frameMs : 0,
       drawCalls: renderer.info.render.drawCalls,
       triangles: renderer.info.render.triangles,
+      drawn: draw,
     };
     for (const l of listeners) l(stats);
   });
@@ -397,7 +432,10 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
     pickBuilding: (ray, limit) => terrainRoot?.buildings?.pick(ray, limit) ?? -1,
     buildingFormVersion: () => terrainRoot?.buildings?.formVersion() ?? 0,
     buildingTop: (id) => terrainRoot?.buildings?.topOf(id) ?? null,
-    setPreset: (preset) => lighting.setPreset(preset),
+    setPreset: async (preset) => {
+      await lighting.setPreset(preset);
+      dirty = true;
+    },
     lighting: () => lighting.report(),
     async benchmark() {
       const size = renderer.getDrawingBufferSize(new Vector2());
@@ -418,6 +456,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean)
         return (performance.now() - start) / PRESET_BENCHMARK.renders;
       } finally {
         target.dispose();
+        dirty = true;
       }
     },
   };

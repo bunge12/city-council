@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { buildingCount, serialize } from "../packages/sim/src/index";
 import { builtFixtureCity } from "./building-fixtures";
+import { MEASURE_STATE } from "./browser-state";
 import { frameTime } from "./measure";
 import { groundAt } from "./road-fixtures";
 
@@ -22,10 +23,11 @@ declare const window: {
     saveNow(): Promise<unknown>;
     downloadCity(): Promise<{ hash: string; tick: number }>;
     mirror: { state: { tick: number; speed: number } | null };
-    view: Promise<{ decorCounts(): unknown; onFrame(listener: () => void): void; renderer: { domElement: { toDataURL(type: string): string } } }>;
+    view: Promise<{ decorCounts(): unknown; onFrame(listener: (stats: { drawn: boolean }) => void): void; renderer: { domElement: { toDataURL(type: string): string } } }>;
     camera: Promise<{ rig: { setPose(position: Vec3, target: Vec3): void } }>;
   };
-  constructionFrames?: { tick: number; scaffolds: number; shot: string }[];
+  constructionFrames?: { tick: number; scaffolds: number }[];
+  constructionShots?: { tick: number; shot: string }[];
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 declare function requestAnimationFrame(callback: () => void): number;
@@ -153,24 +155,47 @@ test("at 4x a new building's scaffolding goes up, the building rises inside it, 
   expect(Number(await dataset(page, "scaffolds"))).toBeGreaterThan(0);
   await attach(testInfo, "0 just built, nothing standing", await canvasShot(page));
 
-  // Every frame drawn at 4x, with the tick it was drawn at. Frames are slow on a runner without a GPU, so the run is not stopped at chosen ticks.
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    window.constructionFrames = [];
-    view.onFrame(() => {
-      const frames = window.constructionFrames;
-      const t = window.cityCouncil.mirror.state?.tick;
-      if (!frames || t === undefined) return;
-      frames.push({ tick: t, scaffolds: Number(document.body.dataset["scaffolds"] ?? 0), shot: view.renderer.domElement.toDataURL("image/png") });
-    });
-  });
+  // The stages to picture: the middle of each, by age in ticks.
+  const up = CONSTRUCTION.scaffoldUp;
+  const down = CONSTRUCTION.scaffoldDown;
+  const stages = [
+    { age: (T * up) / 2, name: "1 scaffolding going up" },
+    { age: T * (up + (1 - up - down) / 2), name: "2 building rising" },
+    { age: T * (1 - down / 2), name: "3 scaffolding coming down" },
+  ];
+  // Every frame drawn at 4x, with the tick it was drawn at, and a picture of
+  // the first frame drawn at or past each stage's age. Frames are slow on a
+  // runner without a GPU, so the run is not stopped at chosen ticks, and
+  // encoding a picture of every frame made them slower still (issue #226).
+  await page.evaluate(
+    async ({ start, ages }) => {
+      const view = await window.cityCouncil.view;
+      window.constructionFrames = [];
+      window.constructionShots = [];
+      let next = 0;
+      view.onFrame((stats) => {
+        const frames = window.constructionFrames;
+        const shots = window.constructionShots;
+        const t = window.cityCouncil.mirror.state?.tick;
+        if (!frames || !shots || t === undefined || !stats.drawn) return;
+        frames.push({ tick: t, scaffolds: Number(document.body.dataset["scaffolds"] ?? 0) });
+        const age = ages[next];
+        if (age !== undefined && t - start >= age) {
+          shots.push({ tick: t, shot: view.renderer.domElement.toDataURL("image/png") });
+          while ((ages[next] ?? Infinity) <= t - start) next++;
+        }
+      });
+    },
+    { start: city.tick, ages: stages.map((s) => s.age) },
+  );
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 4 }))).toEqual({ ok: true });
   await page.waitForFunction((end) => (window.cityCouncil.mirror.state?.tick ?? 0) >= end, city.tick + T + 8, { timeout: 120_000 });
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 0 }))).toEqual({ ok: true });
   await expect.poll(() => dataset(page, "scaffolds"), { timeout: FRAME_WAIT }).toBe("0");
-  const frames = await page.evaluate(() => {
-    const f = window.constructionFrames ?? [];
+  const { frames, shots } = await page.evaluate(() => {
+    const f = { frames: window.constructionFrames ?? [], shots: window.constructionShots ?? [] };
     delete window.constructionFrames;
+    delete window.constructionShots;
     return f;
   });
   // Nothing grew while it ran: every scaffold was one of the fixture's buildings.
@@ -181,19 +206,14 @@ test("at 4x a new building's scaffolding goes up, the building rises inside it, 
   // The run went through construction a frame at a time, and every building's scaffolding came away at the end.
   expect(frames.filter((f) => f.tick - city.tick > 0 && f.tick - city.tick < T).length).toBeGreaterThanOrEqual(3);
   expect(frames.at(-1)?.scaffolds).toBe(0);
-  // The frame nearest the middle of each stage.
-  const up = CONSTRUCTION.scaffoldUp;
-  const down = CONSTRUCTION.scaffoldDown;
-  const stages = [
-    { age: (T * up) / 2, name: "1 scaffolding going up" },
-    { age: T * (up + (1 - up - down) / 2), name: "2 building rising" },
-    { age: T * (1 - down / 2), name: "3 scaffolding coming down" },
-    { age: T + 8, name: "4 finished" },
-  ];
+  // A frame was drawn inside each stage, so each has its picture. A frame
+  // that skipped a stage's middle pictures the stages it skipped, late.
   for (const stage of stages) {
-    const f = frames.reduce((best, f) => (Math.abs(f.tick - city.tick - stage.age) < Math.abs(best.tick - city.tick - stage.age) ? f : best));
-    await attach(testInfo, `${stage.name}, age ${f.tick - city.tick} of ${T} ticks at 4x`, Buffer.from(f.shot.split(",")[1] ?? "", "base64"));
+    const shot = shots.find((s) => s.tick - city.tick >= stage.age);
+    if (!shot) throw new Error(`no frame drawn past age ${stage.age}`);
+    await attach(testInfo, `${stage.name}, age ${shot.tick - city.tick} of ${T} ticks at 4x`, Buffer.from(shot.shot.split(",")[1] ?? "", "base64"));
   }
+  await attach(testInfo, `4 finished, age ${(await tick(page)) - city.tick} of ${T} ticks at 4x`, await canvasShot(page));
   await page.getByRole("region", { name: "Debug panel" }).screenshot({ path: testInfo.outputPath("debug-panel.png") });
   await testInfo.attach("debug panel", { path: testInfo.outputPath("debug-panel.png"), contentType: "image/png" });
 
@@ -275,23 +295,28 @@ test("the state hash is the same with the animation and without it", async ({ pa
   await testInfo.attach("hashes", { body: JSON.stringify(hashes, null, 2), contentType: "application/json" });
 });
 
-test("frame time with a few hundred buildings under construction, at Balanced", async ({ page }, testInfo) => {
-  test.setTimeout(RUN_TIMEOUT);
-  const results: Record<string, number> = {};
-  const far: { position: Vec3; target: Vec3 } = { position: [GRID.x - 60, ground + 210, GRID.z + 230], target: [GRID.x + 20, ground, GRID.z + 10] };
-  // Every building mid-rise, under scaffolding. Paused, so a slow runner measures the same stage throughout: the stages are worked out per vertex every frame, running or not.
-  const mid = newCity(Math.round(T * 0.4));
-  for (const query of ["?webgl&preset=balanced", "?webgl&preset=balanced&noconstruction"]) {
-    await openCity(page, query, mid.bytes);
-    await setPose(page, far.position, far.target);
-    await drawn(page, mid.buildings);
-    await settle(page);
-    const off = query.includes("noconstruction");
-    expect(Number(await dataset(page, "buildingsUnderConstruction"))).toBe(off ? 0 : mid.buildings);
-    results[off ? "off" : "on"] = await frameTime(page, 30);
-    await attach(testInfo, off ? "animation off" : "under construction", await canvasShot(page));
-  }
-  const report = { buildings: mid.buildings, frameMs: results, ticks: T };
-  await testInfo.attach("frame time", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
-  console.log(`frame time with ${mid.buildings} buildings under construction at Balanced: ${results["on"]?.toFixed(1)} ms; animation off: ${results["off"]?.toFixed(1)} ms`);
+test.describe("at the real settings", () => {
+  // Times frames: every frame drawn, antialiased, at the real pixel ratio (issue #226).
+  test.use({ storageState: MEASURE_STATE });
+
+  test("frame time with a few hundred buildings under construction, at Balanced", async ({ page }, testInfo) => {
+    test.setTimeout(RUN_TIMEOUT);
+    const results: Record<string, number> = {};
+    const far: { position: Vec3; target: Vec3 } = { position: [GRID.x - 60, ground + 210, GRID.z + 230], target: [GRID.x + 20, ground, GRID.z + 10] };
+    // Every building mid-rise, under scaffolding. Paused, so a slow runner measures the same stage throughout: the stages are worked out per vertex every frame, running or not.
+    const mid = newCity(Math.round(T * 0.4));
+    for (const query of ["?webgl&preset=balanced", "?webgl&preset=balanced&noconstruction"]) {
+      await openCity(page, query, mid.bytes);
+      await setPose(page, far.position, far.target);
+      await drawn(page, mid.buildings);
+      await settle(page);
+      const off = query.includes("noconstruction");
+      expect(Number(await dataset(page, "buildingsUnderConstruction"))).toBe(off ? 0 : mid.buildings);
+      results[off ? "off" : "on"] = await frameTime(page, 30);
+      await attach(testInfo, off ? "animation off" : "under construction", await canvasShot(page));
+    }
+    const report = { buildings: mid.buildings, frameMs: results, ticks: T };
+    await testInfo.attach("frame time", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
+    console.log(`frame time with ${mid.buildings} buildings under construction at Balanced: ${results["on"]?.toFixed(1)} ms; animation off: ${results["off"]?.toFixed(1)} ms`);
+  });
 });

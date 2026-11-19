@@ -51,15 +51,38 @@ export function claimCity(id: string, locks: LockManagerLike | undefined, waitMs
   });
 }
 
-/** Prefix of the worker's name when the page asks for a city. */
+/** Prefix of the worker's name. */
 const WORKER_NAME = "sim";
+/** Prefix of the worker's name when the test switch turns autosave off (issue #226). */
+const NO_AUTOSAVE_NAME = "sim-noautosave";
 
-/** The name the page gives the worker, carrying the city this tab last ran, if any. */
-export function workerName(cityId: string | null): string {
-  return cityId ? `${WORKER_NAME}:${cityId}` : WORKER_NAME;
+/** What the page tells the worker before any message can reach it. */
+export interface WorkerStart {
+  /** The city this tab last ran, if any. */
+  cityId: string | null;
+  /** Whether the worker saves on its interval. Off only under the test switch. */
+  autosave: boolean;
+}
+
+/** The name the page gives the worker, carrying the tab's city and whether to autosave. */
+export function workerName(cityId: string | null, autosave = true): string {
+  const prefix = autosave ? WORKER_NAME : NO_AUTOSAVE_NAME;
+  return cityId ? `${prefix}:${cityId}` : prefix;
+}
+
+/** What a worker name made by `workerName` carries. Any other name asks for no city, with autosave on. */
+export function startFromWorkerName(name: string): WorkerStart {
+  for (const [prefix, autosave] of [
+    [NO_AUTOSAVE_NAME, false],
+    [WORKER_NAME, true],
+  ] as const) {
+    if (name === prefix) return { cityId: null, autosave };
+    if (name.startsWith(`${prefix}:`)) return { cityId: name.slice(prefix.length + 1) || null, autosave };
+  }
+  return { cityId: null, autosave: true };
 }
 
 /** The city id in a worker name made by `workerName`, or null. */
 export function cityFromWorkerName(name: string): string | null {
-  return name.startsWith(`${WORKER_NAME}:`) ? name.slice(WORKER_NAME.length + 1) || null : null;
+  return startFromWorkerName(name).cityId;
 }

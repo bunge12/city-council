@@ -1,0 +1,43 @@
+// The browser storage each test starts with, set per project in
+// playwright.config.ts and overridden by a spec with `test.use({ storageState })`.
+//
+// Every test starts in a browser that already keeps the Low graphics preset
+// (issue M2-02), as if the player had chosen it. Otherwise each test's fresh
+// browser would run the first-run benchmark, which on a runner without a GPU
+// takes seconds of drawing. Tests of the presets and the benchmark clear it.
+//
+// The chromium project also turns on the test switch
+// (packages/client/src/test-switch.ts, issue #226): cheap frames and no
+// autosave on an interval. The roads and walkthrough projects draw at the
+// real settings: roads compares WebGPU with WebGL 2 pixel for pixel.
+
+import { TEST_SWITCH_KEY, type TestSwitch } from "../packages/client/src/test-switch";
+
+const ORIGINS = ["http://localhost:5173", "http://localhost:4173"];
+const lowPreset = JSON.stringify({ preset: "low", source: "player", benchmarkMs: null, benchmarkBackend: null });
+
+function state(testSwitch: TestSwitch | null) {
+  return {
+    cookies: [],
+    origins: ORIGINS.map((origin) => ({
+      origin,
+      localStorage: [{ name: "city-council:graphics", value: lowPreset }, ...(testSwitch ? [{ name: TEST_SWITCH_KEY, value: JSON.stringify(testSwitch) }] : [])],
+    })),
+  };
+}
+
+/** The Low preset kept, and the page as a player has it. */
+export const PLAYER_STATE = state(null);
+
+/** The chromium project's default: cheap frames, and saves only when a test asks. */
+export const TEST_STATE = state({ cheapFrames: true, autosave: false });
+
+/**
+ * For a spec that times frames: every frame drawn, antialiased, at the real
+ * pixel ratio, so its figures compare with earlier runs. Autosave stays off,
+ * so a save does not land in a measurement.
+ */
+export const MEASURE_STATE = state({ cheapFrames: false, autosave: false });
+
+/** For a spec about saving: cheap frames, and the worker's autosave on as a player has it. */
+export const SAVING_STATE = state({ cheapFrames: true, autosave: true });

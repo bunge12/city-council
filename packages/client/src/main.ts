@@ -23,6 +23,7 @@ import { Vector3 } from "three/webgpu";
 import { SimMirror, type MirrorUpdate } from "./protocol/mirror";
 import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { createWorkerTransport } from "./protocol/transport";
+import { readTestSwitch } from "./test-switch";
 import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
 import type { SaveStatus } from "./save/channel";
 import { createCameraControls, type CameraControls } from "./camera/controls";
@@ -81,7 +82,9 @@ function setTabCity(id: string): void {
 /** True from the moment this tab has chosen another city until the reload that opens it. */
 let switching = false;
 
-const worker = createWorkerTransport(tabCity());
+// Playwright's chromium project turns this on (test-switch.ts, issue #226). A player's page never reads a key it has.
+const testSwitch = readTestSwitch(localStore());
+const worker = createWorkerTransport(tabCity(), testSwitch.autosave);
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
 const saves = new SaveClient(worker.saves);
 
@@ -505,7 +508,7 @@ const cameraReady = new Promise<CameraHooks>((resolve) => {
   resolveCamera = resolve;
 });
 
-const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) => {
+const viewReady = createView(canvas, wantsWebGL(location.search), testSwitch.cheapFrames).then((view) => {
   setViewReadout({ backend: view.backend === "webgpu" ? "WebGPU" : "WebGL 2" });
   let shownSeed: number | null = null;
   let graphicsStarted = false;

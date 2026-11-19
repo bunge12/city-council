@@ -128,6 +128,8 @@ function scaleTown() {
   const town = growScaleCity(city);
   // Past the construction animation (issue 136): every building was grown on one tick.
   finishConstruction(city.state);
+  // Saved paused (issue #226): nothing grows while a test waits on the town or measures it, however fast the machine.
+  city.state.speed = 0;
   const terrain = generateTerrain(city.state.seed);
   const centre = city.grids.reduce((best, g) => (Math.hypot(g.x - 6000, g.z - 6000) < Math.hypot(best.x - 6000, best.z - 6000) ? g : best));
   const focus = { x: centre.x + 288, z: centre.z + 288 };

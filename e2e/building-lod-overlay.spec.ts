@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { MEASURE_STATE } from "./browser-state";
 import { MEASURE_VIEWPORT, WAIT_VIEWPORT, canvasShot, drawnNow, openTown, poseAndSettle, scaleCity, writeReport } from "./building-lod-helpers";
 import { frameTime } from "./measure";
 
@@ -20,6 +21,9 @@ declare const window: { cityCouncil: { renderStatus(): { backend: string } | nul
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: MEASURE_VIEWPORT });
+// Times frames: every frame drawn at the real settings (issue #226).
+test.use({ storageState: MEASURE_STATE });
+
 // About 4 minutes on a fast CI runner and up to 8 on a slow one (issue #217), so 20 leaves twice the headroom #154 asks for.
 test.setTimeout(1_200_000);
 
@@ -35,7 +39,7 @@ test("the zoning overlay over the whole town in the city band", async ({ page },
   await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 900_000 });
   await poseAndSettle(page, city.position, city.target);
   expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe("city");
-  // The town keeps growing at 1x, and a new building redraws the cells round it: wait for those too.
+  // The town is saved paused, so nothing grows and this holds at once, unless the pose asked for cells of its own.
   await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 300_000 });
   const frameMs = Math.round((await frameTime(page, 30)) * 10) / 10;
   const drawn = await drawnNow(page);
