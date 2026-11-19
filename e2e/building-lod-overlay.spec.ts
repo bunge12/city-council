@@ -37,7 +37,7 @@ test("the zoning overlay over the whole town in the city band", async ({ page },
   await settle(page, { timeout: 300_000 });
   await poseAndSettle(page, city.position, city.target);
   expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe("city");
-  // The town keeps growing at 1x, and a new building redraws the cells round it: build those too.
+  // The town is saved paused (issue #226), so this builds only what the pose asked for.
   await settle(page, { timeout: 300_000 });
   const frameMs = Math.round((await frameTime(page, 30)) * 10) / 10;
   const drawn = await drawnNow(page);

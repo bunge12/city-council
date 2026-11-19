@@ -35,7 +35,7 @@ declare const window: {
   };
 };
 
-test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
+test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(180_000);
 
 const WEST = 4200;

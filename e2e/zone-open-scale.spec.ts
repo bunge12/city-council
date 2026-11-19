@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import { MEASURE_STATE } from "./browser-state";
 import { attachCanvas, openFixture, scaleCity, setPose } from "./building-lod-helpers";
 import { buildingsDrawn, settle } from "./helpers";
 
@@ -32,6 +33,8 @@ declare const window: {
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: { width: 1280, height: 800 } });
+// Times the page's own work and stubs out drawing: every frame at the real settings (issue #226).
+test.use({ storageState: MEASURE_STATE });
 // Building the town takes about half a minute, and loading it into software WebGL a few more.
 test.setTimeout(900_000);
 

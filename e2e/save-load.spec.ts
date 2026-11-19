@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { SAVING_STATE } from "./browser-state";
 
 // The hooks packages/client/src/main.ts puts on the page. The tooling
 // tsconfig has no DOM types, so the parts used here are declared.
@@ -115,6 +116,9 @@ async function storedLatest(page: Page, id: string): Promise<number[]> {
     return bytes;
   }, id);
 }
+
+// About saving: the worker autosaves on its interval, as a player's does (issue #226).
+test.use({ storageState: SAVING_STATE });
 
 test("a city resumes from the saved tick after a reload, with its activity log", async ({ page }) => {
   await open(page);
