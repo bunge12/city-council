@@ -1,34 +1,11 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import {
-  BUILDING_TYPES,
-  CELL_OPEN,
-  CELL_ROAD,
-  CELL_STEEP,
-  CELL_WATER,
-  CHUNKS_PER_SIDE,
-  CHUNK_SIZE,
-  ROAD_TYPES,
-  ZONING_BALANCE,
-  cellAt,
-  cellCorners,
-  cellStatuses,
-  createState,
-  deserialize,
-  generateTerrain,
-  hashState,
-  heightAt,
-  replay,
-  serialize,
-  step,
-  submit,
-  syncCells,
-  type SimState,
-} from "../packages/sim/src/index";
+import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PER_SIDE, CHUNK_SIZE, ROAD_TYPES, ZONING_BALANCE, cellAt, cellCorners, cellStatuses, createState, deserialize, generateTerrain, hashState, heightAt, replay, step, submit, syncCells, type SimState } from "../packages/sim/src/index";
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
+import { cityLoaded, cityReady, frames, hideNotes, openCity, settle } from "./helpers";
 
 // The M2 exit test from docs/milestones/M2.md (issue M2-17), as one
 // walkthrough a player could do by hand, run once on WebGPU (when the
@@ -124,7 +101,6 @@ declare const window: {
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 declare const navigator: { gpu?: { requestAdapter(): Promise<unknown> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 const VIEWPORT = { width: 1280, height: 800 };
 test.use({ viewport: VIEWPORT });
@@ -217,40 +193,10 @@ async function shot(page: Page, info: TestInfo, dir: string, name: string): Prom
   await info.attach(name, { body, contentType: "image/png" });
 }
 
-async function ready(page: Page): Promise<void> {
-  await expect(page.locator("#sim-tick")).toHaveText(/^\d+$/, { timeout: 60_000 });
-  await page.waitForFunction(() => document.body.dataset["saveLoaded"] === "true", null, { timeout: 60_000 });
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  // The import and storage notes would cover the map in the screenshots.
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page, n = 2): Promise<void> {
-  await page.evaluate(
-    (n) =>
-      new Promise<void>((r) => {
-        const next = (left: number) => (left <= 0 ? r() : requestAnimationFrame(() => next(left - 1)));
-        next(n);
-      }),
-    n,
-  );
-}
-
-/** Waits until the buildings near the camera are drawn in the form they want, and decoration has stopped filling in. */
-async function settle(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsSettled"] === "true", null, { timeout: 180_000 });
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
+/** Waits until every chunk of buildings is read from the mirror, then until they and the decoration near the camera `settle`. */
+async function settleBuilt(page: Page): Promise<void> {
+  await page.waitForFunction(() => document.body.dataset["buildingsPending"] === "0", null, { timeout: 180_000 });
+  await settle(page, { buildings: true, timeout: 180_000 });
 }
 
 /** Looks at (x, z) from `height` metres up and to the south, set back so the work area sits above the tool menus. */
@@ -574,12 +520,14 @@ for (const variant of [
   { name: "webgl", query: "?webgl" },
 ] as const) {
   test(`M2 walkthrough (${variant.name})`, async ({ page }, info) => {
-    const url = `./${variant.query}`;
     const dir = `m2-${variant.name}`;
     const rows = page.locator("#activity-log tbody tr");
 
+    // The walkthrough's city, opened from a city file. The notes would cover
+    // the map in the screenshots, so they are hidden.
+    await openCity(page, walkthroughCity(), { query: variant.query, name: "M2 walkthrough" });
+    await cityLoaded(page);
     // The WebGPU run expects WebGPU only where this browser offers an adapter.
-    await page.goto(url);
     const hasWebGpu = await page.evaluate(async () => Boolean(await navigator.gpu?.requestAdapter()));
     // CI starts Chromium with a software WebGPU adapter (playwright.config.ts).
     if (variant.name === "webgpu" && process.env["CI"]) expect(hasWebGpu, "CI must have a WebGPU adapter").toBe(true);
@@ -587,15 +535,6 @@ for (const variant of [
     if (variant.name === "webgpu" && !hasWebGpu) {
       info.annotations.push({ type: "backend", description: "no WebGPU adapter in this browser; ran on the WebGL 2 fallback" });
     }
-    await ready(page);
-    const loaded = page.waitForEvent("load");
-    await page.locator("#import-file").setInputFiles({
-      name: "M2 walkthrough.city",
-      mimeType: "application/octet-stream",
-      buffer: Buffer.from(serialize(walkthroughCity())),
-    });
-    await loaded;
-    await ready(page);
     expect((await page.evaluate(() => window.cityCouncil.renderStatus()))?.backend).toBe(wantBackend);
     await expect(speedButton(page, "Pause")).toHaveAttribute("aria-pressed", "true");
     expect(await buildings(page)).toEqual([]);
@@ -747,7 +686,7 @@ for (const variant of [
       const houses = grown.filter((h) => h.type === home);
       const [hx, hz] = centre(R1_STRIP);
       await look(page, hx, hz - 30, 140);
-      await settle(page);
+      await settleBuilt(page);
       const colours = (await tints(page, houses.map((h) => h.id))).map((t) => JSON.stringify(t));
       expect(colours.every((c) => c !== "null"), colours.join("\n")).toBe(true);
       expect(new Set(colours).size, colours.join("\n")).toBeGreaterThan(1);
@@ -797,10 +736,10 @@ for (const variant of [
         description: PAINT.map(({ zone, density }, k) => `${letterOf(zoneNumber(zone))}${density}: ${[...new Set(everyStrip.filter((b) => b.strip === keys[k]).map((b) => BUILDING_TYPES[b.type]?.id))].join(", ")}`).join("; "),
       });
       await look(page, 4400, 4540, 380);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "4-every-zone-grew-its-own-kind");
       await setPose(page, [4300, groundAt(4300, 4500) + 120, 4640], [4330, groundAt(4330, 4500), 4500]);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "4-every-zone-grew-its-own-kind-closer");
       await noteHomes("every zone grew");
       expect(homes.at(-1)?.shown ?? 0).toBeGreaterThan(homes.at(-2)?.shown ?? 0);
@@ -844,7 +783,7 @@ for (const variant of [
       await expect(page.locator("#zone-lot-note")).toContainText("R3 needs a lot at least 4 wide and 4 deep");
       await noTool(page);
       await setPose(page, [4290, groundAt(4290, 4650) + 150, 4800], [4265, groundAt(4265, 4650), 4650]);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "5-townhomes-apartments-and-an-empty-r3-strip");
     });
 
@@ -863,7 +802,7 @@ for (const variant of [
       const after = (await buildings(page)).filter((b) => b.strip === strip);
       expect(after).toEqual(before.map((b) => ({ ...b, cellZone: zoneNumber("commercial"), cellDensity: 2 })));
       await noTool(page);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "6-rezoned-c2-houses-stay");
 
       const top = await page.evaluate(async (id) => (await window.cityCouncil.view).buildingTop(id), house.id);
@@ -899,7 +838,7 @@ for (const variant of [
       await untilBuilt(page, c2);
       const g = groundAt(top.x, top.z);
       await setPose(page, [top.x + 20, g + 150, top.z + 60], [top.x, g, top.z]);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "6-a-c2-building-where-the-house-was");
     });
 
@@ -963,7 +902,7 @@ for (const variant of [
       info.annotations.push({ type: "step 7", description: across.map((b) => `${BUILDING_TYPES[b.type]?.id} ${b.width} x ${b.depth}`).join(", ") });
       for (const b of across) await untilBuilt(page, b.id);
       await setPose(page, [mid + 140, groundAt(mid, 4853) + 170, 4853 + 220], [mid, groundAt(mid, 4853), 4853]);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "7-one-building-across-both-strips");
     });
 
@@ -974,7 +913,7 @@ for (const variant of [
       expect(houses.length).toBeGreaterThan(0);
       const [cx] = centre(HOUSES_STRIP);
       await look(page, cx, 4510, 260);
-      await settle(page);
+      await settleBuilt(page);
       // Through the house nearest the middle of the strip, from the street to the one north of it.
       const tops = await page.evaluate(async (ids) => {
         const view = await window.cityCouncil.view;
@@ -1005,7 +944,7 @@ for (const variant of [
       const left = new Set((await buildings(page)).map((b) => b.id));
       expect(left.has(target.id)).toBe(false);
       await noTool(page);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "8-after-the-click-they-are-gone");
       await noteHomes("a road through the houses");
     });
@@ -1022,7 +961,7 @@ for (const variant of [
       const zonedBefore = [await cellZone(page, ...northCell), await cellZone(page, ...southCell)];
       expect(zonedBefore.map((c) => c?.zone)).toEqual([zoneNumber("mixed"), zoneNumber("residential")]);
       const zonesBefore = await zoning(page);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "9-the-built-street");
 
       await page.keyboard.press("KeyB");
@@ -1049,7 +988,7 @@ for (const variant of [
       expect((await buildings(page)).filter((b) => ids.has(b.id) && sides.includes(b.strip))).toEqual([]);
       await page.keyboard.press("KeyB");
       await away(page);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "9-bulldozed-cells-and-buildings-gone");
 
       await page.keyboard.press("Control+KeyZ");
@@ -1059,10 +998,10 @@ for (const variant of [
       expect(await zoning(page)).toEqual(zonesBefore);
       // The buildings do not come back with it: the grower builds again.
       expect((await buildings(page)).filter((b) => sides.includes(b.strip))).toEqual([]);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "9-undo-street-and-zoning-back");
       await growUntil(page, "buildings on the street again", () => buildings(page), (bs) => sides.every((s) => bs.some((b) => b.strip === s)), 600_000);
-      await settle(page);
+      await settleBuilt(page);
       await shot(page, info, dir, "9-buildings-grow-again");
       await noteHomes("the street bulldozed and undone, and grown again");
     });
@@ -1139,7 +1078,7 @@ for (const variant of [
       ];
       for (const { band, position, form } of bands) {
         await setPose(page, position, target);
-        await settle(page);
+        await settleBuilt(page);
         expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
         expect(await page.evaluate(async (c) => (await window.cityCouncil.view).buildingForm(c), chunk)).toBe(form);
         const s = await page.evaluate(async () => (await window.cityCouncil.view).buildingStats());
@@ -1170,7 +1109,7 @@ for (const variant of [
           const f = light.focus ?? [Infinity, Infinity, Infinity];
           expect(Math.hypot(f[0] - target[0], f[2] - target[2]), `${preset} shadow focus`).toBeLessThan(30);
         }
-        await settle(page);
+        await settleBuilt(page);
         await shot(page, info, dir, `12-${preset}`);
         hashes[preset] = (await page.evaluate(() => window.cityCouncil.downloadCity())).hash;
       }
@@ -1192,7 +1131,7 @@ for (const variant of [
       const g = groundAt(gx, gz);
       const pose: [Vec3, Vec3] = [[gx - 60, g + 210, gz + 230], [gx, g, gz]];
       await setPose(page, ...pose);
-      await settle(page);
+      await settleBuilt(page);
       const bs = await buildings(page);
       saved = { roads: await roads(page), zoning: await zoning(page), buildings: bs, tints: await tints(page, bs.map((b) => b.id)), log: await log(page), tick };
       // Through all the growth since step 5, nothing grew on the R3 strip that is too shallow for a tower.
@@ -1204,7 +1143,8 @@ for (const variant of [
       const id = (await status(page)).city.id;
 
       await page.reload();
-      await ready(page);
+      await cityReady(page);
+      await hideNotes(page);
       const after = await status(page);
       expect(after.loadedFrom).toBe("latest save");
       expect(after.city.id).toBe(id);
@@ -1214,7 +1154,7 @@ for (const variant of [
       expect(await buildings(page)).toEqual(saved.buildings);
       expect(await log(page)).toEqual(saved.log);
       await setPose(page, ...pose);
-      await settle(page);
+      await settleBuilt(page);
       // The same colours, building by building, for every one drawn before.
       const again = await tints(page, saved.buildings.map((b) => b.id));
       for (const [k, t] of saved.tints.entries()) if (t !== null) expect(again[k], `building ${saved.buildings[k]?.id}`).toEqual(t);

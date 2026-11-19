@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { expect, test, type CDPSession, type Page, type TestInfo } from "@playwright/test";
 import { deserialize, hashState, replay } from "../packages/sim/src/index";
 import { decodePng, shareUnlike } from "./png";
+import { cityReady } from "./helpers";
 
 // The M0 exit test from docs/milestones/M0.md, as one walkthrough a player
 // could do by hand, run once on WebGPU (when the browser has an adapter)
@@ -48,7 +49,6 @@ declare const window: {
     }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
 declare const navigator: { gpu?: { requestAdapter(): Promise<unknown> } };
 
 const VIEWPORT = { width: 1280, height: 800 };
@@ -85,12 +85,6 @@ async function shot(page: Page, info: TestInfo, dir: string, name: string): Prom
   mkdirSync(join(SCREENSHOTS, dir), { recursive: true });
   const body = await page.screenshot({ path: join(SCREENSHOTS, dir, `${name}.png`) });
   await info.attach(name, { body, contentType: "image/png" });
-}
-
-async function ready(page: Page): Promise<void> {
-  await expect(page.locator("#sim-tick")).toHaveText(/^\d+$/, { timeout: 15_000 });
-  await page.waitForFunction(() => document.body.dataset["saveLoaded"] === "true", null, { timeout: 15_000 });
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 15_000 });
 }
 
 async function tick(page: Page): Promise<number> {
@@ -154,7 +148,7 @@ async function coldOpen(page: Page, cdp: CDPSession, url: string): Promise<{ wal
   await cdp.send("Network.emulateNetworkConditions", { offline: false, ...BROADBAND });
   const start = Date.now();
   await page.goto(url);
-  await ready(page);
+  await cityReady(page, 15_000);
   const wallMs = Date.now() - start;
   const render = await page.evaluate(() => window.cityCouncil.renderStatus());
   if (!render) throw new Error("render status missing after ready");
@@ -329,7 +323,7 @@ for (const variant of [
       expect(saved.log.map((e) => e.type)).toContain("NoOp");
 
       await page.reload();
-      await ready(page);
+      await cityReady(page, 15_000);
       const after = await status(page);
       expect(after.loadedFrom).toBe("latest save");
       expect(after.city.id).toBe(saved.id);
@@ -350,7 +344,7 @@ for (const variant of [
 
       page = await clearSiteData(page, origin);
       await page.goto(url);
-      await ready(page);
+      await cityReady(page, 15_000);
       const cleared = await status(page);
       expect(cleared.loadedFrom).toBe("new city");
       expect(cleared.cities).toHaveLength(1);
@@ -359,7 +353,7 @@ for (const variant of [
       const loaded = page.waitForEvent("load");
       await menu.locator("#import-file").setInputFiles(file.path);
       await loaded;
-      await ready(page);
+      await cityReady(page, 15_000);
       const imported = await status(page);
       expect(imported.loadedFrom).toBe("latest save");
       expect(imported.loadedTick).toBe(saved.tick);

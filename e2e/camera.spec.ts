@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { frames, openPage } from "./helpers";
 
 // The hook packages/client/src/main.ts puts on the page. The tooling
 // tsconfig has no DOM types, so the parts used here are declared.
@@ -20,8 +21,6 @@ interface Hooks {
   project(x: number, y: number, z: number): { x: number; y: number };
 }
 declare const window: { cityCouncil: { camera: Promise<Hooks> } };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 const VIEWPORT = { width: 1280, height: 800 };
 const CENTRE = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
@@ -29,15 +28,6 @@ const CENTRE = { x: VIEWPORT.width / 2, y: VIEWPORT.height / 2 };
 const PANEL = { right: 400, bottom: 460 };
 
 test.use({ viewport: VIEWPORT });
-
-async function ready(page: Page): Promise<void> {
-  await page.goto("/");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 15_000 });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
-}
 
 /** Points the camera at ground point (x, z) from `distance` metres, `pitch` above the horizon, on bearing `yaw`. */
 async function aim(page: Page, x: number, z: number, distance: number, pitch: number, yaw: number): Promise<Hit> {
@@ -80,7 +70,7 @@ async function mapSize(page: Page): Promise<number> {
 }
 
 test("a click with a fixed camera picks the ground under it, within 1 m", async ({ page }, testInfo) => {
-  await ready(page);
+  await openPage(page, "/", 15_000);
   // The screen centre: the camera looks at a known ground point.
   const target = await aim(page, 4200, 6800, 2400, 0.75, 0.4);
   await frames(page);
@@ -115,7 +105,7 @@ test("a click with a fixed camera picks the ground under it, within 1 m", async 
 });
 
 test("picking works at the map edge and on the steepest slope", async ({ page }, testInfo) => {
-  await ready(page);
+  await openPage(page, "/", 15_000);
   const size = await mapSize(page);
 
   // Map edges: look at a point half a metre inside each edge from the map side.
@@ -160,7 +150,7 @@ test("the camera stays above the terrain and keeps the map in view", async ({ pa
   // Software WebGL on CI takes up to a second a frame for low views, and
   // each mouse event waits for one.
   test.slow();
-  await ready(page);
+  await openPage(page, "/", 15_000);
   const size = await mapSize(page);
   const clearance = () => page.evaluate(async () => (await window.cityCouncil.camera).rig.heightAboveGround());
 
@@ -235,7 +225,7 @@ test("the camera stays above the terrain and keeps the map in view", async ({ pa
 });
 
 test("the readout shows the zoom band and it changes at the configured heights", async ({ page }, testInfo) => {
-  await ready(page);
+  await openPage(page, "/", 15_000);
   for (const [height, band] of [
     [450, "street"],
     [550, "district"],

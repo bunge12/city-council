@@ -53,36 +53,49 @@ export function claimCity(id: string, locks: LockManagerLike | undefined, waitMs
 
 /** Prefix of the worker's name. */
 const WORKER_NAME = "sim";
-/** Prefix of the worker's name when the test switch turns autosave off (issue #226). */
-const NO_AUTOSAVE_NAME = "sim-noautosave";
+/** Flag in the worker's name when the page will send it a city file to open (`LoadFileMessage`). */
+const LOAD_FLAG = "load";
+/** Flag in the worker's name when the test switch turns autosave off (issue #226). */
+const NO_AUTOSAVE_FLAG = "noautosave";
 
-/** What the page tells the worker before any message can reach it. */
+/** What the page tells the worker in its name, before any message can reach it. */
 export interface WorkerStart {
   /** The city this tab last ran, if any. */
   cityId: string | null;
+  /** Whether the page will send a city file to open first. */
+  loadsFile: boolean;
   /** Whether the worker saves on its interval. Off only under the test switch. */
   autosave: boolean;
 }
 
-/** The name the page gives the worker, carrying the tab's city and whether to autosave. */
-export function workerName(cityId: string | null, autosave = true): string {
-  const prefix = autosave ? WORKER_NAME : NO_AUTOSAVE_NAME;
+/**
+ * The name the page gives the worker: `sim`, then `+load` and `+noautosave`
+ * as they apply, then `:` and the city this tab last ran, if any.
+ */
+export function workerName(cityId: string | null, loadsFile = false, autosave = true): string {
+  const prefix = WORKER_NAME + (loadsFile ? `+${LOAD_FLAG}` : "") + (autosave ? "" : `+${NO_AUTOSAVE_FLAG}`);
   return cityId ? `${prefix}:${cityId}` : prefix;
 }
 
-/** What a worker name made by `workerName` carries. Any other name asks for no city, with autosave on. */
+/** What a worker name made by `workerName` carries. Any other name asks for no city and no file, with autosave on. */
 export function startFromWorkerName(name: string): WorkerStart {
-  for (const [prefix, autosave] of [
-    [NO_AUTOSAVE_NAME, false],
-    [WORKER_NAME, true],
-  ] as const) {
-    if (name === prefix) return { cityId: null, autosave };
-    if (name.startsWith(`${prefix}:`)) return { cityId: name.slice(prefix.length + 1) || null, autosave };
-  }
-  return { cityId: null, autosave: true };
+  const colon = name.indexOf(":");
+  const prefix = colon < 0 ? name : name.slice(0, colon);
+  const [base, ...flags] = prefix.split("+");
+  if (base !== WORKER_NAME) return { cityId: null, loadsFile: false, autosave: true };
+  return {
+    cityId: colon < 0 ? null : name.slice(colon + 1) || null,
+    loadsFile: flags.includes(LOAD_FLAG),
+    autosave: !flags.includes(NO_AUTOSAVE_FLAG),
+  };
 }
 
 /** The city id in a worker name made by `workerName`, or null. */
 export function cityFromWorkerName(name: string): string | null {
   return startFromWorkerName(name).cityId;
+}
+
+/** Whether a worker name made by `workerName` says a city file is on its way. */
+export function loadsFileFromWorkerName(name: string): boolean {
+  return startFromWorkerName(name).loadsFile;
 }

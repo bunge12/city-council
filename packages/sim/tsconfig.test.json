@@ -4,7 +4,7 @@
     "rootDir": ".",
     "outDir": "dist/test-types",
     "emitDeclarationOnly": true,
-    "types": []
+    "types": ["node"]
   },
   "include": ["test", "test/**/*.json"],
   "references": [{ "path": "." }]

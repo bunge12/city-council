@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { createState, generateTerrain, heightAt, serialize, type SimState } from "../packages/sim/src/index";
+import { createState, generateTerrain, heightAt, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-18: the debug panel's block overlay. A player closes a loop of
 // streets with the road tool, sees the block outlined with its area,
@@ -21,8 +22,6 @@ declare const window: {
     }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -38,21 +37,6 @@ function openLoop(): SimState {
     [[4400, 4700], [4200, 4700], "street"],
   ]);
   return state;
-}
-
-async function openCity(page: Page, state: SimState): Promise<void> {
-  await page.goto("/?webgl&debug");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  const buffer = Buffer.from(serialize(state));
-  await page.locator("#import-file").setInputFiles({ name: "Blocks.city", mimeType: "application/octet-stream", buffer });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
@@ -96,7 +80,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 }
 
 test("closes a loop of streets, sees the block and its area, bulldozes a side and sees it go", async ({ page }, testInfo) => {
-  await openCity(page, openLoop());
+  await openCity(page, openLoop(), { query: "webgl&debug", name: "Blocks" });
   // Off centre to the east, so the debug panel on the right covers none of the roads.
   await look(page, 4400, 4600, 560);
   const readout = page.locator("#blocks-readout");

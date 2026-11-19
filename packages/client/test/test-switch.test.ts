@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BoxGeometry, Group, InstancedMesh, Matrix4, Mesh, MeshBasicNodeMaterial, PerspectiveCamera, Scene } from "three/webgpu";
 import { frameSignature } from "../src/render/frame-signature";
-import { cityFromWorkerName, startFromWorkerName, workerName } from "../src/save/lock";
+import { cityFromWorkerName, loadsFileFromWorkerName, startFromWorkerName, workerName } from "../src/save/lock";
 import { PLAYER_SETTINGS, TEST_SWITCH_KEY, readTestSwitch } from "../src/test-switch";
 
 const storage = (value: string | null): Pick<Storage, "getItem"> => ({ getItem: (key) => (key === TEST_SWITCH_KEY ? value : null) });
@@ -22,15 +22,19 @@ describe("the test switch (issue #226)", () => {
     expect(readTestSwitch(throwing)).toEqual(PLAYER_SETTINGS);
   });
 
-  it("carries autosave to the worker in its name, beside the tab's city", () => {
-    expect(workerName("abc-123")).toBe(workerName("abc-123", true));
-    expect(startFromWorkerName(workerName("abc-123", false))).toEqual({ cityId: "abc-123", autosave: false });
-    expect(startFromWorkerName(workerName(null, false))).toEqual({ cityId: null, autosave: false });
-    expect(startFromWorkerName(workerName("abc-123"))).toEqual({ cityId: "abc-123", autosave: true });
-    expect(startFromWorkerName(workerName(null))).toEqual({ cityId: null, autosave: true });
-    expect(cityFromWorkerName(workerName("abc-123", false))).toBe("abc-123");
-    // A name the page did not make asks for no city, and saves as a player's worker does.
-    expect(startFromWorkerName("something else")).toEqual({ cityId: null, autosave: true });
+  it("carries autosave to the worker in its name, beside the tab's city and a file on its way", () => {
+    expect(workerName("abc-123")).toBe(workerName("abc-123", false, true));
+    expect(startFromWorkerName(workerName("abc-123", false, false))).toEqual({ cityId: "abc-123", loadsFile: false, autosave: false });
+    expect(startFromWorkerName(workerName(null, false, false))).toEqual({ cityId: null, loadsFile: false, autosave: false });
+    expect(startFromWorkerName(workerName("abc-123", true, false))).toEqual({ cityId: "abc-123", loadsFile: true, autosave: false });
+    expect(startFromWorkerName(workerName(null, true, false))).toEqual({ cityId: null, loadsFile: true, autosave: false });
+    expect(startFromWorkerName(workerName("abc-123"))).toEqual({ cityId: "abc-123", loadsFile: false, autosave: true });
+    expect(startFromWorkerName(workerName(null))).toEqual({ cityId: null, loadsFile: false, autosave: true });
+    expect(cityFromWorkerName(workerName("abc-123", true, false))).toBe("abc-123");
+    expect(loadsFileFromWorkerName(workerName("abc-123", true, false))).toBe(true);
+    expect(loadsFileFromWorkerName(workerName("abc-123", false, false))).toBe(false);
+    // A name the page did not make asks for no city and no file, and saves as a player's worker does.
+    expect(startFromWorkerName("something else")).toEqual({ cityId: null, loadsFile: false, autosave: true });
   });
 });
 

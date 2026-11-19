@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { createState, serialize } from "../packages/sim/src/index";
+import { createState } from "../packages/sim/src/index";
 import { SEED, fixtureRoads } from "./road-fixtures";
+import { canvasShot, openCity, openPage, ready, settle } from "./helpers";
 
 // Issue M2-02: graphics presets, the sun and shadows. The same view at Low,
 // Balanced and High; the same commands at two presets giving the same state
@@ -33,20 +34,12 @@ declare const window: {
   localStorage: { getItem(key: string): string | null };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Three page loads of the whole map, drawn in software on a CI runner.
 test.setTimeout(240_000);
 
 const PRESETS = ["low", "balanced", "high"] as const;
-
-async function ready(page: Page): Promise<{ backend: string; readyMs: number }> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const status = await page.evaluate(() => window.cityCouncil.renderStatus());
-  if (!status) throw new Error("render status missing after ready");
-  return status;
-}
 
 /** Waits until the preset on screen is the one wanted and no benchmark runs. */
 async function presetSettled(page: Page): Promise<void> {
@@ -55,22 +48,6 @@ async function presetSettled(page: Page): Promise<void> {
 
 async function lighting(page: Page): Promise<LightingReport> {
   return page.evaluate(async () => (await window.cityCouncil.view).lighting());
-}
-
-/** Waits until decoration near the camera is built: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
 }
 
 /** Looks at the lowland forest edge nearest the middle of the map, from `height` metres up and `back` metres south. */
@@ -112,22 +89,6 @@ async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<v
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
-/** The canvas alone, without the page's panels over it. */
-async function canvasShot(page: Page): Promise<Buffer> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  return page.locator("#view").screenshot();
-}
-
-/** Opens the page with `query` and imports `bytes` as a city. */
-async function openCity(page: Page, query: string, bytes: Buffer): Promise<void> {
-  await page.goto(`/${query}`);
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Presets.city", mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-}
-
 // On `?webgl`: the chromium project is headless, where the default backend is
 // WebGL 2 as well. WebGPU's frame times per preset come from scale.spec.ts.
 test("the same forest edge at each preset: no shadows, shadows near the camera, shadows further out", async ({ page }, testInfo) => {
@@ -137,8 +98,7 @@ test("the same forest edge at each preset: no shadows, shadows near the camera, 
   const reports: Record<string, LightingReport> = {};
   let target: Vec3 = [0, 0, 0];
   for (const preset of PRESETS) {
-    await page.goto(`/?${query}preset=${preset}`);
-    const status = await ready(page);
+    const status = await openPage(page, `/?${query}preset=${preset}`);
     testInfo.annotations.push({ type: `${preset} backend`, description: status.backend });
     // The first frame is lit as Low and waits for no shadow shaders, so it
     // comes as soon at every preset. Printed, not held to the M0 exit test's
@@ -172,10 +132,9 @@ test("the same commands at two presets give the same state hash", async ({ page 
   // Paused, so the commands land on the same tick however fast the page runs.
   const state = createState(SEED);
   state.speed = 0;
-  const bytes = Buffer.from(serialize(state));
   const hashes: Record<string, string> = {};
   for (const preset of ["low", "high"]) {
-    await openCity(page, `?webgl&preset=${preset}`, bytes);
+    await openCity(page, state, { query: `webgl&preset=${preset}`, name: "Presets" });
     await presetSettled(page);
     for (const [from, to, type] of fixtureRoads()) {
       const result = await page.evaluate(

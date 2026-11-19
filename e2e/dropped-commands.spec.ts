@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
+import { frames, openCity } from "./helpers";
 
 // Issue 94: a command the sim queued can still be dropped at the step,
 // because a command ahead of it in the same tick made it invalid, and a
@@ -35,7 +36,6 @@ declare const document: {
   body: { dataset: Record<string, string | undefined> };
   elementFromPoint(x: number, y: number): { dispatchEvent(event: unknown): boolean } | null;
 };
-declare function requestAnimationFrame(callback: () => void): number;
 declare const PointerEvent: new (type: string, init: Record<string, unknown>) => unknown;
 
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -48,20 +48,6 @@ function city(withStreet: boolean): Buffer {
   const state = createState(SEED);
   if (withStreet) buildRoads(state, [[[STREET.ax, STREET.z], [STREET.bx, STREET.z], "street"]]);
   return Buffer.from(serialize(state));
-}
-
-async function openCity(page: Page, bytes: Buffer): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Dropped.city", mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
@@ -138,7 +124,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 }
 
 test("a continuous road stops at a segment the step drops, and says why", async ({ page }, testInfo) => {
-  await openCity(page, city(false));
+  await openCity(page, city(false), { name: "Dropped" });
   await look(page, 4320, 4640, 260);
   await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyU");
@@ -161,7 +147,7 @@ test("a continuous road stops at a segment the step drops, and says why", async 
 });
 
 test("a bulldoze of a street another road split first is refused, and removes nothing", async ({ page }, testInfo) => {
-  await openCity(page, city(true));
+  await openCity(page, city(true), { name: "Dropped" });
   await look(page, 4370, 4620, 260);
   await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");

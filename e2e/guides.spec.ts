@@ -1,8 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { createState, deserialize, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { MEASURE_STATE } from "./browser-state";
+import { createState, deserialize, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt, scaleCity } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-19: guide lines and parallel offset. A player draws a street
 // beside an existing one with every click up to 10 pixels off, and it lands
@@ -58,20 +59,6 @@ function streetCity(): Buffer {
   const state = createState(SEED);
   buildRoads(state, [[[4220, 4600], [4524, 4600], "street"]]);
   return Buffer.from(serialize(state));
-}
-
-async function openCity(page: Page, bytes: Buffer, name = "Guides"): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
@@ -140,7 +127,7 @@ const MISS: [number, number][] = [
 
 /** Opens the one-street city from above, with the road tool on and a street picked. */
 async function overStreet(page: Page): Promise<void> {
-  await openCity(page, streetCity());
+  await openCity(page, streetCity(), { name: "Guides" });
   const g = groundAt(4372, 4730);
   await setPose(page, [4372, g + 470, 4730 + 150], [4372, g, 4730]);
   await page.keyboard.press("KeyR");
@@ -296,7 +283,7 @@ test.describe("at the real settings", () => {
     test.setTimeout(480_000);
     const bytes = scaleCity(30_000);
     const at = busySpot(bytes, 150);
-    await openCity(page, bytes, "Thirty thousand");
+    await openCity(page, bytes, { name: "Thirty thousand" });
     const g = groundAt(at.x, at.z);
     await setPose(page, [at.x, g + 380, at.z + 170], [at.x, g, at.z]);
     await page.keyboard.press("KeyR");
