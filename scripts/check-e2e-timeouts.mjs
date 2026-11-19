@@ -47,7 +47,7 @@ function ciRunners(workflow) {
   for (const line of e2e.split("\n").filter((l) => /^\s*- \{ ?id:/.test(l))) {
     const entry = /^\s*- (\{.*\})\s*(#.*)?$/.exec(line)?.[1];
     const id = entry && /\bid: ([\w-]+)/.exec(entry)?.[1];
-    const project = entry && /--project (\w+)/.exec(entry)?.[1];
+    const project = entry && (/\bproject: (\w+)/.exec(entry)?.[1] ?? /--project (\w+)/.exec(entry)?.[1]);
     if (!entry || !id || !project) throw new Error(`check-e2e-timeouts cannot read the ci.yml matrix entry: ${line.trim()}. Keep each entry on one line.`);
     const limit = /\blimit: (\d+)/.exec(entry)?.[1];
     runners.push({
