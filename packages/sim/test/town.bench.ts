@@ -19,6 +19,7 @@
 //   the town as it was grown.
 
 import { expect, test } from "vitest";
+import { budget, collect } from "./budget";
 import {
   BUILDINGS_BALANCE,
   CELL_LEFT,
@@ -58,7 +59,7 @@ import {
   type ZoneCellsPayload,
 } from "../src/index";
 import { loadScaleTown } from "./scale-fixture";
-import { grow } from "../src/buildings/grower";
+import { grow, growOne } from "../src/buildings/grower";
 import { buildingsOnSegments, buildingsOnSlots } from "../src/buildings/where";
 import { nextFloat, seedRng } from "../src/rng";
 import { isSegment, segmentIdLimit, SEG_FIXED } from "../src/roads/network";
@@ -140,6 +141,16 @@ const chunk = (): number => chunks[(nextChunk = (nextChunk + 1) % chunks.length)
 /** Those chunks' cells as the overlay reads them for a mesh, which it hands on to `lotMarksInChunk` (issue #164). */
 const chunkShapes = new Map(chunks.map((c) => [c, cellShapesInChunk(state, c)]));
 
+/**
+ * Grows buildings, outside the timing, until the town has `count` again or
+ * the grower finds no lot, so each of twenty BulldozeBuildings at the cap
+ * of 5,000 clears a town as full as the first did. The town has about
+ * 57,000 buildings, too few for twenty clears without it (issue #231).
+ */
+function regrow(count: number): void {
+  for (let misses = 0; buildingCount(state.buildings) < count && misses < 100; ) if (growOne(state) < 0) misses++;
+}
+
 const liveBuildings: number[] = [];
 for (let id = 0; id < state.buildings.flags.length; id++) if (state.buildings.flags[id]) liveBuildings.push(id);
 let nextBuilding = 0;
@@ -211,13 +222,26 @@ function builtStreet(): { seg: number; n: number } {
   throw new Error("out of built streets");
 }
 
-/** `bulldozeMaxBuildings` buildings in a row of ids, as the player saw them. */
+/**
+ * `bulldozeMaxBuildings` buildings in a row of ids, as the player saw them.
+ * Once the list of standing buildings runs out it is taken again from the
+ * town as it stands, with the buildings `regrow` put back.
+ */
 let nextClear = 0;
 function buildingsToClear(): unknown {
   const seen: { id: number; segment: number; side: number; place: number; builtAt: number }[] = [];
-  while (seen.length < BUILDINGS_BALANCE.bulldozeMaxBuildings && nextClear < liveBuildings.length) {
+  const taken = new Set<number>();
+  for (let rescans = 0; seen.length < BUILDINGS_BALANCE.bulldozeMaxBuildings && rescans < 2; ) {
+    if (nextClear >= liveBuildings.length) {
+      liveBuildings.length = 0;
+      for (let id = 0; id < state.buildings.flags.length; id++) if (state.buildings.flags[id]) liveBuildings.push(id);
+      nextClear = 0;
+      rescans++;
+      continue;
+    }
     const id = liveBuildings[nextClear++] ?? 0;
-    if (!state.buildings.flags[id]) continue;
+    if (!state.buildings.flags[id] || taken.has(id)) continue;
+    taken.add(id);
     const row = readBuilding(state.buildings, id);
     seen.push({ id, segment: row.firstSeg, side: row.firstSide, place: row.firstPlace, builtAt: row.builtAt });
   }
@@ -241,6 +265,7 @@ test("the M2 scale town", async ({ bench, annotate }) => {
   ) => {
     const file = `bench-results/town-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
     // `async: false` so tinybench does not call the case once outside its hooks to find out.
+    collect();
     const r = await bench(name, { writeResult: file, async: false, ...hooks }, fn).run(runs);
     meanMs[name] = r.latency.mean;
     p99Ms[name] = r.latency.p99 ?? 0;
@@ -363,19 +388,26 @@ test("the M2 scale town", async ({ bench, annotate }) => {
     },
     fixedRuns(20),
   );
+  // Twenty runs, as the other commands get: with five, one slow run moved
+  // the mean past the budget (issue #231).
+  let standing = 0;
   await run(
     `the step that applies one BulldozeBuilding of ${BUILDINGS_BALANCE.bulldozeMaxBuildings} buildings`,
     () => void step(state),
     {
       beforeEach: () => {
+        standing = buildingCount(state.buildings);
         const payload = buildingsToClear() as { buildings: unknown[] };
         cleared["clear"]?.push(payload.buildings.length);
         const result = submit(state, command("BulldozeBuilding", payload));
         if (!result.ok) throw new Error(result.reason);
       },
-      afterEach: settle,
+      afterEach: () => {
+        settle();
+        regrow(standing);
+      },
     },
-    fixedRuns(5),
+    fixedRuns(20),
   );
   // The grower building again on the ground those commands cleared.
   await run("one step of the town with nothing queued, growing back over two game days", () => void step(state), {}, fixedRuns(2 * day));
@@ -404,8 +436,8 @@ test("the M2 scale town", async ({ bench, annotate }) => {
   // Every step, and every part of an autosave, inside the tick budget, on the mean.
   for (const name of Object.keys(meanMs)) {
     if (name.includes("for comparison")) continue;
-    expect(meanMs[name], name).toBeLessThan(TICK_BUDGET_MS);
+    expect(meanMs[name], budget(name)).toBeLessThan(TICK_BUDGET_MS);
   }
   // A query the client makes per chunk or per pointer move: inside a 60 fps frame, with room for a slower runner.
-  for (const name of Object.keys(queries)) expect(meanMs[name], name).toBeLessThan(16);
+  for (const name of Object.keys(queries)) expect(meanMs[name], budget(name)).toBeLessThan(16);
 }, 600_000);

@@ -91,18 +91,13 @@ describe("the zoning overlay's city band (issue #133)", () => {
   });
 });
 
+// The timings of the first chunk and the slowest one are held in
+// cell-layer.bench.ts, under `pnpm bench`: `pnpm test` reads no clock (issue #231).
 describe("the zoning overlay's lot marks (issue #164)", () => {
-  /** Spends at least `ms` milliseconds, as a first call that builds an index would. */
-  const busy = (ms: number) => {
-    const until = performance.now() + ms;
-    while (performance.now() < until);
-  };
-
-  it("hands each chunk's lot marks the cells it read for the chunk, and times the first chunk apart", () => {
+  it("hands each chunk's lot marks the cells it read for the chunk", () => {
     const { source } = fakeSource();
     const asked: { chunk: number; shapes: ChunkCellShapes }[] = [];
     const read = new Map<number, ChunkCellShapes>();
-    let calls = 0;
     const marked: CellSource = {
       ...source,
       shapes: (c) => {
@@ -112,8 +107,6 @@ describe("the zoning overlay's lot marks (issue #164)", () => {
       },
       marks: (chunk, shapes) => {
         asked.push({ chunk, shapes });
-        // The first call after a load pays for the sim's indexes.
-        if (calls++ === 0) busy(20);
         return new Uint8Array(shapes.slots.length).fill(1);
       },
     };
@@ -130,20 +123,13 @@ describe("the zoning overlay's lot marks (issue #164)", () => {
     // Each chunk with cells asked once, with the very shapes it was built from: the cells are not read again.
     expect(asked).toHaveLength(3);
     for (const { chunk, shapes } of asked) expect(shapes).toBe(read.get(chunk));
-    let stats = layer.stats();
-    expect(stats.marked).toBe(30);
-    expect(stats.firstMarksMs).toBeGreaterThanOrEqual(20);
-    expect(stats.firstFrameMs).toBeGreaterThanOrEqual(20);
-    expect(stats.slowestMarksMs).toBeLessThan(20);
-    expect(stats.slowestFrameMs).toBeLessThan(20);
-    // A snapshot starts the timings again: its first chunk is the slow one this time.
-    calls = 0;
+    expect(layer.stats().marked).toBe(30);
+    // A snapshot starts the timings again.
     layer.reset();
     expect(layer.stats()).toMatchObject({ firstMarksMs: 0, firstFrameMs: 0, slowestMarksMs: 0, slowestFrameMs: 0 });
+    asked.length = 0;
     layer.update({ x: 0, z: 0 }, Infinity);
-    stats = layer.stats();
-    expect(stats.firstMarksMs).toBeGreaterThanOrEqual(20);
-    expect(stats.slowestMarksMs).toBeLessThan(20);
+    expect(asked).toHaveLength(3);
     layer.dispose();
   });
 });

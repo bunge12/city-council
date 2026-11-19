@@ -15,6 +15,7 @@
 // (grid.bench.ts) shows no more than noise from it.
 
 import { expect, test } from "vitest";
+import { budget, collect } from "./budget";
 import { blockIndexOf, listBlocks } from "../src/roads/blocks";
 import { buildRoad, planRoad } from "../src/roads/build";
 import {
@@ -112,9 +113,10 @@ test("the crossing check on 30,000 segments", async ({ bench }) => {
   const meanMs: Record<string, number> = {};
   for (const [name, fn] of Object.entries(cases)) {
     const file = `bench-results/levels-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
+    collect();
     const result = await bench(name, { writeResult: file }, fn).run();
     meanMs[name] = result.latency.mean;
   }
   expect(segmentCount(net)).toBe(30_012);
-  for (const ms of Object.values(meanMs)) expect(ms).toBeLessThan(TICK_BUDGET_MS);
+  for (const [name, ms] of Object.entries(meanMs)) expect(ms, budget(name)).toBeLessThan(TICK_BUDGET_MS);
 }, 300_000);

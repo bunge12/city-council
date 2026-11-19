@@ -11,6 +11,7 @@
 // current through one BuildRoad. Since M2-04, one ZoneCells at the cap.
 
 import { expect, test } from "vitest";
+import { budget, collect } from "./budget";
 import {
   COMMANDS,
   NETWORKS_ROAD,
@@ -326,6 +327,7 @@ test("the M1 scale network", async ({ bench, annotate }) => {
     const file = `bench-results/scale-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
     // `async: false` because tinybench otherwise calls the case once, outside
     // its hooks, to find out, and a grid applied then is never taken back.
+    collect();
     const result = await bench(name, { writeResult: file, async: false, ...hooks }, fn).run(runsOf[name]);
     meanMs[name] = result.latency.mean;
     p99Ms[name] = result.latency.p99;
@@ -361,13 +363,13 @@ test("the M1 scale network", async ({ bench, annotate }) => {
     "one BuildRoad through a block, blocks brought up to date, and taking it back",
     "one BuildRoad crossing ten segments with the zoning cells kept current, and taking it back",
   ]) {
-    expect(meanMs[name], name).toBeLessThan(2 * TICK_BUDGET_MS);
+    expect(meanMs[name], budget(name)).toBeLessThan(2 * TICK_BUDGET_MS);
   }
-  expect(meanMs["one tick with nothing queued"]).toBeLessThan(TICK_BUDGET_MS);
+  expect(meanMs["one tick with nothing queued"], budget("one tick with nothing queued")).toBeLessThan(TICK_BUDGET_MS);
   // A big grid's steps, each on its own: applying it, taking it back, and a slice of its cells settling.
-  for (const name of Object.keys(hooked)) expect(meanMs[name], name).toBeLessThan(TICK_BUDGET_MS);
+  for (const name of Object.keys(hooked)) expect(meanMs[name], budget(name)).toBeLessThan(TICK_BUDGET_MS);
   // A part of an autosave runs between two ticks and holds up the next one
   // (issue #83). The whole save is reported above, for comparison: it no
   // longer runs in one go, so it is not held to the budget.
-  for (const name of partNames) expect(meanMs[name], name).toBeLessThan(TICK_BUDGET_MS);
+  for (const name of partNames) expect(meanMs[name], budget(name)).toBeLessThan(TICK_BUDGET_MS);
 }, 600_000);

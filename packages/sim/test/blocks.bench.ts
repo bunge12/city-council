@@ -5,6 +5,7 @@
 // recorded.
 
 import { expect, test } from "vitest";
+import { budget, collect } from "./budget";
 import { blockById, blockIndexOf, buildBlockIndex, listBlocks } from "../src/roads/blocks";
 import { buildRoad, planRoad, type RoadPlan } from "../src/roads/build";
 import {
@@ -141,11 +142,12 @@ test("blocks on 30,000 segments", async ({ bench }) => {
   const meanMs: Record<string, number> = {};
   for (const [name, [fn, after]] of Object.entries(cases)) {
     const file = `bench-results/blocks-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
+    collect();
     const result = await bench(name, { writeResult: file, afterEach: after }, fn).run();
     meanMs[name] = result.latency.mean;
   }
   expect(listBlocks(blocks)).toEqual(listBlocks(buildBlockIndex(withBlocks)));
   // Bringing the blocks up to date is a small part of a BuildRoad, far
   // below a rebuild.
-  expect(meanMs["one BuildRoad through a block, blocks brought up to date"]).toBeLessThan((meanMs["rebuild every block"] ?? 0) / 10);
+  expect(meanMs["one BuildRoad through a block, blocks brought up to date"], budget("a BuildRoad's block update under a tenth of a rebuild")).toBeLessThan((meanMs["rebuild every block"] ?? 0) / 10);
 }, 180_000);
