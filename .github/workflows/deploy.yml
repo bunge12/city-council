@@ -24,18 +24,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      playwright: ${{ steps.playwright.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: packages/client/dist
+      # The Playwright version in the lockfile, for the walkthrough's
+      # container (see the e2e job in ci.yml).
+      - id: playwright
+        run: |
+          version=$(grep -m1 -oP "^  '@playwright/test@\K[0-9][^']*" pnpm-lock.yaml)
+          [ -n "$version" ] || { echo "No @playwright/test in pnpm-lock.yaml"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
   deploy:
     needs: build
@@ -51,24 +60,27 @@ jobs:
       page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   walkthrough:
-    needs: deploy
+    needs: [build, deploy]
     runs-on: ubuntu-latest
+    # The Playwright image, as in ci.yml's e2e job: no packages from apt.
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.build.outputs.playwright }}-noble
+      options: --ipc=host
     # The three walkthroughs, one after the other, each on WebGPU and WebGL 2.
     # M0 and M1 took up to 30 minutes, and M2 adds 10 to 20 more, or twice
     # that when a test fails once and runs again.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: ./.github/actions/playwright-browsers
       - name: Walkthrough against the public address
         env:
           PAGE_URL: ${{ needs.deploy.outputs.page_url }}
@@ -76,7 +88,7 @@ jobs:
         # WebGPU in one takes the CPU from the other, and the M1 walkthrough
         # fails on steps that pass when it runs alone.
         run: BASE_URL="${PAGE_URL%/}/" xvfb-run -a pnpm e2e --project walkthrough --workers=1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: walkthrough-public

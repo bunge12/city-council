@@ -31,8 +31,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      playwright: ${{ steps.playwright.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The pull request merge commit and its two parents, or the pushed
           # commit and the one before it.
@@ -63,6 +64,14 @@ jobs:
             echo "Only Markdown files changed, skipping the check."
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
+      # The Playwright version in the lockfile, for the e2e jobs' container.
+      # A job's container is chosen before its steps run, so it is read here.
+      - id: playwright
+        run: |
+          version=$(grep -m1 -oP "^  '@playwright/test@\K[0-9][^']*" pnpm-lock.yaml)
+          [ -n "$version" ] || { echo "No @playwright/test in pnpm-lock.yaml"; exit 1; }
+          echo "Playwright $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
   # Lint, sim tests, soak, bench and build. About 6.5 minutes on an EPYC
   # 9V45 runner and 9.5 to 10.5 on an EPYC 7763, which is most of the
@@ -74,9 +83,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 22
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -91,7 +100,7 @@ jobs:
       - run: pnpm soak
       - run: pnpm bench
       - run: pnpm build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: soak-and-bench
@@ -114,10 +123,21 @@ jobs:
   # one runner took 13 to 17 minutes while another took one. A new spec
   # file is picked up without a change here, at a guessed length until its
   # seconds are added.
+  #
+  # The jobs run in the Playwright image for the version in the lockfile. It
+  # has Chromium, its system packages and xvfb, so a job installs nothing
+  # from apt: on a slow Ubuntu mirror that took up to 7.6 minutes (issue
+  # #221). The image is pinned, where ubuntu-latest moves. Chromium finds
+  # SwiftShader's Vulkan in its own build, so the headed WebGPU projects get
+  # the same software adapter as on the bare runner.
   e2e:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.changes.outputs.playwright }}-noble
+      # Chromium's shared memory, as Playwright's Docker guide asks.
+      options: --ipc=host
     # A runner planned at about ten minutes takes twice that on a slow
     # machine, and a test that fails once is run again. 35 minutes leaves
     # room for both, and still stops a run that hangs.
@@ -162,14 +182,13 @@ jobs:
           - { id: walkthrough-m2, timeout: 60, args: "--project walkthrough --no-deps -g \"M2 walkthrough\"" }
     name: e2e (${{ matrix.id }})
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: ./.github/actions/playwright-browsers
       # The roads and walkthrough projects run headed (see
       # playwright.config.ts), so give them a display. Only the walkthrough
       # needs the production build served.
@@ -193,7 +212,7 @@ jobs:
             echo "Spec files: $files"
           fi
           eval "xvfb-run -a pnpm e2e $ARGS $files"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && startsWith(matrix.id, 'walkthrough')
         with:
           name: ${{ matrix.id }}
@@ -204,7 +223,7 @@ jobs:
       # is wanted. Steps under `cancelled()` still run after a time limit
       # (issue #220). test-results holds the traces and screenshots of tests
       # that finished, even when the HTML report was not written.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure() || cancelled()
         with:
           name: playwright-report-${{ matrix.id }}
