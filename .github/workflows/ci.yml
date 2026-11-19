@@ -64,12 +64,15 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # Lint, sim tests, soak, bench and build. About a minute.
+  # Lint, sim tests, soak, bench and build. About 6.5 minutes on an EPYC
+  # 9V45 runner and 9.5 to 10.5 on an EPYC 7763, which is most of the
+  # difference: pnpm test and pnpm bench take longest there. The limit is
+  # twice the slowest 7763 run (issue #220).
   unit:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -196,18 +199,33 @@ jobs:
           name: ${{ matrix.id }}
           path: walkthrough-screenshots
           retention-days: 30
+      # A job that GitHub stops at timeout-minutes ends as cancelled, not
+      # failed, so `failure()` alone skips this step exactly when the report
+      # is wanted. Steps under `cancelled()` still run after a time limit
+      # (issue #220). test-results holds the traces and screenshots of tests
+      # that finished, even when the HTML report was not written.
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: failure() || cancelled()
         with:
           name: playwright-report-${{ matrix.id }}
-          path: playwright-report
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
           retention-days: 7
 
   # The one required check. It passes when every job above passed, or when
   # the change is Markdown only and they were skipped.
+  #
+  # It does not run when the run itself was cancelled, which is what a new
+  # push or "Update branch" does to the run in flight (cancel-in-progress
+  # above). Under `always()` it ran anyway, saw the cancelled jobs and failed,
+  # leaving a red check on a run that was only replaced (issue #220). A job
+  # stopped at its time limit does not cancel the run, so this still runs
+  # and fails on it.
   check:
     needs: [changes, unit, e2e]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
