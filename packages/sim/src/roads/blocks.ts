@@ -36,7 +36,6 @@
 // `applyRoadDelta` on a client's copy, and the next read walks those faces
 // again. A road far from the change leaves its faces alone.
 
-import { segmentQuad, type Quad } from "./curve";
 import {
   LEVEL_GROUND,
   NETWORK_ROAD,
@@ -126,21 +125,30 @@ interface Leaving {
   kz: number;
 }
 
-function leaving(net: RoadNetwork, h: number): Leaving {
-  const q: Quad = segmentQuad(net, h >> 1);
+/** Fills `out` with how half-edge `h` leaves its start node. */
+function leaving(net: RoadNetwork, h: number, out: Leaving): void {
+  const seg = h >> 1;
+  const a = net.segA[seg] ?? 0;
+  const b = net.segB[seg] ?? 0;
   const fromA = (h & 1) === 0;
-  const sx = fromA ? q.ax : q.bx;
-  const sz = fromA ? q.az : q.bz;
-  const ex = fromA ? q.bx : q.ax;
-  const ez = fromA ? q.bz : q.az;
-  let dx = q.cx - sx;
-  let dz = q.cz - sz;
+  const sx = (fromA ? net.nodeX[a] : net.nodeX[b]) ?? 0;
+  const sz = (fromA ? net.nodeZ[a] : net.nodeZ[b]) ?? 0;
+  const ex = (fromA ? net.nodeX[b] : net.nodeX[a]) ?? 0;
+  const ez = (fromA ? net.nodeZ[b] : net.nodeZ[a]) ?? 0;
+  const cx = net.segCX[seg] ?? 0;
+  const cz = net.segCZ[seg] ?? 0;
+  let dx = cx - sx;
+  let dz = cz - sz;
   // A control point on the node itself leaves no tangent: go by the chord.
   if (dx === 0 && dz === 0) {
     dx = ex - sx;
     dz = ez - sz;
   }
-  return { h, dx, dz, kx: sx - 2 * q.cx + ex, kz: sz - 2 * q.cz + ez };
+  out.h = h;
+  out.dx = dx;
+  out.dz = dz;
+  out.kx = sx - 2 * cx + ex;
+  out.kz = sz - 2 * cz + ez;
 }
 
 /** 0 for a direction at an angle in [0, 180) degrees from +x toward +z, 1 for [180, 360). */
@@ -170,19 +178,31 @@ function compareLeaving(p: Leaving, q: Leaving): number {
 /** Points `next` at the right half-edge for every half-edge arriving at `node`. */
 function relinkNode(index: BlockIndex, node: number): void {
   const { net } = index;
-  const out: Leaving[] = [];
+  // Kept between calls, and put in order by insertion: a node has a few
+  // half-edges, and a grid at the cap relinks thousands of nodes, so an
+  // object for each and a sort was a large part of its garbage (issue
+  // #204). `compareLeaving` never ties, so the order is the same.
+  const out = leavingScratch;
+  let count = 0;
   for (let seg = net.nodeFirstSeg[node] ?? NONE; seg !== NONE; seg = nextSegmentAt(net, seg, node)) {
     if (!index.inGraph[seg]) continue;
-    out.push(leaving(net, net.segA[seg] === node ? 2 * seg : 2 * seg + 1));
+    if (count === out.length) out.push({ h: 0, dx: 0, dz: 0, kx: 0, kz: 0 });
+    const item = out[count] as Leaving;
+    leaving(net, net.segA[seg] === node ? 2 * seg : 2 * seg + 1, item);
+    let i = count++;
+    for (; i > 0 && compareLeaving(out[i - 1] as Leaving, item) > 0; i--) out[i] = out[i - 1] as Leaving;
+    out[i] = item;
   }
-  out.sort(compareLeaving);
-  for (let i = 0; i < out.length; i++) {
+  for (let i = 0; i < count; i++) {
     const back = out[i]?.h ?? NONE;
     // Arriving along the reverse of `back`, go on clockwise of it.
-    const cw = out[(i + out.length - 1) % out.length]?.h ?? NONE;
+    const cw = out[(i + count - 1) % count]?.h ?? NONE;
     index.next[back ^ 1] = cw;
   }
 }
+
+/** The half-edges leaving the node `relinkNode` is ordering. Not state. */
+const leavingScratch: Leaving[] = [];
 
 /** Marks the faces of every half-edge at `node` for walking again. */
 function dirtyNode(index: BlockIndex, node: number): void {
@@ -280,53 +300,74 @@ function twiceArea(net: RoadNetwork, h: number, ox: number, oz: number): number 
 /** Walks every face a change touched since the last read. */
 function settle(index: BlockIndex): void {
   if (index.dirtyFaces.size === 0 && index.fresh.size === 0) return;
-  const { net } = index;
-  const todo: number[] = [];
+  const { net, inGraph, face, next } = index;
+  // The half-edges to walk again, and each walk, go in buffers kept between
+  // reads. A grid at the edge of the city touches its outer face, thousands
+  // of half-edges long, and lists of them were garbage (issue #204).
+  let todo = settleTodo;
+  let count = 0;
+  const take = (h: number) => {
+    if (count === todo.length) {
+      const grown = new Int32Array(2 * count);
+      grown.set(todo);
+      todo = settleTodo = grown;
+    }
+    todo[count++] = h;
+  };
   for (const f of index.dirtyFaces) {
-    for (const h of index.faces.get(f) ?? []) if (index.inGraph[h >> 1]) todo.push(h);
+    const old = index.faces.get(f);
+    if (old) for (let i = 0; i < old.length; i++) if (inGraph[(old[i] ?? 0) >> 1]) take(old[i] ?? 0);
     index.faces.delete(f);
     index.blocks.delete(f);
   }
-  for (const h of index.fresh) todo.push(h);
+  for (const h of index.fresh) take(h);
   index.dirtyFaces.clear();
   index.fresh.clear();
-  for (const h of todo) index.face[h] = NONE;
+  for (let i = 0; i < count; i++) face[todo[i] ?? 0] = NONE;
   // A mark for half-edges walked in this pass, before their face id is known.
   const WALKING = -2;
-  const walk: number[] = [];
-  for (const start of todo) {
-    if (index.face[start] !== NONE) continue;
-    walk.length = 0;
+  for (let t = 0; t < count; t++) {
+    const start = todo[t] ?? 0;
+    if (face[start] !== NONE) continue;
+    let walk = settleWalk;
+    let length = 0;
     let low = start;
     let at = 0;
     for (let h = start; ; ) {
-      if (index.face[h] !== NONE) throw new Error(`block walk from ${start} ran into half-edge ${h}, already walked`);
-      index.face[h] = WALKING;
+      if (face[h] !== NONE) throw new Error(`block walk from ${start} ran into half-edge ${h}, already walked`);
+      face[h] = WALKING;
       if (h < low) {
         low = h;
-        at = walk.length;
+        at = length;
       }
-      walk.push(h);
-      h = index.next[h] ?? NONE;
+      if (length === walk.length) {
+        const grown = new Int32Array(2 * length);
+        grown.set(walk);
+        walk = settleWalk = grown;
+      }
+      walk[length++] = h;
+      h = next[h] ?? NONE;
       if (h === start) break;
       if (h === NONE) throw new Error(`block walk from ${start} hit a half-edge with no next`);
     }
     // Start the loop at its lowest half-edge, so its order comes from the graph alone.
-    const loop = new Int32Array(walk.length);
-    for (let i = 0; i < walk.length; i++) loop[i] = walk[(at + i) % walk.length] ?? NONE;
-    for (const h of loop) index.face[h] = low;
+    const loop = new Int32Array(length);
+    loop.set(walk.subarray(at, length));
+    loop.set(walk.subarray(0, at), length - at);
+    for (let i = 0; i < length; i++) face[loop[i] ?? 0] = low;
     index.faces.set(low, loop);
     // Measured from the loop's first node, so the numbers stay small.
     const first = ((low & 1) === 0 ? net.segA[low >> 1] : net.segB[low >> 1]) ?? 0;
     const ox = net.nodeX[first] ?? 0;
     const oz = net.nodeZ[first] ?? 0;
     let twice = 0;
-    for (const h of loop) twice += twiceArea(net, h, ox, oz);
+    for (let i = 0; i < length; i++) twice += twiceArea(net, loop[i] ?? 0, ox, oz);
     const area = twice / 2;
     if (area > BLOCK_MIN_AREA) {
       const segments: number[] = [];
       const forward: boolean[] = [];
-      for (const h of loop) {
+      for (let i = 0; i < length; i++) {
+        const h = loop[i] ?? 0;
         segments.push(h >> 1);
         forward.push((h & 1) === 0);
       }
@@ -334,6 +375,10 @@ function settle(index: BlockIndex): void {
     }
   }
 }
+
+/** The half-edges `settle` walks again, and the walk under way. Not state. */
+let settleTodo = new Int32Array(1024);
+let settleWalk = new Int32Array(1024);
 
 function emptyIndex(net: RoadNetwork): BlockIndex {
   const size = Math.max(16, segmentIdLimit(net));

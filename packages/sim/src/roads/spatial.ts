@@ -423,10 +423,20 @@ export function segmentsInBox(
   checkNetworks(networks);
   checkLevels(levels);
   const { net, cellsPerSide: n } = index;
-  const found: number[] = [];
-  for (let cj = cellOf(index, minZ); cj <= cellOf(index, maxZ); cj++) {
-    for (let ci = cellOf(index, minX); ci <= cellOf(index, maxX); ci++) {
-      for (const seg of index.segCells[cj * n + ci] ?? []) {
+  const i0 = cellOf(index, minX);
+  const i1 = cellOf(index, maxX);
+  const j0 = cellOf(index, minZ);
+  const j1 = cellOf(index, maxZ);
+  // Gathered into a buffer kept between calls: a grid at the cap asks this
+  // thousands of times, and a list and a sort with a comparator for each
+  // was most of its garbage (issue #204).
+  let count = 0;
+  for (let cj = j0; cj <= j1; cj++) {
+    for (let ci = i0; ci <= i1; ci++) {
+      const list = index.segCells[cj * n + ci];
+      if (!list) continue;
+      for (let k = 0; k < list.length; k++) {
+        const seg = list[k] ?? NONE;
         if (!segmentOnNetworks(net, seg, networks, levels)) continue;
         const a = net.segA[seg] ?? NONE;
         const b = net.segB[seg] ?? NONE;
@@ -438,15 +448,27 @@ export function segmentsInBox(
         const touches = straight
           ? segmentTouchesBox(ax, az, bx, bz, minX, minZ, maxX, maxZ)
           : curveTouchesBox(segmentQuad(net, seg), minX, minZ, maxX, maxZ);
-        if (touches) found.push(seg);
+        if (!touches) continue;
+        if (count === boxScratch.length) {
+          const grown = new Int32Array(2 * count);
+          grown.set(boxScratch);
+          boxScratch = grown;
+        }
+        boxScratch[count++] = seg;
       }
     }
   }
-  found.sort((p, q) => p - q);
-  let kept = 0;
-  for (let i = 0; i < found.length; i++) {
-    if (i === 0 || found[i] !== found[kept - 1]) found[kept++] = found[i] ?? 0;
+  // Each cell's list is ascending, so one cell's finds need no sort. A
+  // segment in several cells is found once in each.
+  const finds = boxScratch.subarray(0, count);
+  if (i0 !== i1 || j0 !== j1) finds.sort();
+  const found: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const seg = finds[i] ?? NONE;
+    if (i === 0 || seg !== finds[i - 1]) found.push(seg);
   }
-  found.length = kept;
   return found;
 }
+
+/** The segments `segmentsInBox` finds, before it sorts them. Not state. */
+let boxScratch = new Int32Array(256);

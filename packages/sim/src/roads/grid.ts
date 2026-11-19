@@ -191,10 +191,10 @@ function runsAlong(tx: number, tz: number, dx: number, dz: number): boolean {
 /**
  * Which samples along the link from `a` to `b` lie along an existing road:
  * within the merge distance of a ground-level road that runs within the
- * minimum angle of the link there. Also the samples' points. Sample 0 is
- * `a` and the last is `b`.
+ * minimum angle of the link there, 1 where one does. Sample 0 is `a` and
+ * the last is `b`; `samplePoint` gives each one's point.
  */
-function coverage(net: RoadNetwork, a: BuildPoint, b: BuildPoint): { covered: boolean[]; points: BuildPoint[] } {
+function coverage(net: RoadNetwork, a: BuildPoint, b: BuildPoint): Uint8Array {
   const r = ROAD_BUILD.mergeDistance;
   const dx = b.x - a.x;
   const dz = b.z - a.z;
@@ -211,27 +211,40 @@ function coverage(net: RoadNetwork, a: BuildPoint, b: BuildPoint): { covered: bo
     if (isStraight(q) && !runsAlong(q.bx - q.ax, q.bz - q.az, dx, dz)) continue;
     near.push(q);
   }
-  const length = Math.sqrt(dx * dx + dz * dz);
-  const steps = Math.ceil(length / COVER_STEP);
-  const covered: boolean[] = [];
-  const points: BuildPoint[] = [];
+  const steps = sampleCount(a, b);
+  const covered = new Uint8Array(steps + 1);
+  // Most links have no road along them, so the samples cost nothing (issue #204).
+  if (near.length === 0) return covered;
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const x = a.x + dx * t;
     const z = a.z + dz * t;
-    points.push({ x, z });
-    covered.push(
-      near.some((q) => {
-        const found = nearestOnQuad(q, x, z);
-        if (found.d2 > r * r) return false;
-        // Past a road's end is not along it, though it may be near.
-        if ((found.t === 0 || found.t === 1) && found.d2 > AT_POINT * AT_POINT) return false;
-        const tangent = tangentAt(q, found.t);
-        return (tangent.x !== 0 || tangent.z !== 0) && runsAlong(tangent.x, tangent.z, dx, dz);
-      }),
-    );
+    for (const q of near) {
+      const found = nearestOnQuad(q, x, z);
+      if (found.d2 > r * r) continue;
+      // Past a road's end is not along it, though it may be near.
+      if ((found.t === 0 || found.t === 1) && found.d2 > AT_POINT * AT_POINT) continue;
+      const tangent = tangentAt(q, found.t);
+      if ((tangent.x !== 0 || tangent.z !== 0) && runsAlong(tangent.x, tangent.z, dx, dz)) {
+        covered[i] = 1;
+        break;
+      }
+    }
   }
-  return { covered, points };
+  return covered;
+}
+
+/** How many steps `coverage` samples the link from `a` to `b` in. */
+function sampleCount(a: BuildPoint, b: BuildPoint): number {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  return Math.ceil(Math.sqrt(dx * dx + dz * dz) / COVER_STEP);
+}
+
+/** Sample `i` of `coverage`'s samples along the link from `a` to `b`. */
+function samplePoint(a: BuildPoint, b: BuildPoint, i: number): BuildPoint {
+  const t = i / sampleCount(a, b);
+  return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
 }
 
 /**
@@ -247,19 +260,19 @@ function joinPoint(net: RoadNetwork, p: BuildPoint): BuildPoint {
 }
 
 function linkState(net: RoadNetwork, terrain: Terrain, type: RoadType, a: BuildPoint, b: BuildPoint): LinkState {
-  const { covered, points } = coverage(net, a, b);
+  const covered = coverage(net, a, b);
   const n = covered.length - 1;
-  if (covered.every((c) => c)) return { kind: "covered" };
+  if (covered.every((c) => c === 1)) return { kind: "covered" };
   let from = a;
   let to = b;
   if (covered[0]) {
     let k = 0;
     while (covered[k + 1]) k++;
-    from = joinPoint(net, points[k] as BuildPoint);
+    from = joinPoint(net, samplePoint(a, b, k));
   } else if (covered[n]) {
     let k = n;
     while (covered[k - 1]) k--;
-    to = joinPoint(net, points[k] as BuildPoint);
+    to = joinPoint(net, samplePoint(a, b, k));
   }
   if (distance(from.x, from.z, to.x, to.z) < ROAD_BUILD.minLength) return { kind: "covered" };
   if (groundProblem(terrain, type, straightQuad(from.x, from.z, to.x, to.z)) !== null) return { kind: "ground" };

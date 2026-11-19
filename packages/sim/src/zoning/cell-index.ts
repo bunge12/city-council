@@ -70,16 +70,18 @@ import { forJournalCells, journalCells, journalFits, readJournals } from "./zone
 import {
   STATION_FLOATS,
   anchorSpan,
-  anchorStations,
+  anchorStationsInto,
   ceilOf,
   cellCornersInto,
   measureCurve,
+  type MeasuredCurve,
   isConvexQuad,
   quadBoxInto,
   quadCentre,
   quadContains,
   quadsOverlap,
-  stationsOf,
+  stationCount,
+  stationsInto,
   surfaceInto,
 } from "./shape";
 
@@ -402,18 +404,24 @@ function shapeOfRow(row: SegmentRow, ax: number, az: number, bx: number, bz: num
   let places = 0;
   let from = 0;
   let reversed = false;
-  let cellStations: Float64Array | null = null;
+  let anchorRoad: MeasuredCurve | null = null;
   if (zonableFields(network, type, levelA, levelB)) {
-    const road = measureCurve(anchor.ax, anchor.az, anchor.cx, anchor.cz, anchor.bx, anchor.bz);
-    const span = anchorSpan(road, anchor.tA, anchor.tB, CELL);
+    anchorRoad = measureCurve(anchor.ax, anchor.az, anchor.cx, anchor.cz, anchor.bx, anchor.bz);
+    const span = anchorSpan(anchorRoad, anchor.tA, anchor.tB, CELL);
     places = span.to - span.from;
     from = span.from;
     reversed = span.reversed;
-    if (places > 0) cellStations = anchorStations(road, span.from, span.to, CELL);
   }
   const onSurface = (level: number) => level === LEVEL_GROUND || level === LEVEL_BRIDGE;
   const covers = onSurface(levelA) || onSurface(levelB);
-  const stations = covers ? stationsOf(measureCurve(ax, az, cx, cz, bx, bz), CELL) : null;
+  // The surface's stations go in a buffer kept between shapes: only the
+  // pieces made from them are kept, and a grid at the cap lays out
+  // hundreds of shapes (issue #204).
+  const road = covers ? measureCurve(ax, az, cx, cz, bx, bz) : null;
+  const stationFloats = road ? stationCount(road, CELL) * STATION_FLOATS : 0;
+  if (stationFloats > surfaceStations.length) surfaceStations = new Float64Array(2 * stationFloats);
+  const stations = surfaceStations;
+  if (road) stationsInto(road, CELL, stations);
   const straight = cx === (ax + bx) / 2 && cz === (az + bz) / 2;
   // Rail and paths have no width table yet, so they read the road type
   // with their index, as their segments do until they get their own.
@@ -421,22 +429,21 @@ function shapeOfRow(row: SegmentRow, ax: number, az: number, bx: number, bz: num
   // Everything the shape keeps in one buffer, with a view for each part: a
   // big city has tens of thousands of shapes, and the garbage collector
   // pays for every buffer it tracks.
-  const last = stations ? stations.length / STATION_FLOATS - 1 : 0;
+  const last = road ? stationFloats / STATION_FLOATS - 1 : 0;
   const step = straight ? STRAIGHT_PIECE : 1;
-  const pieces = covers && stations ? ceilOf(last / step) : 0;
-  const cellFloats = cellStations?.length ?? 0;
+  const pieces = road ? ceilOf(last / step) : 0;
+  const cellFloats = places > 0 ? (places + 1) * STATION_FLOATS : 0;
   const floats = cellFloats + pieces * 12;
   const statusBytes = places > 0 ? places * cellsPerPlace() : 0;
   const buffer = new ArrayBuffer(floats * 8 + statusBytes);
   const data = floats > 0 ? new Float64Array(buffer, 0, floats) : null;
-  if (data && cellStations) data.set(cellStations);
+  if (data && anchorRoad && places > 0) anchorStationsInto(anchorRoad, from, from + places, CELL, data);
   const surfaceAt = cellFloats;
   const boxesAt = cellFloats + pieces * 8;
-  if (data && stations) {
+  if (data) {
     for (let i = 0; i < pieces; i++) {
-      const piece = data.subarray(surfaceAt + i * 8, surfaceAt + i * 8 + 8);
-      surfaceInto(stations, i * step, Math.min(last, (i + 1) * step), half, piece);
-      quadBoxInto(piece, data.subarray(boxesAt + i * 4, boxesAt + i * 4 + 4));
+      surfaceInto(stations, i * step, Math.min(last, (i + 1) * step), half, data, surfaceAt + i * 8);
+      quadBoxInto(data, data, surfaceAt + i * 8, boxesAt + i * 4);
     }
   }
   return {
@@ -474,6 +481,9 @@ function shapeOfRow(row: SegmentRow, ax: number, az: number, bx: number, bz: num
     status: statusBytes > 0 ? new Uint8Array(buffer, floats * 8, statusBytes).fill(UNSET) : null,
   };
 }
+
+/** The surface stations `shapeOfRow` makes pieces from. Not state. */
+let surfaceStations = new Float64Array(1024);
 
 /** Whether segment `id` of `net` is exactly what `s` recorded. */
 function sameAsNet(s: SegShape | null, net: RoadNetwork, id: number): boolean {
