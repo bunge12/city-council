@@ -24,7 +24,7 @@ import { SimMirror, type MirrorUpdate } from "./protocol/mirror";
 import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { createWorkerTransport } from "./protocol/transport";
 import { SaveClient, fetchCityFile, requestPersistence, takeLoadAddress, type PersistenceResult } from "./save/page";
-import type { SaveStatus } from "./save/channel";
+import { SAVES_CHANNEL, type LoadFileMessage, type SaveStatus } from "./save/channel";
 import { createCameraControls, type CameraControls } from "./camera/controls";
 import type { GroundHit } from "./camera/pick";
 import { createCameraRig, type CameraRig } from "./camera/rig";
@@ -90,7 +90,17 @@ if (load.address !== null) history.replaceState(history.state, "", `${location.p
 
 const worker = createWorkerTransport(tabCity(), load.address !== null);
 if (load.address !== null) {
-  void fetchCityFile(load.address, location.href).then((file) => worker.saves.send(file, file.bytes ? [file.bytes] : []));
+  // The worker waits for this message before it opens any city, so one is sent whatever happens.
+  const address = load.address;
+  void fetchCityFile(address, location.href)
+    .catch((error: unknown): LoadFileMessage => ({
+      channel: SAVES_CHANNEL,
+      type: "load",
+      fileName: address,
+      bytes: null,
+      error: `It could not be fetched: ${error instanceof Error ? error.message : String(error)}.`,
+    }))
+    .then((file) => worker.saves.send(file, file.bytes ? [file.bytes] : []));
 }
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
 const saves = new SaveClient(worker.saves);

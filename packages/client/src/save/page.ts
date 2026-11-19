@@ -124,6 +124,15 @@ export async function requestPersistence(storage: StorageManager | undefined = n
   }
 }
 
+/** `text` with its percent escapes decoded, or as it is when they are malformed. */
+function decodeOr(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 /**
  * The `?load=` address in query string `search`, and `search` without it.
  * The page takes it out of its own address once read, so a reload goes back
@@ -136,7 +145,7 @@ export function takeLoadAddress(search: string): { address: string | null; rest:
     .split("&")
     .filter((part) => {
       if (!part.startsWith("load=")) return part !== "";
-      address = decodeURIComponent(part.slice("load=".length).replace(/\+/g, " "));
+      address = decodeOr(part.slice("load=".length).replace(/\+/g, " "));
       return false;
     })
     .join("&");
@@ -157,7 +166,7 @@ export async function fetchCityFile(address: string, base: string, fetcher: type
   } catch {
     return failed(address, "Its address is not valid.");
   }
-  const fileName = decodeURIComponent(url.pathname.split("/").pop() ?? "") || "City.city";
+  const fileName = decodeOr(url.pathname.split("/").pop() ?? "") || "City.city";
   if (url.origin !== new URL(base).origin) return failed(fileName, "Only a city file on this site can be opened from the address.");
   try {
     const response = await fetcher(url);

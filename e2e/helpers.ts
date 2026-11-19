@@ -16,6 +16,7 @@ export interface RenderStatus {
 declare const window: {
   cityCouncil: {
     renderStatus(): RenderStatus | null;
+    saves: { status: { city: { name: string }; problem: string | null } | null };
     view: Promise<{ decorCounts(): unknown }>;
   };
 };
@@ -91,6 +92,12 @@ export async function openCity(page: Page, city: SimState | Uint8Array, options:
   const flags = query.replace(/^\/?\??/, "");
   await page.goto(`./?${flags ? `${flags}&` : ""}load=${encodeURIComponent(address)}`);
   await ready(page, timeout);
+  // A file that could not be had opens the tab's usual city with a note, so check it was this one.
+  await page.waitForFunction(() => document.body.dataset["saveLoaded"] === "true", null, { timeout });
+  const opened = await page.evaluate(() => window.cityCouncil.saves.status);
+  if (opened?.problem) throw new Error(`the fixture did not open: ${opened.problem}`);
+  const named = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( \\d+)?$`);
+  if (!named.test(opened?.city.name ?? "")) throw new Error(`opened "${opened?.city.name}", not the fixture "${name}"`);
   if (presetSettled) await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout });
   if (!notes) await hideNotes(page);
   return (await renderStatus(page)).backend;

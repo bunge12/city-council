@@ -613,6 +613,8 @@ describe("opening a city file from the page's address", () => {
     expect(takeLoadAddress("?load=/a.city")).toEqual({ address: "/a.city", rest: "" });
     expect(takeLoadAddress("?webgl&preset=low")).toEqual({ address: null, rest: "?webgl&preset=low" });
     expect(takeLoadAddress("")).toEqual({ address: null, rest: "" });
+    // A malformed escape is kept as it is rather than stopping the page.
+    expect(takeLoadAddress("?load=%zz")).toEqual({ address: "%zz", rest: "" });
   });
 
   it("fetches a file on the same site, named after its path", async () => {
@@ -635,6 +637,8 @@ describe("opening a city file from the page's address", () => {
     expect(await fetchCityFile("/a.city", "http://localhost:5173/", fetcher)).toMatchObject({ bytes: null, error: "The server answered 404." });
     const offline = vi.fn(async (): Promise<Response> => { throw new Error("offline"); });
     expect((await fetchCityFile("/a.city", "http://localhost:5173/", offline)).error).toMatch(/could not be fetched: offline/);
+    // The path keeps an escape the URL parser leaves alone, and naming the file must not throw on it.
+    expect(await fetchCityFile("/a%25zz.city", "http://localhost:5173/", fetcher)).toMatchObject({ fileName: "a%zz.city" });
   });
 
   it("parses only a well-formed load message", () => {
