@@ -28,7 +28,7 @@ The game has three graphics presets and a lit scene, in place before the first b
 ## Done when
 
 - [ ] A Playwright test loads the same city at each preset and takes a screenshot of each. Low has no shadows, Balanced has them near the camera and High has them further out
-- [ ] A test runs the same commands at two presets and gets the same state hash
+- [ ] A test runs the same commands at two presets and gets the same state hash. Since #225 a lint rule holds this instead: code under `packages/client/src/render/`, where the presets are applied, may not import what writes state or call `sendCommand`
 - [ ] The benchmark's choice is logged in the debug panel, and a second visit does not run it again
 - [ ] Cold load to the first frame with terrain stays within the M0 number at every preset
 - [ ] Frame time on the M1 scale city is recorded for each preset in the pull request, on WebGPU and on `?webgl`

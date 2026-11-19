@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { decodePng, type Image } from "./png";
-import { CURVED_JUNCTION, FIVE_WAY, SIGNAL_CROSS, YIELD_TEE, curvedCity, decorationCity, fixtureCity, groundAt, scaleCity } from "./road-fixtures";
+import { CURVED_JUNCTION, FIVE_WAY, SIGNAL_CROSS, YIELD_TEE, curvedCity, decorationCity, fixtureCity, groundAt } from "./road-fixtures";
+import { canvasShot, openCity, settle } from "./helpers";
 
 // Issue M1-06: roads in the mirror appear on the map. It runs in the `roads`
 // project, headed with WebGPU on where the browser has an adapter (see
@@ -9,7 +10,8 @@ import { CURVED_JUNCTION, FIVE_WAY, SIGNAL_CROSS, YIELD_TEE, curvedCity, decorat
 // compared with the same screenshots.
 //
 // The city comes from road-fixtures.ts as a city file, so every run draws
-// the same roads on the same map.
+// the same roads on the same map. The frame time of a 30,000 segment
+// network is roads-scale.spec.ts, in the perf project (issue #225).
 
 type Vec3 = [number, number, number];
 interface RoadStats {
@@ -36,7 +38,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Several page loads with the whole map, on a machine that may have no GPU.
@@ -48,22 +49,6 @@ const BACKENDS = [
   { name: "?webgl", query: "?webgl&preset=low" },
 ] as const;
 
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
-
-/** Opens the page, then imports `bytes` as a city and waits for it to be drawn. */
-async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<string> {
-  await page.goto(`/${query}`);
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-  const status = await page.evaluate(() => window.cityCouncil.renderStatus());
-  return status?.backend ?? "none";
-}
-
 async function roadStats(page: Page): Promise<RoadStats> {
   const stats = await page.evaluate(async () => (await window.cityCouncil.view).roadStats());
   if (!stats) throw new Error("no road layer");
@@ -74,33 +59,11 @@ async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> 
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
 }
 
-/** Waits until decoration has finished building near the camera: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
-}
-
 /** Attaches a screenshot, kept as a file in the test's output folder. */
 async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, body);
   await testInfo.attach(name, { path, contentType: "image/png" });
-}
-
-/** The canvas alone, without the page's panels over it. */
-async function canvasShot(page: Page): Promise<Buffer> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  return page.locator("#view").screenshot();
 }
 
 const ground = groundAt(4400, 4700);
@@ -114,7 +77,7 @@ const BANDS: { band: string; position: Vec3; target: Vec3 }[] = [
 
 for (const { name, query } of BACKENDS) {
   test(`the fixture city draws the same in every zoom band (${name})`, async ({ page }, testInfo) => {
-    const backend = await openCity(page, query, "Roads", fixtureCity().bytes);
+    const backend = await openCity(page, fixtureCity().bytes, { query, name: "Roads" });
     if (query.startsWith("?webgl")) expect(backend).toBe("webgl2");
     // CI has a software WebGPU adapter, so the default backend there is WebGPU.
     else if (process.env["CI"]) expect(backend).toBe("webgpu");
@@ -144,7 +107,7 @@ for (const { name, query } of BACKENDS) {
 const curvedGround = groundAt(CURVED_JUNCTION.x, CURVED_JUNCTION.z);
 for (const { name, query } of BACKENDS) {
   test(`the curved fixture city draws curves and curved junctions (${name})`, async ({ page }, testInfo) => {
-    const backend = await openCity(page, query, "Curves", curvedCity().bytes);
+    const backend = await openCity(page, curvedCity().bytes, { query, name: "Curves" });
     if (query.startsWith("?webgl")) expect(backend).toBe("webgl2");
     // CI has a software WebGPU adapter, so the default backend there is WebGPU.
     else if (process.env["CI"]) expect(backend).toBe("webgpu");
@@ -167,7 +130,7 @@ for (const { name, query } of BACKENDS) {
 const decorGround = groundAt(SIGNAL_CROSS.x, SIGNAL_CROSS.z);
 for (const { name, query } of BACKENDS) {
   test(`junctions get rounded kerbs, crossings, lights and signs, and tapers join two widths (${name})`, async ({ page }, testInfo) => {
-    const backend = await openCity(page, query, "Decorations", decorationCity().bytes);
+    const backend = await openCity(page, decorationCity().bytes, { query, name: "Decorations" });
     if (query.startsWith("?webgl")) expect(backend).toBe("webgl2");
     else if (process.env["CI"]) expect(backend).toBe("webgpu");
     testInfo.annotations.push({ type: "backend", description: backend });
@@ -192,7 +155,7 @@ for (const { name, query } of BACKENDS) {
 }
 
 test("adding one segment rebuilds only the chunks it touches", async ({ page }, testInfo) => {
-  await openCity(page, "?webgl&debug", "Roads", fixtureCity().bytes);
+  await openCity(page, fixtureCity().bytes, { query: "?webgl&debug", name: "Roads" });
   const before = await roadStats(page);
   const build = async (from: [number, number], to: [number, number]) => {
     const result = await page.evaluate(
@@ -247,7 +210,7 @@ const asphalt = (r: number, g: number, b: number) => Math.max(r, g, b) - Math.mi
 
 for (const { name, query } of BACKENDS) {
   test(`roads stay on top of the terrain at every zoom (${name})`, async ({ page }, testInfo) => {
-    await openCity(page, query, "Roads", fixtureCity().bytes);
+    await openCity(page, fixtureCity().bytes, { query, name: "Roads" });
     // Points on the avenue's centre line, between junctions, away from paint.
     // They stop 50 m short of the four-way at z = 4850, clear of its crossing
     // and the traffic light whose mast hangs over the road (issue 87).
@@ -279,52 +242,3 @@ for (const { name, query } of BACKENDS) {
     expect(results.filter((r) => !r.endsWith(": 1")), results.join("\n")).toEqual([]);
   });
 }
-
-/** Mean time between `frames` animation frames, in ms. */
-async function frameTime(page: Page, frames: number): Promise<number> {
-  return page.evaluate(async (frames) => {
-    const times: number[] = [];
-    await new Promise<void>((resolve) => {
-      let last = -1;
-      const tick = (now: number) => {
-        if (last >= 0) times.push(now - last);
-        last = now;
-        if (times.length < frames) requestAnimationFrame(() => tick(performance.now()));
-        else resolve();
-      };
-      requestAnimationFrame(() => tick(performance.now()));
-    });
-    return times.reduce((a, b) => a + b, 0) / times.length;
-  }, frames);
-}
-declare const performance: { now(): number };
-
-test("a 30,000 segment network in the city band", async ({ page }, testInfo: TestInfo) => {
-  test.setTimeout(300_000);
-  const whole: { position: Vec3; target: Vec3 } = { position: [6000, 8400, 15_800], target: [6000, 0, 5600] };
-  const query = "?webgl";
-
-  await openCity(page, query, "Empty", scaleCity(0));
-  await setPose(page, whole.position, whole.target);
-  await settle(page);
-  const empty = await frameTime(page, 120);
-
-  const backend = await openCity(page, query, "Thirty thousand", scaleCity(30_000));
-  const stats = await roadStats(page);
-  await setPose(page, whole.position, whole.target);
-  await settle(page);
-  expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe("city");
-  const roads = await frameTime(page, 120);
-  const report = { backend, emptyFrameMs: empty, roadsFrameMs: roads, buildMs: stats.lastBuildMs, chunks: stats.chunks, segmentPieces: stats.segmentPieces };
-  console.log(`30,000 segments, city band: ${JSON.stringify(report)}`);
-  await testInfo.attach("frame times", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
-  await attach(testInfo, "30,000 segments, city band", await canvasShot(page));
-  expect(stats.segmentPieces).toBeGreaterThan(30_000);
-  // A machine with a GPU draws this at the display's rate. CI runners have
-  // no GPU and draw in software, where the roads add 45 to 55 percent to the
-  // empty map's frame from one run to the next, so a tight ratio only
-  // measures the runner. There the check only catches a gross regression,
-  // such as roads drawn without merged chunk meshes: the frame stays under
-  // three times the empty map's. The numbers are logged above either way.
-  expect(roads).toBeLessThan(Math.max(1000 / 55, empty * 3));
-});

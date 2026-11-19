@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
+import { cityLoaded } from "./helpers";
 
 // The hooks packages/client/src/main.ts puts on the page. The tooling
 // tsconfig has no DOM types, so the parts used here are declared.
@@ -26,7 +27,6 @@ declare const window: {
     saves: { status: SaveStatus | null };
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
 declare const indexedDB: {
   open(name: string): { result: IdbDb; onsuccess: (() => void) | null; onerror: (() => void) | null };
 };
@@ -51,14 +51,9 @@ async function tick(page: Page): Promise<number> {
   return Number(await page.locator("#sim-tick").textContent());
 }
 
-async function ready(page: Page): Promise<void> {
-  await expect(page.locator("#sim-tick")).toHaveText(/^\d+$/);
-  await page.waitForFunction(() => document.body.dataset["saveLoaded"] === "true");
-}
-
 async function open(page: Page): Promise<void> {
   await page.goto("/");
-  await ready(page);
+  await cityLoaded(page);
 }
 
 async function status(page: Page): Promise<SaveStatus> {
@@ -92,7 +87,7 @@ async function importFile(page: Page, file: string | { name: string; mimeType: s
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles(file);
   await loaded;
-  await ready(page);
+  await cityLoaded(page);
 }
 
 /** Clears everything the site has stored, as the browser's "clear site data" does. */
@@ -172,7 +167,7 @@ test("a file that is not a city, or is cut short, is refused and nothing changes
 
   // The page still opens the same city next time.
   await page.reload();
-  await ready(page);
+  await cityLoaded(page);
   expect((await status(page)).city.id).toBe(before.city.id);
 });
 
@@ -219,7 +214,7 @@ test("the page reminds the player to download a copy now and then", async ({ pag
     db.close();
   }, city.id);
   await page.reload();
-  await ready(page);
+  await cityLoaded(page);
   await expect(page.locator("#export-reminder")).toBeVisible();
   await expect(page.locator("#export-reminder")).toContainText("have not downloaded a copy");
   await page.screenshot({ path: "test-results/city-file-reminder.png" });
@@ -228,7 +223,7 @@ test("the page reminds the player to download a copy now and then", async ({ pag
 
   // It comes back next time, until a copy is downloaded.
   await page.reload();
-  await ready(page);
+  await cityLoaded(page);
   await expect(page.locator("#export-reminder")).toBeVisible();
   const [file] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download a copy" }).click()]);
   expect(file.suggestedFilename()).toMatch(/\.city$/);

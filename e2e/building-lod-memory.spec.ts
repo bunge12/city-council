@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { heightAt } from "../packages/sim/src/index";
-import { openCity, scaleCity, setPose, settle, stats } from "./building-lod-helpers";
-import { memory } from "./measure";
+import { openFixture, scaleCity, setPose, stats } from "./building-lod-helpers";
+import { settle } from "./helpers";
+import { memory, perfFigures } from "./measure";
 
 // Issue M2-13: flying across the map does not grow memory without bound.
 // The scale city filled with buildings, flown round a loop at street height
@@ -16,7 +17,7 @@ test.setTimeout(900_000);
 
 test("flying a loop twice ends with no more memory than flying it once", async ({ page }, testInfo) => {
   const { city, terrain, bytes } = scaleCity();
-  await openCity(page, "webgl&preset=low", "Town", bytes);
+  await openFixture(page, "webgl&preset=low", "Town", bytes);
   // A loop round the map at street height, over a grid at each stop.
   const stops = [0.1, 0.3, 0.5, 0.7, 0.9].flatMap((t) => {
     const g = city.grids[Math.floor(t * (city.grids.length - 1))];
@@ -27,7 +28,7 @@ test("flying a loop twice ends with no more memory than flying it once", async (
     for (const s of loop) {
       const h = heightAt(terrain, s.x, s.z);
       await setPose(page, [s.x, h + 190, s.z + 170], [s.x, h, s.z]);
-      await settle(page, 300_000);
+      await settle(page, { timeout: 300_000 });
       expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
     }
     const s = await stats(page);
@@ -38,6 +39,11 @@ test("flying a loop twice ends with no more memory than flying it once", async (
   const second = await fly();
   const report = { stops: loop.length, first, second };
   console.log(`M2-13 flying a loop twice: ${JSON.stringify(report, null, 2)}`);
+  perfFigures("building-lod-memory", "scale town, flying a loop twice", {
+    "page heap after one loop (MB)": first.memory.pageMb,
+    "page heap after two loops (MB)": second.memory.pageMb,
+    "geometries after two loops": second.geometries,
+  });
   await testInfo.attach("loop report", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
   // The same stops, so the same chunks in full at the end of each loop.
   expect(second.full).toEqual(first.full);

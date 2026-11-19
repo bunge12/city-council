@@ -1,0 +1,209 @@
+name: Perf and evidence
+
+# The Playwright `perf` and `evidence` projects (issue #225), outside the
+# required check. perf measures frame time, draw calls and memory on the
+# scale cities; evidence takes the pictures a pull request that changes the
+# look of the city shows. Both are the longest tests in the suite and are
+# bound by how fast a runner draws in software, so on a pull request they
+# report and never block a merge.
+#
+# They run nightly, after each push to main, and on a pull request that
+# touches packages/client/src/render/ or carries the `perf` or `evidence`
+# label. A rendering pull request then gets a table of its frame times next
+# to main's in the job summary, before it merges (scripts/perf-table.mjs).
+# A failure on main or at night opens an issue, or comments on the one open.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels its older run. On main, each push
+# gets a run of its own, and so does a label other than `perf` or
+# `evidence`, which then does nothing (see `plan`) and must not cancel the
+# run in flight.
+concurrency:
+  group: perf-${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'perf' || github.event.label.name == 'evidence') && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Decides which projects run, and reads the Playwright version for the
+  # container. Off a pull request both run. On one, each runs when its label
+  # is on it or when the change touches the renderer. A label added to the
+  # pull request starts a run only when it is one of those two.
+  plan:
+    if: github.event.action != 'labeled' || github.event.label.name == 'perf' || github.event.label.name == 'evidence'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      perf: ${{ steps.plan.outputs.perf }}
+      runners: ${{ steps.plan.outputs.runners }}
+      playwright: ${{ steps.playwright.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          perf=true
+          evidence=true
+          if [ "$EVENT" = pull_request ]; then
+            # The pull request merge commit against main.
+            render=false
+            if git diff --name-only HEAD^1 HEAD | grep -q '^packages/client/src/render/'; then render=true; fi
+            perf=$render
+            evidence=$render
+            if echo "$LABELS" | grep -q '"perf"'; then perf=true; fi
+            if echo "$LABELS" | grep -q '"evidence"'; then evidence=true; fi
+            echo "renderer changed: $render"
+          fi
+          echo "perf: $perf, evidence: $evidence"
+          # The runners: three for perf and two for evidence, each planned at
+          # about ten minutes (node scripts/e2e-shard.mjs --list 3 --project perf).
+          runners=""
+          if [ "$perf" = true ]; then
+            for i in 1 2 3; do runners="$runners{\"id\":\"perf-$i\",\"project\":\"perf\",\"files\":\"$i/3\"},"; done
+          fi
+          if [ "$evidence" = true ]; then
+            for i in 1 2; do runners="$runners{\"id\":\"evidence-$i\",\"project\":\"evidence\",\"files\":\"$i/2\"},"; done
+          fi
+          echo "perf=$perf" >> "$GITHUB_OUTPUT"
+          echo "runners=[${runners%,}]" >> "$GITHUB_OUTPUT"
+      - id: playwright
+        run: |
+          version=$(grep -m1 -oP "^  '@playwright/test@\K[0-9][^']*" pnpm-lock.yaml)
+          [ -n "$version" ] || { echo "No @playwright/test in pnpm-lock.yaml"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # Each project's files dealt out to runners by scripts/e2e-shard.mjs, one
+  # worker each, in the Playwright image, as in ci.yml's e2e job. On a pull
+  # request a failing test leaves the job green: its result is in the logs
+  # and the report, and the run does not block anything.
+  e2e:
+    needs: plan
+    if: needs.plan.outputs.runners != '[]'
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.plan.outputs.playwright }}-noble
+      options: --ipc=host
+    # Planned at about ten minutes a runner; a slow runner takes twice that
+    # and a failed test runs again.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.runners) }}
+    name: ${{ matrix.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - continue-on-error: ${{ github.event_name == 'pull_request' }}
+        env:
+          PROJECT: ${{ matrix.project }}
+          FILES: ${{ matrix.files }}
+          E2E_DEV_SERVER_ONLY: "1"
+        run: |
+          files=$(node scripts/e2e-shard.mjs "$FILES" --project "$PROJECT")
+          echo "Spec files: $files"
+          status=0
+          xvfb-run -a pnpm e2e --project "$PROJECT" --no-deps --workers=1 $files || status=$?
+          # After the run: Playwright empties test-results when it starts.
+          mkdir -p test-results/perf
+          node -e "const os = require('os'); const c = os.cpus(); console.log(c.length + ' x ' + c[0].model)" > test-results/perf/machine.txt
+          exit $status
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && matrix.project == 'perf'
+        with:
+          name: perf-figures-${{ matrix.id }}
+          path: test-results/perf
+          if-no-files-found: ignore
+          retention-days: 30
+      # The report holds every test's screenshots and figures, passed or not.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.id }}
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # This run's figures next to those of the last perf run on main that wrote
+  # any, in the job summary.
+  table:
+    needs: [plan, e2e]
+    if: always() && needs.plan.outputs.perf == 'true' && needs.e2e.result != 'skipped' && needs.e2e.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          # This run's figures, uploaded by its finished perf jobs.
+          gh run download "$RUN_ID" --pattern 'perf-figures-*' --dir current || echo "This run uploaded no figures."
+          # The newest finished run on main other than this one whose figures
+          # can still be downloaded. A run that failed still wrote the
+          # figures of the tests that passed.
+          # Not a pull request's run: a fork's branch may be called main too.
+          for id in $(gh run list --workflow perf.yml --branch main --status completed --limit 20 --json databaseId,event --jq '.[] | select(.event != "pull_request") | .databaseId'); do
+            [ "$id" = "$RUN_ID" ] && continue
+            if gh run download "$id" --pattern 'perf-figures-*' --dir baseline 2>/dev/null; then
+              echo "Main's figures from run $id."
+              echo "Compared with [run $id on main](${{ github.server_url }}/${{ github.repository }}/actions/runs/$id)." > baseline-note.md
+              break
+            fi
+          done
+          node scripts/perf-table.mjs current baseline > table.md
+          { cat table.md; echo; cat baseline-note.md 2>/dev/null || true; } >> "$GITHUB_STEP_SUMMARY"
+          cat table.md
+
+  # On main, after a push or at night, a failed run opens an issue, or
+  # comments on the one already open, so a slow night does not open one
+  # issue per run. It blocks nothing: the required check is ci.yml's.
+  report:
+    needs: [plan, e2e, table]
+    if: >-
+      always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
+      (needs.plan.result == 'failure' || needs.e2e.result == 'failure' || needs.e2e.result == 'cancelled' || needs.table.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Perf or evidence run failed on main"
+          body=$(printf 'The perf and evidence run (%s) failed on `main` at %s.\n\nRun: %s\n\nThese tests do not gate a merge (issue #225). Look at which test failed and whether a runner was only slow before fixing anything.' "$EVENT" "$SHA" "$RUN_URL")
+          open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

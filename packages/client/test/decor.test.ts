@@ -121,12 +121,12 @@ describe("the decoration layer", () => {
     let mask: Uint8Array | null = null;
     const scene = new Scene();
     const layer = createDecorLayer(terrain, scene, (c) => (c === chunk ? mask : null));
-    // Every chunk in range built, a few a frame.
-    let last = -1;
-    for (let f = 0; f < 500 && treesDrawn(scene) !== last; f++) {
-      last = treesDrawn(scene);
-      layer.update(eye);
-    }
+    // Every chunk in range built, a few a frame. A fixed count of frames, as in
+    // the next test: how many chunks a frame builds depends on how fast the
+    // machine is (BUILD_MS_PER_FRAME), and stopping at the first frame that
+    // adds no trees stopped early on a busy runner, when that frame built only
+    // a chunk with none, before the forest chunk was built (issue #230).
+    for (let f = 0; f < 500; f++) layer.update(eye);
     const before = treesDrawn(scene);
     expect(before).toBeGreaterThan(0);
 
@@ -169,5 +169,35 @@ describe("the decoration layer", () => {
     for (let f = 0; f < 500; f++) layer.update(eye);
     expect(treesDrawn(scene)).toBeLessThan(near);
     layer.dispose();
+  });
+
+  it("builds every chunk in range in one update with no budget, and says how many are left to build (issue #223)", () => {
+    const { chunk, eye } = forestChunk();
+    const budgeted = createDecorLayer(terrain, new Scene());
+    const flushed = createDecorLayer(terrain, new Scene());
+    expect(flushed.pending()).toBe(0);
+    flushed.update(eye, Infinity);
+    expect(flushed.pending()).toBe(0);
+    // The budget takes frames to get there, at least one chunk each; zero milliseconds builds exactly one.
+    budgeted.update(eye, 0);
+    const left = budgeted.pending();
+    expect(left).toBeGreaterThan(0);
+    budgeted.update(eye, 0);
+    expect(budgeted.pending()).toBe(left - 1);
+    for (let f = 0; f < 500 && budgeted.pending() > 0; f++) budgeted.update(eye, 0);
+    expect(budgeted.pending()).toBe(0);
+    expect(budgeted.counts()).toEqual(flushed.counts());
+    // A chunk marked to build again is pending until the next update builds it.
+    flushed.refresh([chunk]);
+    expect(flushed.pending()).toBe(0);
+    const mask = new Uint8Array(MASK_SIDE * MASK_SIDE).fill(MASK_TREES);
+    const relaid = createDecorLayer(terrain, new Scene(), (c) => (c === chunk ? mask : null));
+    relaid.update(eye, Infinity);
+    mask.fill(0);
+    expect(relaid.refresh([chunk])).toEqual([chunk]);
+    expect(relaid.pending()).toBe(1);
+    relaid.update(eye, Infinity);
+    expect(relaid.pending()).toBe(0);
+    for (const l of [budgeted, flushed, relaid]) l.dispose();
   });
 });

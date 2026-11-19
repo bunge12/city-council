@@ -24,13 +24,13 @@ import { SimMirror, type MirrorUpdate } from "./protocol/mirror";
 import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { ClockClient } from "./protocol/clock";
 import { createWorkerTransport } from "./protocol/transport";
-import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
-import type { SaveStatus } from "./save/channel";
+import { SaveClient, fetchCityFile, requestPersistence, takeLoadAddress, type PersistenceResult } from "./save/page";
+import { SAVES_CHANNEL, type LoadFileMessage, type SaveStatus } from "./save/channel";
 import { createCameraControls, type CameraControls } from "./camera/controls";
 import type { GroundHit } from "./camera/pick";
 import { createCameraRig, type CameraRig } from "./camera/rig";
 import { startPose } from "./camera/start-pose";
-import { createView, wantsWebGL, type View } from "./render/view";
+import { createView, viewOptions, wantsWebGL, type View } from "./render/view";
 import { choosePreset, loadPreset, presetForBenchmark, savePreset, type Preset } from "./render/presets";
 import { createRoadPreviewLayer } from "./render/road-preview";
 import type { PreviewShape } from "./render/road-preview-geometry";
@@ -82,7 +82,27 @@ function setTabCity(id: string): void {
 /** True from the moment this tab has chosen another city until the reload that opens it. */
 let switching = false;
 
-const worker = createWorkerTransport(tabCity());
+// `?load=<address>` opens the city file at that address on this site in
+// place of the city this tab would open, in this page load, as an import
+// does after its reload. Playwright opens its fixtures this way. The address
+// comes out of the page's own, so a reload stays on the city it opened.
+const load = takeLoadAddress(location.search);
+if (load.address !== null) history.replaceState(history.state, "", `${location.pathname}${load.rest}${location.hash}`);
+
+const worker = createWorkerTransport(tabCity(), load.address !== null);
+if (load.address !== null) {
+  // The worker waits for this message before it opens any city, so one is sent whatever happens.
+  const address = load.address;
+  void fetchCityFile(address, location.href)
+    .catch((error: unknown): LoadFileMessage => ({
+      channel: SAVES_CHANNEL,
+      type: "load",
+      fileName: address,
+      bytes: null,
+      error: `It could not be fetched: ${error instanceof Error ? error.message : String(error)}.`,
+    }))
+    .then((file) => worker.saves.send(file, file.bytes ? [file.bytes] : []));
+}
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
 const saves = new SaveClient(worker.saves);
 const simClock = new ClockClient(worker.clock);
@@ -511,7 +531,7 @@ const cameraReady = new Promise<CameraHooks>((resolve) => {
   resolveCamera = resolve;
 });
 
-const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) => {
+const viewReady = createView(canvas, wantsWebGL(location.search), viewOptions(location.search)).then((view) => {
   setViewReadout({ backend: view.backend === "webgpu" ? "WebGPU" : "WebGL 2" });
   let shownSeed: number | null = null;
   let graphicsStarted = false;

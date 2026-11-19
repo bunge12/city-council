@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { ROAD_TYPES, ZONING_BALANCE, createState, generateTerrain, heightAt, serialize, type SimState } from "../packages/sim/src/index";
+import { ROAD_TYPES, ZONING_BALANCE, createState, generateTerrain, heightAt, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M2-07: the zone tool. A player opens it, paints R1 along one side of
 // a street with a fill two cells deep, sees the cells change and one entry
@@ -30,7 +31,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -59,20 +59,6 @@ function twoStreets(): SimState {
 
 /** The z of the centre of the cell `row` back from the north edge of the street along `z`. */
 const northRow = (z: number, row: number) => z - HALF - CELL / 2 - row * CELL;
-
-async function openCity(page: Page, state: SimState): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Zone.city", mimeType: "application/octet-stream", buffer: Buffer.from(serialize(state)) });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
-}
 
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
   const g = groundAt(x, z);
@@ -125,7 +111,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 }
 
 test("fill paints a strip two cells deep, a repeat sends nothing, and erase clears it", async ({ page }, testInfo) => {
-  await openCity(page, twoStreets());
+  await openCity(page, twoStreets(), { name: "Zone" });
   await look(page, MID_X, SOUTH_Z - 30, 280);
   await page.locator("#view").focus();
   await page.keyboard.press("KeyL");
@@ -203,7 +189,7 @@ test("fill paints a strip two cells deep, a repeat sends nothing, and erase clea
 });
 
 test("a brush drag across two streets paints cells on both, and Escape drops a stroke", async ({ page }, testInfo) => {
-  await openCity(page, twoStreets());
+  await openCity(page, twoStreets(), { name: "Zone" });
   await look(page, MID_X, SOUTH_Z - 30, 280);
   await page.locator("#view").focus();
   await page.keyboard.press("KeyK");

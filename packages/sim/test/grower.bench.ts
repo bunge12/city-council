@@ -31,7 +31,6 @@ import {
   BUILDINGS_BALANCE,
   TIME_BALANCE,
   ZONING_BALANCE,
-  buildScaleCity,
   dayOf,
   growthOnTick,
   planRoad,
@@ -39,6 +38,7 @@ import {
   prepareDerived,
   type BuildRoadGridPayload,
 } from "../src/index";
+import { loadScaleCity } from "./scale-fixture";
 import { buildingCount, removeBuilding } from "../src/buildings/buildings";
 import { forgetCandidates } from "../src/buildings/candidates";
 import { grow, growOne } from "../src/buildings/grower";
@@ -61,7 +61,7 @@ const GROWER_SHARE_MS = 5;
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
 const ZONES = ZONING_BALANCE.zones.length;
 
-const { state, counts, grids } = buildScaleCity();
+const { state, counts, grids } = loadScaleCity();
 prepareDerived(state);
 const net = state.roads;
 const terrain = terrainOf(state.seed);

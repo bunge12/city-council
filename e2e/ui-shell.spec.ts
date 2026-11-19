@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { cityLoaded } from "./helpers";
 
 // The UI shell: top bar, speed controls and shortcuts, debug panel, activity
 // log and city menu. Everything here goes through the page's own controls.
@@ -23,14 +24,9 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 const VIEWPORT = { width: 1280, height: 800 };
 test.use({ viewport: VIEWPORT });
 
-async function ready(page: Page): Promise<void> {
-  await expect(page.locator("#sim-tick")).toHaveText(/^\d+$/);
-  await page.waitForFunction(() => document.body.dataset["saveLoaded"] === "true");
-}
-
 async function open(page: Page, url = "/"): Promise<void> {
   await page.goto(url);
-  await ready(page);
+  await cityLoaded(page);
 }
 
 async function tick(page: Page): Promise<number> {
@@ -193,7 +189,7 @@ test("the city menu starts a new city from a seed and opens a saved one from the
   const loaded = page.waitForEvent("load");
   await menu.getByRole("button", { name: "Start new city" }).click();
   await loaded;
-  await ready(page);
+  await cityLoaded(page);
 
   const second = await status(page);
   expect(second.city).toMatchObject({ name: "Harbourside", seed: 20261112 });
@@ -212,7 +208,7 @@ test("the city menu starts a new city from a seed and opens a saved one from the
   const reopened = page.waitForEvent("load");
   await menu.getByRole("button", { name: `Open ${first.city.name}` }).click();
   await reopened;
-  await ready(page);
+  await cityLoaded(page);
   const third = await status(page);
   expect(third.city.id).toBe(first.city.id);
   expect(third.loadedFrom).toBe("latest save");

@@ -1,6 +1,7 @@
-// Measuring a page for the scale checks (scale.spec.ts, building-lod.spec.ts):
+// Measuring a page for the perf project (scale.spec.ts, building-lod-scale.spec.ts and the rest):
 // the time between animation frames, and the tab's JS heap.
 
+import { mkdirSync, writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 
 declare const performance: { now(): number };
@@ -69,4 +70,18 @@ export async function memory(page: Page): Promise<{ pageMb: number; workerMb: nu
   }
   await cdp.detach();
   return { pageMb: mb(used), workerMb: worker === null ? null : mb(worker) };
+}
+
+/**
+ * Writes figures for the perf run's table (issue #225) to
+ * test-results/perf/`name`.json: `{ title, figures: { label: value } }`, each
+ * label naming its unit. scripts/perf-table.mjs sets them beside the same
+ * figures from the last run on `main`. A figure missing on either side
+ * shows as a dash.
+ */
+export function perfFigures(name: string, title: string, figures: Record<string, number | null | undefined>): void {
+  const kept: Record<string, number> = {};
+  for (const [label, value] of Object.entries(figures)) if (typeof value === "number" && Number.isFinite(value)) kept[label] = Math.round(value * 10) / 10;
+  mkdirSync("test-results/perf", { recursive: true });
+  writeFileSync(`test-results/perf/${name}.json`, `${JSON.stringify({ title, figures: kept }, null, 2)}\n`);
 }

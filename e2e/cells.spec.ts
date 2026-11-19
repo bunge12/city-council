@@ -1,9 +1,10 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { CELL_OPEN, CHUNKS_PER_SIDE, CHUNK_SIZE, ZONING_BALANCE, cellShapesInChunk, generateTerrain, heightAt } from "../packages/sim/src/index";
-import { zonedFixtureCity, zonedScaleCity } from "./cell-fixtures";
+import { zonedFixtureCity } from "./cell-fixtures";
 import { decodePng, type Image } from "./png";
-import { SEED, groundAt, scaleCity } from "./road-fixtures";
+import { SEED, groundAt } from "./road-fixtures";
+import { canvasShot, frames, openCity, settle } from "./helpers";
 
 // Issue M2-06: the zoning overlay. It runs in the `roads` project, headed
 // with WebGPU on where the browser has an adapter (see playwright.config.ts),
@@ -11,7 +12,9 @@ import { SEED, groundAt, scaleCity } from "./road-fixtures";
 // screenshots.
 //
 // The city is the road fixture with every zone at every density painted
-// along its streets (cell-fixtures.ts), imported as a city file.
+// along its streets (cell-fixtures.ts), imported as a city file. The overlay
+// over a 30,000 segment city is cells-scale.spec.ts, in the perf project
+// (issue #225).
 
 type Vec3 = [number, number, number];
 interface CellStats {
@@ -44,8 +47,6 @@ declare const document: {
   querySelectorAll(selector: string): ArrayLike<{ getAttribute(name: string): string | null }>;
 };
 declare function getComputedStyle(element: unknown): { backgroundColor: string };
-declare function requestAnimationFrame(callback: () => void): number;
-declare const performance: { now(): number };
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(240_000);
@@ -54,22 +55,6 @@ const BACKENDS = [
   { name: "default backend", query: "?preset=low" },
   { name: "?webgl", query: "?webgl&preset=low" },
 ] as const;
-
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
-
-/** Opens the page, then imports `bytes` as a city and waits for it to be drawn. */
-async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<string> {
-  await page.goto(`/${query}`);
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-  const status = await page.evaluate(() => window.cityCouncil.renderStatus());
-  return status?.backend ?? "none";
-}
 
 async function cellStats(page: Page): Promise<CellStats> {
   const stats = await page.evaluate(async () => (await window.cityCouncil.view).cellStats());
@@ -98,41 +83,17 @@ async function setOverlay(page: Page, on: boolean): Promise<void> {
   await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe(String(on));
   if (on) await cellsBuilt(page);
   // The next frame draws it.
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await frames(page);
 }
 
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
 }
 
-/** Waits until decoration has finished building near the camera: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
-}
-
 async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, body);
   await testInfo.attach(name, { path, contentType: "image/png" });
-}
-
-/** The canvas alone, without the page's panels over it. */
-async function canvasShot(page: Page): Promise<Buffer> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  const shot = await page.locator("#view").screenshot();
-  await page.addStyleTag({ content: "#ui { display: block !important; }" });
-  return shot;
 }
 
 const ground = groundAt(4250, 4600);
@@ -155,7 +116,7 @@ test("the fixture paints every zone at every density", () => {
 
 for (const { name, query } of BACKENDS) {
   test(`the zoning overlay draws the same in every zoom band (${name})`, async ({ page }, testInfo) => {
-    const backend = await openCity(page, query, "Zoned", fixture.bytes);
+    const backend = await openCity(page, fixture.bytes, { query, name: "Zoned" });
     if (query.startsWith("?webgl")) expect(backend).toBe("webgl2");
     else if (process.env["CI"]) expect(backend).toBe("webgpu");
     testInfo.annotations.push({ type: "backend", description: backend });
@@ -186,7 +147,7 @@ for (const { name, query } of BACKENDS) {
 }
 
 test("painting one strip rebuilds only the chunks it touches and their neighbours", async ({ page }, testInfo) => {
-  await openCity(page, "?webgl&debug", "Zoned", fixture.bytes);
+  await openCity(page, fixture.bytes, { query: "?webgl&debug", name: "Zoned" });
   await overlayOn(page);
   const paint = async (from: [number, number], to: [number, number]) => {
     const result = await page.evaluate(
@@ -250,7 +211,7 @@ const asphalt = (r: number, g: number, b: number) => Math.max(r, g, b) - Math.mi
 
 for (const preset of ["low", "high"] as const) {
   test(`cells show the legend's colours, unlit and unshaded, over the ground and under the roads (${preset})`, async ({ page }, testInfo) => {
-    await openCity(page, `?webgl&preset=${preset}`, "Zoned", fixture.bytes);
+    await openCity(page, fixture.bytes, { query: `?webgl&preset=${preset}`, name: "Zoned" });
     await expect.poll(() => page.evaluate(() => document.body.dataset["presetSettled"])).toBe("true");
     await overlayOn(page);
     // The legend's swatches, by "zone,density", as the page draws them.
@@ -324,138 +285,3 @@ for (const preset of ["low", "high"] as const) {
     expect(results.some((r) => /street, frame 0, roads hidden: 0 of [1-9]\d/.test(r)), results.join("\n")).toBe(true);
   });
 }
-
-/** Mean time between `frames` animation frames, in ms. */
-async function frameTime(page: Page, frames: number): Promise<number> {
-  return page.evaluate(async (frames) => {
-    const times: number[] = [];
-    await new Promise<void>((resolve) => {
-      let last = -1;
-      const tick = (now: number) => {
-        if (last >= 0) times.push(now - last);
-        last = now;
-        if (times.length < frames) requestAnimationFrame(() => tick(performance.now()));
-        else resolve();
-      };
-      requestAnimationFrame(() => tick(performance.now()));
-    });
-    return times.reduce((a, b) => a + b, 0) / times.length;
-  }, frames);
-}
-
-test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band", async ({ page }, testInfo: TestInfo) => {
-  // Ten minutes: since issue #164 the overlay fills in while the camera
-  // pans the district band, which takes this test from about 2.8 to 3.6
-  // minutes on the development container, and an EPYC 7763 runner, the
-  // slowest CI has, ran past the seven it had before.
-  test.setTimeout(600_000);
-  const query = "?webgl";
-  const scaleGround = groundAt(6000, 6000);
-  const poses: { band: string; position: Vec3; target: Vec3 }[] = [
-    { band: "street", position: [6000, scaleGround + 300, 6300], target: [6000, scaleGround, 6000] },
-    { band: "district", position: [6000, scaleGround + 1600, 7400], target: [6000, scaleGround, 6000] },
-    { band: "city", position: [6000, 8400, 15_800], target: [6000, 0, 5600] },
-  ];
-  // The same roads with nothing zoned and the overlay off, for comparison.
-  await openCity(page, query, "Thirty thousand", scaleCity(30_000));
-  // Fixed short waits, not `settle`: in software a frame of this city takes
-  // half a second, and waiting for the trees to settle took a minute a pose.
-  const plain: Record<string, number> = {};
-  for (const { band, position, target } of poses) {
-    await setPose(page, position, target);
-    await frameTime(page, 5);
-    plain[band] = await frameTime(page, 20);
-  }
-  const city = zonedScaleCity(30_000);
-  const backend = await openCity(page, query, "Thirty thousand zoned", city.bytes);
-  // The overlay goes on in the district band, and the camera pans across
-  // the band while it fills in (issue #164). Every free zoned cell is ground
-  // the lot finder has to look at, and the zones change from one segment to
-  // the next, so there are marks all over. The pan is short and the rest of
-  // the fill, a chunk a frame, goes on from the city band, whose frames are
-  // the cheapest in software: on a slow runner the whole fill in the
-  // district band ran past the test's time. The gaps between frames: the
-  // longest is how long the page stood still.
-  const district = poses.find((p) => p.band === "district");
-  const cityBand = poses.find((p) => p.band === "city");
-  if (!district || !cityBand) throw new Error("no district or city pose");
-  await setPose(page, district.position, district.target);
-  await frameTime(page, 3);
-  await page.evaluate(async ([position, target, cityPosition, cityTarget]) => {
-    const w = window as unknown as { gaps: number[]; recording: boolean };
-    const { rig } = await window.cityCouncil.camera;
-    w.gaps = [];
-    w.recording = true;
-    let last = performance.now();
-    let frame = 0;
-    const tick = () => {
-      // Once the fill is done the test sets its own poses, and a frame still queued must not move the camera back (issue #163 made the fill shorter than the pan).
-      if (!w.recording) return;
-      const now = performance.now();
-      w.gaps.push(now - last);
-      last = now;
-      // 2 km east and back, 40 m a frame, over its first 100 frames, then up to the city band.
-      if (frame <= 100) {
-        const dx = 40 * (frame < 50 ? frame : 100 - frame);
-        rig.setPose([position[0] - 1000 + dx, position[1], position[2]], [target[0] - 1000 + dx, target[1], target[2]]);
-      } else if (frame === 101) {
-        rig.setPose(cityPosition, cityTarget);
-      }
-      frame++;
-      if (w.recording) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }, [district.position, district.target, cityBand.position, cityBand.target] as const);
-  const start = Date.now();
-  await page.locator("#view").focus();
-  await page.keyboard.press("k");
-  await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe("true");
-  // Slower than `cellsBuilt` allows: the pan's frames build terrain and trees as well.
-  await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 300_000 });
-  const firstShowMs = Date.now() - start;
-  const gaps = await page.evaluate(() => {
-    const w = window as unknown as { gaps: number[]; recording: boolean };
-    w.recording = false;
-    return [...w.gaps].sort((a, b) => b - a);
-  });
-  const longestFramesMs = gaps.slice(0, 3).map((g) => Math.round(g));
-  const stats = await cellStats(page);
-  expect(stats.zoned).toBe(city.zoned);
-  expect(stats.marked, "cells hatched").toBeGreaterThan(0);
-  const overlay: Record<string, number> = {};
-  for (const { band, position, target } of poses) {
-    await setPose(page, position, target);
-    await frameTime(page, 5);
-    expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
-    overlay[band] = await frameTime(page, 20);
-    await attach(testInfo, `30,000 segments, every cell zoned, ${band} band`, await canvasShot(page));
-  }
-  const report = {
-    backend,
-    zonedCells: stats.zoned,
-    unzonedCells: stats.unzoned,
-    markedCells: stats.marked,
-    chunks: stats.chunks,
-    buildMs: stats.lastBuildMs,
-    // The first chunk and frame build indexes on the mirror once (CellStats), apart from the rest.
-    firstChunkMarksMs: Math.round(stats.firstMarksMs * 100) / 100,
-    firstOverlayFrameMs: Math.round(stats.firstFrameMs * 100) / 100,
-    slowestChunkMarksMs: Math.round(stats.slowestMarksMs * 100) / 100,
-    slowestOverlayFrameMs: Math.round(stats.slowestFrameMs * 100) / 100,
-    firstShowMs,
-    longestFramesMs,
-    framesWhileFilling: gaps.length,
-    plainFrameMs: plain,
-    overlayFrameMs: overlay,
-  };
-  console.log(`30,000 segments, every cell zoned: ${JSON.stringify(report)}`);
-  await testInfo.attach("frame times", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
-  // As with the roads' scale check (roads.spec.ts): a machine with a GPU
-  // holds the display's rate, a CI runner draws in software, so this only
-  // catches a gross regression, such as one mesh per cell. The numbers are
-  // logged above either way.
-  for (const { band } of poses) expect(overlay[band] ?? Infinity).toBeLessThan(Math.max(1000 / 55, (plain[band] ?? 0) * 3));
-  // Issue #164: no chunk's lot marks take a frame at 60 fps. They took 50 to 90 ms on the densest chunks here before.
-  // About 2 ms on the development container, so the bound only catches the old cost coming back, not a slow runner.
-  expect(stats.slowestMarksMs).toBeLessThan(16);
-});
