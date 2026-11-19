@@ -56,11 +56,15 @@ async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<v
 }
 
 test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band", async ({ page }, testInfo: TestInfo) => {
-  // Ten minutes: since issue #164 the overlay fills in while the camera
+  // Fifteen minutes. Since issue #164 the overlay fills in while the camera
   // pans the district band, which takes this test from about 2.8 to 3.6
-  // minutes on the development container, and an EPYC 7763 runner, the
-  // slowest CI has, ran past the seven it had before.
-  test.setTimeout(600_000);
+  // minutes on the development container. Since issue #225 it runs headed
+  // in the perf project, at every frame's real cost (#226): 5.6 to 7
+  // minutes on CI's faster runners, about three times scale.spec.ts each
+  // time. An EPYC 7763, the slowest CI has, takes scale.spec.ts 3.3 to 4.5
+  // minutes, so this test needs 10 to 14 there and timed out at ten (issue
+  // #252). Fifteen is a third of the perf job's 45 minutes (issue #228).
+  test.setTimeout(900_000);
   const query = "?webgl";
   const scaleGround = groundAt(6000, 6000);
   const poses: { band: string; position: Vec3; target: Vec3 }[] = [
