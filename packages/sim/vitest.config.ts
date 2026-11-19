@@ -8,6 +8,10 @@ export default defineConfig({
     // A worker per core. Vitest leaves one for its own process by default,
     // but that process waits while the sim's tests run (issue #230).
     maxWorkers: "100%",
+    // The benches collect before each case they hold to a budget, so the
+    // garbage of the setup or the case before is not collected inside its
+    // runs (test/budget.ts, issue #231). The tests do not call it.
+    execArgv: ["--expose-gc"],
     benchmark: {
       // In bench mode Vitest wraps every export in a getter that counts its
       // calls, to warn when a bench calls across modules a lot. The sim's hot

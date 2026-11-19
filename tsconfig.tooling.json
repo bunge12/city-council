@@ -5,5 +5,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["playwright.config.ts", "e2e", "packages/client/vite.config.ts"]
+  "include": ["playwright.config.ts", "e2e", "packages/client/vite.config.ts", "packages/client/vitest.config.ts"]
 }

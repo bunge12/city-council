@@ -4,6 +4,7 @@
 // issue 02 is under 0.1 ms for one nearest-segment query, on average.
 
 import { expect, test } from "vitest";
+import { budget, collect } from "./budget";
 import { nextFloat, seedRng } from "../src/rng";
 import { createRoadNetwork, segmentCount } from "../src/roads/network";
 import { buildRoadIndex, nearestNode, nearestPointOnSegment, segmentsInBox } from "../src/roads/spatial";
@@ -58,9 +59,10 @@ test("road spatial index on 30,000 segments", async ({ bench }) => {
   for (const [name, fn] of Object.entries(cases)) {
     // Vitest writes each result under bench-results/ and prints the table.
     const file = `bench-results/${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
+    collect();
     const result = await bench(name, { writeResult: file }, fn).run();
     meanMs[name] = result.latency.mean;
   }
-  expect(meanMs["nearest point on a segment, 50 m"]).toBeLessThan(NEAREST_SEGMENT_TARGET_MS);
-  expect(meanMs["nearest point on a segment, 250 m"]).toBeLessThan(NEAREST_SEGMENT_TARGET_MS);
+  expect(meanMs["nearest point on a segment, 50 m"], budget("nearest point on a segment, 50 m")).toBeLessThan(NEAREST_SEGMENT_TARGET_MS);
+  expect(meanMs["nearest point on a segment, 250 m"], budget("nearest point on a segment, 250 m")).toBeLessThan(NEAREST_SEGMENT_TARGET_MS);
 }, 120_000);

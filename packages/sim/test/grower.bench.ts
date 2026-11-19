@@ -27,6 +27,7 @@
 //   command pays it (buildings/upkeep.ts).
 
 import { expect, test } from "vitest";
+import { budget, collect } from "./budget";
 import {
   BUILDINGS_BALANCE,
   TIME_BALANCE,
@@ -55,7 +56,8 @@ const TICK_BUDGET_MS = 20;
  * The grower's share of the tick at `growthPerDayMax`: a quarter, as
  * `settleCellsPerTick` takes, so it, a slice of cells and a command fit
  * in one tick. Held on the mean, since a single run's worst is mostly a
- * garbage collection landing in it; the worst is held to the whole budget.
+ * garbage collection landing in it; the median is held to the whole budget
+ * (issue #231).
  */
 const GROWER_SHARE_MS = 5;
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
@@ -171,9 +173,10 @@ function takeBack(): void {
 
 test("the grower on the M1 scale network with every cell zoned", async ({ bench, annotate }) => {
   const runs = { iterations: 30, time: 0, warmupIterations: 2, warmupTime: 0 };
-  const results: Record<string, { mean: number; p99: number; max: number }> = {};
+  const results: Record<string, { mean: number; p50: number; p99: number; max: number }> = {};
   const time = async (name: string, hooks: { beforeEach?: () => void; afterEach?: () => void }) => {
     const file = `bench-results/grower-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
+    collect();
     const r = await bench(
       name,
       {
@@ -187,7 +190,7 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
       },
       growOnce,
     ).run(runs);
-    results[name] = { mean: r.latency.mean, p99: r.latency.p99 ?? 0, max: r.latency.max };
+    results[name] = { mean: r.latency.mean, p50: r.latency.p50, p99: r.latency.p99 ?? 0, max: r.latency.max };
   };
 
   zoneEverything((z, d) => [z, d]);
@@ -281,6 +284,7 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   // first run removes them, so later runs measure the filing and the check.
   const upkeep = `the buildings' upkeep after a grid at the cap over existing streets, with ${standing} buildings standing`;
   {
+    collect();
     const r = await bench(
       upkeep,
       {
@@ -295,20 +299,23 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
       },
       () => keepBuildings(state),
     ).run(runs);
-    results[upkeep] = { mean: r.latency.mean, p99: r.latency.p99 ?? 0, max: r.latency.max };
+    results[upkeep] = { mean: r.latency.mean, p50: r.latency.p50, p99: r.latency.p99 ?? 0, max: r.latency.max };
   }
 
   const round = (v: number) => Math.round(v * 100) / 100;
   const report = {
     city: { segments: counts.segments, cells: state.cells.zone.length, frontCells: state.cells.zone.length / DEPTH },
-    ms: Object.fromEntries(Object.entries(results).map(([k, v]) => [k, { mean: round(v.mean), p99: round(v.p99), max: round(v.max) }])),
+    ms: Object.fromEntries(Object.entries(results).map(([k, v]) => [k, { mean: round(v.mean), p50: round(v.p50), p99: round(v.p99), max: round(v.max) }])),
     budgetMs: TICK_BUDGET_MS,
     growerShareMs: GROWER_SHARE_MS,
   };
   await annotate(JSON.stringify(report, null, 2), "grower");
+  // The median of the 30 runs, not the worst: one run's worst is whatever
+  // collection or pause of the runner landed in it (issue #231). A tick
+  // that is slow every time moves the median with it.
   for (const [name, r] of Object.entries(results)) {
     if (name.includes("from scratch")) continue;
-    expect(r.max, name).toBeLessThan(TICK_BUDGET_MS);
-    if (name.includes("growthPerDayMax")) expect(r.mean, name).toBeLessThan(GROWER_SHARE_MS);
+    expect(r.p50, budget(`${name}, median`)).toBeLessThan(TICK_BUDGET_MS);
+    if (name.includes("growthPerDayMax")) expect(r.mean, budget(`${name}, mean`)).toBeLessThan(GROWER_SHARE_MS);
   }
 }, 600_000);

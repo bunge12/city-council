@@ -12,6 +12,7 @@
 // the cap over existing streets, every section splitting one.
 
 import { expect, test } from "vitest";
+import { budget, collect } from "./budget";
 import { ROAD_BUILD } from "../src/roads/balance";
 import { blockIndexOf, listBlocks } from "../src/roads/blocks";
 import { buildRoadGrid, planRoadGrid } from "../src/roads/grid";
@@ -169,11 +170,12 @@ test("BuildRoadGrid at the cap on 30,000 segments", async ({ bench }) => {
   const meanMs: Record<string, number> = {};
   for (const [name, fn] of Object.entries(cases)) {
     const file = `bench-results/grid-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
+    collect();
     const result = await bench(name, { writeResult: file }, fn).run();
     meanMs[name] = result.latency.mean;
   }
   expect(segmentCount(over)).toBe(30_012);
   expect(segmentCount(open)).toBe(29_640);
   // The tick budget is 20 ms, and each step must fit inside it.
-  for (const ms of Object.values(meanMs)) expect(ms).toBeLessThan(TICK_BUDGET_MS);
+  for (const [name, ms] of Object.entries(meanMs)) expect(ms, budget(name)).toBeLessThan(TICK_BUDGET_MS);
 }, 300_000);
