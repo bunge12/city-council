@@ -36,6 +36,8 @@ BASE_URL=https://bunge12.github.io/city-council/ pnpm e2e --project walkthrough
 
 Every e2e test starts with the Low preset kept in the browser (see `playwright.config.ts`), so the first-run benchmark does not run in each fresh browser. `e2e/presets.spec.ts` clears it to test the benchmark. For frame times per preset on the M1 scale city, run `e2e/scale.spec.ts` with `SCALE_PRESET` set to `low`, `balanced` or `high`. Add `SCALE_WEBGPU=1` and `--project roads` to measure on WebGPU instead of `?webgl`.
 
+Specs open their fixture cities with `openCity` from `e2e/helpers.ts`, which also has `ready`, `frames`, `settle` and `canvasShot`. Use those rather than writing your own. `openCity` loads the page once: the page's `?load=` address names a city file that `page.route` answers, and the worker stores and opens that file in place of any other city, with no import and no reload. `canvasShot` takes a screenshot of the page clipped to the canvas. A screenshot of the canvas element waits for the canvas to stop changing, which takes twice as long in software rendering.
+
 The replay tests feed a recorded command log and a seed to the sim and compare a hash of the final state. If one fails after your change, the sim has become nondeterministic or its behaviour changed. Both need an explanation in the pull request.
 
 Fixtures live in `packages/sim/test/fixtures/replay/`. Each holds a seed, a log, the tick to replay to and the expected hash. When a change to the sim is meant to change the result, the failing test prints the new hash. Put it in the fixture and say why in the pull request.
