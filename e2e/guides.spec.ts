@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, deserialize, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
+import { MEASURE_STATE } from "./browser-state";
 import { SEED, buildRoads, groundAt, scaleCity } from "./road-fixtures";
 
 // Issue M1-19: guide lines and parallel offset. A player draws a street
@@ -285,44 +286,49 @@ async function drawingFrameTime(page: Page, centre: { x: number; y: number }, co
   );
 }
 
-test("drawing in a network of 30,000 segments keeps its frame time with the guides on", async ({ page }, testInfo) => {
-  // 3.1 minutes on a CI runner that draws a frame here in 0.7 s; one that
-  // takes 1.2 s ran past five minutes (issue #152).
-  test.setTimeout(480_000);
-  const bytes = scaleCity(30_000);
-  const at = busySpot(bytes, 150);
-  await openCity(page, bytes, "Thirty thousand");
-  const g = groundAt(at.x, at.z);
-  await setPose(page, [at.x, g + 380, at.z + 170], [at.x, g, at.z]);
-  await page.keyboard.press("KeyR");
-  // Free-hand, so the start lands where clicked, on open ground or a road.
-  await page.keyboard.down("Alt");
-  const centre = await screenAt(page, at.x, at.z);
-  await page.mouse.click(centre.x, centre.y);
-  await page.keyboard.up("Alt");
-  await frames(page);
+test.describe("at the real settings", () => {
+  // Times frames: every frame drawn, antialiased, at the real pixel ratio (issue #226).
+  test.use({ storageState: MEASURE_STATE });
 
-  const toggle = async () => {
-    await page.locator("#guide-lines").click();
-    await page.locator("#guide-offset").click();
-  };
-  const FRAMES = 30;
-  // Alternate, guides on then off, to spread the machine's noise over both.
-  const on: number[] = [];
-  const off: number[] = [];
-  for (let round = 0; round < 2; round++) {
-    on.push(await drawingFrameTime(page, centre, FRAMES));
-    await toggle();
-    off.push(await drawingFrameTime(page, centre, FRAMES));
-    await toggle();
-  }
-  const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
-  const report = { at, onFrameMs: mean(on), offFrameMs: mean(off), on, off };
-  console.log(`30,000 segments, drawing: ${JSON.stringify(report)}`);
-  await testInfo.attach("frame times", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
-  await attach(page, testInfo, "drawing in 30,000 segments");
-  // A machine with a GPU draws both at the display's rate; a CI runner draws
-  // in software, and there the guides may add a little to the frame, not more.
-  expect(mean(on)).toBeLessThan(Math.max(1000 / 55, mean(off) * 1.15 + 2));
-  await page.keyboard.press("Escape");
+  test("drawing in a network of 30,000 segments keeps its frame time with the guides on", async ({ page }, testInfo) => {
+    // 3.1 minutes on a CI runner that draws a frame here in 0.7 s; one that
+    // takes 1.2 s ran past five minutes (issue #152).
+    test.setTimeout(480_000);
+    const bytes = scaleCity(30_000);
+    const at = busySpot(bytes, 150);
+    await openCity(page, bytes, "Thirty thousand");
+    const g = groundAt(at.x, at.z);
+    await setPose(page, [at.x, g + 380, at.z + 170], [at.x, g, at.z]);
+    await page.keyboard.press("KeyR");
+    // Free-hand, so the start lands where clicked, on open ground or a road.
+    await page.keyboard.down("Alt");
+    const centre = await screenAt(page, at.x, at.z);
+    await page.mouse.click(centre.x, centre.y);
+    await page.keyboard.up("Alt");
+    await frames(page);
+
+    const toggle = async () => {
+      await page.locator("#guide-lines").click();
+      await page.locator("#guide-offset").click();
+    };
+    const FRAMES = 30;
+    // Alternate, guides on then off, to spread the machine's noise over both.
+    const on: number[] = [];
+    const off: number[] = [];
+    for (let round = 0; round < 2; round++) {
+      on.push(await drawingFrameTime(page, centre, FRAMES));
+      await toggle();
+      off.push(await drawingFrameTime(page, centre, FRAMES));
+      await toggle();
+    }
+    const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
+    const report = { at, onFrameMs: mean(on), offFrameMs: mean(off), on, off };
+    console.log(`30,000 segments, drawing: ${JSON.stringify(report)}`);
+    await testInfo.attach("frame times", { body: JSON.stringify(report, null, 2), contentType: "application/json" });
+    await attach(page, testInfo, "drawing in 30,000 segments");
+    // A machine with a GPU draws both at the display's rate; a CI runner draws
+    // in software, and there the guides may add a little to the frame, not more.
+    expect(mean(on)).toBeLessThan(Math.max(1000 / 55, mean(off) * 1.15 + 2));
+    await page.keyboard.press("Escape");
+  });
 });

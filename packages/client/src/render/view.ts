@@ -259,7 +259,13 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
     cells?.setBand(band);
     cells?.setVisible(cellsVisible);
     // The overlay is hidden until the zone tool opens; its shader is compiled now, so that frame does not build it (issue #163).
-    void cells?.precompile((o) => renderer.compileAsync(o, camera, scene)).catch(() => undefined);
+    // Under cheap frames a chunk drawn before the compile settles is left out, and nothing else would draw it again.
+    void cells
+      ?.precompile((o) => renderer.compileAsync(o, camera, scene))
+      .catch(() => undefined)
+      .finally(() => {
+        dirty = true;
+      });
     // Buildings stand on the ground as the nearest terrain draws it, so it never comes up through a wall.
     const buildings = buildingSource ? createBuildingLayer(scene, buildingSource, NORTH_AMERICAN, (x, z) => surfaceHeightAt(terrain, x, z, TERRAIN_LODS[0]?.segments ?? 32)) : null;
     buildingsLayer = buildings;
