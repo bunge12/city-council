@@ -18,21 +18,39 @@ permissions:
   contents: read
 
 jobs:
-  load-budget:
+  # The Playwright version in the lockfile, for the jobs' container (see the
+  # e2e job in ci.yml). A job's container is chosen before its steps run.
+  playwright:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.playwright.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: playwright
+        run: |
+          version=$(grep -m1 -oP "^  '@playwright/test@\K[0-9][^']*" pnpm-lock.yaml)
+          [ -n "$version" ] || { echo "No @playwright/test in pnpm-lock.yaml"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  load-budget:
+    needs: playwright
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
+      options: --ipc=host
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: ./.github/actions/playwright-browsers
       - name: M0 walkthrough against the public address
         run: BASE_URL="https://bunge12.github.io/city-council/" xvfb-run -a pnpm e2e --project walkthrough --workers=1 -g "M0 walkthrough"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: walkthrough-m0-nightly
@@ -40,22 +58,25 @@ jobs:
           retention-days: 14
 
   zone-tool-task-budget:
+    needs: playwright
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
+      options: --ipc=host
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: ./.github/actions/playwright-browsers
       - name: Opening the zone tool on the scale town, every task under 50 ms
         env:
           E2E_DEV_SERVER_ONLY: "1"
         run: xvfb-run -a pnpm e2e --project chromium --workers=1 e2e/zone-open-scale.spec.ts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: zone-open-nightly
