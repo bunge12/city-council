@@ -23,8 +23,9 @@ declare const window: {
 declare const performance: { now(): number };
 
 test.use({ viewport: MEASURE_VIEWPORT });
-// About 4 minutes on a fast CI runner and up to 8 on a slow one (issue #217), so 20 leaves twice the headroom #154 asks for.
-test.setTimeout(1_200_000);
+// About 4 minutes on a fast CI runner and up to 8 on a slow one (issue #217). 15 is a third of the perf job's
+// 45 minutes (issue #228, scripts/check-e2e-timeouts.mjs), and the perf project does not retry.
+test.setTimeout(900_000);
 
 test("frame time, draw calls and memory in each band, at Low", async ({ page }, testInfo) => {
   const { city, town, bytes } = scaleCity();

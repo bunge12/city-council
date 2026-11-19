@@ -23,6 +23,11 @@
     "through-lots.spec.ts"
   ],
   "defaultSeconds": 90,
+  "globalTimeout": {
+    "_about": "Each CI runner's Playwright run stops at timesPlan times its planned minutes, and at no less than minMinutes, with --global-timeout from scripts/e2e-shard.mjs (issue #228). Playwright then fails the run and writes its report, where GitHub's job limit would stop the job with no report. A runner's plan is the sum of its files' seconds, or for a runner without files the plan its matrix entry gives. In the 156 chromium runners of the last 25 CI runs, first attempts took 1.33 times their files' seconds at the median, 2.17 at the 90th percentile and 2.68 at the 95th, and 1.6 at the median on an EPYC 7763. At 1.5 times, as the issue first asked, about four runners in ten that passed would have been stopped. minMinutes covers starting the servers and the production build. A runner also never gets less than its plan plus every attempt of its longest test (scripts/e2e-limits.mjs), so a test that times out still gets its retry.",
+    "timesPlan": 3,
+    "minMinutes": 10
+  },
   "seconds": {
     "blocks.spec.ts": 34,
     "bridges.spec.ts": 62,

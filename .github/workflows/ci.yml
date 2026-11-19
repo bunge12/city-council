@@ -195,8 +195,11 @@ jobs:
       options: --ipc=host
     # A runner planned at about eight to ten minutes takes twice that on a
     # slow machine, and a test that fails once is run again. 35 minutes leaves
-    # room for both, and still stops a run that hangs.
-    # The M2 walkthrough takes its own limit (see its matrix entry).
+    # room for both. Playwright stops the run before that (--global-timeout
+    # below), so a run that hangs still ends with its report. The M2
+    # walkthrough takes its own limit (see its matrix entry).
+    # scripts/check-e2e-timeouts.mjs, in `pnpm lint`, reads these limits and
+    # fails on a test allowed more than a third of its job (issue #228).
     timeout-minutes: ${{ matrix.timeout || 35 }}
     strategy:
       fail-fast: false
@@ -223,18 +226,24 @@ jobs:
           # One worker: software WebGPU takes most of a runner's CPU. In CI
           # the roads project is fully parallel, so its one file is dealt
           # out test by test.
-          - { id: roads-1, args: "--project roads --no-deps --workers=1 --shard=1/3" }
-          - { id: roads-2, args: "--project roads --no-deps --workers=1 --shard=2/3" }
-          - { id: roads-3, args: "--project roads --no-deps --workers=1 --shard=3/3" }
+          #
+          # A runner without `files` gives its Playwright run's time limit in
+          # `limit`, in minutes. scripts/check-e2e-timeouts.mjs holds it to
+          # every attempt of its longest test plus two minutes, and to three
+          # minutes under the job's limit. The roads runners took up to 6
+          # minutes on CI, the walkthroughs up to 2.3 (M0), 7 (M1) and 19.5 (M2).
+          - { id: roads-1, limit: 12, args: "--project roads --no-deps --workers=1 --shard=1/3" }
+          - { id: roads-2, limit: 12, args: "--project roads --no-deps --workers=1 --shard=2/3" }
+          - { id: roads-3, limit: 12, args: "--project roads --no-deps --workers=1 --shard=3/3" }
           # The M0, M1 and M2 walkthroughs on runners of their own: each
           # runs on WebGPU in software, which takes most of a runner's CPU.
-          - { id: walkthrough-m0, args: "--project walkthrough --no-deps -g \"M0 walkthrough\"" }
-          - { id: walkthrough-m1, args: "--project walkthrough --no-deps -g \"M1 walkthrough\"" }
+          - { id: walkthrough-m0, limit: 15, args: "--project walkthrough --no-deps -g \"M0 walkthrough\"" }
+          - { id: walkthrough-m1, limit: 25, args: "--project walkthrough --no-deps -g \"M1 walkthrough\"" }
           # About 7.5 minutes on software WebGPU and 3 on WebGL 2 on a 4-core
           # container, with waits on the grower's draws in steps 3 and 5. A
           # slow runner takes twice that and a failed test runs again, which
           # 35 minutes does not hold.
-          - { id: walkthrough-m2, timeout: 60, args: "--project walkthrough --no-deps -g \"M2 walkthrough\"" }
+          - { id: walkthrough-m2, timeout: 60, limit: 48, args: "--project walkthrough --no-deps -g \"M2 walkthrough\"" }
     name: e2e (${{ matrix.id }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -250,6 +259,7 @@ jobs:
       - env:
           ARGS: ${{ matrix.args }}
           FILES: ${{ matrix.files }}
+          LIMIT: ${{ matrix.limit }}
           E2E_DEV_SERVER_ONLY: ${{ startsWith(matrix.id, 'walkthrough') && '0' || '1' }}
           # The M0 walkthrough prints its cold load here and does not hold it
           # to 5 s: on the slowest runners it has 1.3 times headroom, less than
@@ -265,21 +275,26 @@ jobs:
           if [ -n "$FILES" ]; then
             files=$(node scripts/e2e-shard.mjs "$FILES")
             echo "Spec files: $files"
+            limit=$(node scripts/e2e-shard.mjs "$FILES" --global-timeout)
+          else
+            limit=$((LIMIT * 60000))
           fi
-          eval "xvfb-run -a pnpm e2e $ARGS $files"
+          echo "Playwright stops this run after $((limit / 60000)) minutes."
+          eval "xvfb-run -a pnpm e2e $ARGS --global-timeout=$limit $files"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && startsWith(matrix.id, 'walkthrough')
         with:
           name: ${{ matrix.id }}
           path: walkthrough-screenshots
           retention-days: 30
-      # A job that GitHub stops at timeout-minutes ends as cancelled, not
-      # failed, so `failure()` alone skips this step exactly when the report
-      # is wanted. Steps under `cancelled()` still run after a time limit
-      # (issue #220). test-results holds the traces and screenshots of tests
-      # that finished, even when the HTML report was not written.
+      # Uploaded whatever the result (issue #228): a passing run's report
+      # shows a flaky test's failed first attempt, and test-results holds
+      # its trace and screenshot, and any file a test writes. A job that
+      # GitHub stops at timeout-minutes ends as cancelled, and steps under
+      # `always()` still run then (issue #220), as they do when a newer push
+      # cancels the run, which only costs an upload.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() || cancelled()
+        if: always()
         with:
           name: playwright-report-${{ matrix.id }}
           path: |

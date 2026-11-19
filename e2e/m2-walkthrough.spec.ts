@@ -108,8 +108,11 @@ declare const navigator: { gpu?: { requestAdapter(): Promise<unknown> } };
 const VIEWPORT = { width: 1280, height: 800 };
 test.use({ viewport: VIEWPORT });
 // Several page loads, game months of growth at 4x and many redraws, on a
-// machine that may have no GPU.
-test.setTimeout(1_500_000);
+// machine that may have no GPU. On software WebGPU it took 9 to 14.5
+// minutes on CI. 20 is a third of the walkthrough-m2 job's 60 minutes, so
+// a test that times out twice still leaves its job time to report (issue
+// #228, scripts/check-e2e-timeouts.mjs).
+test.setTimeout(1_200_000);
 
 const SCREENSHOTS = "walkthrough-screenshots";
 const terrain = generateTerrain(SEED);
