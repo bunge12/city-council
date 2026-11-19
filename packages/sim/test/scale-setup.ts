@@ -35,7 +35,7 @@ export default function setup(project: TestProject): () => void {
     // Grown on a copy loaded from the bytes, as the scale tests grow it.
     const copy = { ...city, state: deserialize(bytes).state };
     const town = growScaleCity(copy);
-    const townMeta: ScaleTownMeta = { town, hash: hashState(copy.state) };
+    const townMeta: ScaleTownMeta = { town };
     writeFileSync(join(dir, TOWN_FILE), serialize(copy.state));
     writeFileSync(join(dir, TOWN_META), JSON.stringify(townMeta));
   }

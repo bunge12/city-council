@@ -101,6 +101,8 @@ describe("save and resume on the scale city", () => {
     expect(hashState(resumed)).toBe(hashState(straight));
     expect(resumed.log).toEqual(straight.log);
     // And a replay of the whole log agrees with both.
+    // Both runs above start from the saved snapshot, so this replay is the one run here built from
+    // the first road with every piece of derived data kept current. Keep it.
     expect(hashState(replay(SCALE_SEED, [...straight.log], straight.tick))).toBe(hashState(straight));
   }, 120_000);
 });

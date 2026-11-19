@@ -16,6 +16,4 @@ export interface ScaleCityMeta {
 
 export interface ScaleTownMeta {
   town: ScaleTown;
-  /** `hashState` of the town as grown. */
-  hash: string;
 }

@@ -30,12 +30,11 @@ export function loadScaleCity(): ScaleCity {
 }
 
 /** A fresh copy of the scale town, as `growScaleCity` grows the scale city. Bench runs only. */
-export function loadScaleTown(): { city: ScaleCity; town: ScaleTown; hash: string } {
+export function loadScaleTown(): { city: ScaleCity; town: ScaleTown } {
   const meta = readJson<ScaleTownMeta>(TOWN_META);
   const city = scaleCityMeta();
   return {
     city: { state: deserialize(read(TOWN_FILE)).state, counts: { ...city.counts }, grids: city.grids.map((g) => ({ ...g })) },
     town: meta.town,
-    hash: meta.hash,
   };
 }
