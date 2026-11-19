@@ -288,8 +288,11 @@ function settle(index: BlockIndex): void {
     index.blocks.delete(f);
   }
   for (const h of index.fresh) todo.push(h);
-  index.dirtyFaces.clear();
-  index.fresh.clear();
+  // New sets rather than clear(): a set that lives long gets each new
+  // table in the old generation, garbage only a major collection takes
+  // back (zoning/cell-index.ts, `CellWatch`; issue #209).
+  index.dirtyFaces = new Set();
+  index.fresh = new Set();
   for (const h of todo) index.face[h] = NONE;
   // A mark for half-edges walked in this pass, before their face id is known.
   const WALKING = -2;

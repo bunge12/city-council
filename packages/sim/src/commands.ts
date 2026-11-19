@@ -10,7 +10,7 @@ import { terrainOf } from "./terrain/cache";
 import { applyUndo, hasUndo, planUndo, recordUndo, undoPutsRoadsBack } from "./undo";
 import { ZONING_BALANCE } from "./zoning/balance";
 import { cellsSettled, stepCells } from "./zoning/cell-index";
-import { checkZoneCellsPayload, planZoneCells, strokeOf, zoneCellsIfValid } from "./zoning/zone";
+import { checkZoneCells, checkZoneCellsPayload, strokeOf, zoneCellsIfValid } from "./zoning/zone";
 import { NO_JOURNALS, journalLostZones, journalPaint } from "./zoning/zone-undo";
 
 /**
@@ -227,8 +227,7 @@ const ZoneCells: CommandDef = {
     // A command the step will hold is checked in full when it applies.
     // Checking the cells now would walk the rest of the change in one go.
     if (waitsForCells(state, command)) return checkZoneCellsPayload(command.payload);
-    const result = planZoneCells(state, command.payload);
-    return result.ok ? null : result.reason;
+    return checkZoneCells(state, command.payload);
   },
   apply: (state, command) => void zoneCells(state, command),
   // Finding the cells is the whole cost, so the step does it once.

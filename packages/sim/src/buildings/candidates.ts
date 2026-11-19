@@ -255,9 +255,13 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
     for (const seg of watch.segs) c.segs.add(seg);
     for (const node of watch.nodes) segmentsNear(c.index, state.roads, node, c.segs);
     for (const key of watch.fronts) noteFront(c, key);
-    watch.segs.clear();
-    watch.nodes.clear();
-    watch.fronts.clear();
+    // New sets rather than clear(), and only when there is something to
+    // let go of: see `CellWatch` in zoning/cell-index.ts. Cleared on every
+    // grower draw, empty or not, they were a share of the garbage behind
+    // the major collections on the sim's thread (issue #209).
+    if (watch.segs.size > 0) watch.segs = new Set();
+    if (watch.nodes.size > 0) watch.nodes = new Set();
+    if (watch.fronts.size > 0) watch.fronts = new Set();
   }
   if (c.segs.size === 0 && c.fronts.length === 0) return c;
   fit(c, index.segs.length);
@@ -270,7 +274,7 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
     const seg = Math.floor(key / CELL_KEY_STRIDE);
     if (!c.segs.has(seg)) refreshColumn(c, state, onCell, seg, key - seg * CELL_KEY_STRIDE);
   }
-  c.segs.clear();
+  if (c.segs.size > 0) c.segs = new Set();
   c.fronts.length = 0;
   c.frontsCap = MOST_FRONTS;
   return c;
