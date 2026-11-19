@@ -44,7 +44,7 @@ Fixtures live in `packages/sim/test/fixtures/replay/`. Each holds a seed, a log,
 
 - One issue per pull request.
 - Tests pass in CI. There is no second reviewer, so the tests are the gate.
-- Your branch does not need to be up to date with `main` to merge. Rebase only when GitHub shows a conflict or you need something that landed since. CI runs again on every commit to `main`, and a failure there opens an issue titled "CI failed on main". While one is open, fix `main` before merging anything else.
+- Your branch does not need to be up to date with `main` to merge. Rebase only when GitHub shows a conflict or you need something that landed since. CI runs again on every commit to `main`, and a failure there opens an issue titled "CI failed on main", labelled `CI Failure`. While one is open, fix `main` before merging anything else.
 - Anything visible to a player comes with a Playwright walkthrough and screenshots.
 - Changes to the shape of saved state come with a version bump and a migration.
 - Models, sounds and other assets must carry a licence that can sit in an MIT repository.
