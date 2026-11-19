@@ -112,6 +112,8 @@ export class SimHost {
   /** Real time not yet turned into steps. */
   private owedMs = 0;
   private lastPump: number;
+  /** While true, `pump` steps nothing and only `advance` moves the sim (see `hold`). */
+  private held = false;
 
   /**
    * `pagedLog` is the entries that have left live state, as a loaded save
@@ -269,6 +271,11 @@ export class SimHost {
     const now = this.now();
     this.owedMs += now - this.lastPump;
     this.lastPump = now;
+    if (this.held) {
+      this.owedMs = 0;
+      this.flushDelta();
+      return;
+    }
     let steps = 0;
     while (this.owedMs >= stepIntervalMs(this.state.speed)) {
       if (steps === MAX_CATCH_UP_STEPS) {
@@ -280,6 +287,39 @@ export class SimHost {
       this.stepOnce();
       steps++;
     }
+    this.flushDelta();
+  }
+
+  /**
+   * Stops the clock stepping the sim: from here on only `advance` does,
+   * paused or not, and queued commands wait for it. For tests, which then
+   * say how many steps to run instead of waiting on real time, so what they
+   * see does not depend on how fast the machine draws (issue #224). The sim
+   * is the same either way; only who decides when to step changes.
+   */
+  hold(): void {
+    this.held = true;
+  }
+
+  /** Gives stepping back to the clock, starting from now: held time is not caught up. */
+  release(): void {
+    this.held = false;
+    this.owedMs = 0;
+    this.lastPump = this.now();
+  }
+
+  /** True while `hold` has stopped the clock. */
+  get isHeld(): boolean {
+    return this.held;
+  }
+
+  /**
+   * Runs `steps` steps now, whatever the speed, then sends one delta. At any
+   * speed but paused each step is one tick; paused steps apply commands and
+   * leave the tick where it is, as `step` does.
+   */
+  advance(steps: number): void {
+    for (let i = 0; i < steps; i++) this.stepOnce();
     this.flushDelta();
   }
 

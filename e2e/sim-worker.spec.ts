@@ -6,28 +6,23 @@ declare const window: {
   cityCouncil: {
     sendCommand(type: string, payload?: unknown): Promise<unknown>;
     mirror: { state: { log: unknown[]; rng: unknown } | null };
-    view: Promise<{ renderer: { setAnimationLoop(callback: null): void } }>;
+    holdClock(): Promise<number>;
+    advance(steps: number): Promise<number>;
+    releaseClock(): Promise<number>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 async function tick(page: Page): Promise<number> {
   return Number(await page.locator("#sim-tick").textContent());
 }
 
-async function setSpeed(page: Page, speed: number): Promise<void> {
-  const result = await page.evaluate((s) => window.cityCouncil.sendCommand("SetSpeed", { speed: s }), speed);
-  expect(result).toEqual({ ok: true });
-  await expect(page.locator("#sim-speed")).toHaveText(speed === 0 ? "paused" : `${speed}x`);
-}
-
-/** Ticks per real second over `ms`, measured from the page's own readout. */
-async function rate(page: Page, ms: number): Promise<number> {
-  const from = await tick(page);
-  const start = Date.now();
-  await page.waitForTimeout(ms);
-  const to = await tick(page);
-  return ((to - from) * 1000) / (Date.now() - start);
+/** Sends SetSpeed with the clock held and runs the one step that applies it. */
+async function setSpeedHeld(page: Page, speed: number): Promise<unknown> {
+  return page.evaluate(async (speed) => {
+    const settled = window.cityCouncil.sendCommand("SetSpeed", { speed });
+    const tick = await window.cityCouncil.advance(1);
+    return { ...((await settled) as object), tick };
+  }, speed);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -55,25 +50,24 @@ test("a NoOp round-trips to a commandResult and lands in the log", async ({ page
   expect(entry).toMatchObject({ playerId: "local", type: "NoOp", seq: 1 });
 });
 
-test("pause stops the tick and 4x runs four times as fast as 1x", async ({ page }) => {
-  // This measures the worker's tick rate through the page's readout. CI has
-  // no GPU, and software WebGL blocks the main thread for about 600 ms each
-  // frame it presents, which delays the readout and skews the rate. Let the
-  // map finish drawing, then stop the render loop so the page only relays ticks.
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 15_000 });
-  await page.evaluate(async () => (await window.cityCouncil.view).renderer.setAnimationLoop(null));
-  await setSpeed(page, 0);
-  const paused = await tick(page);
-  await page.waitForTimeout(1000);
-  expect(await tick(page)).toBe(paused);
+// The tick rate and the 1x to 4x ratio are checked exactly in
+// packages/client/test/protocol.test.ts, against a fake clock, and roughly
+// against the real one in the M0 walkthrough. Here the clock is held and
+// stepped by hand, so nothing depends on how fast the runner is (issue #224).
+test("with the clock held, paused steps leave the tick alone and each step at 4x is one tick", async ({ page }) => {
+  const held = await page.evaluate(() => window.cityCouncil.holdClock());
+  await expect(page.locator("#sim-tick")).toHaveText(String(held));
 
-  await setSpeed(page, 1);
-  const oneX = await rate(page, 2000);
-  await setSpeed(page, 4);
-  const fourX = await rate(page, 2000);
+  expect(await setSpeedHeld(page, 0)).toEqual({ ok: true, tick: held });
+  await expect(page.locator("#sim-speed")).toHaveText("paused");
+  expect(await page.evaluate(() => window.cityCouncil.advance(50))).toBe(held);
 
-  expect(oneX).toBeGreaterThan(8.5);
-  expect(oneX).toBeLessThan(11.5);
-  expect(fourX / oneX).toBeGreaterThan(3.4);
-  expect(fourX / oneX).toBeLessThan(4.6);
+  expect(await setSpeedHeld(page, 4)).toEqual({ ok: true, tick: held + 1 });
+  expect(await page.evaluate(() => window.cityCouncil.advance(40))).toBe(held + 41);
+  await expect(page.locator("#sim-tick")).toHaveText(String(held + 41));
+  await expect(page.locator("#sim-speed")).toHaveText("4x");
+
+  // Released, the worker's clock steps it again.
+  await page.evaluate(() => window.cityCouncil.releaseClock());
+  await expect.poll(() => tick(page)).toBeGreaterThan(held + 41);
 });

@@ -77,6 +77,9 @@ declare const window: {
   cityCouncil: {
     saves: { status: SaveStatus | null };
     downloadCity(): Promise<{ hash: string; tick: number }>;
+    holdClock(): Promise<number>;
+    advance(steps: number): Promise<number>;
+    releaseClock(): Promise<number>;
     mirror: {
       state: ({ tick: number; log: LogEntry[]; roads: Arrays; cells: Arrays; buildings: Arrays } & Record<string, unknown>) | null;
       cellAt(x: number, z: number): CellInfo | null;
@@ -283,13 +286,6 @@ async function status(page: Page): Promise<SaveStatus> {
 
 const speedButton = (page: Page, name: string) => page.getByRole("group", { name: "Game speed" }).getByRole("button", { name, exact: true });
 
-async function setSpeed(page: Page, name: "Pause" | "4x"): Promise<void> {
-  await speedButton(page, name).click();
-  await expect(speedButton(page, name)).toHaveAttribute("aria-pressed", "true");
-  // The speed is state: wait for the copy to have it, so the tick stops before anything is read.
-  await expect.poll(() => page.evaluate(() => window.cityCouncil.mirror.state?.["speed"])).toBe(name === "Pause" ? 0 : 4);
-}
-
 /** The city menu, opened if it is closed. */
 async function cityMenu(page: Page) {
   const menu = page.getByRole("region", { name: "City menu" });
@@ -487,22 +483,35 @@ async function tints(page: Page, ids: number[]): Promise<(Tint | null)[]> {
   }, ids);
 }
 
-/** Runs the game at 4x until `done` holds, then pauses. */
-async function growUntil<T>(page: Page, what: string, read: () => Promise<T>, done: (value: T) => boolean, timeout = 240_000): Promise<T> {
-  await setSpeed(page, "4x");
-  let last: T | undefined;
-  await expect
-    .poll(
-      async () => {
-        last = await read();
-        return done(last);
-      },
-      { message: what, timeout, intervals: [1000] },
-    )
-    .toBe(true);
-  await setSpeed(page, "Pause");
-  // What stands once paused, which may be a little more than what passed.
+/** Ticks `growUntil` runs between reads: a second at 4x. */
+const GROW_CHUNK = 40;
+
+/**
+ * Runs the game at 4x until `done` holds, at most `maxTicks` ticks, then
+ * pauses. The worker's clock is held meanwhile and stepped `GROW_CHUNK`
+ * ticks at a time, so how far the city grows before `done` is read does
+ * not depend on how fast the runner draws (issue #224).
+ */
+async function growUntil<T>(page: Page, what: string, read: () => Promise<T>, done: (value: T) => boolean, maxTicks = 9_600): Promise<T> {
+  await page.evaluate(() => window.cityCouncil.holdClock());
+  await heldSpeed(page, "4x");
+  let ran = 0;
+  for (let last = await read(); !done(last); last = await read()) {
+    if (ran >= maxTicks) throw new Error(`${what}: not there after ${ran} ticks at 4x, last read ${JSON.stringify(last)}`);
+    await page.evaluate((n) => window.cityCouncil.advance(n), GROW_CHUNK);
+    ran += GROW_CHUNK;
+  }
+  await heldSpeed(page, "Pause");
+  await page.evaluate(() => window.cityCouncil.releaseClock());
   return read();
+}
+
+/** Presses a speed button with the clock held and runs the one step that applies it. */
+async function heldSpeed(page: Page, name: "Pause" | "4x"): Promise<void> {
+  await speedButton(page, name).click();
+  await page.evaluate(() => window.cityCouncil.advance(1));
+  await expect(speedButton(page, name)).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => window.cityCouncil.mirror.state?.["speed"])).toBe(name === "Pause" ? 0 : 4);
 }
 
 /** Runs the game until building `id` has finished its construction animation, for a screenshot of it standing. */
@@ -719,7 +728,7 @@ for (const variant of [
         "a building on every zone and density",
         () => buildings(page),
         (bs) => [...keys, housesKey].every((key) => bs.some((b) => b.strip === key)),
-        600_000,
+        24_000,
       );
       for (const [k, { zone, density }] of PAINT.entries()) {
         const on = everyStrip.filter((b) => b.strip === keys[k]);
@@ -770,7 +779,7 @@ for (const variant of [
         "townhomes on the shallow R2 strip and apartments on the deep one",
         () => buildings(page),
         (bs) => bs.some((b) => b.strip === shallow) && bs.some((b) => b.strip === deep && b.type === apartments),
-        600_000,
+        24_000,
       );
       const onShallow = grown.filter((b) => b.strip === shallow);
       expect(onShallow.length).toBeGreaterThan(0);
@@ -829,7 +838,7 @@ for (const variant of [
         "a C2 building where the house stood",
         () => page.evaluate(([x, z]) => window.cityCouncil.mirror.buildingAt(x, z)?.id ?? -1, [top.x, top.z] as const),
         (id) => id >= 0,
-        600_000,
+        24_000,
       );
       const built = (await buildings(page)).find((b) => b.id === c2);
       expect(BUILDING_TYPES[built?.type ?? -1]?.zone).toBe("commercial");
@@ -887,7 +896,7 @@ for (const variant of [
         "a building across the block",
         () => buildings(page),
         (bs) => bs.some((b) => strips.includes(b.strip) && b.backDepth > 0),
-        600_000,
+        24_000,
       );
       const across = grown.filter((b) => strips.includes(b.strip) && b.backDepth > 0);
       for (const b of across) {
@@ -1000,7 +1009,7 @@ for (const variant of [
       expect((await buildings(page)).filter((b) => sides.includes(b.strip))).toEqual([]);
       await settleBuilt(page);
       await shot(page, info, dir, "9-undo-street-and-zoning-back");
-      await growUntil(page, "buildings on the street again", () => buildings(page), (bs) => sides.every((s) => bs.some((b) => b.strip === s)), 600_000);
+      await growUntil(page, "buildings on the street again", () => buildings(page), (bs) => sides.every((s) => bs.some((b) => b.strip === s)), 24_000);
       await settleBuilt(page);
       await shot(page, info, dir, "9-buildings-grow-again");
       await noteHomes("the street bulldozed and undone, and grown again");

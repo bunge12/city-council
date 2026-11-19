@@ -120,6 +120,59 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(mirror.state?.tick).toBe(20 + MAX_CATCH_UP_STEPS);
   });
 
+  describe("a held clock (issue #224)", () => {
+    it("steps nothing on its own, however much real time passes, and runs exactly the steps asked for", async () => {
+      const { host, mirror, run, stall } = setup();
+      run(500);
+      host.hold();
+      run(5000);
+      stall(60_000);
+      expect(mirror.state?.tick).toBe(5);
+      await mirror.sendCommand("SetSpeed", { speed: 4 });
+      host.advance(1);
+      expect(mirror.state?.speed).toBe(4);
+      expect(mirror.state?.tick).toBe(6);
+      host.advance(200);
+      expect(mirror.state?.tick).toBe(206);
+    });
+
+    it("applies queued commands only when it advances, and leaves the tick alone while paused", async () => {
+      const { host, mirror, run } = setup();
+      host.hold();
+      const settled = mirror.sendCommandSettled("SetSpeed", { speed: 0 });
+      run(1000);
+      expect(mirror.state?.speed).toBe(1);
+      host.advance(1);
+      await expect(settled).resolves.toEqual({ ok: true });
+      host.advance(50);
+      expect(mirror.state?.tick).toBe(0);
+    });
+
+    it("lands on the same state as the clock for the same number of steps", async () => {
+      const clocked = setup(11);
+      const held = setup(11);
+      held.host.hold();
+      for (const { mirror } of [clocked, held]) await mirror.sendCommand("SetSpeed", { speed: 4 });
+      clocked.run(10_000);
+      const ticks = clocked.mirror.state?.tick ?? 0;
+      expect(ticks).toBeGreaterThan(390);
+      held.host.advance(ticks);
+      expect(held.mirror.state?.tick).toBe(ticks);
+      const [a, b] = [held.mirror.state, clocked.mirror.state];
+      if (!a || !b) throw new Error("no state");
+      expect(hashState(a)).toBe(hashState(b));
+    });
+
+    it("carries on from now when released, without catching up the held time", () => {
+      const { host, mirror, run } = setup();
+      host.hold();
+      run(5000);
+      host.release();
+      run(1000);
+      expect(mirror.state?.tick).toBe(10);
+    });
+  });
+
   it("sends deltas only when something changed, carrying only tick, speed, the generator, the grower's plan, the cell count and new log", async () => {
     const { mirror, run, received } = setup();
     await mirror.sendCommand("SetSpeed", { speed: 0 });

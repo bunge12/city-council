@@ -14,6 +14,9 @@ declare const window: {
     saves: { status: SaveStatus | null };
     mirror: { state: { tick: number; seed: number } | null };
     camera: Promise<unknown>;
+    holdClock(): Promise<number>;
+    advance(steps: number): Promise<number>;
+    releaseClock(): Promise<number>;
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
@@ -49,9 +52,11 @@ test("the top bar shows the city and the game date, and the speed buttons send S
   await speedButton(page, "Pause").click();
   await expect(speedButton(page, "Pause")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#sim-speed")).toHaveText("paused");
-  const paused = await tick(page);
-  await page.waitForTimeout(600);
-  expect(await tick(page)).toBe(paused);
+  // Ten paused steps, a second at 1x, with the worker's clock held: the tick stays (issue #224).
+  const paused = await page.evaluate(() => window.cityCouncil.holdClock());
+  expect(await page.evaluate(() => window.cityCouncil.advance(10))).toBe(paused);
+  await page.evaluate(() => window.cityCouncil.releaseClock());
+  await expect(page.locator("#sim-tick")).toHaveText(String(paused));
 
   await speedButton(page, "4x").click();
   await expect(speedButton(page, "4x")).toHaveAttribute("aria-pressed", "true");
