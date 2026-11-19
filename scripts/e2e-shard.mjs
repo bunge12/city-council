@@ -16,10 +16,20 @@
 // runner, and a new file, not yet timed, counts as `defaultSeconds`.
 //
 // With --list <total> it prints every runner's files and minutes instead.
+//
+// With --global-timeout it prints the milliseconds to give that runner's
+// Playwright run as --global-timeout instead of its files (issue #228):
+// `timesPlan` times its planned seconds and no less than `minMinutes`, from
+// `globalTimeout` in e2e/projects.json, and no less than its plan plus
+// every attempt of its longest test, so a test that times out still gets
+// its retry (scripts/e2e-limits.mjs).
+//
+//   node scripts/e2e-shard.mjs 3/6 --global-timeout
 
 import { readFileSync, readdirSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { attemptsOf, configTimeoutMs, globalTimeoutMs, longestTestMs } from "./e2e-limits.mjs";
 
 const root = new URL("../", import.meta.url);
 const projects = JSON.parse(readFileSync(new URL("e2e/projects.json", root), "utf8"));
@@ -38,6 +48,9 @@ if (stray.length > 0) {
 }
 
 const args = process.argv.slice(2);
+const timeoutAt = args.indexOf("--global-timeout");
+const globalTimeout = timeoutAt >= 0;
+if (globalTimeout) args.splice(timeoutAt, 1);
 const at = args.indexOf("--project");
 const project = at >= 0 ? args.splice(at, 2)[1] : "chromium";
 if (!["chromium", "perf", "evidence"].includes(project ?? "")) {
@@ -86,14 +99,24 @@ if (arg === "--list") {
   const current = Number(match?.[1]);
   const total = Number(match?.[2]);
   if (!match || current < 1 || current > total) {
-    console.error("usage: node scripts/e2e-shard.mjs <current>/<total> [--project chromium|perf|evidence], for example 3/6, or --list <total>");
+    console.error("usage: node scripts/e2e-shard.mjs <current>/<total> [--project chromium|perf|evidence] [--global-timeout], for example 3/6, or --list <total>");
     process.exit(1);
   }
-  const { files: mine } = deal(total)[current - 1];
+  const { files: mine, seconds: planned } = deal(total)[current - 1];
   // No files would mean no filter, and Playwright would run them all.
   if (mine.length === 0) {
     console.error(`runner ${current} of ${total} has no spec files: use fewer runners`);
     process.exit(1);
   }
-  console.log(mine.map((f) => `e2e/${f}`).join(" "));
+  if (globalTimeout) {
+    const defaultMs = configTimeoutMs(readFileSync(new URL("playwright.config.ts", root), "utf8"));
+    const longest = Math.max(...mine.map((f) => longestTestMs(readFileSync(new URL(`e2e/${f}`, root), "utf8"), defaultMs)));
+    if (!Number.isFinite(longest)) {
+      console.error("a spec file sets a time limit that cannot be read: run node scripts/check-e2e-timeouts.mjs");
+      process.exit(1);
+    }
+    console.log(globalTimeoutMs(projects, planned, longest, attemptsOf(project)));
+  } else {
+    console.log(mine.map((f) => `e2e/${f}`).join(" "));
+  }
 }

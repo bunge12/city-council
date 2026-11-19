@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "pnpm --filter @city-council/client dev",
     "test": "pnpm -r --parallel --if-present test",
-    "lint": "eslint . --max-warnings 0 && node scripts/check-lint-rules.mjs && node scripts/check-node-version.mjs",
+    "lint": "eslint . --max-warnings 0 && node scripts/check-lint-rules.mjs && node scripts/check-node-version.mjs && node scripts/check-e2e-timeouts.mjs",
     "typecheck": "tsc -b && tsc -p tsconfig.tooling.json",
     "build": "pnpm typecheck && pnpm --filter @city-council/client build",
     "e2e": "playwright test",

@@ -96,8 +96,12 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.plan.outputs.playwright }}-noble
       options: --ipc=host
-    # Planned at about ten minutes a runner; a slow runner takes twice that
-    # and a failed test runs again.
+    # Planned at about ten minutes a runner; a slow runner takes twice that.
+    # The perf project does not retry; evidence does. Playwright stops the run
+    # at three times its plan (--global-timeout below), so a run that hangs
+    # still ends with its report. scripts/check-e2e-timeouts.mjs, in `pnpm
+    # lint`, reads this limit and fails on a test allowed more than a third
+    # of it (issue #228).
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -120,8 +124,10 @@ jobs:
         run: |
           files=$(node scripts/e2e-shard.mjs "$FILES" --project "$PROJECT")
           echo "Spec files: $files"
+          limit=$(node scripts/e2e-shard.mjs "$FILES" --project "$PROJECT" --global-timeout)
+          echo "Playwright stops this run after $((limit / 60000)) minutes."
           status=0
-          xvfb-run -a pnpm e2e --project "$PROJECT" --no-deps --workers=1 $files || status=$?
+          xvfb-run -a pnpm e2e --project "$PROJECT" --no-deps --workers=1 --global-timeout="$limit" $files || status=$?
           # After the run: Playwright empties test-results when it starts.
           mkdir -p test-results/perf
           node -e "const os = require('os'); const c = os.cpus(); console.log(c.length + ' x ' + c[0].model)" > test-results/perf/machine.txt

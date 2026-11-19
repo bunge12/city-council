@@ -36,7 +36,8 @@ test.use({ viewport: { width: 1280, height: 800 } });
 // Times the page's own work and stubs out drawing: every frame at the real settings (issue #226).
 test.use({ storageState: MEASURE_STATE });
 // Building the town takes about half a minute, and loading it into software WebGL a few more.
-test.setTimeout(900_000);
+// The file took up to 4.5 minutes on CI; 10 stays under a third of its job's 35 (issue #228).
+test.setTimeout(600_000);
 
 /** The issue's budget for any one main-thread task while the tool opens. */
 const LONG_TASK_MS = 50;
