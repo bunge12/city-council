@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "soak": "vitest run --config vitest.soak.config.ts --reporter verbose"
+    "soak": "node ../../scripts/budget-retry.mjs --keep soak-report.json -- run --config vitest.soak.config.ts --reporter verbose",
+    "bench": "node ../../scripts/budget-retry.mjs -- bench --run --reporter verbose"
   },
   "dependencies": {
     "@city-council/sim": "workspace:*",

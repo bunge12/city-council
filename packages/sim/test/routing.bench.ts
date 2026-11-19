@@ -4,6 +4,7 @@
 // 20 ms for one route across the network.
 
 import { expect, test } from "vitest";
+import { budget, collect } from "./budget";
 import { nextFloat, seedRng } from "../src/rng";
 import { addNode, addSegment, createRoadNetwork, segmentCount } from "../src/roads/network";
 import { buildRoutingGraph, findRoute, findRouteBetween } from "../src/roads/routing";
@@ -71,9 +72,10 @@ test("pathfinder on 30,000 segments", async ({ bench }) => {
   const meanMs: Record<string, number> = {};
   for (const [name, fn] of Object.entries(cases)) {
     const file = `bench-results/route-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
+    collect();
     const result = await bench(name, { writeResult: file }, fn).run();
     meanMs[name] = result.latency.mean;
   }
-  expect(meanMs["grid, corner to corner"]).toBeLessThan(ROUTE_TARGET_MS);
-  expect(meanMs["grid, between random points"]).toBeLessThan(ROUTE_TARGET_MS);
+  expect(meanMs["grid, corner to corner"], budget("grid, corner to corner")).toBeLessThan(ROUTE_TARGET_MS);
+  expect(meanMs["grid, between random points"], budget("grid, between random points")).toBeLessThan(ROUTE_TARGET_MS);
 }, 180_000);

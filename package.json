@@ -14,7 +14,7 @@
     "build": "pnpm typecheck && pnpm --filter @city-council/client build",
     "e2e": "playwright test",
     "soak": "pnpm --filter @city-council/client soak",
-    "bench": "pnpm --filter @city-council/sim bench"
+    "bench": "pnpm -r --workspace-concurrency=1 --no-bail --if-present bench"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

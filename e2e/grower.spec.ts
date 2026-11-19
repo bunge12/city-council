@@ -25,7 +25,7 @@ declare const window: {
     view: Promise<{
       scene: SceneObject;
       renderer: { domElement: { toDataURL(type: string): string } };
-      onFrame(listener: () => void): void;
+      onFrame(listener: (stats: { drawn: boolean }) => void): void;
       buildingStats(): { buildings: number } | null;
       decorCounts(): { trees: number; grass: number };
     }>;
@@ -90,9 +90,10 @@ test("trees near new buildings stay drawn while the city grows", async ({ page }
   await page.evaluate(async () => {
     const view = await window.cityCouncil.view;
     window.growthFrames = [];
-    view.onFrame(() => {
+    view.onFrame((stats) => {
       const frames = window.growthFrames;
-      if (!frames) return;
+      // Under cheap frames (issue #226) a frame where nothing changed is not drawn, and the canvas has nothing to read.
+      if (!frames || !stats.drawn) return;
       let trees = 0;
       view.scene.traverseVisible((o) => {
         if (o.name === "broadleaf" || o.name === "conifer") trees += o.count ?? 0;

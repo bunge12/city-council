@@ -1,5 +1,5 @@
 {
-  "_about": "Which spec files each Playwright project runs, read by playwright.config.ts and by scripts/e2e-shard.mjs, which deals the files of the chromium, perf and evidence projects out to CI runners. `walkthrough` is a pattern of file names; the rest are lists of them. The chromium project runs every other spec file. `seconds` is how long each chromium file took on a CI runner with one worker, first attempts only, as e2e/file-times-reporter.ts prints them at the end of each runner's log. They come from CI run 43977997350 (16 November 2026), and construction.spec.ts, whose runner was cancelled there, from run 43984776649 (17 November 2026), its first with the 4x tests at Low. building-looks.spec.ts is from run 44334181956 (18 November 2026), on an EPYC 9V45, the fastest runner type. Runners are not all the same speed (issue #152), so a figure is only good to a factor of about two. To bring them up to date, pipe a CI run's logs into `node scripts/e2e-timings.mjs --write` and say here which run they came from. The shard script balances the runners by them. zone-open-scale.spec.ts is from run 44380459005 (18 November 2026), on an EPYC 9V45. A file not listed counts as `defaultSeconds`. building-lod-scale.spec.ts, building-lod-scale-balanced.spec.ts and building-lod-overlay.spec.ts are estimates until a CI run times them: issue #217 split the first into the three, and they are their seconds in the development container, times 1.15, the ratio of its time for the old file to a Xeon 8573C runner's. Issue #225 split construction.spec.ts, guides.spec.ts, presets.spec.ts, roads.spec.ts and cells.spec.ts: the tests that stayed, and the ones moved to construction-frame-time.spec.ts, guides-scale.spec.ts, presets-forest.spec.ts, roads-scale.spec.ts and cells-scale.spec.ts, are each file's old seconds times the share of it those tests took in run 44453580892 (19 November 2026). downtown.spec.ts is an estimate from the development container, times 1.15, until a CI run times it. `perf` and `evidence` are the files of those projects (issue #225): they run nightly, after each push to main and on pull requests that touch the renderer or carry the `perf` or `evidence` label, and they do not gate a merge (.github/workflows/perf.yml). Their files are dealt out to runners the same way, by the same `seconds`.",
+  "_about": "Which spec files each Playwright project runs, read by playwright.config.ts and by scripts/e2e-shard.mjs, which deals the files of the chromium, perf and evidence projects out to CI runners. `walkthrough` is a pattern of file names; the rest are lists of them. The chromium project runs every other spec file. `seconds` is how long each chromium file took on a CI runner with one worker, first attempts only, as e2e/file-times-reporter.ts prints them at the end of each runner's log. They come from CI run 43977997350 (16 November 2026), and construction.spec.ts, whose runner was cancelled there, from run 43984776649 (17 November 2026), its first with the 4x tests at Low. building-looks.spec.ts is from run 44334181956 (18 November 2026), on an EPYC 9V45, the fastest runner type. Runners are not all the same speed (issue #152), so a figure is only good to a factor of about two. To bring them up to date, pipe a CI run's logs into `node scripts/e2e-timings.mjs --write` and say here which run they came from. The shard script balances the runners by them. zone-open-scale.spec.ts is from run 44380459005 (18 November 2026), on an EPYC 9V45. A file not listed counts as `defaultSeconds`. building-lod-scale.spec.ts, building-lod-scale-balanced.spec.ts and building-lod-overlay.spec.ts are estimates until a CI run times them: issue #217 split the first into the three, and they are their seconds in the development container, times 1.15, the ratio of its time for the old file to a Xeon 8573C runner's. Issue #225 split construction.spec.ts, guides.spec.ts, presets.spec.ts, roads.spec.ts and cells.spec.ts: the tests that stayed, and the ones moved to construction-frame-time.spec.ts, guides-scale.spec.ts, presets-forest.spec.ts, roads-scale.spec.ts and cells-scale.spec.ts, are each file's old seconds times the share of it those tests took in run 44453580892 (19 November 2026). downtown.spec.ts is an estimate from the development container, times 1.15, until a CI run times it. `perf` and `evidence` are the files of those projects (issue #225): they run nightly, after each push to main and on pull requests that touch the renderer or carry the `perf` or `evidence` label, and they do not gate a merge (.github/workflows/perf.yml). Their files are dealt out to runners the same way, by the same `seconds`. guides.spec.ts, two-tabs.spec.ts and construction.spec.ts are estimates since issue #226 turned on cheap frames: their seconds before it times the ratio of their seconds after to before in the development container (4-core Xeon at 2.1 GHz, one worker, 19 November 2026, on main at d891dcd), 25/52, 24/47 and 19/36. The other chromium files got cheaper too and keep their figures until a CI run times them.",
   "walkthrough": "walkthrough\\.spec\\.ts$",
   "roads": [
     "roads.spec.ts",
@@ -44,7 +44,7 @@
     "city-file.spec.ts": 81,
     "connections.spec.ts": 36,
     "construction-frame-time.spec.ts": 248,
-    "construction.spec.ts": 130,
+    "construction.spec.ts": 69,
     "decor.spec.ts": 74,
     "dock.spec.ts": 93,
     "downtown.spec.ts": 30,
@@ -54,7 +54,7 @@
     "grid-tool.spec.ts": 113,
     "grower.spec.ts": 44,
     "guides-scale.spec.ts": 153,
-    "guides.spec.ts": 60,
+    "guides.spec.ts": 29,
     "levels.spec.ts": 36,
     "presets-forest.spec.ts": 184,
     "presets.spec.ts": 52,
@@ -71,7 +71,7 @@
     "terrain.spec.ts": 7,
     "through-lots.spec.ts": 86,
     "tools-and-buildings.spec.ts": 101,
-    "two-tabs.spec.ts": 93,
+    "two-tabs.spec.ts": 47,
     "ui-shell.spec.ts": 144,
     "undo.spec.ts": 65,
     "zone-open-scale.spec.ts": 136,

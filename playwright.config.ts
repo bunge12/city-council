@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { MEASURE_STATE, PLAYER_STATE, TEST_STATE } from "./e2e/browser-state";
 import projectFiles from "./e2e/projects.json" with { type: "json" };
 
 const isCI = Boolean(process.env["CI"]);
@@ -33,21 +34,6 @@ const webGpuArgs =
     ? ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-webgpu-adapter=swiftshader"]
     : ["--enable-unsafe-webgpu"];
 
-/**
- * Every test starts in a browser that already keeps the Low graphics preset
- * (issue M2-02), as if the player had chosen it. Otherwise each test's fresh
- * browser would run the first-run benchmark, which on a runner without a GPU
- * takes seconds of drawing. Tests of the presets and the benchmark clear it.
- */
-const lowPreset = JSON.stringify({ preset: "low", source: "player", benchmarkMs: null, benchmarkBackend: null });
-const keptPreset = {
-  cookies: [],
-  origins: ["http://localhost:5173", "http://localhost:4173"].map((origin) => ({
-    origin,
-    localStorage: [{ name: "city-council:graphics", value: lowPreset }],
-  })),
-};
-
 export default defineConfig({
   testDir: "e2e",
   forbidOnly: isCI,
@@ -68,7 +54,8 @@ export default defineConfig({
     // two cores instead of 1.4, without them 1.5.
     trace: { mode: "retain-on-first-failure", screenshots: false, snapshots: false },
     screenshot: "only-on-failure",
-    storageState: keptPreset,
+    // The Low preset kept, and per project below the test switch (e2e/browser-state.ts).
+    storageState: PLAYER_STATE,
   },
   projects: [
     {
@@ -76,7 +63,8 @@ export default defineConfig({
       // Every file the other projects do not run. In CI its files are dealt
       // out to runners by scripts/e2e-shard.mjs, by how long each takes.
       testIgnore: [walkthroughFiles, ...projectFiles.roads, ...projectFiles.perf, ...projectFiles.evidence],
-      use: { ...devices["Desktop Chrome"] },
+      // Cheap frames and no autosave on an interval (issue #226). A spec that tests saving overrides it.
+      use: { ...devices["Desktop Chrome"], storageState: TEST_STATE },
     },
     {
       // Road rendering (issue M1-06), on WebGPU and on WebGL 2, compared
@@ -137,7 +125,8 @@ export default defineConfig({
       retries: 0,
       testMatch: process.env["SCALE_WEBGPU"] ? projectFiles.perf.filter((f) => f !== "scale.spec.ts") : projectFiles.perf,
       dependencies: remoteBase ? [] : ["walkthrough"],
-      use: { ...devices["Desktop Chrome"] },
+      // Every frame drawn at the real settings, and no autosave in a measurement (issue #226).
+      use: { ...devices["Desktop Chrome"], storageState: MEASURE_STATE },
     },
     {
       // Pictures for a pull request that changes what the city looks like
@@ -146,7 +135,8 @@ export default defineConfig({
       name: "evidence",
       testMatch: projectFiles.evidence,
       dependencies: remoteBase ? [] : ["perf"],
-      use: { ...devices["Desktop Chrome"] },
+      // Pictures at the real settings, as a player sees them (issue #226).
+      use: { ...devices["Desktop Chrome"], storageState: MEASURE_STATE },
     },
   ],
   // Against a public address nothing local is needed. Run only the

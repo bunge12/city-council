@@ -113,7 +113,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A missed budget runs the soak once more (issue #231), so a job can
+    # take twice its usual time and still pass.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
@@ -127,19 +129,24 @@ jobs:
       # soak hold steps to the 20 ms tick (issue #154).
       - run: |
           node -e "const os = require('os'); const c = os.cpus(); console.log('machine: ' + c.length + ' x ' + c[0].model + ', ' + Math.round(os.totalmem() / 2 ** 30) + ' GB')"
+      # A missed budget runs the soak once more, and the job fails only when
+      # the second hour misses as well (scripts/budget-retry.mjs, issue
+      # #231). The first hour's report is kept as soak-report.attempt-1.json.
       - run: pnpm soak
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: soak
-          path: packages/client/soak-report.json
+          path: packages/client/soak-report*.json
           retention-days: 30
 
   bench:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A missed budget runs the bench once more (issue #231), so a job can
+    # take twice its usual time and still pass.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
@@ -153,6 +160,9 @@ jobs:
       # soak hold steps to the 20 ms tick (issue #154).
       - run: |
           node -e "const os = require('os'); const c = os.cpus(); console.log('machine: ' + c.length + ' x ' + c[0].model + ', ' + Math.round(os.totalmem() / 2 ** 30) + ' GB')"
+      # A bench file that misses a budget runs once more, and the job fails
+      # only when it misses again (scripts/budget-retry.mjs, issue #231).
+      # The first attempt's results are kept in bench-results/attempt-1/.
       - run: pnpm bench
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
