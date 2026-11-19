@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { settleView, withFlush } from "./settle";
 
 // The hook packages/client/src/main.ts puts on the page. The tooling
 // tsconfig has no DOM types, so the parts used here are declared.
@@ -17,30 +18,18 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
 async function ready(page: Page, url = "/"): Promise<void> {
-  await page.goto(url);
+  await page.goto(withFlush(url));
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 15_000 });
 }
 
-/** Decoration drawn once the layer has built every chunk in range: the counts hold for ten frames. */
+/** Decoration drawn once the layer has built every chunk in range. */
 async function settledCounts(page: Page): Promise<Counts> {
-  return page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-    return view.decorCounts();
-  });
+  await settleView(page);
+  return page.evaluate(async () => (await window.cityCouncil.view).decorCounts());
 }
 
 /**

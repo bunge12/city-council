@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { buildScaleCity, createState, heightAt, generateTerrain, serialize } from "../packages/sim/src/index";
 import { frameTime, memory } from "./measure";
+import { settleView, withFlush } from "./settle";
 
 // The M1 scale check in the browser (issue M1-17): the city `buildScaleCity`
 // makes through commands, 30,000 road segments of street grids, curves and
@@ -29,7 +30,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Two cities, three bands each, drawn in software on a CI runner at about
@@ -69,7 +69,7 @@ async function ready(page: Page): Promise<void> {
 
 /** Opens the page, imports `bytes` as a city and waits for it to be drawn. */
 async function openCity(page: Page, name: string, bytes: Buffer): Promise<void> {
-  await page.goto(`/?${scaleQuery}`);
+  await page.goto(withFlush(`/?${scaleQuery}`));
   await ready(page);
   await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
   const loaded = page.waitForEvent("load");
@@ -84,28 +84,12 @@ async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> 
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
 }
 
-/** Waits until decoration near the camera has finished building: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 120 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
-}
-
 /** Frame time in each band, after the view settles there, with a screenshot of each when `testInfo` is given. */
 async function bandTimes(page: Page, testInfo?: TestInfo): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const { band, position, target } of BANDS) {
     await setPose(page, position, target);
-    await settle(page);
+    await settleView(page);
     expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
     out[band] = Math.round((await frameTime(page, 40)) * 10) / 10;
     if (testInfo) await attach(page, testInfo, `scale city, ${band} band`);

@@ -4,6 +4,7 @@ import { CELL_OPEN, CHUNKS_PER_SIDE, CHUNK_SIZE, ZONING_BALANCE, cellShapesInChu
 import { zonedFixtureCity, zonedScaleCity } from "./cell-fixtures";
 import { decodePng, type Image } from "./png";
 import { SEED, groundAt, scaleCity } from "./road-fixtures";
+import { settleView, withFlush } from "./settle";
 
 // Issue M2-06: the zoning overlay. It runs in the `roads` project, headed
 // with WebGPU on where the browser has an adapter (see playwright.config.ts),
@@ -61,7 +62,7 @@ async function ready(page: Page): Promise<void> {
 
 /** Opens the page, then imports `bytes` as a city and waits for it to be drawn. */
 async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<string> {
-  await page.goto(`/${query}`);
+  await page.goto(withFlush(`/${query}`));
   await ready(page);
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
@@ -103,22 +104,6 @@ async function setOverlay(page: Page, on: boolean): Promise<void> {
 
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
-}
-
-/** Waits until decoration has finished building near the camera: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
 }
 
 async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<void> {
@@ -170,7 +155,7 @@ for (const { name, query } of BACKENDS) {
     expect(stats.unzoned).toBeGreaterThan(0);
     for (const { band, position, target } of BANDS) {
       await setPose(page, position, target);
-      await settle(page);
+      await settleView(page);
       await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
       const shot = await canvasShot(page);
       await attach(testInfo, `${band} band, ${backend}`, shot);
@@ -180,7 +165,7 @@ for (const { name, query } of BACKENDS) {
     // The page with its legend, for the pull request.
     const street = BANDS[0];
     if (street) await setPose(page, street.position, street.target);
-    await settle(page);
+    await settleView(page);
     await attach(testInfo, `street band with the legend, ${backend}`, await page.screenshot());
   });
 }
@@ -205,7 +190,7 @@ test("painting one strip rebuilds only the chunks it touches and their neighbour
   await paint([4170, 4470], [4170, 4530]);
   await expect(page.locator("#cell-rebuilds")).toHaveText(new RegExp(`^12 last, ${total + 21} total,`));
   await setPose(page, [4250, ground + 300, 4700], [4180, ground, 4520]);
-  await settle(page);
+  await settleView(page);
   await attach(testInfo, "two painted strips, debug panel open", await page.screenshot());
 });
 
@@ -274,7 +259,7 @@ for (const preset of ["low", "high"] as const) {
     const results: string[] = [];
     for (const height of [3500, 1500, 600, 250, 120]) {
       await setPose(page, [GRID.x + height * 0.3, ground + height, GRID.z + height * 0.6], [GRID.x, ground, GRID.z]);
-      await settle(page);
+      await settleView(page);
       const band = await page.evaluate(() => document.body.dataset["zoomBand"]);
       const project = (pts: Vec3[]) =>
         page.evaluate(async (pts) => {

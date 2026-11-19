@@ -29,6 +29,7 @@ import {
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
+import { settleView, withFlush } from "./settle";
 
 // The M2 exit test from docs/milestones/M2.md (issue M2-17), as one
 // walkthrough a player could do by hand, run once on WebGPU (when the
@@ -236,21 +237,9 @@ async function frames(page: Page, n = 2): Promise<void> {
   );
 }
 
-/** Waits until the buildings near the camera are drawn in the form they want, and decoration has stopped filling in. */
+/** Waits until the buildings near the camera are drawn in the form they want, and decoration has filled in. */
 async function settle(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsSettled"] === "true", null, { timeout: 180_000 });
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
+  await settleView(page, 180_000);
 }
 
 /** Looks at (x, z) from `height` metres up and to the south, set back so the work area sits above the tool menus. */
@@ -579,7 +568,7 @@ for (const variant of [
     const rows = page.locator("#activity-log tbody tr");
 
     // The WebGPU run expects WebGPU only where this browser offers an adapter.
-    await page.goto(url);
+    await page.goto(withFlush(url));
     const hasWebGpu = await page.evaluate(async () => Boolean(await navigator.gpu?.requestAdapter()));
     // CI starts Chromium with a software WebGPU adapter (playwright.config.ts).
     if (variant.name === "webgpu" && process.env["CI"]) expect(hasWebGpu, "CI must have a WebGPU adapter").toBe(true);

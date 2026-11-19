@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, serialize } from "../packages/sim/src/index";
 import { SEED, fixtureRoads } from "./road-fixtures";
+import { settleView, withFlush } from "./settle";
 
 // Issue M2-02: graphics presets, the sun and shadows. The same view at Low,
 // Balanced and High; the same commands at two presets giving the same state
@@ -33,7 +34,6 @@ declare const window: {
   localStorage: { getItem(key: string): string | null };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Three page loads of the whole map, drawn in software on a CI runner.
@@ -55,22 +55,6 @@ async function presetSettled(page: Page): Promise<void> {
 
 async function lighting(page: Page): Promise<LightingReport> {
   return page.evaluate(async () => (await window.cityCouncil.view).lighting());
-}
-
-/** Waits until decoration near the camera is built: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
 }
 
 /** Looks at the lowland forest edge nearest the middle of the map, from `height` metres up and `back` metres south. */
@@ -120,7 +104,7 @@ async function canvasShot(page: Page): Promise<Buffer> {
 
 /** Opens the page with `query` and imports `bytes` as a city. */
 async function openCity(page: Page, query: string, bytes: Buffer): Promise<void> {
-  await page.goto(`/${query}`);
+  await page.goto(withFlush(`/${query}`));
   await ready(page);
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles({ name: "Presets.city", mimeType: "application/octet-stream", buffer: bytes });
@@ -137,7 +121,7 @@ test("the same forest edge at each preset: no shadows, shadows near the camera, 
   const reports: Record<string, LightingReport> = {};
   let target: Vec3 = [0, 0, 0];
   for (const preset of PRESETS) {
-    await page.goto(`/?${query}preset=${preset}`);
+    await page.goto(withFlush(`/?${query}preset=${preset}`));
     const status = await ready(page);
     testInfo.annotations.push({ type: `${preset} backend`, description: status.backend });
     // The first frame is lit as Low and waits for no shadow shaders, so it
@@ -147,7 +131,7 @@ test("the same forest edge at each preset: no shadows, shadows near the camera, 
     await presetSettled(page);
     await expect(page.locator("#graphics-preset")).toHaveValue(preset);
     target = await lookAtForestEdge(page, 60, 120);
-    await settle(page);
+    await settleView(page);
     const report = await lighting(page);
     reports[preset] = report;
     expect(report.preset).toBe(preset);

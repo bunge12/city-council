@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { MEASURE_VIEWPORT, WAIT_VIEWPORT, canvasShot, drawnNow, openTown, poseAndSettle, scaleCity, writeReport } from "./building-lod-helpers";
 import { frameTime } from "./measure";
+import { settleView } from "./settle";
 
 // Issue #133: the zoning overlay over the whole scale town in the city band,
 // at Low. Every cell is zoned, the built ones hidden under their blocks. It
@@ -10,11 +11,12 @@ import { frameTime } from "./measure";
 // building-lod-scale.spec.ts, which then ran past its 15 minutes on slow
 // runners.
 //
-// The overlay builds at least one 500 m chunk a frame, and a chunk of the
-// scale town takes longer than the 6 ms budget, so filling in its 576 chunks
-// takes 576 frames, however fast the machine. It is turned on once every
-// building is drawn, so built cells are hidden under them from the start,
-// and fills in at `WAIT_VIEWPORT`, where a frame costs least.
+// A player's overlay builds at least one 500 m chunk a frame, and a chunk of
+// the scale town takes longer than the 6 ms budget, so filling in its 576
+// chunks takes 576 frames, however fast the machine. The test builds them
+// all at once with `view.flush()` (settle.ts, issue #223). It is turned on
+// once every building is drawn, so built cells are hidden under them from
+// the start.
 
 declare const window: { cityCouncil: { renderStatus(): { backend: string } | null; view: Promise<{ cellStats(): unknown }> } };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
@@ -32,11 +34,12 @@ test("the zoning overlay over the whole town in the city band", async ({ page },
   await page.keyboard.press("k");
   await page.waitForFunction(() => document.body.dataset["zoningOverlay"] === "true");
   expect(page.viewportSize()).toEqual(WAIT_VIEWPORT);
-  await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 900_000 });
+  await settleView(page, 300_000);
   await poseAndSettle(page, city.position, city.target);
   expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe("city");
-  // The town keeps growing at 1x, and a new building redraws the cells round it: wait for those too.
-  await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 300_000 });
+  // The town keeps growing at 1x, and a new building redraws the cells round it: build those too.
+  await settleView(page, 300_000);
+  expect(await page.evaluate(() => document.body.dataset["cellsPending"])).toBe("0");
   const frameMs = Math.round((await frameTime(page, 30)) * 10) / 10;
   const drawn = await drawnNow(page);
   const cells = await page.evaluate(async () => (await window.cityCouncil.view).cellStats());

@@ -16,6 +16,7 @@ import {
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
 import { finishConstruction } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { settleView, withFlush } from "./settle";
 
 // Issue M2-14: through-lots. Two blocks between three parallel streets
 // twelve cells apart, closed at both ends, on seed 2026's flat square. The
@@ -32,7 +33,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
 test.setTimeout(180_000);
@@ -96,7 +96,7 @@ function throughLotCity(): Fixture {
 const fixture = throughLotCity();
 
 async function openCity(page: Page, query: string): Promise<void> {
-  await page.goto(`/${query}`);
+  await page.goto(withFlush(`/${query}`));
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles({ name: "Through-lots.city", mimeType: "application/octet-stream", buffer: fixture.bytes });
@@ -112,18 +112,7 @@ async function openCity(page: Page, query: string): Promise<void> {
 async function look(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
   // Decoration fills in near the camera over a few frames: wait for its counts to hold.
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
+  await settleView(page);
 }
 
 async function shoot(page: Page, testInfo: TestInfo, name: string): Promise<void> {

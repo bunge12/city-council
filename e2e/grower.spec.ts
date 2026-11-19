@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { zonedFixtureCity } from "./cell-fixtures";
 import { groundAt } from "./road-fixtures";
+import { settleView, withFlush } from "./settle";
 
 // Issue M2-10: the grower. Buildings are not drawn until issue 12, so this
 // checks what the page can show now: buildings arrive in the page's copy of
@@ -33,7 +34,6 @@ declare const window: {
   growthFrames?: { trees: number; buildings: number; shot: string | null }[];
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 async function ready(page: Page): Promise<void> {
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
@@ -85,7 +85,7 @@ test("buildings grow on zoned cells over game time, and the debug panel times th
 // growth counts the trees drawn: none may dip for a frame and come back.
 test("trees near new buildings stay drawn while the city grows", async ({ page }, info) => {
   const { bytes } = zonedFixtureCity();
-  await page.goto("/?webgl&preset=low");
+  await page.goto(withFlush("/?webgl&preset=low"));
   await ready(page);
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles({ name: "zoned.city", mimeType: "application/octet-stream", buffer: bytes });
@@ -99,19 +99,8 @@ test("trees near new buildings stay drawn while the city grows", async ({ page }
     [grid.x + 40, ground + 90, grid.z + 150],
     [grid.x + 10, ground + 5, grid.z + 40],
   ] as [Vec3, Vec3]);
-  // Decoration in range finished building: its counts hold for ten frames.
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
+  // Decoration in range finished building.
+  await settleView(page);
   // After each frame is drawn: the tree instances in the scene, and every tenth frame's picture for the pull request.
   await page.evaluate(async () => {
     const view = await window.cityCouncil.view;

@@ -12,6 +12,7 @@ import { finishConstruction } from "./building-fixtures";
 import { frameTime, mb, memory } from "./measure";
 import { BUILDINGS } from "../packages/client/src/render/config";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE, buildScaleCity, generateTerrain, growScaleCity, heightAt, serialize } from "../packages/sim/src/index";
+import { settleView, withFlush } from "./settle";
 
 export type Vec3 = readonly [number, number, number];
 export type Form = "full" | "simple" | "box" | "flat";
@@ -62,7 +63,7 @@ export async function ready(page: Page): Promise<void> {
 
 /** Opens the page, imports `bytes` as a city and waits for it to be drawn. */
 export async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<void> {
-  await page.goto(`/?${query}`);
+  await page.goto(withFlush(`/?${query}`));
   await ready(page);
   await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 120_000 });
   const loaded = page.waitForEvent("load");
@@ -79,25 +80,9 @@ export async function setPose(page: Page, position: Vec3, target: Vec3): Promise
 
 /**
  * Waits until every chunk of buildings shows the form it wants, with no fade
- * under way, and decoration near the camera has finished building: its
- * counts hold for ten frames.
+ * under way, and decoration near the camera has been built (settle.ts).
  */
-export async function settle(page: Page, timeout = 120_000): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["buildingsSettled"] === "true", null, { timeout });
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
-  await page.waitForFunction(() => document.body.dataset["buildingsSettled"] === "true", null, { timeout });
-}
+export const settle = settleView;
 
 export async function stats(page: Page): Promise<BuildingStats> {
   const s = await page.evaluate(async () => (await window.cityCouncil.view).buildingStats());
@@ -249,6 +234,9 @@ export async function openTown(page: Page): Promise<void> {
   const { town, bytes } = scaleCity();
   await page.setViewportSize(WAIT_VIEWPORT);
   await openCity(page, "webgl&preset=low", "Town", bytes);
-  // Every chunk read from the mirror: a snapshot fills in over frames.
-  await page.waitForFunction((n) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(n), town.buildings, { timeout: 300_000 });
+  // Every chunk read from the mirror. Players see a snapshot fill in over
+  // frames, at least one chunk a frame, which on the town is 576 frames; the
+  // flush reads them all at once (issue #223).
+  await settleView(page, 300_000);
+  await page.waitForFunction((n) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(n), town.buildings, { timeout: 60_000 });
 }

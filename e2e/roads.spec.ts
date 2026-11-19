@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { decodePng, type Image } from "./png";
 import { CURVED_JUNCTION, FIVE_WAY, SIGNAL_CROSS, YIELD_TEE, curvedCity, decorationCity, fixtureCity, groundAt, scaleCity } from "./road-fixtures";
+import { settleView, withFlush } from "./settle";
 
 // Issue M1-06: roads in the mirror appear on the map. It runs in the `roads`
 // project, headed with WebGPU on where the browser has an adapter (see
@@ -54,7 +55,7 @@ async function ready(page: Page): Promise<void> {
 
 /** Opens the page, then imports `bytes` as a city and waits for it to be drawn. */
 async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<string> {
-  await page.goto(`/${query}`);
+  await page.goto(withFlush(`/${query}`));
   await ready(page);
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
@@ -72,22 +73,6 @@ async function roadStats(page: Page): Promise<RoadStats> {
 
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
-}
-
-/** Waits until decoration has finished building near the camera: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
 }
 
 /** Attaches a screenshot, kept as a file in the test's output folder. */
@@ -125,7 +110,7 @@ for (const { name, query } of BACKENDS) {
     expect(stats.chunks).toBe(3 + 2);
     for (const { band, position, target } of BANDS) {
       await setPose(page, position, target);
-      await settle(page);
+      await settleView(page);
       await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
       const shot = await canvasShot(page);
       await attach(testInfo, `${band} band, ${backend}`, shot);
@@ -151,13 +136,13 @@ for (const { name, query } of BACKENDS) {
     testInfo.annotations.push({ type: "backend", description: backend });
     const { x, z } = CURVED_JUNCTION;
     await setPose(page, [x + 40, curvedGround + 210, z + 200], [x + 40, curvedGround, z + 30]);
-    await settle(page);
+    await settleView(page);
     await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
     const shot = await canvasShot(page);
     await attach(testInfo, `curves, street band, ${backend}`, shot);
     expect(shot).toMatchSnapshot("roads-curves.png", { maxDiffPixelRatio: 0.01, threshold: 0.1 });
     await setPose(page, [x, curvedGround + 4200, z + 1700], [x, curvedGround, z]);
-    await settle(page);
+    await settleView(page);
     await attach(testInfo, `curves, city band, ${backend}`, await canvasShot(page));
   });
 }
@@ -177,16 +162,16 @@ for (const { name, query } of BACKENDS) {
     expect(stats.yields).toBe(3);
     const { x, z } = SIGNAL_CROSS;
     await setPose(page, [x - 30, decorGround + 40, z + 50], [x, decorGround, z]);
-    await settle(page);
+    await settleView(page);
     await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
     const shot = await canvasShot(page);
     await attach(testInfo, `avenue crossing a street, ${backend}`, shot);
     expect(shot).toMatchSnapshot("roads-decorations.png", { maxDiffPixelRatio: 0.01, threshold: 0.1 });
     await setPose(page, [YIELD_TEE.x - 20, decorGround + 45, YIELD_TEE.z + 60], [YIELD_TEE.x, decorGround, YIELD_TEE.z]);
-    await settle(page);
+    await settleView(page);
     await attach(testInfo, `street T with yield signs, ${backend}`, await canvasShot(page));
     await setPose(page, [4290, decorGround + 90, 4620], [4290, decorGround, 4510]);
-    await settle(page);
+    await settleView(page);
     await attach(testInfo, `streets tapering into avenues, ${backend}`, await canvasShot(page));
   });
 }
@@ -211,7 +196,7 @@ test("adding one segment rebuilds only the chunks it touches", async ({ page }, 
   const after = await roadStats(page);
   expect(after.chunks).toBe(before.chunks + 1);
   await setPose(page, [4250, ground + 300, 5150], [4220, ground, 4900]);
-  await settle(page);
+  await settleView(page);
   await attach(testInfo, "two new streets, debug panel open", await page.screenshot());
 });
 
@@ -257,7 +242,7 @@ for (const { name, query } of BACKENDS) {
     const results: string[] = [];
     for (const height of [12_000, 6000, 3500, 2500, 1500, 800, 400, 200, 100, 60]) {
       await setPose(page, [4450 + height * 0.35, ground + height, 4650 + height * 0.6], [4450, ground, 4650]);
-      await settle(page);
+      await settleView(page);
       const band = await page.evaluate(() => document.body.dataset["zoomBand"]);
       const points = await page.evaluate(async (pts) => {
         const camera = await window.cityCouncil.camera;
@@ -306,13 +291,13 @@ test("a 30,000 segment network in the city band", async ({ page }, testInfo: Tes
 
   await openCity(page, query, "Empty", scaleCity(0));
   await setPose(page, whole.position, whole.target);
-  await settle(page);
+  await settleView(page);
   const empty = await frameTime(page, 120);
 
   const backend = await openCity(page, query, "Thirty thousand", scaleCity(30_000));
   const stats = await roadStats(page);
   await setPose(page, whole.position, whole.target);
-  await settle(page);
+  await settleView(page);
   expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe("city");
   const roads = await frameTime(page, 120);
   const report = { backend, emptyFrameMs: empty, roadsFrameMs: roads, buildMs: stats.lastBuildMs, chunks: stats.chunks, segmentPieces: stats.segmentPieces };

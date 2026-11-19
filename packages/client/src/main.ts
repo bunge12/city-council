@@ -29,7 +29,7 @@ import { createCameraControls, type CameraControls } from "./camera/controls";
 import type { GroundHit } from "./camera/pick";
 import { createCameraRig, type CameraRig } from "./camera/rig";
 import { startPose } from "./camera/start-pose";
-import { createView, wantsWebGL, type View } from "./render/view";
+import { createView, viewOptions, wantsWebGL, type View } from "./render/view";
 import { choosePreset, loadPreset, presetForBenchmark, savePreset, type Preset } from "./render/presets";
 import { createRoadPreviewLayer } from "./render/road-preview";
 import type { PreviewShape } from "./render/road-preview-geometry";
@@ -505,7 +505,7 @@ const cameraReady = new Promise<CameraHooks>((resolve) => {
   resolveCamera = resolve;
 });
 
-const viewReady = createView(canvas, wantsWebGL(location.search)).then((view) => {
+const viewReady = createView(canvas, wantsWebGL(location.search), viewOptions(location.search)).then((view) => {
   setViewReadout({ backend: view.backend === "webgpu" ? "WebGPU" : "WebGL 2" });
   let shownSeed: number | null = null;
   let graphicsStarted = false;

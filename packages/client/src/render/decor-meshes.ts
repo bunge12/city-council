@@ -121,8 +121,17 @@ function grassGeometry(): BufferGeometry {
 
 /** Decoration shown on the map, and its controls. */
 export interface DecorLayer {
-  /** Shows or hides each chunk's decoration for the camera at `eye`, building any newly in range. */
-  update(eye: Vector3): void;
+  /**
+   * Shows or hides each chunk's decoration for the camera at `eye`,
+   * building any newly in range for about `budgetMs` (at least one chunk).
+   * `Infinity` builds every chunk in range now.
+   */
+  update(eye: Vector3, budgetMs?: number): void;
+  /**
+   * Chunks in range of the camera at the last update that are not built,
+   * or are marked to build again since.
+   */
+  pending(): number;
   /** Instances drawn last update: trees and grass tufts. */
   counts(): { trees: number; grass: number };
   /**
@@ -261,6 +270,8 @@ export function createDecorLayer(
   }
 
   let shown = { trees: 0, grass: 0 };
+  const lastEye = new Vector3();
+  let looked = false;
 
   function drop(slot: ChunkSlot): void {
     for (const group of [slot.trees, slot.grass]) {
@@ -276,11 +287,11 @@ export function createDecorLayer(
   }
 
   return {
-    update(eye) {
+    update(eye, budgetMs = BUILD_MS_PER_FRAME) {
       const start = performance.now();
       let built = false;
       const next = { trees: 0, grass: 0 };
-      const canBuild = () => !built || performance.now() - start < BUILD_MS_PER_FRAME;
+      const canBuild = () => !built || performance.now() - start < budgetMs;
       // Chunks whose mask changed first: they are on screen with decoration
       // that may stand on a new road or lot. The old meshes go only once the
       // new ones are built, so the chunk is never drawn bare.
@@ -307,8 +318,16 @@ export function createDecorLayer(
         if (slot.grass && wantGrass) next.grass += slot.grassCount;
       });
       shown = next;
+      lastEye.copy(eye);
+      looked = true;
     },
     counts: () => shown,
+    pending() {
+      if (!looked) return 0;
+      let n = 0;
+      for (const slot of slots) if ((slot.stale || !slot.trees) && lastEye.distanceTo(slot.centre) < DECOR.trees.drawDistance) n++;
+      return n;
+    },
     refresh(chunks) {
       const dropped: number[] = [];
       for (const c of chunks) {

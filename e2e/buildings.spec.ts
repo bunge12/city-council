@@ -4,6 +4,7 @@ import { BUILDING_TYPES, buildingInfo } from "../packages/sim/src/index";
 import { builtFixtureCity } from "./building-fixtures";
 import { zonedFixtureCity } from "./cell-fixtures";
 import { groundAt } from "./road-fixtures";
+import { settleView, withFlush } from "./settle";
 
 // Issue M2-12: building rendering. It runs in the `roads` project, headed
 // with WebGPU on where the browser has an adapter (see playwright.config.ts),
@@ -35,7 +36,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(240_000);
@@ -57,7 +57,7 @@ async function buildingsDrawn(page: Page, count: number): Promise<void> {
 
 /** Opens the page, then imports `bytes` as a city and waits for it to be drawn. */
 async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<string> {
-  await page.goto(`/${query}`);
+  await page.goto(withFlush(`/${query}`));
   await ready(page);
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
@@ -69,22 +69,6 @@ async function openCity(page: Page, query: string, name: string, bytes: Buffer):
 
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
-}
-
-/** Waits until decoration has finished building near the camera: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
 }
 
 async function stats(page: Page): Promise<BuildingStats> {
@@ -146,7 +130,7 @@ for (const preset of ["balanced", "low"] as const) {
       await buildingsDrawn(page, fixture.buildings);
       expect((await stats(page)).buildings).toBe(fixture.buildings);
       await setPose(page, STREET.position, STREET.target);
-      await settle(page);
+      await settleView(page);
       await expect.poll(() => page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
       // Every chunk of the fixture is near the camera, so drawn in full (issue
       // M2-13): every building written once, when its chunk was first drawn so.
@@ -159,7 +143,7 @@ for (const preset of ["balanced", "low"] as const) {
       // More views for the pull request, on one backend: software WebGPU is slow to screenshot.
       if (query.startsWith("webgl")) for (const view of VIEWS) {
         await setPose(page, view.position, view.target);
-        await settle(page);
+        await settleView(page);
         await attach(testInfo, `${view.name}, ${preset}, ${backend}`, await canvasShot(page));
       }
     });
@@ -200,7 +184,7 @@ test("a building keeps its colours after a reload, and two houses on one street 
   const [hx, hz] = [mean(0), mean(1)];
   const h = groundAt(hx, hz);
   await setPose(page, [hx + 45, h + 55, hz + 45], [hx, h, hz]);
-  await settle(page);
+  await settleView(page);
   await attach(testInfo, "houses on one street", await canvasShot(page));
 });
 

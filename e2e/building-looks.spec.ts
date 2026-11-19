@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { BUILDING_TYPES, buildingInfo } from "../packages/sim/src/index";
 import { builtFixtureCity, downtownFixtureCity } from "./building-fixtures";
 import { groundAt } from "./road-fixtures";
+import { settleView, withFlush } from "./settle";
 
 // Issue #137: the look and detail of the buildings. A downtown of towers,
 // slabs and podiums, and the street of every type, drawn close up and from
@@ -23,7 +24,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Each test opens a city of towers and takes several screenshots in software
@@ -37,7 +37,7 @@ async function ready(page: Page): Promise<void> {
 }
 
 async function openCity(page: Page, name: string, city: { bytes: Buffer; buildings: number }): Promise<void> {
-  await page.goto("/?webgl&preset=balanced");
+  await page.goto(withFlush("/?webgl&preset=balanced"));
   await ready(page);
   const loaded = page.waitForEvent("load");
   await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: city.bytes });
@@ -51,25 +51,9 @@ async function openCity(page: Page, name: string, city: { bytes: Buffer; buildin
   await page.addStyleTag({ content: "#ui { display: none !important; }" });
 }
 
-/** Waits until decoration near the camera has finished building: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
-}
-
 async function shoot(page: Page, testInfo: TestInfo, name: string, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
-  await settle(page);
+  await settleView(page);
   const shot = await page.locator("#view").screenshot();
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, shot);
