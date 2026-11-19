@@ -2,6 +2,12 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Builds the scale city once per run, and the scale town in bench runs,
+    // for the scale tests and benches to load (issue #230).
+    globalSetup: ["./test/scale-setup.ts"],
+    // A worker per core. Vitest leaves one for its own process by default,
+    // but that process waits while the sim's tests run (issue #230).
+    maxWorkers: "100%",
     benchmark: {
       // In bench mode Vitest wraps every export in a getter that counts its
       // calls, to warn when a bench calls across modules a lot. The sim's hot

@@ -33,7 +33,6 @@ import {
   CHUNK_SIZE,
   TIME_BALANCE,
   ZONING_BALANCE,
-  buildScaleCity,
   buildingCount,
   buildingInfo,
   buildingsInChunk,
@@ -43,7 +42,6 @@ import {
   cellsInChunk,
   cellsSettled,
   findLot,
-  growScaleCity,
   lotMarkAt,
   lotMarksInChunk,
   lotOptions,
@@ -59,6 +57,7 @@ import {
   type Command,
   type ZoneCellsPayload,
 } from "../src/index";
+import { loadScaleTown } from "./scale-fixture";
 import { grow } from "../src/buildings/grower";
 import { buildingsOnSegments, buildingsOnSlots } from "../src/buildings/where";
 import { nextFloat, seedRng } from "../src/rng";
@@ -70,8 +69,7 @@ const TICK_BUDGET_MS = 20;
 const LINE = 96;
 const SPAN = 6 * LINE;
 
-const city = buildScaleCity();
-const town = growScaleCity(city);
+const { city, town } = loadScaleTown();
 const { state, grids } = city;
 prepareDerived(state);
 // Let the grower plan its first day and the cells settle, as a loaded city would before a player acts.
