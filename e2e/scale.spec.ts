@@ -72,7 +72,7 @@ async function bandTimes(page: Page, testInfo?: TestInfo): Promise<Record<string
   const out: Record<string, number> = {};
   for (const { band, position, target } of BANDS) {
     await setPose(page, position, target);
-    await settle(page, { maxFrames: 120 });
+    await settle(page);
     expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
     out[band] = Math.round((await frameTime(page, 40)) * 10) / 10;
     if (testInfo) await attach(page, testInfo, `scale city, ${band} band`);

@@ -188,6 +188,13 @@ export interface BuildingLayer {
    */
   update(camera: { x: number; z: number }, budgetMs: number, view?: BuildingView): void;
   /**
+   * True when nothing is left to read and every chunk shows the form it
+   * wanted at the last update, built from its buildings as they are now,
+   * with no fade under way. The forms built ahead for a later zoom do not
+   * count.
+   */
+  idle(): boolean;
+  /**
    * The chunks a lot that a building came onto or left since the last call
    * reaches, with the ground round it kept clear of trees. A lot can reach
    * over a chunk line, so the zoning overlay and the decoration redraw these
@@ -1479,6 +1486,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     }
   }
 
+  /** Chunks whose wanted form the last update left to build, for want of budget. */
+  let queued = 0;
+
   /** One step of the forms, after the reads: what each chunk wants, what that needs built, and the fades. */
   function forms(camera: { x: number; z: number }, view: BuildingView, start: number, budgetMs: number): void {
     const needs: { c: number; ch: Chunk; d: number; form: BuildingForm }[] = [];
@@ -1520,9 +1530,14 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     }
     needs.sort((a, b) => a.d - b.d || a.c - b.c);
     let done = 0;
+    queued = 0;
     for (const n of needs) {
       if (n.form !== "full" && !unbuilt(n.ch, n.form)) continue;
-      if (done > 0 && performance.now() - start >= budgetMs) break;
+      // Left for a later frame: a stale form still drawn counts as ready, so neither `fading` nor `waiting` sees it.
+      if (done > 0 && performance.now() - start >= budgetMs) {
+        queued++;
+        continue;
+      }
       if (n.form === "full") fill(n.ch);
       else buildMerged(n.c, n.ch, n.form);
       done++;
@@ -1664,6 +1679,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         batchMs = 0;
       }
     },
+    idle: () => dirty.size === 0 && pendingIds.size === 0 && queued === 0 && stats.fading === 0 && stats.waiting === 0,
     takeLotChunks() {
       const out = [...lotChunks];
       lotChunks = new Set();

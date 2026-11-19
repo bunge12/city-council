@@ -55,7 +55,7 @@ test("frame time with a few hundred buildings under construction, at Balanced", 
     await openCity(page, mid.bytes, { query, name: "new" });
     await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [far.position, far.target] as const);
     await buildingsDrawn(page, mid.buildings);
-    await settle(page, { buildings: true });
+    await settle(page);
     const off = query.includes("noconstruction");
     expect(Number(await dataset(page, "buildingsUnderConstruction"))).toBe(off ? 0 : mid.buildings);
     results[off ? "off" : "on"] = await frameTime(page, 30);

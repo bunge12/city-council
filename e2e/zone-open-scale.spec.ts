@@ -92,7 +92,7 @@ test("opening the zone tool on the scale town runs no main-thread task over 50 m
   if (!street) throw new Error("no street band pose");
   await setPose(page, street.position, street.target);
   // Buildings and decoration near the camera finish building first: that work comes with the move, not the tool.
-  await settle(page, { buildings: true, timeout: 300_000 });
+  await settle(page, { timeout: 300_000 });
   await page.locator("#view").hover({ position: { x: 640, y: 400 } });
 
   // Drawing stops.

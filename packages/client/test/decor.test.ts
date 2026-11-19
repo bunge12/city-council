@@ -170,4 +170,34 @@ describe("the decoration layer", () => {
     expect(treesDrawn(scene)).toBeLessThan(near);
     layer.dispose();
   });
+
+  it("builds every chunk in range in one update with no budget, and says how many are left to build (issue #223)", () => {
+    const { chunk, eye } = forestChunk();
+    const budgeted = createDecorLayer(terrain, new Scene());
+    const flushed = createDecorLayer(terrain, new Scene());
+    expect(flushed.pending()).toBe(0);
+    flushed.update(eye, Infinity);
+    expect(flushed.pending()).toBe(0);
+    // The budget takes frames to get there, at least one chunk each; zero milliseconds builds exactly one.
+    budgeted.update(eye, 0);
+    const left = budgeted.pending();
+    expect(left).toBeGreaterThan(0);
+    budgeted.update(eye, 0);
+    expect(budgeted.pending()).toBe(left - 1);
+    for (let f = 0; f < 500 && budgeted.pending() > 0; f++) budgeted.update(eye, 0);
+    expect(budgeted.pending()).toBe(0);
+    expect(budgeted.counts()).toEqual(flushed.counts());
+    // A chunk marked to build again is pending until the next update builds it.
+    flushed.refresh([chunk]);
+    expect(flushed.pending()).toBe(0);
+    const mask = new Uint8Array(MASK_SIDE * MASK_SIDE).fill(MASK_TREES);
+    const relaid = createDecorLayer(terrain, new Scene(), (c) => (c === chunk ? mask : null));
+    relaid.update(eye, Infinity);
+    mask.fill(0);
+    expect(relaid.refresh([chunk])).toEqual([chunk]);
+    expect(relaid.pending()).toBe(1);
+    relaid.update(eye, Infinity);
+    expect(relaid.pending()).toBe(0);
+    for (const l of [budgeted, flushed, relaid]) l.dispose();
+  });
 });

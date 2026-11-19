@@ -196,7 +196,7 @@ async function shot(page: Page, info: TestInfo, dir: string, name: string): Prom
 /** Waits until every chunk of buildings is read from the mirror, then until they and the decoration near the camera `settle`. */
 async function settleBuilt(page: Page): Promise<void> {
   await page.waitForFunction(() => document.body.dataset["buildingsPending"] === "0", null, { timeout: 180_000 });
-  await settle(page, { buildings: true, timeout: 180_000 });
+  await settle(page, { timeout: 180_000 });
 }
 
 /** Looks at (x, z) from `height` metres up and to the south, set back so the work area sits above the tool menus. */

@@ -103,7 +103,7 @@ test("at 4x a new building's scaffolding goes up, the building rises inside it, 
   await openCity(page, city.bytes, { query: "?webgl&preset=low&debug", name: "new" });
   await setPose(page, CLOSE.position, CLOSE.target);
   await buildingsDrawn(page, city.buildings);
-  await settle(page, { buildings: true });
+  await settle(page);
   expect(await dataset(page, "zoomBand")).toBe("street");
   // Paused on the tick every building was built on: all of them under construction, nothing standing yet.
   expect(await tick(page)).toBe(city.tick);
@@ -161,7 +161,7 @@ test("at 4x a new building's scaffolding goes up, the building rises inside it, 
   await ready(page);
   await setPose(page, CLOSE.position, CLOSE.target);
   await page.waitForFunction(() => document.body.dataset["buildingsPending"] === "0" && Number(document.body.dataset["buildingsDrawn"]) > 0, null, { timeout: 120_000 });
-  await settle(page, { buildings: true });
+  await settle(page);
   expect(await tick(page)).toBeGreaterThanOrEqual(city.tick + T);
   expect(await dataset(page, "buildingsUnderConstruction")).toBe("0");
   expect(await dataset(page, "scaffolds")).toBe("0");
@@ -177,7 +177,7 @@ test("pausing freezes a building half way up, and running again finishes it", as
   await openCity(page, mid.bytes, { query: "?webgl&preset=low", name: "new" });
   await setPose(page, CLOSE.position, CLOSE.target);
   await buildingsDrawn(page, mid.buildings);
-  await settle(page, { buildings: true });
+  await settle(page);
   expect(Number(await dataset(page, "scaffolds"))).toBeGreaterThan(0);
   const first = await canvasShot(page);
   await attach(testInfo, `paused at age ${age} of ${T} ticks`, first);
@@ -194,12 +194,12 @@ test("pausing freezes a building half way up, and running again finishes it", as
   ] as const) {
     await setPose(page, [...position], [GRID.x, ground, GRID.z]);
     await expect.poll(() => dataset(page, "zoomBand"), { timeout: FRAME_WAIT }).toBe(band);
-    await settle(page, { buildings: true });
+    await settle(page);
     expect(await dataset(page, "scaffolds")).toBe("0");
     await attach(testInfo, `paused at age ${age}, ${band} band`, await canvasShot(page));
   }
   await setPose(page, CLOSE.position, CLOSE.target);
-  await settle(page, { buildings: true });
+  await settle(page);
   // Running again, construction carries on from where it stopped and finishes.
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 4 }))).toEqual({ ok: true });
   await page.waitForFunction((end) => (window.cityCouncil.mirror.state?.tick ?? 0) >= end, mid.tick + T, { timeout: 120_000 });
@@ -208,6 +208,6 @@ test("pausing freezes a building half way up, and running again finishes it", as
   await attach(testInfo, "run on at 4x, finished", await canvasShot(page));
   await setPose(page, DISTRICT, [GRID.x, ground, GRID.z]);
   await expect.poll(() => dataset(page, "zoomBand"), { timeout: FRAME_WAIT }).toBe("district");
-  await settle(page, { buildings: true });
+  await settle(page);
   await attach(testInfo, "run on at 4x, finished, district band", await canvasShot(page));
 });

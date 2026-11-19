@@ -28,7 +28,7 @@ test("flying a loop twice ends with no more memory than flying it once", async (
     for (const s of loop) {
       const h = heightAt(terrain, s.x, s.z);
       await setPose(page, [s.x, h + 190, s.z + 170], [s.x, h, s.z]);
-      await settle(page, { buildings: true, timeout: 300_000 });
+      await settle(page, { timeout: 300_000 });
       expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe("street");
     }
     const s = await stats(page);

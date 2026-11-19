@@ -118,7 +118,7 @@ export const WAIT_VIEWPORT = { width: 160, height: 100 } as const;
 export async function poseAndSettle(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.setViewportSize(WAIT_VIEWPORT);
   await setPose(page, position, target);
-  await settle(page, { buildings: true, timeout: 300_000 });
+  await settle(page, { timeout: 300_000 });
   // A resize builds nothing: two frames drawn at full size, and the buildings still settled.
   await fullSize(page);
   await page.waitForFunction(() => document.body.dataset["buildingsSettled"] === "true", null, { timeout: 300_000 });
@@ -222,6 +222,9 @@ export async function openTown(page: Page): Promise<void> {
   const { town, bytes } = scaleCity();
   await page.setViewportSize(WAIT_VIEWPORT);
   await openFixture(page, "webgl&preset=low", "Town", bytes);
-  // Every chunk read from the mirror: a snapshot fills in over frames.
-  await buildingsDrawn(page, town.buildings, 300_000);
+  // Every chunk read from the mirror. Players see a snapshot fill in over
+  // frames, at least one chunk a frame, which on the town is 576 frames; the
+  // flush reads them all at once (issue #223).
+  await settle(page, { timeout: 300_000 });
+  await buildingsDrawn(page, town.buildings, 60_000);
 }

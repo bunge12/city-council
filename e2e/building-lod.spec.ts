@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { builtFixtureCity } from "./building-fixtures";
 import { attachCanvas, chunkAt, openFixture, setPose, stats, type Form, type Vec3 } from "./building-lod-helpers";
-import { settle } from "./helpers";
+import { settle, settleThroughFrames } from "./helpers";
 import { groundAt } from "./road-fixtures";
 import { ZONING_BALANCE } from "../packages/sim/src/index";
 
@@ -17,7 +17,9 @@ import { ZONING_BALANCE } from "../packages/sim/src/index";
 // not gate a merge: the forms each band draws and the homes count are held
 // here instead.
 
-declare const window: { cityCouncil: { view: Promise<{ buildingForm(chunk: number): Form | null }> } };
+declare const window: {
+  cityCouncil: { view: Promise<{ buildingForm(chunk: number): Form | null; decorCounts(): { trees: number; grass: number }; flush?: () => void }> };
+};
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: { width: 1280, height: 800 } });
@@ -46,7 +48,7 @@ test.describe("the fixture city", () => {
       await expect(page.locator("#homes-count")).toHaveText(homes.toLocaleString("en-US"));
       for (const { band, position, form } of BANDS) {
         await setPose(page, position, target);
-        await settle(page, { buildings: true });
+        await settle(page);
         expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
         expect(await page.evaluate(async (c) => (await window.cityCouncil.view).buildingForm(c), chunk)).toBe(form);
         const s = await stats(page);
@@ -65,4 +67,31 @@ test.describe("the fixture city", () => {
       }
     });
   }
+
+  // Every other spec settles the view with `view.flush()` (helpers.ts
+  // `settle`, issue #223). This one waits for the per-frame budget, the path
+  // players get: buildings, their fades, the decoration and the zoning
+  // overlay fill in a few chunks a frame until the canvas says every queue
+  // is empty. A flush then finds nothing to change.
+  test("the per-frame budget fills each band in, overlay on, and a flush after it changes nothing", async ({ page }) => {
+    await openFixture(page, "webgl&preset=low", "Built", fixture.bytes);
+    await page.locator("#view").focus();
+    await page.keyboard.press("k");
+    await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe("true");
+    const chunk = chunkAt(target[0], target[2]);
+    const shown = () =>
+      page.evaluate(async (c) => {
+        const view = await window.cityCouncil.view;
+        return { form: view.buildingForm(c), decor: view.decorCounts(), cellsPending: document.body.dataset["cellsPending"], settled: document.body.dataset["buildingsSettled"] };
+      }, chunk);
+    for (const { band, position, form } of BANDS) {
+      await setPose(page, position, target);
+      await settleThroughFrames(page);
+      const before = await shown();
+      expect(before, band).toEqual({ form, decor: before.decor, cellsPending: "0", settled: "true" });
+      if (band !== "city") expect(before.decor.trees + before.decor.grass, band).toBeGreaterThan(0);
+      await page.evaluate(async () => (await window.cityCouncil.view).flush?.());
+      expect(await shown(), band).toEqual(before);
+    }
+  });
 });
