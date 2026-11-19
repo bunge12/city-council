@@ -131,15 +131,18 @@ export interface View {
   benchmark(): Promise<number>;
   /**
    * Whether every build queue is empty: no chunk of buildings, cells or
-   * decoration waits to be built and no building fade is under way. The
-   * canvas carries it as `data-render-settled` after each frame.
+   * decoration waits to be built and no building fade is under way. It
+   * describes the view as of the last frame or flush: after a camera move
+   * it is stale until the next. The canvas carries it as
+   * `data-render-settled` after each frame.
    */
   settled(): boolean;
   /**
    * Only with `?flush`, for tests (issue #223): builds every pending
    * building, cell and decoration chunk now, with no budget, shows each
-   * chunk's buildings in the form it wants without the fade, and draws
-   * once. Players get the per-frame budget.
+   * chunk's buildings in the form it wants without the fade, builds the
+   * forms kept ahead for a later zoom, as frames with time left would, and
+   * draws once. Players get the per-frame budget.
    */
   flush?: () => void;
 }
@@ -321,7 +324,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
     camera.updateMatrixWorld();
     viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     frustum.setFromProjectionMatrix(viewProjection, camera.coordinateSystem);
-    const view = { band, seconds: flush ? Infinity : seconds, frustum, ...(gameTick !== null ? { tick: gameTick } : {}), ...(flush ? { noAhead: true } : {}) };
+    const view = { band, seconds: flush ? Infinity : seconds, frustum, ...(gameTick !== null ? { tick: gameTick } : {}) };
     terrainRoot?.buildings?.update(camera.position, flush ? Infinity : BUILDINGS.buildBudgetMs, view);
     // Cells under a lot that reaches over a chunk line are in a chunk the delta did not name.
     const lots = terrainRoot?.buildings?.takeLotChunks() ?? [];

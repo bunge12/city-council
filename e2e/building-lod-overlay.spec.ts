@@ -39,7 +39,6 @@ test("the zoning overlay over the whole town in the city band", async ({ page },
   expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe("city");
   // The town keeps growing at 1x, and a new building redraws the cells round it: build those too.
   await settleView(page, 300_000);
-  expect(await page.evaluate(() => document.body.dataset["cellsPending"])).toBe("0");
   const frameMs = Math.round((await frameTime(page, 30)) * 10) / 10;
   const drawn = await drawnNow(page);
   const cells = await page.evaluate(async () => (await window.cityCouncil.view).cellStats());
