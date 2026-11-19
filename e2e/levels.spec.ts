@@ -1,8 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
+import { createState, generateTerrain, heightAt } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-22: roads on different levels cross without a junction. No player
 // tool sets a level in M1, so the debug panel's road level picker builds an
@@ -26,7 +27,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -38,20 +38,6 @@ const STREET = { x0: 4200, x1: 4600, z: 4600 };
 const OVER = { x: 4400, z0: 4480, z1: 4720 };
 /** The second elevated road, west to east, crossing the first at (4400, 4680). */
 const SECOND = { x0: 4300, x1: 4520, z: 4680 };
-
-async function openCity(page: Page, bytes: Buffer): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Levels.city", mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
-}
 
 /** Looks at (x, z) from `height` metres up, `back` times as far to the south as up and `side` times as far to the east. */
 async function look(page: Page, x: number, z: number, height: number, back = 0.75, side = 0): Promise<void> {
@@ -115,7 +101,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 test("an elevated road built from the debug panel passes over a ground street with no junction, and joins another at its own level", async ({ page }, testInfo) => {
   const state = createState(SEED);
   buildRoads(state, [[[STREET.x0, STREET.z], [STREET.x1, STREET.z], "street"]]);
-  await openCity(page, Buffer.from(serialize(state)));
+  await openCity(page, state, { name: "Levels" });
   const before = await graph(page);
   expect(before.levels).toEqual([[0, 0]]);
   const logged = await logLength(page);

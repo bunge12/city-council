@@ -53,13 +53,27 @@ export function claimCity(id: string, locks: LockManagerLike | undefined, waitMs
 
 /** Prefix of the worker's name when the page asks for a city. */
 const WORKER_NAME = "sim";
+/** Prefix of the worker's name when the page will send it a city file to open (`LoadFileMessage`). */
+const LOAD_WORKER_NAME = "sim+load";
 
-/** The name the page gives the worker, carrying the city this tab last ran, if any. */
-export function workerName(cityId: string | null): string {
-  return cityId ? `${WORKER_NAME}:${cityId}` : WORKER_NAME;
+/**
+ * The name the page gives the worker, carrying the city this tab last ran,
+ * if any. `loadsFile` says the page will send a city file to open first.
+ */
+export function workerName(cityId: string | null, loadsFile = false): string {
+  const prefix = loadsFile ? LOAD_WORKER_NAME : WORKER_NAME;
+  return cityId ? `${prefix}:${cityId}` : prefix;
 }
 
 /** The city id in a worker name made by `workerName`, or null. */
 export function cityFromWorkerName(name: string): string | null {
-  return name.startsWith(`${WORKER_NAME}:`) ? name.slice(WORKER_NAME.length + 1) || null : null;
+  for (const prefix of [WORKER_NAME, LOAD_WORKER_NAME]) {
+    if (name.startsWith(`${prefix}:`)) return name.slice(prefix.length + 1) || null;
+  }
+  return null;
+}
+
+/** Whether a worker name made by `workerName` says a city file is on its way. */
+export function loadsFileFromWorkerName(name: string): boolean {
+  return name === LOAD_WORKER_NAME || name.startsWith(`${LOAD_WORKER_NAME}:`);
 }

@@ -1,20 +1,11 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import {
-  ROAD_TYPES,
-  createState,
-  deserialize,
-  generateTerrain,
-  hashState,
-  heightAt,
-  reachesOutside,
-  replay,
-  serialize,
-} from "../packages/sim/src/index";
+import { ROAD_TYPES, createState, deserialize, generateTerrain, hashState, heightAt, reachesOutside, replay } from "../packages/sim/src/index";
 import { formatMoneyShort } from "../packages/client/src/ui/format";
 import { SEED, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
+import { cityLoaded, cityReady, frames, hideNotes, openCity } from "./helpers";
 
 // The M1 exit test from docs/milestones/M1.md (issue M1-17), as one
 // walkthrough a player could do by hand, run once on WebGPU (when the
@@ -75,9 +66,7 @@ declare const window: {
     }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
 declare const navigator: { gpu?: { requestAdapter(): Promise<unknown> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 const VIEWPORT = { width: 1280, height: 800 };
 test.use({ viewport: VIEWPORT });
@@ -115,18 +104,6 @@ async function shot(page: Page, info: TestInfo, dir: string, name: string): Prom
   mkdirSync(join(SCREENSHOTS, dir), { recursive: true });
   const body = await page.screenshot({ path: join(SCREENSHOTS, dir, `${name}.png`) });
   await info.attach(name, { body, contentType: "image/png" });
-}
-
-async function ready(page: Page): Promise<void> {
-  await expect(page.locator("#sim-tick")).toHaveText(/^\d+$/, { timeout: 60_000 });
-  await page.waitForFunction(() => document.body.dataset["saveLoaded"] === "true", null, { timeout: 60_000 });
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  // The import and storage notes would cover the map in the screenshots.
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 /** Looks at (x, z) from `height` metres up and to the south, `back` times as far south as up. */
@@ -364,13 +341,15 @@ for (const variant of [
 ] as const) {
   test(`M1 walkthrough (${variant.name})`, async ({ page }, info) => {
     if (!street) throw new Error("street is in the balance file");
-    const url = `./${variant.query}`;
     const dir = `m1-${variant.name}`;
     const readout = page.locator("#road-readout");
     const rows = page.locator("#activity-log tbody tr");
 
+    // An empty city on the fixture seed, opened from a city file. The notes
+    // would cover the map in the screenshots, so they are hidden.
+    await openCity(page, createState(SEED), { query: variant.query, name: "M1 walkthrough" });
+    await cityLoaded(page);
     // The WebGPU run expects WebGPU only where this browser offers an adapter.
-    await page.goto(url);
     const hasWebGpu = await page.evaluate(async () => Boolean(await navigator.gpu?.requestAdapter()));
     // CI starts Chromium with a software WebGPU adapter (playwright.config.ts).
     // Without this the "webgpu" run could pass on WebGL 2 with only an
@@ -380,17 +359,6 @@ for (const variant of [
     if (variant.name === "webgpu" && !hasWebGpu) {
       info.annotations.push({ type: "backend", description: "no WebGPU adapter in this browser; ran on the WebGL 2 fallback" });
     }
-    await ready(page);
-    // An empty city on the fixture seed, imported as a city file. The page
-    // reloads into it.
-    const loaded = page.waitForEvent("load");
-    await page.locator("#import-file").setInputFiles({
-      name: "M1 walkthrough.city",
-      mimeType: "application/octet-stream",
-      buffer: Buffer.from(serialize(createState(SEED))),
-    });
-    await loaded;
-    await ready(page);
     expect((await page.evaluate(() => window.cityCouncil.renderStatus()))?.backend).toBe(wantBackend);
     expect(await logTypes(page)).toEqual([]);
     await page.keyboard.press("KeyL");
@@ -674,7 +642,8 @@ for (const variant of [
       const id = (await status(page)).city.id;
 
       await page.reload();
-      await ready(page);
+      await cityReady(page);
+      await hideNotes(page);
       const after = await status(page);
       expect(after.loadedFrom).toBe("latest save");
       expect(after.city.id).toBe(id);

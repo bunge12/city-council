@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
+import { createState, generateTerrain, heightAt } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-11: a street drawn across the water becomes a bridge without a
 // bridge tool. The preview marks the bridge and puts it in the cost, the
@@ -20,7 +21,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -29,20 +29,6 @@ const terrain = generateTerrain(SEED);
 
 /** Seed 2026's inlet: water from x = 3488 to 3600 along z = 6600, low banks either side. */
 const RIVER = { x0: 3400, x1: 3700, z: 6600, mid: 3545 };
-
-async function openCity(page: Page, bytes: Buffer): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Bridges.city", mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
-}
 
 /** Looks at (x, z) from `height` metres up and to the south, `back` times as far south as up. */
 async function look(page: Page, x: number, z: number, height: number, back = 0.75): Promise<void> {
@@ -102,7 +88,7 @@ async function band(page: Page): Promise<string | undefined> {
 }
 
 test("a street drawn across the river becomes a bridge, shown in the preview, the cost and both near bands", async ({ page }, testInfo) => {
-  await openCity(page, Buffer.from(serialize(createState(SEED))));
+  await openCity(page, createState(SEED), { name: "Bridges" });
   await look(page, RIVER.mid, RIVER.z, 260);
   await page.keyboard.press("KeyR");
   await click(page, RIVER.x0, RIVER.z);
@@ -144,7 +130,7 @@ test("a street drawn across the river becomes a bridge, shown in the preview, th
 test("a second bridge across the first, and a road that ends in the water, are refused with the reason", async ({ page }, testInfo) => {
   const state = createState(SEED);
   buildRoads(state, [[[RIVER.x0, RIVER.z], [RIVER.x1, RIVER.z], "street"]]);
-  await openCity(page, Buffer.from(serialize(state)));
+  await openCity(page, state, { name: "Bridges" });
   await look(page, RIVER.mid, RIVER.z, 300);
   await page.keyboard.press("KeyR");
   const readout = page.locator("#road-readout");

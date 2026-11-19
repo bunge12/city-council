@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { LEVEL_BRIDGE, ROAD_TYPES, SEG_FIXED, bridgeDeckLevel, createState, generateTerrain, heightAt, serialize, type SimState } from "../packages/sim/src/index";
+import { LEVEL_BRIDGE, ROAD_TYPES, SEG_FIXED, bridgeDeckLevel, createState, generateTerrain, heightAt, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-13: the upgrade and bulldoze tools. A player upgrades a street to
 // an avenue and sees it widen, bulldozes it and sees it gone, with a log
@@ -31,7 +32,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -82,22 +82,6 @@ function segmentNear(state: SimState, x: number, z: number): number {
     }
   }
   return best;
-}
-
-async function openCity(page: Page, state: SimState): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  const buffer = Buffer.from(serialize(state));
-  await page.locator("#import-file").setInputFiles({ name: "Edit.city", mimeType: "application/octet-stream", buffer });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  // Hide the import note so screenshots show the map.
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 /** Looks at (x, z) from `height` metres up and to the south, `back` times as far south as up. */
@@ -171,7 +155,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 test("upgrades a street to an avenue and sees it widen, then bulldozes it, with a log entry each", async ({ page }, testInfo) => {
   const state = crossedCity();
   const seg = segmentNear(state, 4300, MAIN_Z);
-  await openCity(page, state);
+  await openCity(page, state, { name: "Edit" });
   await look(page, 4300, MAIN_Z, 160);
   const readout = page.locator("#edit-readout");
   const start = (await logEntries(page)).length;
@@ -227,7 +211,7 @@ test("upgrades a street to an avenue and sees it widen, then bulldozes it, with 
 test("a drag across four segments bulldozes them in one log entry", async ({ page }, testInfo) => {
   const state = crossedCity();
   const segs = [4200, 4300, 4400, 4500].map((x) => segmentNear(state, x, MAIN_Z));
-  await openCity(page, state);
+  await openCity(page, state, { name: "Edit" });
   await look(page, 4350, MAIN_Z, 320);
   const start = (await logEntries(page)).length;
   const ends = await endsOf(page, segs);
@@ -262,7 +246,7 @@ test("picks a curve along the curve, a bridge at its deck, and the nearer of two
   const north = segmentNear(state, 4300, 4616);
   const bridge = Array.from(state.roads.segLevelA).indexOf(LEVEL_BRIDGE);
   expect(bridge).toBeGreaterThanOrEqual(0);
-  await openCity(page, state);
+  await openCity(page, state, { name: "Edit" });
   await page.keyboard.press("KeyB");
 
   // The arch's apex is 50 m off its chord.
@@ -294,7 +278,7 @@ test("a fixed road shows as not removable, and a right-click reverses a one-way"
   const fixed = segmentNear(state, 4300, 4600);
   state.roads.segFlags[fixed] = (state.roads.segFlags[fixed] ?? 0) | SEG_FIXED;
   const oneWay = segmentNear(state, 4575, 4700);
-  await openCity(page, state);
+  await openCity(page, state, { name: "Edit" });
   const start = (await logEntries(page)).length;
   await page.keyboard.press("KeyB");
   await look(page, 4300, 4608, 120);
@@ -320,7 +304,7 @@ test("a fixed road shows as not removable, and a right-click reverses a one-way"
 });
 
 test("both tools' keys are listed with the other shortcuts", async ({ page }, testInfo) => {
-  await openCity(page, crossedCity());
+  await openCity(page, crossedCity(), { name: "Edit" });
   await page.keyboard.press("Backquote");
   const panel = page.locator("#debug-panel");
   await expect(panel).toContainText("upgrade tool on or off");
@@ -360,7 +344,7 @@ async function alongMain(page: Page): Promise<[number, number, number][]> {
 // whole segment, and a drag along a road grows its stretch.
 test("bulldozes and upgrades a stretch of a road, the whole road with Shift, and a drag's length", async ({ page }, testInfo) => {
   const state = crossedCity();
-  await openCity(page, state);
+  await openCity(page, state, { name: "Edit" });
   await look(page, 4300, MAIN_Z, 160);
   const start = (await logEntries(page)).length;
 

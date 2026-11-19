@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-10: curved and continuous drawing modes. A curved avenue drawn
 // from open ground ends on an existing node, a curved street leaves the end
@@ -37,8 +38,6 @@ declare const window: {
     }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -52,20 +51,6 @@ function city(withStreet: boolean): Buffer {
   const state = createState(SEED);
   if (withStreet) buildRoads(state, [[[STREET.ax, STREET.z], [STREET.bx, STREET.z], "street"]]);
   return Buffer.from(serialize(state));
-}
-
-async function openCity(page: Page, bytes: Buffer): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Modes.city", mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
@@ -167,7 +152,7 @@ function tangentFrom(seg: SegInfo, at: [number, number]): [number, number] {
 const hint = (page: Page) => page.locator("#road-hint");
 
 test("a curved avenue ends on an existing node, with the preview following the curve", async ({ page }, testInfo) => {
-  await openCity(page, city(true));
+  await openCity(page, city(true), { name: "Modes" });
   await look(page, 4420, 4700, 330);
   await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyX");
@@ -210,7 +195,7 @@ test("a curved avenue ends on an existing node, with the preview following the c
 });
 
 test("a curve from the end of a road leaves in line with it, with no kink at the join", async ({ page }, testInfo) => {
-  await openCity(page, city(true));
+  await openCity(page, city(true), { name: "Modes" });
   await look(page, 4180, 4560, 160);
   await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyY");
@@ -239,7 +224,7 @@ test("a curve from the end of a road leaves in line with it, with no kink at the
 });
 
 test("continuous mode draws a three-segment road, one log entry per segment, ended by a double click", async ({ page }, testInfo) => {
-  await openCity(page, city(false));
+  await openCity(page, city(false), { name: "Modes" });
   await look(page, 4400, 4640, 300);
   await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyU");
@@ -282,7 +267,7 @@ test("continuous mode draws a three-segment road, one log entry per segment, end
 });
 
 test("a continuous road stops at a refused segment and keeps the ones built", async ({ page }, testInfo) => {
-  await openCity(page, city(false));
+  await openCity(page, city(false), { name: "Modes" });
   await look(page, 4320, 4600, 220);
   await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyU");
@@ -302,7 +287,7 @@ test("a continuous road stops at a refused segment and keeps the ones built", as
 });
 
 test("switching mode or tool part way through a road cancels it and leaves nothing behind", async ({ page }) => {
-  await openCity(page, city(true));
+  await openCity(page, city(true), { name: "Modes" });
   await look(page, 4380, 4680, 260);
   await page.keyboard.press("KeyR");
   await page.keyboard.press("KeyY");

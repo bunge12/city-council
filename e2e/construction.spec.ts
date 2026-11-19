@@ -5,6 +5,7 @@ import { buildingCount, serialize } from "../packages/sim/src/index";
 import { builtFixtureCity } from "./building-fixtures";
 import { frameTime } from "./measure";
 import { groundAt } from "./road-fixtures";
+import { buildingsDrawn, canvasShot, openCity, ready, settle } from "./helpers";
 
 // Issue 136: construction on screen. A new building draws in three stages
 // over CONSTRUCTION.ticks of game time: scaffolding up, the building rising
@@ -28,7 +29,6 @@ declare const window: {
   constructionFrames?: { tick: number; scaffolds: number; shot: string }[];
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(240_000);
@@ -51,54 +51,12 @@ function newCity(age = 0): { bytes: Buffer; tick: number; buildings: number } {
 }
 const city = newCity();
 
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
-
-async function openCity(page: Page, query: string, bytes: Buffer): Promise<void> {
-  await page.goto(`/${query}`);
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "new.city", mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function drawn(page: Page, count: number): Promise<void> {
-  await page.waitForFunction((count) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(count), count, { timeout: 120_000 });
-}
-
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
 }
 
-/** Waits until decoration near the camera has finished building and the buildings show the form they want. */
-async function settle(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["buildingsSettled"] === "true", null, { timeout: 120_000 });
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
-}
-
 const dataset = (page: Page, key: string) => page.evaluate((key) => document.body.dataset[key], key);
 const tick = (page: Page) => page.evaluate(() => window.cityCouncil.mirror.state?.tick ?? -1);
-
-async function canvasShot(page: Page): Promise<Buffer> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  const shot = await page.locator("#view").screenshot();
-  await page.addStyleTag({ content: "#ui { display: block !important; }" });
-  return shot;
-}
 
 async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
@@ -142,10 +100,10 @@ const FRAME_WAIT = 30_000;
 test("at 4x a new building's scaffolding goes up, the building rises inside it, and the scaffolding comes down", async ({ page }, testInfo) => {
   test.setTimeout(RUN_TIMEOUT);
   await page.setViewportSize(RUN_VIEWPORT);
-  await openCity(page, "?webgl&preset=low&debug", city.bytes);
+  await openCity(page, city.bytes, { query: "?webgl&preset=low&debug", name: "new" });
   await setPose(page, CLOSE.position, CLOSE.target);
-  await drawn(page, city.buildings);
-  await settle(page);
+  await buildingsDrawn(page, city.buildings);
+  await settle(page, { buildings: true });
   expect(await dataset(page, "zoomBand")).toBe("street");
   // Paused on the tick every building was built on: all of them under construction, nothing standing yet.
   expect(await tick(page)).toBe(city.tick);
@@ -203,7 +161,7 @@ test("at 4x a new building's scaffolding goes up, the building rises inside it, 
   await ready(page);
   await setPose(page, CLOSE.position, CLOSE.target);
   await page.waitForFunction(() => document.body.dataset["buildingsPending"] === "0" && Number(document.body.dataset["buildingsDrawn"]) > 0, null, { timeout: 120_000 });
-  await settle(page);
+  await settle(page, { buildings: true });
   expect(await tick(page)).toBeGreaterThanOrEqual(city.tick + T);
   expect(await dataset(page, "buildingsUnderConstruction")).toBe("0");
   expect(await dataset(page, "scaffolds")).toBe("0");
@@ -216,10 +174,10 @@ test("pausing freezes a building half way up, and running again finishes it", as
   // Opened paused with every building half way through its rise.
   const age = Math.round(T * (CONSTRUCTION.scaffoldUp + (1 - CONSTRUCTION.scaffoldUp - CONSTRUCTION.scaffoldDown) / 2));
   const mid = newCity(age);
-  await openCity(page, "?webgl&preset=low", mid.bytes);
+  await openCity(page, mid.bytes, { query: "?webgl&preset=low", name: "new" });
   await setPose(page, CLOSE.position, CLOSE.target);
-  await drawn(page, mid.buildings);
-  await settle(page);
+  await buildingsDrawn(page, mid.buildings);
+  await settle(page, { buildings: true });
   expect(Number(await dataset(page, "scaffolds"))).toBeGreaterThan(0);
   const first = await canvasShot(page);
   await attach(testInfo, `paused at age ${age} of ${T} ticks`, first);
@@ -236,12 +194,12 @@ test("pausing freezes a building half way up, and running again finishes it", as
   ] as const) {
     await setPose(page, [...position], [GRID.x, ground, GRID.z]);
     await expect.poll(() => dataset(page, "zoomBand"), { timeout: FRAME_WAIT }).toBe(band);
-    await settle(page);
+    await settle(page, { buildings: true });
     expect(await dataset(page, "scaffolds")).toBe("0");
     await attach(testInfo, `paused at age ${age}, ${band} band`, await canvasShot(page));
   }
   await setPose(page, CLOSE.position, CLOSE.target);
-  await settle(page);
+  await settle(page, { buildings: true });
   // Running again, construction carries on from where it stopped and finishes.
   expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 4 }))).toEqual({ ok: true });
   await page.waitForFunction((end) => (window.cityCouncil.mirror.state?.tick ?? 0) >= end, mid.tick + T, { timeout: 120_000 });
@@ -250,17 +208,17 @@ test("pausing freezes a building half way up, and running again finishes it", as
   await attach(testInfo, "run on at 4x, finished", await canvasShot(page));
   await setPose(page, DISTRICT, [GRID.x, ground, GRID.z]);
   await expect.poll(() => dataset(page, "zoomBand"), { timeout: FRAME_WAIT }).toBe("district");
-  await settle(page);
+  await settle(page, { buildings: true });
   await attach(testInfo, "run on at 4x, finished, district band", await canvasShot(page));
 });
 
 test("the state hash is the same with the animation and without it", async ({ page }, testInfo) => {
   const hashes: Record<string, string> = {};
   for (const query of ["?webgl&preset=low", "?webgl&preset=low&noconstruction"]) {
-    await openCity(page, query, city.bytes);
+    await openCity(page, city.bytes, { query, name: "new" });
     await setPose(page, CLOSE.position, CLOSE.target);
-    await drawn(page, city.buildings);
-    await settle(page);
+    await buildingsDrawn(page, city.buildings);
+    await settle(page, { buildings: true });
     const off = query.includes("noconstruction");
     expect(Number(await dataset(page, "scaffolds")) > 0, query).toBe(!off);
     // The same commands on the same paused tick.
@@ -282,10 +240,10 @@ test("frame time with a few hundred buildings under construction, at Balanced", 
   // Every building mid-rise, under scaffolding. Paused, so a slow runner measures the same stage throughout: the stages are worked out per vertex every frame, running or not.
   const mid = newCity(Math.round(T * 0.4));
   for (const query of ["?webgl&preset=balanced", "?webgl&preset=balanced&noconstruction"]) {
-    await openCity(page, query, mid.bytes);
+    await openCity(page, mid.bytes, { query, name: "new" });
     await setPose(page, far.position, far.target);
-    await drawn(page, mid.buildings);
-    await settle(page);
+    await buildingsDrawn(page, mid.buildings);
+    await settle(page, { buildings: true });
     const off = query.includes("noconstruction");
     expect(Number(await dataset(page, "buildingsUnderConstruction"))).toBe(off ? 0 : mid.buildings);
     results[off ? "off" : "on"] = await frameTime(page, 30);

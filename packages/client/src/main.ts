@@ -23,7 +23,7 @@ import { Vector3 } from "three/webgpu";
 import { SimMirror, type MirrorUpdate } from "./protocol/mirror";
 import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { createWorkerTransport } from "./protocol/transport";
-import { SaveClient, requestPersistence, type PersistenceResult } from "./save/page";
+import { SaveClient, fetchCityFile, requestPersistence, takeLoadAddress, type PersistenceResult } from "./save/page";
 import type { SaveStatus } from "./save/channel";
 import { createCameraControls, type CameraControls } from "./camera/controls";
 import type { GroundHit } from "./camera/pick";
@@ -81,7 +81,17 @@ function setTabCity(id: string): void {
 /** True from the moment this tab has chosen another city until the reload that opens it. */
 let switching = false;
 
-const worker = createWorkerTransport(tabCity());
+// `?load=<address>` opens the city file at that address on this site in
+// place of the city this tab would open, in this page load, as an import
+// does after its reload. Playwright opens its fixtures this way. The address
+// comes out of the page's own, so a reload stays on the city it opened.
+const load = takeLoadAddress(location.search);
+if (load.address !== null) history.replaceState(history.state, "", `${location.pathname}${load.rest}${location.hash}`);
+
+const worker = createWorkerTransport(tabCity(), load.address !== null);
+if (load.address !== null) {
+  void fetchCityFile(load.address, location.href).then((file) => worker.saves.send(file, file.bytes ? [file.bytes] : []));
+}
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
 const saves = new SaveClient(worker.saves);
 

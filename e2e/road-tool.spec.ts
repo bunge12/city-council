@@ -4,6 +4,7 @@ import { ROAD_TYPES, createState, generateTerrain, heightAt, serialize } from ".
 import { formatMoneyShort } from "../packages/client/src/ui/format";
 import { FLAT, SEED, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-07: the straight road tool. A player draws a street, crosses it
 // with an avenue and sees a four-way junction and two log entries, then
@@ -30,8 +31,6 @@ declare const window: {
     }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -70,15 +69,6 @@ function roadIntoWater(): { from: { x: number; z: number }; to: { x: number; z: 
   return { from: at(shore - 120), to: at(shore + 60) };
 }
 
-async function openEmptyCity(page: Page): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Empty.city", mimeType: "application/octet-stream", buffer: emptyCity() });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
-
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   // Issue 47: the road menu covers the bottom middle of the screen, so the
   // view sits a quarter of its height further back and the work area higher up.
@@ -87,10 +77,6 @@ async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> 
   const t: Vec3 = [target[0], target[1], target[2] + back];
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [p, t] as const);
   await frames(page);
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 /** Where ground point (x, z) is drawn on screen. */
@@ -148,9 +134,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 
 test("draws a street, crosses it with an avenue, and refuses a road into water", async ({ page }, testInfo) => {
   if (!street || !avenue) throw new Error("street and avenue are in the balance file");
-  await openEmptyCity(page);
-  // Hide the import note so screenshots show the map.
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
+  await openCity(page, emptyCity(), { name: "Empty" });
   const ground = groundAt(4350, 4600);
   await setPose(page, [4350, ground + 330, 4860], [4350, ground, 4600]);
   await page.keyboard.press("KeyL");
@@ -244,7 +228,7 @@ test("draws a street, crosses it with an avenue, and refuses a road into water",
 });
 
 test("Escape drops a road being drawn, and the keys are listed with the others", async ({ page }) => {
-  await openEmptyCity(page);
+  await openCity(page, emptyCity(), { name: "Empty", notes: true });
   const ground = groundAt(4350, 4600);
   await setPose(page, [4350, ground + 330, 4860], [4350, ground, 4600]);
   await page.keyboard.press("KeyC");

@@ -1,10 +1,11 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_TYPES, cellAt, createState, generateTerrain, heightAt, serialize, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_TYPES, cellAt, createState, generateTerrain, heightAt, syncCells, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
 import { finishConstruction } from "./building-fixtures";
 import { lotProblem } from "../packages/sim/src/buildings/where";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M2-15: the tools and buildings. The road tool marks the houses a
 // road would clear and counts them before the click, and after it they are
@@ -29,7 +30,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(180_000);
@@ -76,23 +76,6 @@ function houseCity(): { state: SimState; houses: number } {
   return { state, houses };
 }
 
-async function openCity(page: Page, state: SimState): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Houses.city", mimeType: "application/octet-stream", buffer: Buffer.from(serialize(state)) });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page, n = 2): Promise<void> {
-  await page.evaluate((n) => new Promise<void>((r) => {
-    const step = (left: number) => (left <= 0 ? r() : requestAnimationFrame(() => step(left - 1)));
-    step(n);
-  }), n);
-}
-
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
   const g = groundAt(x, z);
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [[x, g + height, z + height * 0.75], [x, g, z]] as const);
@@ -135,7 +118,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 test("a road through a row of houses marks and counts them before the click, and they are gone after", async ({ page }, testInfo) => {
   const { state, houses } = houseCity();
   expect(houses).toBeGreaterThan(8);
-  await openCity(page, state);
+  await openCity(page, state, { name: "Houses" });
   await look(page, 4300, 4560, 260);
   const before = await live(page);
   expect(before).toHaveLength(houses);
@@ -165,7 +148,7 @@ test("a road through a row of houses marks and counts them before the click, and
 
 test("the grid tool counts the buildings its rectangle would clear", async ({ page }, testInfo) => {
   const { state } = houseCity();
-  await openCity(page, state);
+  await openCity(page, state, { name: "Houses" });
   await look(page, 4300, 4590, 300);
   const before = await live(page);
 
@@ -203,7 +186,7 @@ test("the grid tool counts the buildings its rectangle would clear", async ({ pa
 
 test("hovering a building with no tool on reads it out", async ({ page }, testInfo) => {
   const { state } = houseCity();
-  await openCity(page, state);
+  await openCity(page, state, { name: "Houses" });
   await look(page, 4300, 4590, 160);
   const [x, z] = cellCentre(12, 1, true);
   await moveTo(page, x, z);
@@ -225,7 +208,7 @@ test("hovering a building with no tool on reads it out", async ({ page }, testIn
 
 test("an R3 strip of 3 x 6 is hatched, and the zone tool says why", async ({ page }, testInfo) => {
   const { state } = houseCity();
-  await openCity(page, state);
+  await openCity(page, state, { name: "Houses" });
   await look(page, 4300, 4640, 160);
   await page.keyboard.press("KeyK");
   await page.waitForFunction(async () => {

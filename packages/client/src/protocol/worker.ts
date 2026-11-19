@@ -2,9 +2,9 @@
 // worker's clock and saves it on an interval and when the page asks. City
 // file downloads and imports go through the saver too.
 import { AUTOSAVE_INTERVAL_MS } from "../save/config";
-import { SAVES_CHANNEL, isSaveMessage, type FromSaver } from "../save/channel";
-import { newCityFallback, openLatestCity, type OpenedCity } from "../save/load";
-import { cityFromWorkerName, claimCity } from "../save/lock";
+import { SAVES_CHANNEL, isSaveMessage, parseLoadFile, type FromSaver, type LoadFileMessage } from "../save/channel";
+import { newCityFallback, openLatestCity, openLoadedFile, type OpenedCity } from "../save/load";
+import { cityFromWorkerName, claimCity, loadsFileFromWorkerName } from "../save/lock";
 import { Saver } from "../save/saver";
 import { CityStore } from "../save/store";
 import { PUMP_INTERVAL_MS, SimHost } from "./host";
@@ -17,6 +17,23 @@ const port = self as unknown as MessagePortLike;
 const simTransport = bufferUntilListening(portTransport(port, (data) => !isSaveMessage(data)));
 const saveTransport = bufferUntilListening(portTransport<FromSaver, unknown>(port, isSaveMessage));
 
+/**
+ * The city file the page fetched from its `?load=` address, when the page
+ * named this worker to wait for one. Listened for before anything else, so
+ * it cannot arrive unheard.
+ */
+const loadFile: Promise<LoadFileMessage> | null = loadsFileFromWorkerName(self.name)
+  ? new Promise((resolve) => {
+      const listener = (event: MessageEvent): void => {
+        const file = parseLoadFile(event.data);
+        if (!file) return;
+        port.removeEventListener("message", listener);
+        resolve(file);
+      };
+      port.addEventListener("message", listener);
+    })
+  : null;
+
 async function start(): Promise<void> {
   let store: CityStore | null = null;
   let storeError: string | undefined;
@@ -24,7 +41,9 @@ async function start(): Promise<void> {
   const opening = (seed: number): void => saveTransport.send({ channel: SAVES_CHANNEL, type: "opening", seed, requestId: null });
   try {
     store = await CityStore.open();
-    city = await openLatestCity(store, undefined, cityFromWorkerName(self.name), opening);
+    city = loadFile
+      ? await openLoadedFile(store, await loadFile, Date.now(), undefined, cityFromWorkerName(self.name), opening)
+      : await openLatestCity(store, undefined, cityFromWorkerName(self.name), opening);
   } catch (error) {
     storeError = `saved cities could not be opened (${error instanceof Error ? error.message : String(error)})`;
     city = newCityFallback(`Saved cities could not be opened, so a new city was started. ${storeError}.`, undefined, opening);

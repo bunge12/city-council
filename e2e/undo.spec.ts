@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { createState, generateTerrain, heightAt, serialize, type SimState } from "../packages/sim/src/index";
+import { createState, generateTerrain, heightAt, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity } from "./helpers";
 
 // Issue M1-14: undo. A player draws a street across one that came with the
 // city, zones one of its pieces (issue 111), upgrades the other and
@@ -39,7 +40,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -51,22 +51,6 @@ function startCity(): SimState {
   const state = createState(SEED);
   buildRoads(state, [[[4350, 4500], [4350, 4700], "street"]]);
   return state;
-}
-
-async function openCity(page: Page, state: SimState): Promise<void> {
-  await page.goto("/?webgl");
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  const loaded = page.waitForEvent("load");
-  const buffer = Buffer.from(serialize(state));
-  await page.locator("#import-file").setInputFiles({ name: "Undo.city", mimeType: "application/octet-stream", buffer });
-  await loaded;
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-  // Hide the import note so screenshots show the map.
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
-}
-
-async function frames(page: Page): Promise<void> {
-  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
 }
 
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
@@ -172,7 +156,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
 }
 
 test("builds, zones, upgrades and bulldozes, then undoes all four one step at a time", async ({ page }, testInfo) => {
-  await openCity(page, startCity());
+  await openCity(page, startCity(), { name: "Undo" });
   await look(page, 4350, 4600, 260);
   await page.keyboard.press("KeyL");
   await expect(page.locator("#activity-log")).toBeVisible();
