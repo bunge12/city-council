@@ -6,17 +6,19 @@ import {
   applyCellDelta,
   applyRoadDelta,
   applyUndoDelta,
+  blockIndexOf,
   buildingInfo,
   buildingOnSlot,
   buildingsInChunk,
+  buildingsOnSlots,
   cellAt,
-  cellBuildings,
   cellShapesInChunk,
   cellsInChunk,
   gridClears,
   lotMarkAt,
   lotMarksInChunk,
   roadClears,
+  roadIndexOf,
   type BuildingInfo,
   type BuildingsInTheWay,
   type GridPlan,
@@ -216,12 +218,30 @@ export class SimMirror {
   }
 
   /**
-   * By slot in `state.cells.zone`, the building standing on each cell, or
-   * -1 (`NO_BUILDING`). Worked out by the sim's own code from the copy.
-   * Read only. Null until the first snapshot.
+   * The building standing on each cell of `slots`, slots in
+   * `state.cells.zone` as `cellShapesInChunk` gives them, in the same
+   * order, or -1 (`NO_BUILDING`). Worked out by the sim's own code from the
+   * copy, for those cells alone. Null until the first snapshot.
    */
-  cellBuildings(): Int32Array | null {
-    return this.current ? cellBuildings(this.current) : null;
+  buildingsOnSlots(slots: ArrayLike<number>): Int32Array | null {
+    return this.current ? buildingsOnSlots(this.current, slots) : null;
+  }
+
+  /**
+   * Builds now what the copy's tools and the zoning overlay would otherwise
+   * build on their first question, so it lands at load and not on the key
+   * press that opens a tool (issue #163). The cell index and the building
+   * index are built at load already, by the first frame of buildings. This
+   * adds the road spatial index, which picks the road under the pointer, and
+   * the block index, which the lot finder behind the overlay's hatching
+   * needs: about 20 and 50 ms on the scale town. Both follow the copy's
+   * roads from then on.
+   */
+  prepareTools(): void {
+    const state = this.current;
+    if (!state) return;
+    roadIndexOf(state.roads);
+    blockIndexOf(state.roads);
   }
 
   /**
