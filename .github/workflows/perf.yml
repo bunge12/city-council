@@ -245,9 +245,14 @@ jobs:
         run: |
           title="Perf or evidence run failed on main"
           body=$(printf 'The perf and evidence run (%s) failed on `main` at %s.\n\nRun: %s\n\nThese tests do not gate a merge (issue #225). Look at which test failed and whether a runner was only slow before fixing anything.' "$EVENT" "$SHA" "$RUN_URL")
+          # The same label as ci.yml's issue, for whoever triages them.
+          # --force makes the call a no-op when the label is already there.
+          label="CI Failure"
+          gh label create "$label" --color B60205 --description "CI failed on main" --force
           open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
           if [ -n "$open" ]; then
             gh issue comment "$open" --body "$body"
+            gh issue edit "$open" --add-label "$label"
           else
-            gh issue create --title "$title" --body "$body"
+            gh issue create --title "$title" --body "$body" --label "$label"
           fi

@@ -17,6 +17,7 @@ interface CellStats {
   unzoned: number;
   marked: number;
   chunks: number;
+  pending: number;
   lastBuildMs: number;
   firstMarksMs: number;
   firstFrameMs: number;
@@ -25,7 +26,7 @@ interface CellStats {
 }
 declare const window: {
   cityCouncil: {
-    view: Promise<{ cellStats(): CellStats | null }>;
+    view: Promise<{ cellStats(): CellStats | null; flush?: () => void }>;
     camera: Promise<{ rig: { setPose(position: Vec3, target: Vec3): void } }>;
   };
 };
@@ -56,14 +57,11 @@ async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<v
 }
 
 test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band", async ({ page }, testInfo: TestInfo) => {
-  // Fifteen minutes. Since issue #164 the overlay fills in while the camera
-  // pans the district band, which takes this test from about 2.8 to 3.6
-  // minutes on the development container. Since issue #225 it runs headed
-  // in the perf project, at every frame's real cost (#226): 5.6 to 7
-  // minutes on CI's faster runners, about three times scale.spec.ts each
-  // time. An EPYC 7763, the slowest CI has, takes scale.spec.ts 3.3 to 4.5
-  // minutes, so this test needs 10 to 14 there and timed out at ten (issue
-  // #252). Fifteen is a third of the perf job's 45 minutes (issue #228).
+  // Fifteen minutes, a third of the perf job's 45 (issue #228). Since issue
+  // #225 it runs headed in the perf project, at every frame's real cost
+  // (#226): 5.6 to 7.4 minutes on CI's faster runners. It used to wait for
+  // the whole fill at a chunk a frame, and on slower runners that ran past
+  // fifteen minutes (issue #259); see the pan below.
   test.setTimeout(900_000);
   const query = "?webgl";
   const scaleGround = groundAt(6000, 6000);
@@ -87,21 +85,27 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   // The overlay goes on in the district band, and the camera pans across
   // the band while it fills in (issue #164). Every free zoned cell is ground
   // the lot finder has to look at, and the zones change from one segment to
-  // the next, so there are marks all over. The pan is short and the rest of
-  // the fill, a chunk a frame, goes on from the city band, whose frames are
-  // the cheapest in software: on a slow runner the whole fill in the
-  // district band ran past the test's time. The gaps between frames: the
+  // the next, so there are marks all over. The gaps between frames: the
   // longest is how long the page stood still.
+  //
+  // The fill builds chunks for 6 ms a frame and at least one, so in
+  // software, at half a second to a second and a half a frame, it takes
+  // one frame for each of the 576 chunks. A slower runner then has both
+  // slower frames and fewer chunks a frame: the fill took 1.5 to 2 minutes
+  // on the faster runners and ran out of the test's time on the slower ones (issue
+  // #259). So the test measures the frames of the pan only, about 100, and
+  // builds whatever is left with `view.flush()`.
   const district = poses.find((p) => p.band === "district");
   const cityBand = poses.find((p) => p.band === "city");
   if (!district || !cityBand) throw new Error("no district or city pose");
   await setPose(page, district.position, district.target);
   await frameTime(page, 3);
   await page.evaluate(async ([position, target, cityPosition, cityTarget]) => {
-    const w = window as unknown as { gaps: number[]; recording: boolean };
+    const w = window as unknown as { gaps: number[]; recording: boolean; panFrames: number };
     const { rig } = await window.cityCouncil.camera;
     w.gaps = [];
     w.recording = true;
+    w.panFrames = 0;
     let last = performance.now();
     let frame = 0;
     const tick = () => {
@@ -110,6 +114,7 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
       const now = performance.now();
       w.gaps.push(now - last);
       last = now;
+      w.panFrames = frame;
       // 2 km east and back, 40 m a frame, over its first 100 frames, then up to the city band.
       if (frame <= 100) {
         const dx = 40 * (frame < 50 ? frame : 100 - frame);
@@ -126,15 +131,25 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   await page.locator("#view").focus();
   await page.keyboard.press("k");
   await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe("true");
-  // Slower than `cellsBuilt` allows: the pan's frames build terrain and trees as well.
-  await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 300_000 });
-  const firstShowMs = Date.now() - start;
+  // Until the pan is over and the camera is in the city band, or the fill
+  // is done first. About 100 frames, so two and a half minutes at most on
+  // the slowest runner.
+  await page.waitForFunction(
+    () => (window as unknown as { panFrames: number }).panFrames > 101 || document.body.dataset["cellsPending"] === "0",
+    null,
+    { timeout: 300_000 },
+  );
+  const panMs = Date.now() - start;
   const gaps = await page.evaluate(() => {
     const w = window as unknown as { gaps: number[]; recording: boolean };
     w.recording = false;
     return [...w.gaps].sort((a, b) => b - a);
   });
   const longestFramesMs = gaps.slice(0, 3).map((g) => Math.round(g));
+  // The frame figures come from the pan: the flush builds every chunk left in one go, which is no frame a player sees.
+  const panStats = await cellStats(page);
+  await page.evaluate(async () => (await window.cityCouncil.view).flush?.());
+  expect(await page.evaluate(() => document.body.dataset["cellsPending"])).toBe("0");
   const stats = await cellStats(page);
   expect(stats.zoned).toBe(city.zoned);
   expect(stats.marked, "cells hatched").toBeGreaterThan(0);
@@ -157,8 +172,9 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
     firstChunkMarksMs: Math.round(stats.firstMarksMs * 100) / 100,
     firstOverlayFrameMs: Math.round(stats.firstFrameMs * 100) / 100,
     slowestChunkMarksMs: Math.round(stats.slowestMarksMs * 100) / 100,
-    slowestOverlayFrameMs: Math.round(stats.slowestFrameMs * 100) / 100,
-    firstShowMs,
+    slowestOverlayFrameMs: Math.round(panStats.slowestFrameMs * 100) / 100,
+    panMs,
+    chunksLeftAfterPan: panStats.pending,
     longestFramesMs,
     framesWhileFilling: gaps.length,
     plainFrameMs: plain,
@@ -171,7 +187,7 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
       [`${band} band, nothing zoned (ms)`, plain[band]],
       [`${band} band, overlay (ms)`, overlay[band]],
     ])),
-    "overlay filled in (ms)": firstShowMs,
+    "pan while filling in (ms)": panMs,
     "slowest chunk's lot marks (ms)": stats.slowestMarksMs,
   });
   // As with the roads' scale check (roads.spec.ts): a machine with a GPU
