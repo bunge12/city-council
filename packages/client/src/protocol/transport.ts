@@ -97,12 +97,13 @@ export interface WorkerChannels {
  * `cityId` is the city this tab last ran, which the worker opens if it is
  * still saved. It travels in the worker's name, so the worker has it before
  * any message arrives. With `loadsFile` the worker instead waits for the
- * page to send it a city file to open (`LoadFileMessage`).
+ * page to send it a city file to open (`LoadFileMessage`). `autosave`
+ * travels the same way, off only under the test switch (issue #226).
  */
-export function createWorkerTransport(cityId: string | null = null, loadsFile = false): WorkerChannels {
+export function createWorkerTransport(cityId: string | null = null, loadsFile = false, autosave = true): WorkerChannels {
   const worker = new Worker(new URL("./worker.ts", import.meta.url), {
     type: "module",
-    name: workerName(cityId, loadsFile),
+    name: workerName(cityId, loadsFile, autosave),
   });
   return {
     sim: portTransport<ToSimMessage, FromSimMessage>(worker, isSimMessage),

@@ -24,6 +24,7 @@ import { SimMirror, type MirrorUpdate } from "./protocol/mirror";
 import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { ClockClient } from "./protocol/clock";
 import { createWorkerTransport } from "./protocol/transport";
+import { readTestSwitch } from "./test-switch";
 import { SaveClient, fetchCityFile, requestPersistence, takeLoadAddress, type PersistenceResult } from "./save/page";
 import { SAVES_CHANNEL, type LoadFileMessage, type SaveStatus } from "./save/channel";
 import { createCameraControls, type CameraControls } from "./camera/controls";
@@ -89,7 +90,9 @@ let switching = false;
 const load = takeLoadAddress(location.search);
 if (load.address !== null) history.replaceState(history.state, "", `${location.pathname}${load.rest}${location.hash}`);
 
-const worker = createWorkerTransport(tabCity(), load.address !== null);
+// Playwright's chromium project turns this on (test-switch.ts, issue #226). A player's page never reads a key it has.
+const testSwitch = readTestSwitch(localStore());
+const worker = createWorkerTransport(tabCity(), load.address !== null, testSwitch.autosave);
 if (load.address !== null) {
   // The worker waits for this message before it opens any city, so one is sent whatever happens.
   const address = load.address;
@@ -531,7 +534,7 @@ const cameraReady = new Promise<CameraHooks>((resolve) => {
   resolveCamera = resolve;
 });
 
-const viewReady = createView(canvas, wantsWebGL(location.search), viewOptions(location.search)).then((view) => {
+const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptions(location.search), cheapFrames: testSwitch.cheapFrames }).then((view) => {
   setViewReadout({ backend: view.backend === "webgpu" ? "WebGPU" : "WebGL 2" });
   let shownSeed: number | null = null;
   let graphicsStarted = false;

@@ -32,6 +32,7 @@ declare const window: {
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: { width: 1280, height: 800 } });
+
 // Two cities, three bands each, drawn in software on a CI runner at about
 // 2 fps. On main it took 294.7 s of the old 300 s (run 43548591694), so the
 // wait for the graphics preset (issue M2-02) tipped it over. Seven minutes

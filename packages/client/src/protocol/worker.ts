@@ -4,7 +4,7 @@
 import { AUTOSAVE_INTERVAL_MS } from "../save/config";
 import { SAVES_CHANNEL, isSaveMessage, parseLoadFile, type FromSaver, type LoadFileMessage } from "../save/channel";
 import { newCityFallback, openLatestCity, openLoadedFile, type OpenedCity } from "../save/load";
-import { cityFromWorkerName, claimCity, loadsFileFromWorkerName } from "../save/lock";
+import { claimCity, startFromWorkerName } from "../save/lock";
 import { Saver } from "../save/saver";
 import { CityStore } from "../save/store";
 import { serveClock, isClockMessage, type FromClock } from "./clock";
@@ -20,12 +20,15 @@ const saveTransport = bufferUntilListening(portTransport<FromSaver, unknown>(por
 // A test can hold the clock before the city has loaded, so it holds from the first step.
 const clockTransport = bufferUntilListening(portTransport<FromClock, unknown>(port, isClockMessage));
 
+/** What the page put in this worker's name. */
+const asked = startFromWorkerName(self.name);
+
 /**
  * The city file the page fetched from its `?load=` address, when the page
  * named this worker to wait for one. Listened for before anything else, so
  * it cannot arrive unheard.
  */
-const loadFile: Promise<LoadFileMessage> | null = loadsFileFromWorkerName(self.name)
+const loadFile: Promise<LoadFileMessage> | null = asked.loadsFile
   ? new Promise((resolve) => {
       const listener = (event: MessageEvent): void => {
         const file = parseLoadFile(event.data);
@@ -45,8 +48,8 @@ async function start(): Promise<void> {
   try {
     store = await CityStore.open();
     city = loadFile
-      ? await openLoadedFile(store, await loadFile, Date.now(), undefined, cityFromWorkerName(self.name), opening)
-      : await openLatestCity(store, undefined, cityFromWorkerName(self.name), opening);
+      ? await openLoadedFile(store, await loadFile, Date.now(), undefined, asked.cityId, opening)
+      : await openLatestCity(store, undefined, asked.cityId, opening);
   } catch (error) {
     storeError = `saved cities could not be opened (${error instanceof Error ? error.message : String(error)})`;
     city = newCityFallback(`Saved cities could not be opened, so a new city was started. ${storeError}.`, undefined, opening);
@@ -72,7 +75,8 @@ async function start(): Promise<void> {
   serveClock(host, clockTransport);
   if (host) {
     setInterval(() => host.pump(), PUMP_INTERVAL_MS);
-    setInterval(() => void saver.save("autosave"), AUTOSAVE_INTERVAL_MS);
+    // Off only under the test switch (issue #226): the page still saves on request.
+    if (asked.autosave) setInterval(() => void saver.save("autosave"), AUTOSAVE_INTERVAL_MS);
   }
   await saver.start();
 }
