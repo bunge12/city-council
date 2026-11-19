@@ -263,6 +263,23 @@ describe("the building layer", () => {
     layer.dispose();
   });
 
+  it("counts the instance of a building that comes to a chunk with none, written when the chunk is filled (issue #222)", () => {
+    const { source, put } = fakeSource();
+    put(0, 4000, 4000);
+    const layer = createBuildingLayer(new Scene(), source, theme, () => 0);
+    layer.reset();
+    settle(layer);
+    // The chunk next door had no building, so it is not drawn in full until the frame's forms fill it.
+    const chunk = put(1, 4000 + CHUNK_SIZE, 4000);
+    expect(chunk).not.toBe(source.buildingChunk(0));
+    const before = layer.stats().totalWrites;
+    layer.apply([chunk]);
+    settle(layer);
+    expect(layer.stats().totalWrites - before).toBe(1);
+    expect(layer.stats()).toMatchObject({ buildings: 2, lastWrites: 1, lastRebuilt: 0 });
+    layer.dispose();
+  });
+
   it("grows a model's mesh past its first size and keeps every instance", () => {
     const { source, put } = fakeSource();
     for (let id = 0; id < 40; id++) put(id, 1000 + (id % 20) * 16, 1000 + Math.floor(id / 20) * 48);
