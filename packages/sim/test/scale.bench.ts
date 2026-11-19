@@ -11,7 +11,8 @@
 // current through one BuildRoad. Since M2-04, one ZoneCells at the cap.
 
 import { expect, test } from "vitest";
-import { budget, collect } from "./budget";
+import { collect, hold } from "./budget";
+import { budgetFigure } from "../src/budgets";
 import {
   COMMANDS,
   NETWORKS_ROAD,
@@ -42,8 +43,6 @@ import { ROAD_BUILD } from "../src/roads/balance";
 import { terrainOf } from "../src/terrain/cache";
 import { buildCellIndex, settleCells, stepCells, syncCells } from "../src/zoning/cell-index";
 
-/** What one tick may spend, in milliseconds. */
-const TICK_BUDGET_MS = 20;
 const LINE = 96;
 const SPAN = 6 * LINE;
 
@@ -347,15 +346,15 @@ test("the M1 scale network", async ({ bench, annotate }) => {
         (meanMs["the same BuildRoad on a copy with no blocks"] ?? 0)) /
         2,
     ),
-    budgetMs: TICK_BUDGET_MS,
+    budgetMs: budgetFigure("scale.step").budget,
   };
   // The reporter prints the annotation; each case's own numbers are in
   // its file under bench-results/.
   await annotate(JSON.stringify(report, null, 2), "M1 scale network");
 
-  // Each thing a tick does must fit inside the tick budget. These times
-  // include the take-back, which costs about as much again, so a road
-  // command gets twice the budget here. The soak run (`pnpm soak`) hosts
+  // Each thing a tick does must fit inside the tick budget
+  // (balance/budgets.json). These times include the take-back, which costs
+  // about as much again, so a road command gets twice the budget here. The soak run (`pnpm soak`) hosts
   // this city and times the step that applies each command on its own, and
   // holds every step to the budget itself.
   for (const name of [
@@ -363,13 +362,12 @@ test("the M1 scale network", async ({ bench, annotate }) => {
     "one BuildRoad through a block, blocks brought up to date, and taking it back",
     "one BuildRoad crossing ten segments with the zoning cells kept current, and taking it back",
   ]) {
-    expect(meanMs[name], budget(name)).toBeLessThan(2 * TICK_BUDGET_MS);
+    hold("scale.road-command-and-take-back", name, { mean: meanMs[name] });
   }
-  expect(meanMs["one tick with nothing queued"], budget("one tick with nothing queued")).toBeLessThan(TICK_BUDGET_MS);
+  hold("scale.step", "one tick with nothing queued", { mean: meanMs["one tick with nothing queued"] });
   // A big grid's steps, each on its own: applying it, taking it back, and a slice of its cells settling.
-  for (const name of Object.keys(hooked)) expect(meanMs[name], budget(name)).toBeLessThan(TICK_BUDGET_MS);
   // A part of an autosave runs between two ticks and holds up the next one
   // (issue #83). The whole save is reported above, for comparison: it no
   // longer runs in one go, so it is not held to the budget.
-  for (const name of partNames) expect(meanMs[name], budget(name)).toBeLessThan(TICK_BUDGET_MS);
+  for (const name of Object.keys(hooked)) hold(partNames.includes(name) ? "scale.autosave-part" : "scale.step", name, { mean: meanMs[name] });
 }, 600_000);

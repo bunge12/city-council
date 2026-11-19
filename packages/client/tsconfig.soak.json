@@ -7,6 +7,6 @@
     "lib": ["ES2023"],
     "types": ["node"]
   },
-  "include": ["soak", "vitest.soak.config.ts"],
+  "include": ["soak", "vitest.soak.config.ts", "test/budget.ts"],
   "references": [{ "path": "." }]
 }

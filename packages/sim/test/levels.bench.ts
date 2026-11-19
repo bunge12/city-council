@@ -15,7 +15,7 @@
 // (grid.bench.ts) shows no more than noise from it.
 
 import { expect, test } from "vitest";
-import { budget, collect } from "./budget";
+import { collect, hold } from "./budget";
 import { blockIndexOf, listBlocks } from "../src/roads/blocks";
 import { buildRoad, planRoad } from "../src/roads/build";
 import {
@@ -31,9 +31,6 @@ import {
 import { routingGraphOf } from "../src/roads/routing";
 import { roadIndexOf } from "../src/roads/spatial";
 import type { Terrain } from "../src/terrain/terrain";
-
-/** What one tick may spend, in milliseconds. */
-const TICK_BUDGET_MS = 20;
 
 // A street grid 96 m apart, 123 by 123 nodes: 30,012 segments, as the
 // grid and blocks benches use.
@@ -110,13 +107,14 @@ test("the crossing check on 30,000 segments", async ({ bench }) => {
     "planRoad, the same road on the ground, splitting 52 streets": () => planRoad(net, terrain, road()),
     "the step that builds the elevated road, and taking it back": () => applyAndUndo(road("elevated1")),
   };
-  const meanMs: Record<string, number> = {};
+  const latency: Record<string, { mean: number }> = {};
   for (const [name, fn] of Object.entries(cases)) {
     const file = `bench-results/levels-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
     collect();
     const result = await bench(name, { writeResult: file }, fn).run();
-    meanMs[name] = result.latency.mean;
+    latency[name] = result.latency;
   }
   expect(segmentCount(net)).toBe(30_012);
-  for (const [name, ms] of Object.entries(meanMs)) expect(ms, budget(name)).toBeLessThan(TICK_BUDGET_MS);
+  // Each inside the tick (`levels.step` in balance/budgets.json).
+  for (const [name, l] of Object.entries(latency)) hold("levels.step", name, l);
 }, 300_000);

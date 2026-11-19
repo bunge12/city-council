@@ -27,7 +27,8 @@
 //   command pays it (buildings/upkeep.ts).
 
 import { expect, test } from "vitest";
-import { budget, collect } from "./budget";
+import { collect, hold } from "./budget";
+import { budgetFigure } from "../src/budgets";
 import {
   BUILDINGS_BALANCE,
   TIME_BALANCE,
@@ -51,15 +52,11 @@ import { endJournal, reverseOps, startJournal, type NetworkOp } from "../src/roa
 import { terrainOf } from "../src/terrain/cache";
 import { syncCells } from "../src/zoning/cell-index";
 
-const TICK_BUDGET_MS = 20;
-/**
- * The grower's share of the tick at `growthPerDayMax`: a quarter, as
- * `settleCellsPerTick` takes, so it, a slice of cells and a command fit
- * in one tick. Held on the mean, since a single run's worst is mostly a
- * garbage collection landing in it; the median is held to the whole budget
- * (issue #231).
- */
-const GROWER_SHARE_MS = 5;
+// The grower's share of the tick at `growthPerDayMax` (`grower.share` in
+// balance/budgets.json) is a quarter, as `settleCellsPerTick` takes, so it,
+// a slice of cells and a command fit in one tick. Held on the mean, since a
+// single run's worst is mostly a garbage collection landing in it; the
+// median is held to the whole budget (`grower.tick`, issue #231).
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
 const ZONES = ZONING_BALANCE.zones.length;
 
@@ -306,8 +303,8 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   const report = {
     city: { segments: counts.segments, cells: state.cells.zone.length, frontCells: state.cells.zone.length / DEPTH },
     ms: Object.fromEntries(Object.entries(results).map(([k, v]) => [k, { mean: round(v.mean), p50: round(v.p50), p99: round(v.p99), max: round(v.max) }])),
-    budgetMs: TICK_BUDGET_MS,
-    growerShareMs: GROWER_SHARE_MS,
+    budgetMs: budgetFigure("grower.tick").budget,
+    growerShareMs: budgetFigure("grower.share").budget,
   };
   await annotate(JSON.stringify(report, null, 2), "grower");
   // The median of the 30 runs, not the worst: one run's worst is whatever
@@ -315,7 +312,7 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   // that is slow every time moves the median with it.
   for (const [name, r] of Object.entries(results)) {
     if (name.includes("from scratch")) continue;
-    expect(r.p50, budget(`${name}, median`)).toBeLessThan(TICK_BUDGET_MS);
-    if (name.includes("growthPerDayMax")) expect(r.mean, budget(`${name}, mean`)).toBeLessThan(GROWER_SHARE_MS);
+    hold("grower.tick", `${name}, median`, r);
+    if (name.includes("growthPerDayMax")) hold("grower.share", `${name}, mean`, r);
   }
 }, 600_000);

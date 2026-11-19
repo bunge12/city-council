@@ -5,7 +5,7 @@
 // recorded.
 
 import { expect, test } from "vitest";
-import { budget, collect } from "./budget";
+import { collect, hold } from "./budget";
 import { blockById, blockIndexOf, buildBlockIndex, listBlocks } from "../src/roads/blocks";
 import { buildRoad, planRoad, type RoadPlan } from "../src/roads/build";
 import {
@@ -148,6 +148,7 @@ test("blocks on 30,000 segments", async ({ bench }) => {
   }
   expect(listBlocks(blocks)).toEqual(listBlocks(buildBlockIndex(withBlocks)));
   // Bringing the blocks up to date is a small part of a BuildRoad, far
-  // below a rebuild.
-  expect(meanMs["one BuildRoad through a block, blocks brought up to date"], budget("a BuildRoad's block update under a tenth of a rebuild")).toBeLessThan((meanMs["rebuild every block"] ?? 0) / 10);
+  // below a rebuild (`blocks.update-share` in balance/budgets.json).
+  const share = (meanMs["one BuildRoad through a block, blocks brought up to date"] ?? Infinity) / (meanMs["rebuild every block"] ?? 0);
+  hold("blocks.update-share", "one BuildRoad through a block against rebuilding every block", share);
 }, 180_000);

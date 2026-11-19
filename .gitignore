@@ -7,3 +7,5 @@ playwright-report/
 soak-report.json
 walkthrough-screenshots/
 bench-results/
+budget-rows/
+budget-table.jsonl

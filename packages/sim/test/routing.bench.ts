@@ -1,18 +1,16 @@
 // Timing for the pathfinder on the M1 scale network: 30,000 segments. Run
 // with `pnpm bench`, kept out of `pnpm test`. Vitest does the timing; nothing
 // here reads the clock (CLAUDE.md rule 3). The target from issue 15 is under
-// 20 ms for one route across the network.
+// 20 ms for one route across the network (`routing.route` in
+// balance/budgets.json).
 
 import { expect, test } from "vitest";
-import { budget, collect } from "./budget";
+import { collect, hold } from "./budget";
 import { nextFloat, seedRng } from "../src/rng";
 import { addNode, addSegment, createRoadNetwork, segmentCount } from "../src/roads/network";
 import { buildRoutingGraph, findRoute, findRouteBetween } from "../src/roads/routing";
 import { buildRoadIndex } from "../src/roads/spatial";
 import { growNetwork } from "./road-network-helper";
-
-/** Milliseconds, from issue 15. */
-const ROUTE_TARGET_MS = 20;
 
 // A street grid of 123 by 123 nodes, 30,012 segments about 98 m apart over
 // the 12 km map. Corner to corner is the worst case: the search settles
@@ -69,13 +67,12 @@ test("pathfinder on 30,000 segments", async ({ bench }) => {
       buildRoutingGraph(grid);
     },
   };
-  const meanMs: Record<string, number> = {};
+  const latency: Record<string, { mean: number }> = {};
   for (const [name, fn] of Object.entries(cases)) {
     const file = `bench-results/route-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
     collect();
     const result = await bench(name, { writeResult: file }, fn).run();
-    meanMs[name] = result.latency.mean;
+    latency[name] = result.latency;
   }
-  expect(meanMs["grid, corner to corner"], budget("grid, corner to corner")).toBeLessThan(ROUTE_TARGET_MS);
-  expect(meanMs["grid, between random points"], budget("grid, between random points")).toBeLessThan(ROUTE_TARGET_MS);
+  for (const name of ["grid, corner to corner", "grid, between random points"]) hold("routing.route", name, latency[name] ?? {});
 }, 180_000);

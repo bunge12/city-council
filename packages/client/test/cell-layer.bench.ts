@@ -7,11 +7,16 @@
 // and `firstFrameMs`, and every later chunk to the slowest figures.
 import { expect, test } from "vitest";
 import { Scene } from "three/webgpu";
-import { CELL_OPEN, type ChunkCellShapes } from "@city-council/sim";
+import { CELL_OPEN, budgetFigure, type ChunkCellShapes } from "@city-council/sim";
 import { createCellLayer, type CellSource } from "../src/render/cell-meshes";
+import { hold } from "./budget";
 
-/** What the first chunk's marks cost, in milliseconds. */
-const FIRST_MS = 20;
+/**
+ * What the fixture's first chunk's marks cost, in milliseconds, as building
+ * the sim's indexes would: the budget the later chunks are held under
+ * (`client.cell-layer.later-chunk` in the sim's balance/budgets.json).
+ */
+const FIRST_MS = budgetFigure("client.cell-layer.later-chunk").budget;
 
 /** Spends at least `ms` milliseconds, as a first call that builds an index would. */
 function busy(ms: number): void {
@@ -54,14 +59,14 @@ test("the zoning overlay times the first chunk's lot marks apart from the rest",
   expect(stats.firstMarksMs, "the first chunk's marks").toBeGreaterThanOrEqual(FIRST_MS);
   expect(stats.firstFrameMs, "the first frame").toBeGreaterThanOrEqual(FIRST_MS);
   // The rest take microseconds: a pause of the runner is the only way past this.
-  expect(stats.slowestMarksMs, "[budget] the slowest later chunk's marks").toBeLessThan(FIRST_MS);
-  expect(stats.slowestFrameMs, "[budget] the slowest later frame").toBeLessThan(FIRST_MS);
+  hold("client.cell-layer.later-chunk", "the slowest later chunk's marks", { max: stats.slowestMarksMs });
+  hold("client.cell-layer.later-chunk", "the slowest later frame", { max: stats.slowestFrameMs });
   // A snapshot starts the timings again: its first chunk is the slow one this time.
   calls = 0;
   layer.reset();
   layer.update({ x: 0, z: 0 }, Infinity);
   stats = layer.stats();
   expect(stats.firstMarksMs, "the first chunk's marks after a reset").toBeGreaterThanOrEqual(FIRST_MS);
-  expect(stats.slowestMarksMs, "[budget] the slowest later chunk's marks after a reset").toBeLessThan(FIRST_MS);
+  hold("client.cell-layer.later-chunk", "the slowest later chunk's marks after a reset", { max: stats.slowestMarksMs });
   layer.dispose();
 });

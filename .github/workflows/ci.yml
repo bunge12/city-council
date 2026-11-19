@@ -133,12 +133,24 @@ jobs:
       # the second hour misses as well (scripts/budget-retry.mjs, issue
       # #231). The first hour's report is kept as soak-report.attempt-1.json.
       - run: pnpm soak
+      # Every held figure against its budget in packages/sim/balance/budgets.json,
+      # with its headroom, in the job summary. A figure under 1.5x headroom
+      # gets a warning annotation (issue #232).
+      - if: always()
+        run: node scripts/budget-table.mjs --title Soak --out budget-table.jsonl packages/client/budget-rows
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: soak
           path: packages/client/soak-report*.json
           retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: budget-table-soak
+          path: budget-table.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
 
   bench:
     needs: changes
@@ -164,12 +176,84 @@ jobs:
       # only when it misses again (scripts/budget-retry.mjs, issue #231).
       # The first attempt's results are kept in bench-results/attempt-1/.
       - run: pnpm bench
+      # As in the soak job: every held figure and its headroom (issue #232).
+      - if: always()
+        run: node scripts/budget-table.mjs --title Bench --out budget-table.jsonl packages/sim/budget-rows packages/client/budget-rows
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: bench
           path: packages/sim/bench-results
           retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: budget-table-bench
+          path: budget-table.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # On main only: appends the bench's and the soak's budget rows to
+  # budgets.jsonl on the `budget-history` branch, one JSON line a figure a
+  # run, with the commit, the run and the runner's CPU, so the headroom of
+  # each figure can be drawn over time per CPU model (issue #232). It runs
+  # when either job ran, passed or failed, and gates nothing: `check` does
+  # not need it. Two runs on main can push at once, so a rejected push
+  # starts again from the branch as it now stands.
+  budget-history:
+    needs: [bench, soak]
+    if: >-
+      always() && github.event_name == 'push' &&
+      (needs.bench.result == 'success' || needs.bench.result == 'failure' ||
+      needs.soak.result == 'success' || needs.soak.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          gh run download "$RUN_ID" --pattern 'budget-table-*' --dir rows || true
+          shopt -s nullglob
+          files=(rows/*/budget-table.jsonl)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No budget rows in this run."
+            exit 0
+          fi
+          branch=budget-history
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git"
+          for try in 1 2 3 4; do
+            rm -rf history
+            if git ls-remote --exit-code --heads "$url" "$branch" > /dev/null; then
+              git clone --quiet --depth 1 --branch "$branch" "$url" history
+            else
+              git init --quiet -b "$branch" history
+              git -C history remote add origin "$url"
+              printf '%s\n' \
+                "# Budget history" \
+                "" \
+                "Written by the budget-history job in .github/workflows/ci.yml on main (issue #232). Do not edit by hand." \
+                "" \
+                "budgets.jsonl has one JSON line for each held figure on each CI run on main: date, sha, run, job, cpu, figure, case, statistic, unit, measured, budget, headroom, mode, pass and attempt." \
+                > history/README.md
+            fi
+            cat "${files[@]}" >> history/budgets.jsonl
+            git -C history add README.md budgets.jsonl 2> /dev/null || git -C history add budgets.jsonl
+            git -C history -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit --quiet -m "Budgets from run $RUN_ID at $SHA"
+            if git -C history push --quiet origin "$branch"; then
+              echo "Appended $(cat "${files[@]}" | wc -l) rows to $branch."
+              exit 0
+            fi
+            echo "Push rejected, trying again ($try)."
+            sleep $((try * 5))
+          done
+          exit 1
 
   # The Playwright suite, split over runners. The runners have no GPU, so
   # every page is drawn in software and the suite is bound by CPU: more
