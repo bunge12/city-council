@@ -20,7 +20,7 @@ import { SEED, buildRoads, groundAt } from "./road-fixtures";
 type Vec3 = readonly [number, number, number];
 declare const window: {
   cityCouncil: {
-    mirror: { state: { buildings: { flags: Uint8Array }; log: { type: string }[] } | null };
+    mirror: { state: { tick: number; buildings: { flags: Uint8Array; builtAt: Float64Array }; log: { type: string }[] } | null };
     view: Promise<{ cellStats(): { marked: number; pending: number; visible: boolean } | null }>;
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
@@ -126,6 +126,26 @@ async function live(page: Page): Promise<number[]> {
   });
 }
 
+/** The tick of the client's copy of the city. */
+async function tickNow(page: Page): Promise<number> {
+  return page.evaluate(() => window.cityCouncil.mirror.state?.tick ?? 0);
+}
+
+/**
+ * The live buildings built on or before `tick`. The cells a road or grid
+ * clears stay zoned, so the grower can put a house back on them a few game
+ * seconds later, often under a freed id. Counted with the rest, that house
+ * can land in the same update as the clearing on a slow runner, and the
+ * count never shows the houses gone (issue #245).
+ */
+async function standingSince(page: Page, tick: number): Promise<number[]> {
+  return page.evaluate((tick) => {
+    const b = window.cityCouncil.mirror.state?.buildings;
+    if (!b) return [];
+    return Array.from(b.flags.keys()).filter((id) => ((b.flags[id] ?? 0) & 1) !== 0 && (b.builtAt[id] ?? 0) <= tick);
+  }, tick);
+}
+
 async function attach(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, await page.screenshot());
@@ -138,6 +158,7 @@ test("a road through a row of houses marks and counts them before the click, and
   await openCity(page, state);
   await look(page, 4300, 4560, 260);
   const before = await live(page);
+  const beforeTick = await tickNow(page);
   expect(before).toHaveLength(houses);
 
   await page.keyboard.press("KeyR");
@@ -156,7 +177,7 @@ test("a road through a row of houses marks and counts them before the click, and
 
   await page.mouse.down();
   await page.mouse.up();
-  await expect.poll(async () => (await live(page)).length, { timeout: 30_000 }).toBe(houses - count);
+  await expect.poll(async () => (await standingSince(page, beforeTick)).length, { timeout: 30_000 }).toBe(houses - count);
   await page.keyboard.press("Escape");
   await page.mouse.move(640, 20);
   await frames(page, 6);
@@ -168,6 +189,7 @@ test("the grid tool counts the buildings its rectangle would clear", async ({ pa
   await openCity(page, state);
   await look(page, 4300, 4590, 300);
   const before = await live(page);
+  const beforeTick = await tickNow(page);
 
   await page.keyboard.press("KeyG");
   // The first side west to east along the near edge, then the grid reaches
@@ -198,7 +220,7 @@ test("the grid tool counts the buildings its rectangle would clear", async ({ pa
   await attach(page, testInfo, "the grid preview counts the buildings it would clear");
 
   await page.locator("#grid-confirm").click();
-  await expect.poll(async () => (await live(page)).length, { timeout: 30_000 }).toBe(before.length - count);
+  await expect.poll(async () => (await standingSince(page, beforeTick)).length, { timeout: 30_000 }).toBe(before.length - count);
 });
 
 test("hovering a building with no tool on reads it out", async ({ page }, testInfo) => {

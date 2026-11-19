@@ -281,9 +281,14 @@ jobs:
           title="CI failed on main"
           subject=$(printf '%s\n' "$MESSAGE" | head -n 1)
           body=$(printf 'CI failed on `main` at %s, "%s".\n\nRun: %s\n\nThe pull request passed on its own, so it most likely conflicts with one merged since its last push. Fix it on `main` before merging more.' "$SHA" "$subject" "$RUN_URL")
+          # The label marks these issues for whoever triages them. --force
+          # makes the call a no-op when the label is already there.
+          label="CI Failure"
+          gh label create "$label" --color B60205 --description "CI failed on main" --force
           open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
           if [ -n "$open" ]; then
             gh issue comment "$open" --body "$body"
+            gh issue edit "$open" --add-label "$label"
           else
-            gh issue create --title "$title: $subject" --body "$body"
+            gh issue create --title "$title: $subject" --body "$body" --label "$label"
           fi
