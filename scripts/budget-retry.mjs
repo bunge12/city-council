@@ -110,9 +110,16 @@ if (!first.report) {
 const failed = failures(first.report);
 const firstLines = describe(1, failed);
 console.log(`\nbudget-retry: attempt 1 failed:\n${firstLines.join("\n")}`);
-const other = failed.filter((f) => !f.budgetOnly);
-if (failed.length === 0 || other.length > 0) {
-  const why = other.length > 0 ? `${other.map((f) => f.path).join(", ")} failed on more than a time budget` : "no file failed, yet the run did";
+const other = failed.filter((f) => !f.budgetOnly || f.fileMessage.length > 0);
+// An unhandled error fails the run without failing a test, and the report's
+// `success` leaves it out. Running only the files that missed a budget would
+// hide it, so such a run is not retried.
+const unhandled = first.report.success === true || first.report.numFailedTests === 0;
+if (failed.length === 0 || other.length > 0 || unhandled) {
+  const why =
+    other.length > 0
+      ? `${other.map((f) => f.path).join(", ")} failed on more than a time budget`
+      : "the run failed outside its tests, an unhandled error say,";
   console.log(`budget-retry: ${why}, so nothing is run again`);
   summary(["### Budget retry", "", `Attempt 1 failed. ${why}, so nothing was run again.`, "", ...firstLines.map((l) => `- ${l}`), ""]);
   process.exit(first.status);

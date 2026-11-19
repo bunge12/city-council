@@ -405,11 +405,14 @@ test("the M2 scale town", async ({ bench, annotate }) => {
       afterEach: () => {
         settle();
         regrow(standing);
+        // The regrowth's garbage, collected before the next timed step.
+        collect();
       },
     },
     fixedRuns(20),
   );
-  // The grower building again on the ground those commands cleared.
+  // The grower building again on the ground the road commands cleared.
+  // The BulldozeBuilding runs grew theirs back already, outside the timing.
   await run("one step of the town with nothing queued, growing back over two game days", () => void step(state), {}, fixedRuns(2 * day));
 
   const round = (v: number): number => Math.round(v * 1000) / 1000;
