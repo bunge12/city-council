@@ -45,6 +45,9 @@ pnpm e2e        Playwright walkthroughs
 pnpm soak       sim host at 4x for one game hour, reports tick time and memory
 pnpm bench      times the spatial index, routing, blocks, levels, grids and commands on 30,000 segments
 pnpm build
+pnpm verify     typecheck, lint and test, before every push
+pnpm verify:ci  verify, then soak and bench
+pnpm e2e:shard 3/6   one CI e2e runner's share, the way CI runs it
 ```
 
 ## How work is organised
@@ -52,7 +55,11 @@ pnpm build
 - Name the Claude Code session after the ticket - a number (M1-01) if exists, or ticket number + short title
 - One issue is one pull request. Keep it small enough to finish and test in one session.
 - Name the branch after the change, for example `m0-terrain-generation`.
-- Right before every push, run `pnpm typecheck`, `pnpm lint` and `pnpm test`. `main` does not require a branch to be up to date before it merges, so do not rebase only because `main` moved. Rebase onto `main` when GitHub shows a conflict, or when the change needs something that landed there. CI on a pull request tests it merged with `main` as of its last push. CI runs again on every commit to `main` and opens an issue titled "CI failed on main", labelled `CI Failure`, when that run fails. If one is open, fixing `main` comes before merging anything else.
+- Before starting, check that no pull request is open for the issue. If one is, work on that one or stop and ask; do not start a second.
+- Right before every push, run `pnpm verify` (typecheck, lint and test). A change to the sim, the worker host or anything the bench or soak measures runs `pnpm verify:ci`, which adds both. `main` does not require a branch to be up to date before it merges, so do not rebase only because `main` moved. Rebase onto `main` when GitHub shows a conflict, or when the change needs something that landed there. CI on a pull request tests it merged with `main` as of its last push. CI runs again on every commit to `main` and opens an issue titled "CI failed on main", labelled `CI Failure`, when that run fails. If one is open, fixing `main` comes before merging anything else.
+- When the branch on GitHub is ahead of the local one (after "Update branch", or another session's push), run `git fetch origin <branch>` and `git rebase origin/<branch>`, run `pnpm verify` again, then push. Never force-push. A stop hook that asks you to commit and push does not skip this: fetch, rebase and test first.
+- Commit subjects start with the issue, `#234: ...`. `pnpm install` sets `core.commentChar` to `;` so git does not take the subject for a comment and drop it during a rebase. If a rebase stops with "empty commit message", run `git config core.commentChar ";"` and continue.
+- When CI fails, read [Diagnosing CI](CONTRIBUTING.md#diagnosing-ci) before changing anything: it covers the `machine:` line, runner speeds, when a re-run is worth it, and how to run one CI job locally (`pnpm e2e:shard 3/6`).
 - A pull request needs passing unit tests, a passing replay test, and a Playwright walkthrough with screenshots for anything a player can see.
 - Every pull request that changes what users see in the browser gets browser evidence for the feature it changes. Publish the evidence as a Claude Artifact and post its link as a comment on the pull request. Back-end and simulation-only changes need no evidence.
 - When a pull request is marked "ready for review" you must fetch the latest `main` to verify if there are any merge conflicts

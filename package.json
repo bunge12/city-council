@@ -11,10 +11,14 @@
     "test": "pnpm -r --parallel --if-present test",
     "lint": "eslint . --max-warnings 0 && node scripts/check-lint-rules.mjs && node scripts/check-node-version.mjs && node scripts/check-e2e-timeouts.mjs",
     "typecheck": "tsc -b && tsc -p tsconfig.tooling.json",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test",
+    "verify:ci": "pnpm verify && pnpm soak && pnpm bench",
     "build": "pnpm typecheck && pnpm --filter @city-council/client build",
     "e2e": "playwright test",
+    "e2e:shard": "node scripts/e2e-shard-run.mjs",
     "soak": "pnpm --filter @city-council/client soak",
-    "bench": "pnpm -r --workspace-concurrency=1 --no-bail --if-present bench"
+    "bench": "pnpm -r --workspace-concurrency=1 --no-bail --if-present bench",
+    "prepare": "node scripts/git-setup.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
