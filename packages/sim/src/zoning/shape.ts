@@ -152,13 +152,23 @@ function stationInto(c: MeasuredCurve, t: number, out: Float64Array, at: number)
  * floats each, as STATION_FLOATS says. For a road's surface.
  */
 export function stationsOf(c: MeasuredCurve, step: number): Float64Array {
-  const whole = cellsAlong(c.length, step);
-  const extra = c.length - whole * step > STATION_TOLERANCE;
-  const count = whole + 1 + (extra ? 1 : 0);
-  const out = new Float64Array(count * STATION_FLOATS);
-  for (let k = 0; k <= whole; k++) stationInto(c, paramAt(c, k * step), out, k * STATION_FLOATS);
-  if (extra) stationInto(c, 1, out, (count - 1) * STATION_FLOATS);
+  const out = new Float64Array(stationCount(c, step) * STATION_FLOATS);
+  stationsInto(c, step, out);
   return out;
+}
+
+/** How many stations `stationsOf` gives `c`. */
+export function stationCount(c: MeasuredCurve, step: number): number {
+  const whole = cellsAlong(c.length, step);
+  return whole + 1 + (c.length - whole * step > STATION_TOLERANCE ? 1 : 0);
+}
+
+/** `stationsOf` written into `out`, which has room for `stationCount` stations. */
+export function stationsInto(c: MeasuredCurve, step: number, out: Float64Array): void {
+  const whole = cellsAlong(c.length, step);
+  const count = stationCount(c, step);
+  for (let k = 0; k <= whole; k++) stationInto(c, paramAt(c, k * step), out, k * STATION_FLOATS);
+  if (count > whole + 1) stationInto(c, 1, out, (count - 1) * STATION_FLOATS);
 }
 
 /**
@@ -197,8 +207,13 @@ function ownerBound(s: number, step: number, whole: number): number {
  */
 export function anchorStations(c: MeasuredCurve, from: number, to: number, step: number): Float64Array {
   const out = new Float64Array((to - from + 1) * STATION_FLOATS);
-  for (let k = from; k <= to; k++) stationInto(c, paramAt(c, k * step), out, (k - from) * STATION_FLOATS);
+  anchorStationsInto(c, from, to, step, out);
   return out;
+}
+
+/** `anchorStations` written into the start of `out`. */
+export function anchorStationsInto(c: MeasuredCurve, from: number, to: number, step: number, out: Float64Array): void {
+  for (let k = from; k <= to; k++) stationInto(c, paramAt(c, k * step), out, (k - from) * STATION_FLOATS);
 }
 
 /**
@@ -239,9 +254,9 @@ export function cellCornersInto(
 /**
  * Writes the road surface between stations `from` and `to`, `half` metres
  * either side of the centre line, into `out`: left at `from`, left at `to`,
- * right at `to`, right at `from`.
+ * right at `to`, right at `from`, from `at` on.
  */
-export function surfaceInto(stations: Float64Array, from: number, to: number, half: number, out: Float64Array): void {
+export function surfaceInto(stations: Float64Array, from: number, to: number, half: number, out: Float64Array, at = 0): void {
   const i0 = from * STATION_FLOATS;
   const i1 = to * STATION_FLOATS;
   const x0 = stations[i0] ?? 0;
@@ -252,34 +267,34 @@ export function surfaceInto(stations: Float64Array, from: number, to: number, ha
   const z1 = stations[i1 + 1] ?? 0;
   const nx1 = stations[i1 + 2] ?? 0;
   const nz1 = stations[i1 + 3] ?? 0;
-  out[0] = x0 + nx0 * half;
-  out[1] = z0 + nz0 * half;
-  out[2] = x1 + nx1 * half;
-  out[3] = z1 + nz1 * half;
-  out[4] = x1 - nx1 * half;
-  out[5] = z1 - nz1 * half;
-  out[6] = x0 - nx0 * half;
-  out[7] = z0 - nz0 * half;
+  out[at + 0] = x0 + nx0 * half;
+  out[at + 1] = z0 + nz0 * half;
+  out[at + 2] = x1 + nx1 * half;
+  out[at + 3] = z1 + nz1 * half;
+  out[at + 4] = x1 - nx1 * half;
+  out[at + 5] = z1 - nz1 * half;
+  out[at + 6] = x0 - nx0 * half;
+  out[at + 7] = z0 - nz0 * half;
 }
 
-/** The box around a quad: writes min x, min z, max x, max z into `out`. */
-export function quadBoxInto(q: Float64Array, out: Float64Array): void {
-  let minX = q[0] ?? 0;
+/** The box around a quad: writes min x, min z, max x, max z into `out`. `qAt` and `outAt` are where each starts in its array. */
+export function quadBoxInto(q: Float64Array, out: Float64Array, qAt = 0, outAt = 0): void {
+  let minX = q[qAt] ?? 0;
   let maxX = minX;
-  let minZ = q[1] ?? 0;
+  let minZ = q[qAt + 1] ?? 0;
   let maxZ = minZ;
   for (let i = 2; i < 8; i += 2) {
-    const x = q[i] ?? 0;
-    const z = q[i + 1] ?? 0;
+    const x = q[qAt + i] ?? 0;
+    const z = q[qAt + i + 1] ?? 0;
     if (x < minX) minX = x;
     if (x > maxX) maxX = x;
     if (z < minZ) minZ = z;
     if (z > maxZ) maxZ = z;
   }
-  out[0] = minX;
-  out[1] = minZ;
-  out[2] = maxX;
-  out[3] = maxZ;
+  out[outAt] = minX;
+  out[outAt + 1] = minZ;
+  out[outAt + 2] = maxX;
+  out[outAt + 3] = maxZ;
 }
 
 /**

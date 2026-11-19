@@ -568,33 +568,55 @@ function tooSharp(dx: number, dz: number, ex: number, ez: number): boolean {
  * a straight one is along it and for a curve is the tangent.
  */
 function angleProblem(net: RoadNetwork, planned: PlannedSegment[], removed: number[], crossingKeys: number[]): string | null {
-  const keys = [...new Set(planned.flatMap((s) => [s.a.key, s.b.key]))];
+  // Every node key once, in the order the planned segments first name them.
+  const keys: number[] = [];
+  for (const s of planned) {
+    if (!keys.includes(s.a.key)) keys.push(s.a.key);
+    if (!keys.includes(s.b.key)) keys.push(s.b.key);
+  }
+  // Directions as x, z pairs in flat lists, kept between calls: a grid
+  // plans hundreds of links, and a pair array for each direction was
+  // garbage (issue #204).
+  const fresh = freshDirections;
+  const old = oldDirections;
   for (const key of keys) {
     const here = planned.find((s) => s.a.key === key)?.a ?? planned.find((s) => s.b.key === key)?.b;
     if (!here) continue;
-    const fresh: [number, number][] = [];
+    fresh.length = 0;
     for (const s of planned) {
-      if (s.a.key === key) fresh.push(s.control ? [s.control.x - here.x, s.control.z - here.z] : [s.b.x - here.x, s.b.z - here.z]);
-      if (s.b.key === key) fresh.push(s.control ? [s.control.x - here.x, s.control.z - here.z] : [s.a.x - here.x, s.a.z - here.z]);
+      if (s.a.key === key) {
+        if (s.control) fresh.push(s.control.x - here.x, s.control.z - here.z);
+        else fresh.push(s.b.x - here.x, s.b.z - here.z);
+      }
+      if (s.b.key === key) {
+        if (s.control) fresh.push(s.control.x - here.x, s.control.z - here.z);
+        else fresh.push(s.a.x - here.x, s.a.z - here.z);
+      }
     }
-    const old: [number, number][] = [];
+    old.length = 0;
     if (here.node !== NONE) {
       for (let seg = net.nodeFirstSeg[here.node] ?? NONE; seg !== NONE; seg = nextSegmentAt(net, seg, here.node)) {
-        if (!removed.includes(seg)) old.push([(net.segCX[seg] ?? 0) - here.x, (net.segCZ[seg] ?? 0) - here.z]);
+        if (!removed.includes(seg)) old.push((net.segCX[seg] ?? 0) - here.x, (net.segCZ[seg] ?? 0) - here.z);
       }
     }
     const reason = crossingKeys.includes(key) ? SHALLOW : SHARP;
-    for (let i = 0; i < fresh.length; i++) {
-      const [dx = 0, dz = 0] = fresh[i] ?? [];
-      for (let j = i + 1; j < fresh.length; j++) {
-        const [ex = 0, ez = 0] = fresh[j] ?? [];
-        if (tooSharp(dx, dz, ex, ez)) return reason;
+    for (let i = 0; i < fresh.length; i += 2) {
+      const dx = fresh[i] ?? 0;
+      const dz = fresh[i + 1] ?? 0;
+      for (let j = i + 2; j < fresh.length; j += 2) {
+        if (tooSharp(dx, dz, fresh[j] ?? 0, fresh[j + 1] ?? 0)) return reason;
       }
-      for (const [ex, ez] of old) if (tooSharp(dx, dz, ex, ez)) return reason;
+      for (let j = 0; j < old.length; j += 2) {
+        if (tooSharp(dx, dz, old[j] ?? 0, old[j + 1] ?? 0)) return reason;
+      }
     }
   }
   return null;
 }
+
+/** `angleProblem`'s directions, as x, z pairs. Not state. */
+const freshDirections: number[] = [];
+const oldDirections: number[] = [];
 
 /**
  * Whether a planned segment would meet, anywhere but a shared node, an
