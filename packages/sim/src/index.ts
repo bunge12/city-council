@@ -24,6 +24,8 @@ export type { GameDate, TimeBalance } from "./calendar";
 export { fnv1a64, hashState } from "./hash";
 export { replay } from "./replay";
 export { BALANCE_STAMP, replaysUnderThisBalance } from "./balance-stamp";
+export { BUDGETS, BUDGET_WARN_BELOW_HEADROOM, budgetFigure, judgeBudget } from "./budgets";
+export type { BudgetFigure, BudgetRow, BudgetStatistic, BudgetTimings } from "./budgets";
 export { migrateState } from "./migrate";
 export {
   SNAPSHOT_FORMAT_VERSION,

@@ -16,9 +16,14 @@
 //
 // The log, and the GitHub job summary when there is one, say which attempt
 // failed and with what. The child sees `BUDGET_ATTEMPT` set to 1 or 2.
+//
+// The child also sees `BUDGET_ROWS`, the package's `budget-rows/`, emptied
+// before the first attempt. Each held figure appends its row there, one
+// file an attempt, for the headroom table (scripts/budget-table.mjs, issue
+// #232).
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, extname, join, relative } from "node:path";
 
@@ -40,6 +45,8 @@ for (let i = 0; i < split; i++) {
 }
 const vitestArgs = argv.slice(split + 1);
 const outDir = mkdtempSync(join(tmpdir(), "budget-retry-"));
+const rowsDir = join(process.cwd(), "budget-rows");
+rmSync(rowsDir, { recursive: true, force: true });
 
 /** One Vitest run, with a JSON report beside the reporters asked for. */
 function attempt(n, files) {
@@ -48,7 +55,7 @@ function attempt(n, files) {
   console.log(`\nbudget-retry: attempt ${n}: vitest ${args.join(" ")}\n`);
   // The package's own Vitest, also when run with plain `node` rather than from a pnpm script.
   const path = `${join(process.cwd(), "node_modules", ".bin")}${delimiter}${process.env["PATH"] ?? ""}`;
-  const run = spawnSync("vitest", args, { stdio: "inherit", env: { ...process.env, PATH: path, BUDGET_ATTEMPT: String(n) } });
+  const run = spawnSync("vitest", args, { stdio: "inherit", env: { ...process.env, PATH: path, BUDGET_ATTEMPT: String(n), BUDGET_ROWS: rowsDir } });
   if (run.error) throw run.error;
   const report = existsSync(out) ? JSON.parse(readFileSync(out, "utf8")) : null;
   return { status: run.status ?? 1, report };

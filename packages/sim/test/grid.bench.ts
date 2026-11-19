@@ -1,8 +1,9 @@
 // Timing for BuildRoadGrid on the M1 scale network: 30,000 segments. Run
 // with `pnpm bench`, kept out of `pnpm test`. Vitest does the timing; nothing
 // here reads the clock (CLAUDE.md rule 3). Issue 20 asks for the step that
-// applies a grid at the cap to be measured against the 20 ms tick budget,
-// and the cap lowered if it does not fit.
+// applies a grid at the cap to be measured against the tick budget
+// (`grid.step` in balance/budgets.json), and the cap lowered if it does
+// not fit.
 //
 // The cost is about one BuildRoad per link, and a link that splits an
 // existing street costs several times one on open ground, so the cap counts
@@ -12,7 +13,7 @@
 // the cap over existing streets, every section splitting one.
 
 import { expect, test } from "vitest";
-import { budget, collect } from "./budget";
+import { collect, hold } from "./budget";
 import { ROAD_BUILD } from "../src/roads/balance";
 import { blockIndexOf, listBlocks } from "../src/roads/blocks";
 import { buildRoadGrid, planRoadGrid } from "../src/roads/grid";
@@ -30,9 +31,6 @@ import {
 import { routingGraphOf } from "../src/roads/routing";
 import { roadIndexOf } from "../src/roads/spatial";
 import type { Terrain } from "../src/terrain/terrain";
-
-/** What one tick may spend, in milliseconds. */
-const TICK_BUDGET_MS = 20;
 
 // Street grids 96 m apart, as in the blocks bench. The one the grid is laid
 // over is 123 by 123 nodes, 30,012 segments. The open one is 126 by 126
@@ -167,15 +165,15 @@ test("BuildRoadGrid at the cap on 30,000 segments", async ({ bench }) => {
     "the step that applies a grid at the cap, on open ground, and taking it back": () => reverseOps(open, applyGrid(open, openPayload)),
     "the step that applies a grid at the cap, over existing streets, and taking it back": () => reverseOps(over, applyGrid(over, overPayload)),
   };
-  const meanMs: Record<string, number> = {};
+  const latency: Record<string, { mean: number }> = {};
   for (const [name, fn] of Object.entries(cases)) {
     const file = `bench-results/grid-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
     collect();
     const result = await bench(name, { writeResult: file }, fn).run();
-    meanMs[name] = result.latency.mean;
+    latency[name] = result.latency;
   }
   expect(segmentCount(over)).toBe(30_012);
   expect(segmentCount(open)).toBe(29_640);
-  // The tick budget is 20 ms, and each step must fit inside it.
-  for (const [name, ms] of Object.entries(meanMs)) expect(ms, budget(name)).toBeLessThan(TICK_BUDGET_MS);
+  // Each step must fit inside the tick.
+  for (const [name, l] of Object.entries(latency)) hold("grid.step", name, l);
 }, 300_000);

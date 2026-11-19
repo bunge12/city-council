@@ -19,7 +19,8 @@
 //   the town as it was grown.
 
 import { expect, test } from "vitest";
-import { budget, collect } from "./budget";
+import { collect, hold } from "./budget";
+import { budgetFigure } from "../src/budgets";
 import {
   BUILDINGS_BALANCE,
   CELL_LEFT,
@@ -65,8 +66,6 @@ import { nextFloat, seedRng } from "../src/rng";
 import { isSegment, segmentIdLimit, SEG_FIXED } from "../src/roads/network";
 import { submit } from "./seen-ends";
 
-/** What one tick may spend, in milliseconds. */
-const TICK_BUDGET_MS = 20;
 const LINE = 96;
 const SPAN = 6 * LINE;
 
@@ -431,16 +430,17 @@ test("the M2 scale town", async ({ bench, annotate }) => {
     meanMs: Object.fromEntries(Object.entries(meanMs).map(([k, v]) => [k, round(v)])),
     p99Ms: Object.fromEntries(Object.entries(p99Ms).map(([k, v]) => [k, round(v)])),
     maxMs: Object.fromEntries(Object.entries(maxMs).map(([k, v]) => [k, round(v)])),
-    budgetMs: TICK_BUDGET_MS,
+    budgetMs: budgetFigure("town.step").budget,
     chunkSize: CHUNK_SIZE,
   };
   await annotate(JSON.stringify(report, null, 2), "M2 scale town");
 
-  // Every step, and every part of an autosave, inside the tick budget, on the mean.
+  // Every step, and every part of an autosave, inside the tick budget, on
+  // the mean. A query the client makes per chunk or per pointer move:
+  // inside a 60 fps frame, with room for a slower runner (balance/budgets.json).
   for (const name of Object.keys(meanMs)) {
     if (name.includes("for comparison")) continue;
-    expect(meanMs[name], budget(name)).toBeLessThan(TICK_BUDGET_MS);
+    const figure = name in queries ? "town.query" : partNames.includes(name) ? "town.autosave-part" : "town.step";
+    hold(figure, name, { mean: meanMs[name] });
   }
-  // A query the client makes per chunk or per pointer move: inside a 60 fps frame, with room for a slower runner.
-  for (const name of Object.keys(queries)) expect(meanMs[name], budget(name)).toBeLessThan(16);
 }, 600_000);

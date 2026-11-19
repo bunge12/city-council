@@ -7,6 +7,8 @@ playwright-report/
 soak-report.json
 walkthrough-screenshots/
 bench-results/
+budget-rows/
+budget-table.jsonl
 e2e-times.json
 e2e-test-list.txt
 e2e-planned.txt

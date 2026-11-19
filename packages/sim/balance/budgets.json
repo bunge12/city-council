@@ -1,0 +1,162 @@
+{
+  "_about": "Every time budget the benches and the soak hold (issue #232). Each figure has a name, a budget, the statistic it holds, and whether a miss blocks a merge or only reports. `budget` is milliseconds for the ms figures, a share for `ratio`, and a count of steps for `count over`, where `overMs` is the time a step must pass to count. Headroom is budget over measured; a figure under `warnBelowHeadroom` gets a warning on CI. The budgets are absolute and are not scaled by any calibration run (PRD, Testing). They are not game balance, so the balance stamp leaves this file out. No prices here, so no source years.",
+  "warnBelowHeadroom": 1.5,
+  "figures": {
+    "spatial.nearest-segment": {
+      "name": "one nearest-segment query on 30,000 segments",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 0.1,
+      "mode": "blocks",
+      "source": "issue 02"
+    },
+    "routing.route": {
+      "name": "one route across the 30,000 segment grid",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "issue 15"
+    },
+    "blocks.update-share": {
+      "name": "a BuildRoad's block update, as a share of rebuilding every block",
+      "unit": "ratio",
+      "statistic": "ratio",
+      "budget": 0.1,
+      "mode": "blocks",
+      "source": "issue 18"
+    },
+    "grid.step": {
+      "name": "the step that applies a BuildRoadGrid at the cap, inside the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, issue 20"
+    },
+    "levels.step": {
+      "name": "planning and building a road across 52 streets, inside the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, issue 22"
+    },
+    "scale.road-command-and-take-back": {
+      "name": "a road command's step and taking it back, twice the tick since the take-back costs about as much again",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 40,
+      "mode": "blocks",
+      "source": "M0 tick budget, M1 exit"
+    },
+    "scale.step": {
+      "name": "a step on the scale city, inside the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, M1 exit"
+    },
+    "scale.autosave-part": {
+      "name": "one part of an autosave on the scale city, between two ticks",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, issue #83"
+    },
+    "town.step": {
+      "name": "a step on the scale town, inside the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, M2 exit"
+    },
+    "town.autosave-part": {
+      "name": "one part of an autosave on the scale town, between two ticks",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, issue #83"
+    },
+    "town.query": {
+      "name": "a cell or lot query the client makes per chunk or pointer move, inside a 60 fps frame",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 16,
+      "mode": "blocks",
+      "source": "M2 exit"
+    },
+    "grower.tick": {
+      "name": "a grower tick on the scale city, the median of 30, inside the tick",
+      "unit": "ms",
+      "statistic": "p50",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, issue #231"
+    },
+    "grower.share": {
+      "name": "a grower tick at growthPerDayMax, its quarter of the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 5,
+      "mode": "blocks",
+      "source": "issue #166"
+    },
+    "soak.command-steps": {
+      "name": "steps of one command type over the tick in the soak hour, two runner pauses allowed",
+      "unit": "steps",
+      "statistic": "count over",
+      "overMs": 20,
+      "budget": 2,
+      "mode": "blocks",
+      "source": "M0 tick budget, issue #154"
+    },
+    "soak.settle-steps": {
+      "name": "zoning cell settle steps over the tick in the soak hour, two runner pauses allowed",
+      "unit": "steps",
+      "statistic": "count over",
+      "overMs": 20,
+      "budget": 2,
+      "mode": "blocks",
+      "source": "M0 tick budget, issue #154"
+    },
+    "soak.idle-steps": {
+      "name": "idle steps over the tick in the soak hour, two runner pauses allowed",
+      "unit": "steps",
+      "statistic": "count over",
+      "overMs": 20,
+      "budget": 2,
+      "mode": "blocks",
+      "source": "M0 tick budget, issue #154"
+    },
+    "soak.autosave-parts": {
+      "name": "autosaves whose slowest part passed the tick in the soak hour, three collections allowed",
+      "unit": "steps",
+      "statistic": "count over",
+      "overMs": 20,
+      "budget": 3,
+      "mode": "blocks",
+      "source": "M0 tick budget, issue #83"
+    },
+    "client.cell-layer.later-chunk": {
+      "name": "the zoning overlay's slowest chunk after the first, under the first chunk's 20 ms",
+      "unit": "ms",
+      "statistic": "max",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "issue #164"
+    },
+    "client.grid-tool.preview": {
+      "name": "the grid tool's preview of a grid at the cap, inside a 60 fps frame",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 16,
+      "mode": "blocks",
+      "source": "issue 88"
+    }
+  }
+}

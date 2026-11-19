@@ -5,9 +5,8 @@
 import { expect, test } from "vitest";
 import { createBareState, generateTerrain } from "@city-council/sim";
 import { previewGrid } from "../src/tools/grid-tool";
+import { hold } from "./budget";
 
-/** A frame at 60 fps. Generous for a slow CI runner; on the development container it is a few milliseconds. */
-const FRAME_MS = 16;
 const SEED = 2026;
 
 test("the grid tool previews a grid at the cap well inside a frame", async ({ bench }) => {
@@ -21,5 +20,8 @@ test("the grid tool previews a grid at the cap well inside a frame", async ({ be
   expect(first.streets.reduce((n, s) => n + s.points.length - 1, 0)).toBe(337);
   const name = "preview a grid at the cap";
   const r = await bench(name, { async: false }, () => void previewGrid(net, terrain, payload)).run();
-  expect(r.latency.mean, `[budget] ${name}`).toBeLessThan(FRAME_MS);
+  // Inside a 60 fps frame (`client.grid-tool.preview` in the sim's
+  // balance/budgets.json). Generous for a slow CI runner; on the
+  // development container it is a few milliseconds.
+  hold("client.grid-tool.preview", name, r.latency);
 });

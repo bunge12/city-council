@@ -73,11 +73,13 @@ import {
   SEG_ALIVE,
   TICK_MS,
   ZONING_BALANCE,
+  budgetFigure,
   buildScaleCity,
   buildingCount,
   cellsSettled,
   deserialize,
   hashState,
+  judgeBudget,
   replay,
   step,
   type FromSimMessage,
@@ -89,6 +91,7 @@ import { countHomes } from "../src/protocol/homes";
 import type { HostTransport } from "../src/protocol/transport";
 import type { FromMirror, MirrorQuestion, ToMirror } from "./mirror-worker";
 import { AUTOSAVE_INTERVAL_MS } from "../src/save/config";
+import { recordBudgetRow } from "../test/budget";
 
 const SPEED = 4;
 /** One hour of game time. */
@@ -113,21 +116,20 @@ const LINE = 96;
 const SPAN = 6 * LINE;
 /** Memory is sampled once a game minute. */
 const SAMPLE_EVERY = (60 * 1000) / TICK_MS;
-/** Tick budget from M0.md: 20 ms of worker time. */
-const BUDGET_MS = 20;
 /**
- * How many steps of one source may pass the budget in a run: random pauses
- * of the runner. Runs on CI and on a slower machine met up to two in a
- * source, and most met none.
+ * Tick budget from M0.md: 20 ms of worker time. It and how many steps of
+ * each source may pass it are in the sim's balance/budgets.json, as the
+ * `soak.*` figures (issue #232), which share this one step time
+ * (budgets.test.ts holds them to that).
+ *
+ * A source may pass it a couple of times in a run: random pauses of the
+ * runner. Runs on CI and on a slower machine met up to two in a source, and
+ * most met none. Each autosave allocates a snapshot of about 13 MB, so a
+ * collection of the old generation tends to land in one of its parts rather
+ * than in a step: runs met up to two such parts in 28 saves, and autosaves
+ * are allowed three. The bench holds the mean of each part to the budget.
  */
-const PAUSES_ALLOWED = 2;
-/**
- * Each autosave allocates a snapshot of about 13 MB, so a collection of the
- * old generation tends to land in one of its parts rather than in a step.
- * Runs met up to two such parts in 28 saves. The bench holds the mean of
- * each part to the budget.
- */
-const SAVE_PAUSES_ALLOWED = 3;
+const BUDGET_MS = budgetFigure("soak.command-steps").overMs ?? 0;
 /** A step whose cells system took longer than this walked a slice; an idle one takes microseconds. */
 const SETTLE_MIN_MS = 0.25;
 /** A grower step slower than this is listed in the report with the collections that paused it (issue 166). Not checked. */
@@ -242,6 +244,8 @@ function writeSummary(checks: readonly BudgetCheck[], over: number, steps: numbe
 
 /** One source of work held to the tick budget. */
 interface BudgetCheck {
+  /** The figure in budgets.json. */
+  figure: string;
   name: string;
   steps: number;
   overBudget: number;
@@ -249,6 +253,8 @@ interface BudgetCheck {
   medianMs: number;
   maxMs: number;
   pass: boolean;
+  /** Whether a miss fails the soak, or only shows in the table. */
+  mode: "blocks" | "reports";
 }
 
 const mb = (bytes: number): number => Math.round((bytes / 1024 / 1024) * 10) / 10;
@@ -593,18 +599,19 @@ async function soakHour(): Promise<SoakRun> {
   const slowestPart = Math.max(0, ...partMax);
   /** Each autosave's slowest part, in order of size. */
   const saveSlowest = ascending(snapshotParts.map((parts) => Math.max(0, ...parts)));
-  /** Each source: how many of its steps passed the budget, against how many may. */
-  const check = (name: string, times: Float64Array, allowed: number): BudgetCheck => {
-    const overBudget = overOf(times);
-    return { name, steps: times.length, overBudget, allowed, medianMs: quantile(times, 0.5), maxMs: times.at(-1) ?? 0, pass: overBudget <= allowed };
+  /** Each source: how many of its steps passed its figure's time, against how many may. Its row goes to the CI table. */
+  const check = (figure: string, name: string, times: Float64Array): BudgetCheck => {
+    const limit = budgetFigure(figure).overMs ?? 0;
+    const overBudget = Array.from(times).filter((t) => t > limit).length;
+    const row = judgeBudget(figure, name, overBudget);
+    recordBudgetRow(row);
+    return { figure, name, steps: times.length, overBudget, allowed: row.budget, medianMs: quantile(times, 0.5), maxMs: times.at(-1) ?? 0, pass: row.pass, mode: row.mode };
   };
   const checks: BudgetCheck[] = [
-    ...Object.entries(byCommand).map(([type, c]) =>
-      check(`${type} steps`, ascending(c.ms), PAUSES_ALLOWED),
-    ),
-    check("zoning cell settle steps", settleSorted, PAUSES_ALLOWED),
-    check("idle steps", idleSorted, PAUSES_ALLOWED),
-    check("autosaves' slowest parts", saveSlowest, SAVE_PAUSES_ALLOWED),
+    ...Object.entries(byCommand).map(([type, c]) => check("soak.command-steps", `${type} steps`, ascending(c.ms))),
+    check("soak.settle-steps", "zoning cell settle steps", settleSorted),
+    check("soak.idle-steps", "idle steps", idleSorted),
+    check("soak.autosave-parts", "autosaves' slowest parts", saveSlowest),
   ];
   // A save written in parts from a copy is the save written at once.
   // A save written in parts into the kept buffers is the save written at once.
@@ -752,7 +759,7 @@ describe("soak: one hour of game time at 4x", () => {
     // The tick budget is an exit number. A part of an autosave runs in the
     // worker between two steps, so it holds up the next one and gets the
     // same budget as a step (issue #83).
-    const failed = b.checks.filter((c) => !c.pass);
+    const failed = b.checks.filter((c) => !c.pass && c.mode === "blocks");
     expect(
       failed.map((c) => `${c.name}: ${c.overBudget} of ${c.steps} over, ${c.allowed} allowed, max ${ms(c.maxMs)} ms`),
       `[budget] sources that passed the ${BUDGET_MS} ms tick budget more often than a runner's pauses explain`,
