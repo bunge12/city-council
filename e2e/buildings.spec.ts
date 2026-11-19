@@ -4,6 +4,7 @@ import { BUILDING_TYPES, buildingInfo } from "../packages/sim/src/index";
 import { builtFixtureCity } from "./building-fixtures";
 import { zonedFixtureCity } from "./cell-fixtures";
 import { groundAt } from "./road-fixtures";
+import { buildingsDrawn, canvasShot, openCity, ready, settle } from "./helpers";
 
 // Issue M2-12: building rendering. It runs in the `roads` project, headed
 // with WebGPU on where the browser has an adapter (see playwright.config.ts),
@@ -35,56 +36,14 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(240_000);
 
 const fixture = builtFixtureCity();
 
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
-
-/** Waits until every building in the city is drawn: they fill in a few chunks a frame. */
-async function buildingsDrawn(page: Page, count: number): Promise<void> {
-  await page.waitForFunction(
-    (count) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(count),
-    count,
-    { timeout: 120_000 },
-  );
-}
-
-/** Opens the page, then imports `bytes` as a city and waits for it to be drawn. */
-async function openCity(page: Page, query: string, name: string, bytes: Buffer): Promise<string> {
-  await page.goto(`/${query}`);
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: bytes });
-  await loaded;
-  await ready(page);
-  const status = await page.evaluate(() => window.cityCouncil.renderStatus());
-  return status?.backend ?? "none";
-}
-
 async function setPose(page: Page, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
-}
-
-/** Waits until decoration has finished building near the camera: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
 }
 
 async function stats(page: Page): Promise<BuildingStats> {
@@ -104,14 +63,6 @@ async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<v
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, body);
   await testInfo.attach(name, { path, contentType: "image/png" });
-}
-
-/** The canvas alone, without the page's panels over it. */
-async function canvasShot(page: Page): Promise<Buffer> {
-  await page.addStyleTag({ content: "#ui { display: none !important; }" });
-  const shot = await page.locator("#view").screenshot();
-  await page.addStyleTag({ content: "#ui { display: block !important; }" });
-  return shot;
 }
 
 const GRID = { x: 4250, z: 4600 };
@@ -138,7 +89,7 @@ test("the fixture has buildings of every type", () => {
 for (const preset of ["balanced", "low"] as const) {
   for (const { name, query } of BACKENDS) {
     test(`every building type draws the same at ${preset} (${name})`, async ({ page }, testInfo) => {
-      const backend = await openCity(page, `?${query}preset=${preset}`, "Built", fixture.bytes);
+      const backend = await openCity(page, fixture.bytes, { query: `?${query}preset=${preset}`, name: "Built" });
       if (query.startsWith("webgl")) expect(backend).toBe("webgl2");
       else if (process.env["CI"]) expect(backend).toBe("webgpu");
       testInfo.annotations.push({ type: "backend", description: backend });
@@ -180,7 +131,7 @@ function housesOnOneStreet(): number[] {
 }
 
 test("a building keeps its colours after a reload, and two houses on one street differ", async ({ page }, testInfo) => {
-  await openCity(page, "?webgl&preset=low", "Built", fixture.bytes);
+  await openCity(page, fixture.bytes, { query: "?webgl&preset=low", name: "Built" });
   await buildingsDrawn(page, fixture.buildings);
   const ids = Array.from({ length: fixture.buildings }, (_, id) => id);
   const before = await tints(page, ids);
@@ -206,7 +157,7 @@ test("a building keeps its colours after a reload, and two houses on one street 
 
 test("a building the grower adds writes one instance and rebuilds no chunk", async ({ page }, testInfo) => {
   const { bytes } = zonedFixtureCity();
-  await openCity(page, "?webgl&preset=low&debug", "Zoned", bytes);
+  await openCity(page, bytes, { query: "?webgl&preset=low&debug", name: "Zoned" });
   await expect.poll(async () => (await stats(page)).pending).toBe(0);
   expect((await stats(page)).buildings).toBe(0);
   // In the street band over the fixture, where buildings are drawn in full (issue M2-13).

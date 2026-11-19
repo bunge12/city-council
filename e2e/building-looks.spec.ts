@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { BUILDING_TYPES, buildingInfo } from "../packages/sim/src/index";
 import { builtFixtureCity, downtownFixtureCity } from "./building-fixtures";
 import { groundAt } from "./road-fixtures";
+import { buildingsDrawn, canvasShot, openCity, settle } from "./helpers";
 
 // Issue #137: the look and detail of the buildings. A downtown of towers,
 // slabs and podiums, and the street of every type, drawn close up and from
@@ -22,8 +23,6 @@ declare const window: {
     camera: Promise<{ rig: { setPose(position: Vec3, target: Vec3): void } }>;
   };
 };
-declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Each test opens a city of towers and takes several screenshots in software
@@ -32,45 +31,17 @@ test.use({ viewport: { width: 1280, height: 800 } });
 // runners take about twice as long (issue #152), so eight minutes.
 test.setTimeout(480_000);
 
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
-
-async function openCity(page: Page, name: string, city: { bytes: Buffer; buildings: number }): Promise<void> {
-  await page.goto("/?webgl&preset=balanced");
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: `${name}.city`, mimeType: "application/octet-stream", buffer: city.bytes });
-  await loaded;
-  await ready(page);
-  await page.waitForFunction(
-    (count) => document.body.dataset["buildingsPending"] === "0" && document.body.dataset["buildingsDrawn"] === String(count),
-    city.buildings,
-    { timeout: 120_000 },
-  );
+/** Opens `city` and waits until every building is drawn, with the UI hidden. */
+async function openBuilt(page: Page, name: string, city: { bytes: Buffer; buildings: number }): Promise<void> {
+  await openCity(page, city.bytes, { query: "webgl&preset=balanced", name });
+  await buildingsDrawn(page, city.buildings);
   await page.addStyleTag({ content: "#ui { display: none !important; }" });
-}
-
-/** Waits until decoration near the camera has finished building: its counts hold for ten frames. */
-async function settle(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const view = await window.cityCouncil.view;
-    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
-    let last = "";
-    let steady = 0;
-    for (let f = 0; f < 600 && steady < 10; f++) {
-      await frame();
-      const now = JSON.stringify(view.decorCounts());
-      steady = now === last ? steady + 1 : 0;
-      last = now;
-    }
-  });
 }
 
 async function shoot(page: Page, testInfo: TestInfo, name: string, position: Vec3, target: Vec3): Promise<void> {
   await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [position, target] as const);
   await settle(page);
-  const shot = await page.locator("#view").screenshot();
+  const shot = await canvasShot(page);
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, shot);
   await testInfo.attach(name, { path, contentType: "image/png" });
@@ -110,7 +81,7 @@ function firstOf(state: Parameters<typeof buildingInfo>[0], ids: readonly string
 
 test("a downtown's towers come in many shapes, with glass that is not asphalt", async ({ page }, testInfo) => {
   const city = downtownFixtureCity();
-  await openCity(page, "Downtown", city);
+  await openBuilt(page, "Downtown", city);
   const stats = await page.evaluate(async () => (await window.cityCouncil.view).buildingStats());
   expect(stats?.buildings).toBe(city.buildings);
   // Many models in use: each type's buildings draw several of its shapes.
@@ -130,7 +101,7 @@ test("a downtown's towers come in many shapes, with glass that is not asphalt", 
 
 test("every type up close: closed roofs, no trees through walls, light glass", async ({ page }, testInfo) => {
   const city = builtFixtureCity();
-  await openCity(page, "Built", city);
+  await openBuilt(page, "Built", city);
   for (const { type, id } of firstOf(city.state, ["single-family-home", "townhomes", "apartments", "shop-row", "small-factory"])) {
     const v = frame(city.state, id);
     await shoot(page, testInfo, `close up, ${type}`, v.position, v.target);

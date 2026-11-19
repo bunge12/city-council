@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { builtFixtureCity } from "./building-fixtures";
-import { canvasShot, chunkAt, openCity, setPose, settle, stats, type Form, type Vec3 } from "./building-lod-helpers";
+import { attachCanvas, chunkAt, openFixture, setPose, stats, type Form, type Vec3 } from "./building-lod-helpers";
+import { settle } from "./helpers";
 import { groundAt } from "./road-fixtures";
 
 // Issue M2-13: buildings across the zoom bands. Full models near the camera
@@ -32,11 +33,11 @@ test.describe("the fixture city", () => {
 
   for (const preset of ["balanced", "low"] as const) {
     test(`the same district in all three bands, at ${preset}`, async ({ page }, testInfo) => {
-      await openCity(page, `webgl&debug&preset=${preset}`, "Built", fixture.bytes);
+      await openFixture(page, `webgl&debug&preset=${preset}`, "Built", fixture.bytes);
       const chunk = chunkAt(target[0], target[2]);
       for (const { band, position, form } of BANDS) {
         await setPose(page, position, target);
-        await settle(page);
+        await settle(page, { buildings: true });
         expect(await page.evaluate(() => document.body.dataset["zoomBand"])).toBe(band);
         expect(await page.evaluate(async (c) => (await window.cityCouncil.view).buildingForm(c), chunk)).toBe(form);
         const s = await stats(page);
@@ -46,7 +47,7 @@ test.describe("the fixture city", () => {
           if (other === form) expect(s.forms[other].buildings, `${band}: ${other}`).toBeGreaterThan(0);
           else if (other !== "simple" || band !== "street") expect(s.forms[other].meshes, `${band}: ${other}`).toBe(0);
         }
-        await canvasShot(page, testInfo, `${band} band, ${preset}`);
+        await attachCanvas(page, testInfo, `${band} band, ${preset}`);
         if (band === "street") {
           await page.getByRole("region", { name: "Debug panel" }).screenshot({ path: testInfo.outputPath("debug-panel.png") });
           await testInfo.attach(`debug panel, ${band} band`, { path: testInfo.outputPath("debug-panel.png"), contentType: "image/png" });

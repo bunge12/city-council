@@ -3,7 +3,7 @@
 // so the snapshot is taken there and written straight to IndexedDB without
 // a trip through the page.
 
-import { SnapshotError, createState, deserialize, serialize, type Snapshot, type SnapshotSteps } from "@city-council/sim";
+import { createState, serialize, type SnapshotSteps } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, type LocalSave, type PendingSave, type SimHost } from "../protocol/host";
 import {
   SAVES_CHANNEL,
@@ -16,7 +16,7 @@ import {
   type SwitchReply,
   type WorkerSaveTransport,
 } from "./channel";
-import { cityFileName, cityNameFromFile, uniqueCityName } from "./city-file";
+import { cityFileName, storeCityFile, uniqueCityName } from "./city-file";
 import type { CityStore } from "./store";
 
 export interface SaverOptions {
@@ -153,40 +153,18 @@ export class Saver {
       const { store, storeError, wallClock } = this.options;
       const refuse = (error: string): void =>
         this.reply({ channel: SAVES_CHANNEL, type: "imported", requestId, result: { ok: false, error } });
-      const cannot = `Could not import "${fileName}".`;
-      let snapshot: Snapshot;
-      try {
-        // Decode the whole file, not just the header, so nothing that cannot
-        // be opened is ever stored.
-        snapshot = deserialize(bytes);
-      } catch (error) {
-        refuse(`${cannot} ${error instanceof SnapshotError ? error.message.replace(/^This save/, "This file") : `It could not be read: ${message(error)}.`}`);
+      const stored = await storeCityFile(store, storeError, fileName, bytes, wallClock(), this.options.makeId);
+      if (!stored.ok) {
+        refuse(stored.error);
         return;
       }
-      if (!store) {
-        refuse(`${cannot} ${storeError ?? "Saving is not available in this browser"}.`);
-        return;
-      }
+      const { city } = stored;
       try {
-        const taken = (await store.list()).map((c) => c.name);
-        const now = wallClock();
-        const city = {
-          id: (this.options.makeId ?? (() => crypto.randomUUID()))(),
-          name: uniqueCityName(cityNameFromFile(fileName), taken),
-          seed: snapshot.state.seed,
-          tick: snapshot.state.tick,
-          savedAt: now,
-          createdAt: now,
-          openedAt: now,
-          // The player has this city as a file already.
-          exportedAt: now,
-        };
-        await store.add(city, bytes);
         await this.refreshList();
         this.reply({ channel: SAVES_CHANNEL, type: "imported", requestId, result: { ok: true, city } });
         this.send(null);
       } catch (error) {
-        refuse(`${cannot} It could not be stored: ${message(error)}.`);
+        refuse(`Could not import "${fileName}". It could not be stored: ${message(error)}.`);
       }
     });
   }

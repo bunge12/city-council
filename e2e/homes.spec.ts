@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { ROAD_TYPES, ZONING_BALANCE, createState, generateTerrain, heightAt, serialize, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
+import { frames, openCity, ready } from "./helpers";
 
 // Issue M2-18: the homes figure in the top bar. A player paints R1 along a
 // street with the zone tool, lets the grower build, and watches the figure
@@ -24,7 +25,6 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
-declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(240_000);
@@ -41,17 +41,6 @@ function oneStreet(): SimState {
   const state = createState(SEED);
   buildRoads(state, [[[4200, STREET_Z], [4392, STREET_Z], "street"]]);
   return state;
-}
-
-async function ready(page: Page): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });
-}
-
-async function frames(page: Page, n = 2): Promise<void> {
-  await page.evaluate((n) => new Promise<void>((r) => {
-    const step = (left: number) => (left <= 0 ? r() : requestAnimationFrame(() => step(left - 1)));
-    step(n);
-  }), n);
 }
 
 async function look(page: Page, x: number, z: number, height: number): Promise<void> {
@@ -106,13 +95,7 @@ async function attach(page: Page, testInfo: TestInfo, name: string, whole = fals
 }
 
 test("the top bar counts the homes built: up as houses grow, down when one is bulldozed, the same after a reload", async ({ page }, testInfo) => {
-  await page.goto("/?webgl");
-  await ready(page);
-  const loaded = page.waitForEvent("load");
-  await page.locator("#import-file").setInputFiles({ name: "Elm Street.city", mimeType: "application/octet-stream", buffer: Buffer.from(serialize(oneStreet())) });
-  await loaded;
-  await ready(page);
-  await page.addStyleTag({ content: ".notes { display: none !important; }" });
+  await openCity(page, oneStreet(), { name: "Elm Street" });
   const figure = page.locator("#homes");
 
   await test.step("a city with no homes shows 0, beside the date", async () => {
