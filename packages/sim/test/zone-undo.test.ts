@@ -29,7 +29,8 @@ import { segmentBuildings } from "../src/buildings/where";
 import { checkRoadNetwork, isSegment, segmentIdLimit } from "../src/roads/network";
 import { checkUndoHistory, heldIds } from "../src/undo";
 import { syncCells } from "../src/zoning/cell-index";
-import { ZONE_UNTOUCHED, journalCells, journalLostZones, readJournals } from "../src/zoning/zone-undo";
+import { ZONE_UNTOUCHED, anchorHash, journalCells, journalLostZones, readJournals } from "../src/zoning/zone-undo";
+import { Fnv64 } from "../src/hash";
 
 // Issue 111: undo for zoning, and for roads that carried buildings.
 
@@ -151,6 +152,27 @@ function expectSound(state: SimState): void {
   expect(candidates.kept).toEqual(candidates.fresh);
   expect(hashState(deserialize(serialize(state)).state)).toBe(hashState(state));
 }
+
+describe("anchorHash", () => {
+  // Undo records in saves hold these hashes, so the bytes must not change
+  // (issue #204 took them from a buffer instead of a float at a time).
+  it("hashes the eight numbers as Fnv64.f64 feeds them, a float at a time", () => {
+    const slow = (a: number[]): number => {
+      const h = new Fnv64();
+      for (const v of a) h.f64(v);
+      return h.lo | 0;
+    };
+    const anchors = [
+      [0, 0, 0, 0, 0, 0, 0, 1],
+      [4100.5, 4400.25, 4300, 4500, 4700, 5000, 0.125, 0.875],
+      [-0, 1e-300, -1e300, 3.141592653589793, -2.5, 7, 0.3333333333333333, 1],
+    ];
+    for (const a of anchors) {
+      const [ax = 0, az = 0, cx = 0, cz = 0, bx = 0, bz = 0, tA = 0, tB = 0] = a;
+      expect(anchorHash({ ax, az, cx, cz, bx, bz, tA, tB })).toBe(slow(a));
+    }
+  });
+});
 
 describe("Undo of ZoneCells", () => {
   it("unzones the cells a paint zoned, leaving the city as before the paint", () => {

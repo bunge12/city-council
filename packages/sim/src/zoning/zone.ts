@@ -22,7 +22,7 @@ import { noteFrontCells } from "../buildings/candidates";
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "./balance";
 import { noteCellsPainted } from "./cell-changes";
-import { forOpenCellsInBox, syncCells } from "./cell-index";
+import { forOpenCellsInBoxes, syncCells } from "./cell-index";
 import { DENSITY_NONE, ZONE_NONE } from "./cells";
 
 /** The `zone` of a ZoneCells that clears cells. */
@@ -133,67 +133,73 @@ function parse(payload: unknown): Parsed | string {
   return zoneId === ZONE_CLEAR ? { zone: ZONE_NONE, density: DENSITY_NONE, rects } : { zone: zoneAt + 1, density: level as number, rects };
 }
 
-// Scratch, one byte per cell: set while a cell is on the list being
-// gathered, so a cell under two rectangles is listed once. Cleared again
-// before `gather` returns. Not state.
-let listed = new Uint8Array(0);
-// Scratch for the list itself, kept between commands so a stroke at the cap
-// grows no list of its own (issue #155). Not state.
+// Scratch for the list, kept between commands so a stroke at the cap grows
+// no list of its own (issue #155), and for the rectangles' boxes. Not state.
 let found = new Int32Array(1 << 12);
+let boxes = new Float64Array(4 * 64);
 
 /**
  * Where every cell the command would change sits in the zone and density
  * arrays, ascending: the open cells with their centre inside a rectangle
- * whose zone or density is not already the one asked for.
+ * whose zone or density is not already the one asked for. The cells under
+ * all the rectangles are read in one pass, so a cell under two is looked at
+ * once and listed once (issue #204: a pass per rectangle read the buckets
+ * where two meet twice).
  */
 function gather(state: SimState, parsed: Parsed): Int32Array {
   const index = syncCells(state);
   const cells = state.cells;
   const { zone, density, rects } = parsed;
-  // Grown with room to spare: sized to the cells exactly, every stroke after
-  // a road added cells made a new one, megabytes of buffer that only a full
-  // collection takes back (issue 166).
-  if (listed.length < cells.zone.length) listed = new Uint8Array(Math.max(cells.zone.length, Math.ceil(listed.length * 1.5)));
-  const marks = listed;
-  let count = 0;
-  for (let at = 0; at < rects.length; at += RECT_FLOATS) {
+  const count = rects.length / RECT_FLOATS;
+  if (boxes.length < 4 * count) boxes = new Float64Array(4 * count);
+  for (let r = 0; r < count; r++) {
+    const at = r * RECT_FLOATS;
     const fx = rects[at] ?? 0;
     const fz = rects[at + 1] ?? 0;
     const dx = rects[at + 2] ?? 0;
     const dz = rects[at + 3] ?? 0;
     const half = rects[at + 4] ?? 0;
-    const length2 = dx * dx + dz * dz;
-    const reach2 = half * half * length2;
     // A box around the rectangle, a little generous: it only picks the
     // buckets to look in, and the test below decides.
-    const length = Math.sqrt(length2);
+    const length = Math.sqrt(dx * dx + dz * dz);
     const padX = (half * (dz < 0 ? -dz : dz)) / length + 1;
     const padZ = (half * (dx < 0 ? -dx : dx)) / length + 1;
-    const minX = (dx < 0 ? fx + dx : fx) - padX;
-    const maxX = (dx < 0 ? fx : fx + dx) + padX;
-    const minZ = (dz < 0 ? fz + dz : fz) - padZ;
-    const maxZ = (dz < 0 ? fz : fz + dz) + padZ;
-    forOpenCellsInBox(index, cells, minX, minZ, maxX, maxZ, (slot, x, z) => {
-      if (cells.zone[slot] === zone && cells.density[slot] === density) return;
-      if (marks[slot] === 1) return;
-      const px = x - fx;
-      const pz = z - fz;
-      const along = px * dx + pz * dz;
-      if (along < 0 || along > length2) return;
-      const across = px * dz - pz * dx;
-      if (across * across > reach2) return;
-      marks[slot] = 1;
-      if (count === found.length) {
-        const grown = new Int32Array(found.length * 2);
-        grown.set(found);
-        found = grown;
-      }
-      found[count++] = slot;
-    });
+    boxes[4 * r] = (dx < 0 ? fx + dx : fx) - padX;
+    boxes[4 * r + 1] = (dz < 0 ? fz + dz : fz) - padZ;
+    boxes[4 * r + 2] = (dx < 0 ? fx : fx + dx) + padX;
+    boxes[4 * r + 3] = (dz < 0 ? fz : fz + dz) + padZ;
   }
-  const out = found.slice(0, count);
-  for (let i = 0; i < count; i++) marks[out[i] ?? 0] = 0;
-  return out.sort();
+  let n = 0;
+  forOpenCellsInBoxes(
+    index,
+    cells,
+    boxes,
+    count,
+    (slot) => cells.zone[slot] === zone && cells.density[slot] === density,
+    (slot, x, z, hits, hitCount) => {
+      for (let k = 0; k < hitCount; k++) {
+        const at = (hits[k] ?? 0) * RECT_FLOATS;
+        const px = x - (rects[at] ?? 0);
+        const pz = z - (rects[at + 1] ?? 0);
+        const dx = rects[at + 2] ?? 0;
+        const dz = rects[at + 3] ?? 0;
+        const half = rects[at + 4] ?? 0;
+        const length2 = dx * dx + dz * dz;
+        const along = px * dx + pz * dz;
+        if (along < 0 || along > length2) continue;
+        const across = px * dz - pz * dx;
+        if (across * across > half * half * length2) continue;
+        if (n === found.length) {
+          const grown = new Int32Array(found.length * 2);
+          grown.set(found);
+          found = grown;
+        }
+        found[n++] = slot;
+        return;
+      }
+    },
+  );
+  return found.slice(0, n).sort();
 }
 
 const NOTHING = "no cell would change: nothing open lies under the rectangles, or it is zoned this way already";

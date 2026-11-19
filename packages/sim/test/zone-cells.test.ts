@@ -6,6 +6,7 @@ import {
   ZONE_CLEAR,
   ZONE_NONE,
   ZONING_BALANCE,
+  cellAt,
   cellCorners,
   cellStatuses,
   cellsInBox,
@@ -202,6 +203,55 @@ describe("ZoneCells", () => {
     expect(plan.plan.cells).toHaveLength(12);
     expect(new Set(plan.plan.cells).size).toBe(12);
     expect(Array.from(plan.plan.cells)).toEqual(Array.from(plan.plan.cells).sort((p, q) => p - q));
+  });
+
+  it("finds the same cells as a look at every open cell, for strokes of many rectangles over roads changed since (issue #204)", () => {
+    // A grid of streets, then some taken away and built again, so cells
+    // are filed out and in again and bucket entries are reused.
+    const state = createState(SEED);
+    for (let k = 0; k <= 4; k++) {
+      ok(state, road([4150, 4450 + 120 * k], [4650, 4450 + 120 * k]));
+      ok(state, road([4150 + 120 * k, 4450], [4150 + 120 * k, 4950]));
+    }
+    ok(state, road([4210, 4500], [4590, 4880]));
+    const cut = cellAt(state, 4390, 4562);
+    if (!cut) throw new Error("no cell by the street to bulldoze");
+    ok(state, command("BulldozeRoad", { segments: [cut.segment] }));
+    ok(state, road([4300, 4450], [4300, 4950]));
+    while (!cellsSettled(state)) step(state);
+    // Every open cell and its centre, from the corners, without the buckets.
+    const open: { slot: number; x: number; z: number }[] = [];
+    for (const cell of cellsInBox(state, 3000, 3000, 6000, 6000)) {
+      if (cell.status !== CELL_OPEN) continue;
+      const c = cellCorners(state, cell) ?? [];
+      const x = ((c[0] ?? 0) + (c[2] ?? 0) + (c[4] ?? 0) + (c[6] ?? 0)) / 4;
+      const z = ((c[1] ?? 0) + (c[3] ?? 0) + (c[5] ?? 0) + (c[7] ?? 0)) / 4;
+      open.push({ slot: cell.index, x, z });
+    }
+    expect(open.length).toBeGreaterThan(1000);
+    const inside = (r: ZoneRect, x: number, z: number): boolean => {
+      const dx = r.to.x - r.from.x;
+      const dz = r.to.z - r.from.z;
+      const length2 = dx * dx + dz * dz;
+      const along = (x - r.from.x) * dx + (z - r.from.z) * dz;
+      const across = (x - r.from.x) * dz - (z - r.from.z) * dx;
+      return along >= 0 && along <= length2 && across * across <= (r.width / 2) * (r.width / 2) * length2;
+    };
+    const strokes: ZoneRect[][] = [
+      // Side by side and overlapping.
+      Array.from({ length: 16 }, (_, k) => rect([4150 + 64 * (k % 4), 4480 + 64 * Math.floor(k / 4)], [4230 + 64 * (k % 4), 4480 + 64 * Math.floor(k / 4)], 70)),
+      // An L, far apart at its ends.
+      [rect([4160, 4470], [4400, 4470], 40), rect([4620, 4470], [4620, 4700], 40), rect([4620, 4700], [4620, 4930], 40), rect([4160, 4930], [4400, 4930], 30)],
+      // Along a diagonal, at an angle.
+      Array.from({ length: 6 }, (_, k) => rect([4170 + 80 * k, 4470 + 80 * k], [4230 + 80 * k, 4530 + 80 * k], 50)),
+    ];
+    for (const rects of strokes) {
+      const plan = planZoneCells(state, zone("commercial", 2, rects).payload);
+      const want = open.filter((c) => rects.some((r) => inside(r, c.x, c.z))).map((c) => c.slot).sort((p, q) => p - q);
+      expect(want.length).toBeGreaterThan(0);
+      if (!plan.ok) throw new Error(plan.reason);
+      expect(Array.from(plan.plan.cells)).toEqual(want);
+    }
   });
 
   it("plans the cells the command then changes", () => {

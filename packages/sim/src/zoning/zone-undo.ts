@@ -61,23 +61,49 @@ export interface Journal {
   to: number;
 }
 
-// One hasher for every anchor: a stroke at the cap hashes about a thousand,
-// and a new hasher each time is garbage for the collector. Not state.
+// One hasher for every anchor, and one buffer to hash its eight numbers
+// from: a stroke at the cap hashes about a thousand, and a new hasher or
+// anchor object each time is garbage for the collector. Not state.
 const anchorHasher = new Fnv64();
+const anchorFloats = new Float64Array(8);
+// The bytes of the eight numbers. Every engine the game targets is little
+// endian, as `hashState` already assumes, so these are the bytes
+// `Fnv64.f64` feeds, in its order.
+const anchorBytes = new Uint8Array(anchorFloats.buffer);
+
+function hashAnchorFloats(): number {
+  const h = anchorHasher;
+  h.reset();
+  h.bytes(anchorBytes);
+  return h.lo | 0;
+}
 
 /** A 32-bit hash of a segment's cell anchor, from the bits of its eight numbers. */
 export function anchorHash(a: SegmentAnchor): number {
-  const h = anchorHasher;
-  h.reset();
-  h.f64(a.ax);
-  h.f64(a.az);
-  h.f64(a.cx);
-  h.f64(a.cz);
-  h.f64(a.bx);
-  h.f64(a.bz);
-  h.f64(a.tA);
-  h.f64(a.tB);
-  return h.lo | 0;
+  const f = anchorFloats;
+  f[0] = a.ax;
+  f[1] = a.az;
+  f[2] = a.cx;
+  f[3] = a.cz;
+  f[4] = a.bx;
+  f[5] = a.bz;
+  f[6] = a.tA;
+  f[7] = a.tB;
+  return hashAnchorFloats();
+}
+
+/** `anchorHash` of segment `seg`'s anchor as `net` holds it, read in place. */
+function anchorHashOf(net: RoadNetwork, seg: number): number {
+  const f = anchorFloats;
+  f[0] = net.segAnchorAX[seg] ?? 0;
+  f[1] = net.segAnchorAZ[seg] ?? 0;
+  f[2] = net.segAnchorCX[seg] ?? 0;
+  f[3] = net.segAnchorCZ[seg] ?? 0;
+  f[4] = net.segAnchorBX[seg] ?? 0;
+  f[5] = net.segAnchorBZ[seg] ?? 0;
+  f[6] = net.segAnchorTA[seg] ?? 0;
+  f[7] = net.segAnchorTB[seg] ?? 0;
+  return hashAnchorFloats();
 }
 
 /** The journals in `zones`, in order. */
@@ -94,7 +120,7 @@ export function readJournals(zones: Int32Array): Journal[] {
 
 /** Whether segment `journal.seg` of `net` is the road the journal was written for, by its anchor. */
 export function journalFits(net: RoadNetwork, journal: Journal): boolean {
-  return isSegment(net, journal.seg) && anchorHash(readAnchor(net, journal.seg)) === journal.anchor;
+  return isSegment(net, journal.seg) && anchorHashOf(net, journal.seg) === journal.anchor;
 }
 
 /** How many cells `journal` covers. */
@@ -173,8 +199,8 @@ function write(seg: number, anchor: number, cells: CellState, start: number, cou
   let runDensity = -1;
   for (let side = 0; side < 2; side++) {
     for (let d = 0; d < depth; d++) {
-      for (let place = 0; place < places; place++) {
-        const local = localIndex(side, place, d);
+      // `localIndex(side, place, d)`, a place at a time.
+      for (let place = 0, local = side * depth + d; place < places; place++, local += 2 * depth) {
         let zone = ZONE_UNTOUCHED;
         let density = 0;
         if (marks === null || marks[local] === 1) {
@@ -222,7 +248,7 @@ export function journalPaint(net: RoadNetwork, cells: CellState, slots: Int32Arr
     if (touched.length < count) touched = new Uint8Array(Math.max(count, touched.length * 2));
     const first = i;
     for (; i < slots.length && (slots[i] ?? 0) < start + count; i++) touched[(slots[i] ?? 0) - start] = 1;
-    write(seg, anchorHash(readAnchor(net, seg)), cells, start, count, touched);
+    write(seg, anchorHashOf(net, seg), cells, start, count, touched);
     for (let k = first; k < i; k++) touched[(slots[k] ?? 0) - start] = 0;
     seg++;
   }

@@ -36,7 +36,7 @@
 // `applyRoadDelta` on a client's copy, and the next read walks those faces
 // again. A road far from the change leaves its faces alone.
 
-import { isStraight, segmentQuad, type Quad } from "./curve";
+import { segmentQuad, type Quad } from "./curve";
 import {
   LEVEL_GROUND,
   NETWORK_ROAD,
@@ -247,20 +247,33 @@ export function removeBlockSegment(index: BlockIndex, seg: number): void {
   relinkNode(index, b);
 }
 
-/** Twice the signed area half-edge `h` adds, measured from (ox, oz). */
+/**
+ * Twice the signed area half-edge `h` adds, measured from (ox, oz). Read
+ * from the network's arrays in place: a walk of the city's outer face takes
+ * thousands of half-edges, and an object for each was garbage (issue #204).
+ */
 function twiceArea(net: RoadNetwork, h: number, ox: number, oz: number): number {
-  const q = segmentQuad(net, h >> 1);
+  const seg = h >> 1;
+  const a = net.segA[seg] ?? 0;
+  const b = net.segB[seg] ?? 0;
+  const ax = net.nodeX[a] ?? 0;
+  const az = net.nodeZ[a] ?? 0;
+  const bx = net.nodeX[b] ?? 0;
+  const bz = net.nodeZ[b] ?? 0;
+  const qcx = net.segCX[seg] ?? 0;
+  const qcz = net.segCZ[seg] ?? 0;
   const fromA = (h & 1) === 0;
-  const sx = (fromA ? q.ax : q.bx) - ox;
-  const sz = (fromA ? q.az : q.bz) - oz;
-  const ex = (fromA ? q.bx : q.ax) - ox;
-  const ez = (fromA ? q.bz : q.az) - oz;
+  const sx = (fromA ? ax : bx) - ox;
+  const sz = (fromA ? az : bz) - oz;
+  const ex = (fromA ? bx : ax) - ox;
+  const ez = (fromA ? bz : az) - oz;
   const chord = sx * ez - ex * sz;
-  if (isStraight(q)) return chord;
+  // Straight, as `isStraight` has it.
+  if (qcx === (ax + bx) / 2 && qcz === (az + bz) / 2) return chord;
   // The chord plus two thirds of the triangle from the ends to the control
   // point: (s x e + 2 s x c + 2 c x e) / 3.
-  const cx = q.cx - ox;
-  const cz = q.cz - oz;
+  const cx = qcx - ox;
+  const cz = qcz - oz;
   return (chord + 2 * (sx * cz - cx * sz) + 2 * (cx * ez - ex * cz)) / 3;
 }
 
@@ -280,9 +293,10 @@ function settle(index: BlockIndex): void {
   for (const h of todo) index.face[h] = NONE;
   // A mark for half-edges walked in this pass, before their face id is known.
   const WALKING = -2;
+  const walk: number[] = [];
   for (const start of todo) {
     if (index.face[start] !== NONE) continue;
-    const walk: number[] = [];
+    walk.length = 0;
     let low = start;
     let at = 0;
     for (let h = start; ; ) {

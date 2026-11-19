@@ -38,7 +38,7 @@
 // Format version 3 changes the checksum and nothing else. Versions 1 and 2
 // use FNV-1a 64, which takes the body a byte at a time: 7 ms for the 3.3 MB
 // of a 30,000 segment city, a third of a tick, and more as the city grows.
-// Version 3 takes the body four bytes at a time (`wordChecksum`) and is
+// Version 3 takes the body four bytes at a time (`WordChecksum`) and is
 // several times faster. A snapshot without its paged log, which is what an
 // autosave writes between ticks, is written as version 3. Builds from
 // before it refuse such a save as one from a newer version.
@@ -61,7 +61,7 @@ import { checkCells } from "./zoning/cells";
 export const SNAPSHOT_FORMAT_VERSION = 3;
 /** The layout version in which the paged log is always inside the snapshot. */
 const FORMAT_LOG_INSIDE = 1;
-/** The first layout version whose checksum is `wordChecksum`. */
+/** The first layout version whose checksum is `WordChecksum`. */
 const FORMAT_WORD_CHECKSUM = 3;
 
 /** "CITY" in ASCII. */
@@ -335,28 +335,51 @@ const WORD_PRIME_B = 0x9e3779b1 | 0;
  * byte; the other turns its sum five bits before each word, so the two do
  * not miss the same change. Each step is one to one in the sum, so no
  * change to a single word goes unseen. Integer operations only, the same in
- * every engine. `bytes` must be a whole number of words long.
+ * every engine. Taken a run at a time, so a save can take it between
+ * ticks: the runs added in order give the sum of the whole body.
  */
-function wordChecksum(bytes: Uint8Array): { hi: number; lo: number } {
-  // A view of words has to start on a word boundary of its buffer.
-  const aligned = bytes.byteOffset % 4 === 0 ? bytes : bytes.slice();
-  const words = new Int32Array(aligned.buffer, aligned.byteOffset, aligned.byteLength / 4);
-  let a = 0x811c9dc5 | 0;
-  let b = 0xcbf29ce4 | 0;
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i] ?? 0;
-    a = Math.imul(a ^ word, WORD_PRIME_A);
-    b = Math.imul(((b << 5) | (b >>> 27)) ^ word, WORD_PRIME_B);
+class WordChecksum {
+  private a = 0x811c9dc5 | 0;
+  private b = 0xcbf29ce4 | 0;
+
+  /** Adds `bytes`, which must be a whole number of words long. */
+  add(bytes: Uint8Array): void {
+    // A view of words has to start on a word boundary of its buffer.
+    const aligned = bytes.byteOffset % 4 === 0 ? bytes : bytes.slice();
+    const words = new Int32Array(aligned.buffer, aligned.byteOffset, aligned.byteLength / 4);
+    let a = this.a;
+    let b = this.b;
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i] ?? 0;
+      a = Math.imul(a ^ word, WORD_PRIME_A);
+      b = Math.imul(((b << 5) | (b >>> 27)) ^ word, WORD_PRIME_B);
+    }
+    this.a = a;
+    this.b = b;
   }
-  return { hi: a >>> 0, lo: b >>> 0 };
+
+  sum(): { hi: number; lo: number } {
+    return { hi: this.a >>> 0, lo: this.b >>> 0 };
+  }
+}
+
+/** A body's checksum taken a run at a time, as layout version `formatVersion` defines it. */
+interface BodyChecksum {
+  add(bytes: Uint8Array): void;
+  sum(): { hi: number; lo: number };
+}
+
+function bodyChecksum(formatVersion: number): BodyChecksum {
+  if (formatVersion >= FORMAT_WORD_CHECKSUM) return new WordChecksum();
+  const h = new Fnv64();
+  return { add: (bytes) => h.bytes(bytes), sum: () => ({ hi: h.hi, lo: h.lo }) };
 }
 
 /** The checksum of a snapshot body, as layout version `formatVersion` defines it. */
 function checksum(bytes: Uint8Array, formatVersion: number): { hi: number; lo: number } {
-  if (formatVersion >= FORMAT_WORD_CHECKSUM) return wordChecksum(bytes);
-  const h = new Fnv64();
-  h.bytes(bytes);
-  return { hi: h.hi, lo: h.lo };
+  const sum = bodyChecksum(formatVersion);
+  sum.add(bytes);
+  return sum.sum();
 }
 
 /**
@@ -431,15 +454,45 @@ function finish(steps: SnapshotSteps): Uint8Array {
   }
 }
 
-/** Writes the code units of `text`. A function of its own, so the engine compiles this loop on its first long run and not along with all of `write`. */
-function writeUnits(text: string, units: Uint16Array): void {
-  for (let i = 0; i < text.length; i++) units[i] = text.charCodeAt(i);
+/**
+ * Writes code units `from` to `to` of `text`. A function of its own, so the
+ * engine compiles this loop on its first long run and not along with all
+ * of `write`.
+ */
+function writeUnits(text: string, units: Uint16Array, from: number, to: number): void {
+  for (let i = from; i < to; i++) units[i - from] = text.charCodeAt(i);
+}
+
+/**
+ * How many bytes one part of a save lays out and takes the checksum of
+ * (issue #204). Both cost about the same per byte, so a part's time is set
+ * by its bytes, however big the city: 2 MB is about 2 ms on the development
+ * container, against the 16 MB in one part that took 8 to 11 ms on the
+ * 30,000 segment city and up to 11.4 ms on CI. The format 1 checksum takes
+ * a byte at a time and costs about four times as much, so a part of a city
+ * file holds a quarter of that. JSON text is written a code unit at a time,
+ * so it counts `TEXT_COST` times its bytes. Not balance: these change when
+ * the bytes are written, never what they are.
+ */
+const PART_BYTES = 2 * 1024 * 1024;
+const PART_BYTES_BYTE_CHECKSUM = PART_BYTES / 4;
+/** What a byte of JSON text costs to write, in bytes of a typed array: its code units are written one at a time. */
+const TEXT_COST = 4;
+
+function floor8(n: number): number {
+  return n - (n % 8);
 }
 
 // The parts are the stages that take time on a large city, each a fraction
 // of a tick on 30,000 segments (issue #83): find the typed arrays, write the
-// JSON text, lay out the bytes, take the checksum.
-function* write(state: SimState, pagedLog: readonly LogEntry[] | null, into?: SnapshotBuffer): SnapshotSteps {
+// JSON text, then lay out the bytes and take their checksum, a run of at
+// most `partBytes` bytes per part.
+function* write(
+  state: SimState,
+  pagedLog: readonly LogEntry[] | null,
+  into?: SnapshotBuffer,
+  partBytes?: number,
+): SnapshotSteps {
   if (pagedLog !== null && pagedLog.length !== state.logOffset) {
     throw new RangeError(
       `serialize: pagedLog has ${pagedLog.length} entries but ${state.logOffset} have left live state`,
@@ -454,6 +507,13 @@ function* write(state: SimState, pagedLog: readonly LogEntry[] | null, into?: Sn
   }
   // The header is written last, from what the state held when this began.
   const { seed, tick, version } = state;
+  // A snapshot with its log inside stays readable by every build. One
+  // without is the save taken between ticks, so it gets the fast checksum.
+  const formatVersion = pagedLog === null ? SNAPSHOT_FORMAT_VERSION : FORMAT_LOG_INSIDE;
+  const perPart =
+    partBytes ?? (formatVersion >= FORMAT_WORD_CHECKSUM ? PART_BYTES : PART_BYTES_BYTE_CHECKSUM);
+  // Runs end on 8-byte boundaries, so every run the checksum takes is whole words.
+  const runBytes = Math.max(8, floor8(perPart));
 
   const arrays: Section[] = [];
   const fields = encodeJson(state, "", arrays);
@@ -485,7 +545,11 @@ function* write(state: SimState, pagedLog: readonly LogEntry[] | null, into?: Sn
     out = new Uint8Array(size);
   }
   const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  const sum = bodyChecksum(formatVersion);
   let at = HEADER_BYTES;
+  /** Where the checksum has got to, and where this part's run ends. Both on 8-byte boundaries. */
+  let summed = HEADER_BYTES;
+  let limit = summed + runBytes;
   for (const part of parts) {
     out[at++] = part.name.length;
     for (let i = 0; i < part.name.length; i++) out[at++] = part.name.charCodeAt(i);
@@ -493,24 +557,39 @@ function* write(state: SimState, pagedLog: readonly LogEntry[] | null, into?: Sn
     view.setUint32(at, part.byteLength, true);
     out.fill(0, at + 4, align8(at + 4));
     at = align8(at + 4);
-    const { source } = part;
-    if (typeof source === "string") {
-      // Data starts on an 8-byte boundary of a buffer this function made,
-      // so the code units can be written in place, in the platform's order.
-      writeUnits(source, new Uint16Array(out.buffer, at, source.length));
-    } else {
-      out.set(source, at);
+    const { source, byteLength } = part;
+    // Data starts on an 8-byte boundary of `out`, and a run that stops
+    // short of the data's end stops on one, so the code units can be
+    // written in place, in the platform's order, and the checksum takes
+    // whole words.
+    for (let done = 0; done < byteLength; ) {
+      if (at >= limit) {
+        sum.add(out.subarray(summed, at));
+        summed = at;
+        limit = at + runBytes;
+        yield;
+      }
+      if (typeof source === "string") {
+        // A code unit at a time costs several times a copy, so text takes a
+        // share of the part's bytes and the rest of the part is charged for it.
+        const run = Math.min(byteLength - done, Math.max(8, floor8((limit - at) / TEXT_COST)));
+        writeUnits(source, new Uint16Array(out.buffer, out.byteOffset + at, run / 2), done / 2, (done + run) / 2);
+        at += run;
+        done += run;
+        limit = Math.max(align8(at), limit - align8((TEXT_COST - 1) * run));
+      } else {
+        const run = Math.min(byteLength - done, limit - at);
+        out.set(source.subarray(done, done + run), at);
+        at += run;
+        done += run;
+      }
     }
-    out.fill(0, at + part.byteLength, align8(at + part.byteLength));
-    at = align8(at + part.byteLength);
+    out.fill(0, at, align8(at));
+    at = align8(at);
   }
-
-  yield;
+  sum.add(out.subarray(summed, at));
 
   out.set(MAGIC, 0);
-  // A snapshot with its log inside stays readable by every build. One
-  // without is the save taken between ticks, so it gets the fast checksum.
-  const formatVersion = pagedLog === null ? SNAPSHOT_FORMAT_VERSION : FORMAT_LOG_INSIDE;
   view.setUint16(4, formatVersion, true);
   view.setUint16(6, version, true);
   view.setUint32(8, seed, true);
@@ -518,10 +597,25 @@ function* write(state: SimState, pagedLog: readonly LogEntry[] | null, into?: Sn
   view.setFloat64(16, tick, true);
   view.setUint32(24, bodyLength, true);
   view.setUint32(28, 0, true);
-  const sum = checksum(out.subarray(HEADER_BYTES), formatVersion);
-  view.setUint32(32, sum.hi, true);
-  view.setUint32(36, sum.lo, true);
+  const { hi, lo } = sum.sum();
+  view.setUint32(32, hi, true);
+  view.setUint32(36, lo, true);
   return out;
+}
+
+/**
+ * `serializeDetachedSteps` or `serializeSteps` with parts of `partBytes`
+ * bytes, so a test can split a small state into many parts. Not on the
+ * sim's entry.
+ */
+export function serializeStepsOf(
+  state: SimState,
+  pagedLog: readonly LogEntry[] | null,
+  partBytes: number,
+  into?: SnapshotBuffer,
+): SnapshotSteps {
+  if (!Number.isSafeInteger(partBytes) || partBytes < 1) throw new RangeError(`serializeStepsOf: partBytes ${partBytes} must be a whole number of bytes, 1 or more`);
+  return write(state, pagedLog, into, partBytes);
 }
 
 /**
