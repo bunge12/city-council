@@ -493,14 +493,18 @@ jobs:
   # On main only: when the check fails, open an issue that names the merge, or
   # comment on the one already open so a broken main does not open one issue
   # per merge. Two pull requests that each pass alone can fail together.
+  # deploy.yml and nightly.yml report their failures the same way, through
+  # scripts/report-failure.sh (issue #233).
   report:
     needs: check
     if: always() && github.event_name == 'push' && needs.check.result == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
       issues: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -508,17 +512,6 @@ jobs:
           MESSAGE: ${{ github.event.head_commit.message }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          title="CI failed on main"
-          subject=$(printf '%s\n' "$MESSAGE" | head -n 1)
-          body=$(printf 'CI failed on `main` at %s, "%s".\n\nRun: %s\n\nThe pull request passed on its own, so it most likely conflicts with one merged since its last push. Fix it on `main` before merging more.' "$SHA" "$subject" "$RUN_URL")
-          # The label marks these issues for whoever triages them. --force
-          # makes the call a no-op when the label is already there.
-          label="CI Failure"
-          gh label create "$label" --color B60205 --description "CI failed on main" --force
-          open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
-          if [ -n "$open" ]; then
-            gh issue comment "$open" --body "$body"
-            gh issue edit "$open" --add-label "$label"
-          else
-            gh issue create --title "$title: $subject" --body "$body" --label "$label"
-          fi
+          SUBJECT=$(printf '%s\n' "$MESSAGE" | head -n 1) scripts/report-failure.sh "CI failed on main" "CI Failure" "CI failed on main" \
+            "CI failed on \`main\`" \
+            "The pull request passed on its own, so it most likely conflicts with one merged since its last push. Fix it on \`main\` before merging more."

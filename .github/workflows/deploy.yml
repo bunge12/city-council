@@ -14,16 +14,23 @@ on:
 permissions:
   contents: read
 
-# One deploy at a time. A newer push waits rather than cancelling a deploy
-# half way.
-concurrency:
-  group: pages
-  cancel-in-progress: false
+# One build and deploy at a time, through the `pages` group on those two jobs.
+# A newer push waits rather than cancelling a deploy half way. GitHub keeps
+# one waiting job per group and cancels an older one that waits, so with
+# pushes close together an older commit may never deploy, and none deploys
+# after a newer one. The walkthrough is not in the group (issue #233): it
+# took 17 to 30 minutes, and held the next push's deploy for all of them.
+#
+# A failure in any job opens an issue (the `report` job below). A newer push
+# cancelling a walkthrough is not a failure.
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     outputs:
       playwright: ${{ steps.playwright.outputs.version }}
     steps:
@@ -50,6 +57,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write
@@ -62,17 +72,39 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
+  # The M0, M1 and M2 walkthroughs against the public address, a job each,
+  # as in ci.yml's e2e job: each runs on WebGPU in software, which takes most
+  # of a runner's CPU. One after another in one job they took 17 to 30
+  # minutes. The M0 walkthrough holds the cold load to its 5 s budget here
+  # (issue #154).
+  #
+  # A newer push cancels the walkthrough in flight. The public address then
+  # serves the newer build or soon will, so the older run would not test the
+  # commit it names. Each walkthrough has its own group, so the three of one
+  # run do not cancel each other.
   walkthrough:
     needs: [build, deploy]
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-walkthrough-${{ matrix.id }}
+      cancel-in-progress: true
     # The Playwright image, as in ci.yml's e2e job: no packages from apt.
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.build.outputs.playwright }}-noble
       options: --ipc=host
-    # The three walkthroughs, one after the other, each on WebGPU and WebGL 2.
-    # M0 and M1 took up to 30 minutes, and M2 adds 10 to 20 more, or twice
-    # that when a test fails once and runs again.
-    timeout-minutes: 90
+    # The limits of ci.yml's walkthrough runners. Playwright stops its run at
+    # `limit` minutes (--global-timeout), before GitHub stops the job, so a
+    # walkthrough that hangs fails with its report rather than ending as
+    # cancelled, which the `report` job does not report.
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: m0, timeout: 35, limit: 15, grep: "M0 walkthrough" }
+          - { id: m1, timeout: 35, limit: 25, grep: "M1 walkthrough" }
+          - { id: m2, timeout: 60, limit: 48, grep: "M2 walkthrough" }
+    name: walkthrough (${{ matrix.id }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
@@ -84,13 +116,48 @@ jobs:
       - name: Walkthrough against the public address
         env:
           PAGE_URL: ${{ needs.deploy.outputs.page_url }}
-        # One worker. With two, the walkthroughs run side by side, software
-        # WebGPU in one takes the CPU from the other, and the M1 walkthrough
-        # fails on steps that pass when it runs alone.
-        run: BASE_URL="${PAGE_URL%/}/" xvfb-run -a pnpm e2e --project walkthrough --workers=1
+          GREP: ${{ matrix.grep }}
+          LIMIT: ${{ matrix.limit }}
+        # One worker: the WebGPU and WebGL 2 runs of one walkthrough side by
+        # side take the CPU from each other, and fail on steps that pass alone.
+        run: BASE_URL="${PAGE_URL%/}/" xvfb-run -a pnpm e2e --project walkthrough --workers=1 -g "$GREP" --global-timeout=$((LIMIT * 60000))
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: walkthrough-public
+          name: walkthrough-public-${{ matrix.id }}
           path: walkthrough-screenshots
           retention-days: 30
+
+  # When a job above failed, open an issue that names the commit, or comment
+  # on the one already open (scripts/report-failure.sh). A deploy failure
+  # blocks no merge, so these do not carry ci.yml's "CI Failure" label.
+  report:
+    needs: [build, deploy, walkthrough]
+    if: always() && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BUILD: ${{ needs.build.result }}
+          DEPLOY: ${{ needs.deploy.result }}
+          WALKTHROUGH: ${{ needs.walkthrough.result }}
+        # A newer push deploys while this run's walkthrough is still going,
+        # and cancels it only once its own deploy is done. A walkthrough that
+        # failed in that gap may have been testing the newer build, so the
+        # issue says when main had moved on.
+        run: |
+          note="build: $BUILD, deploy: $DEPLOY, walkthrough: $WALKTHROUGH. The walkthrough holds the M0 cold load to its 5 s budget, which pull request CI only prints (issue #154). This blocks no merge."
+          head=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ -n "$head" ] && [ "$head" != "$SHA" ]; then
+            note="$note main was at $head when this was reported, so a newer deploy may have replaced the site during the walkthrough."
+          fi
+          scripts/report-failure.sh "Deploy failed on main" "Deploy Failure" "Deploy or public walkthrough failed" \
+            "The deploy to GitHub Pages or the walkthrough against the public address failed on \`main\`" "$note"
