@@ -233,6 +233,11 @@ function build(state: SimState, index: CellIndex, onCell: OnCell): Candidates {
   return c;
 }
 
+/** Whether `state` has candidates built, by `prepareDerived` or a first grower read. */
+export function candidatesBuilt(state: SimState): boolean {
+  return live.has(state.buildings);
+}
+
 /**
  * The candidates of `state`, current. `index` and `onCell` are the cell
  * index and the building on each cell, as `syncCells` and `segmentBuildings`

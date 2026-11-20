@@ -443,6 +443,17 @@ export function existingBlockIndex(net: RoadNetwork): BlockIndex | null {
   return live.get(net) ?? null;
 }
 
+/**
+ * Walks every face a change touched since the last read, so the next read
+ * does not. The step calls it after the commands that changed the roads
+ * (derived.ts), so their step pays for the walk and not the first lot
+ * query after (issue #210). The faces walked follow from the roads alone,
+ * so when this runs changes no answer.
+ */
+export function settleBlocks(index: BlockIndex): void {
+  settle(index);
+}
+
 /** Every block, by ascending id. */
 export function listBlocks(index: BlockIndex): Block[] {
   settle(index);

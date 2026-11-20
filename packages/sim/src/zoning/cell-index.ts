@@ -1560,6 +1560,20 @@ export function cellsWalked(state: SimState): boolean {
   return !index?.pending;
 }
 
+/**
+ * Whether `syncCells` would leave `state` as it is: the cell index exists,
+ * no change of roads is waiting to be laid out, no undo's zoning is waiting
+ * to come back with it, and no change is still walking.
+ * For derived data catching up between reads (derived.ts), which must
+ * never be what lays cells out in state, since a city loaded from a save
+ * that has not built that data would lay them out later and hash
+ * differently meanwhile.
+ */
+export function cellsLaidOut(state: SimState): boolean {
+  const index = live.get(state.roads);
+  return !!index && !index.pending && !index.restore && index.touched.size === 0 && index.segs.length === segmentIdLimit(index.net);
+}
+
 /** `cells` as they are when they fit the roads, or laid out afresh as `syncCells` says. */
 function fitCells(index: CellIndex, cells: CellState): CellState {
   const limit = index.segs.length;

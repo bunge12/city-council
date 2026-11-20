@@ -306,6 +306,16 @@ describe("blocks through the commands", () => {
     expect(thirds.reduce((sum, b) => sum + b.area, 0)).toBeCloseTo(whole, 6);
   });
 
+  it("walks the faces a road command touched in that command's step, so the next lot query does not (issue #210)", () => {
+    const state = squareCity();
+    const index = blockIndexOf(state.roads);
+    listBlocks(index);
+    ok(state, road([4280, 4500], [4280, 4700]));
+    expect(index.dirtyFaces.size).toBe(0);
+    expect(index.fresh.size).toBe(0);
+    expect(listBlocks(index)).toHaveLength(2);
+  });
+
   it("loses the block when one side is bulldozed, and undo brings it back with the same id", () => {
     const state = squareCity();
     const before = only(state.roads);
