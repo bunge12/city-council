@@ -236,6 +236,58 @@ test("a brush drag across two streets paints cells on both, and Escape drops a s
   await attach(page, testInfo, "brushed C2 cells on two streets");
 });
 
+/** The south street, and a street north from the north one's line that stops 12 m short of it, through its north strip with no junction. */
+function cutStrip(): SimState {
+  const state = createState(SEED);
+  buildRoads(state, [
+    [[X0, SOUTH_Z], [X1, SOUTH_Z], "street"],
+    [[MID_X, SOUTH_Z - 12], [MID_X, NORTH_Z + 20], "street"],
+  ]);
+  return state;
+}
+
+test("a fill stops at a street across the strip (#196)", async ({ page }, testInfo) => {
+  await openCity(page, cutStrip(), { name: "Zone" });
+  await look(page, MID_X, SOUTH_Z - 30, 280);
+  await page.locator("#view").focus();
+  await page.keyboard.press("KeyL");
+  await page.keyboard.press("KeyK");
+  await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 60_000 });
+  const readout = page.locator("#zone-readout");
+  const west = MID_X - 50;
+  const east = MID_X + 50;
+
+  // A cell west of the cross street: only the strip on its side lights up.
+  await hover(page, west, northRow(SOUTH_Z, 2));
+  await expect(readout).toHaveAttribute("data-ok", "true");
+  await attach(page, testInfo, "fill preview from a cell west of the cross street");
+  const westCount = Number(await readout.getAttribute("data-cells"));
+  const places = (X1 - X0) / CELL;
+  // Six rows across about half the street's places, not the whole street.
+  expect(westCount).toBeGreaterThan(6 * 6);
+  expect(westCount).toBeLessThan(6 * (places / 2));
+
+  // The street east of it: only the strip on that side.
+  await hover(page, east, SOUTH_Z - HALF / 2);
+  await expect(readout).toHaveAttribute("data-ok", "true");
+  await attach(page, testInfo, "fill preview from the street east of the cross street");
+  const eastCount = Number(await readout.getAttribute("data-cells"));
+  expect(eastCount).toBeLessThan(6 * (places / 2));
+
+  // Painting the west part leaves the east part bare.
+  await click(page, west, northRow(SOUTH_Z, 2));
+  await expect.poll(() => zoneLog(page).then((l) => l.length)).toBe(1);
+  await expect.poll(() => zonedCount(page)).toBe(westCount);
+  for (const row of [0, 2, 5]) {
+    expect((await cellAt(page, west, northRow(SOUTH_Z, row)))?.zone).toBe(RESIDENTIAL);
+    expect((await cellAt(page, east, northRow(SOUTH_Z, row)))?.zone).toBe(0);
+  }
+  await page.mouse.move(10, 10);
+  await expect.poll(() => page.evaluate(() => document.body.dataset["cellsPending"])).toBe("0");
+  await frames(page);
+  await attach(page, testInfo, "painted west of the cross street only");
+});
+
 test("the zone tool's keys are in the shortcut list", async ({ page }) => {
   await page.goto("/?debug&webgl");
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 60_000 });

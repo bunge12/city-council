@@ -3,7 +3,9 @@
 //
 //   fill   hover a road, or a cell beside one, and the strip on that side of
 //          that segment lights up, `zoneDepth` cells back from the road's
-//          edge. A click paints it.
+//          edge. Only the part of the strip joined to the cell hovered, or
+//          to the road's edge where the pointer is, counts: another road
+//          across the strip cuts it in two (#196). A click paints it.
 //   brush  drag over cells to paint the ones the pointer passes over. A
 //          click paints the one cell under it.
 //
@@ -166,6 +168,59 @@ export function stripCells(city: City, segment: number, side: number, depth: num
     }
   }
   return out;
+}
+
+/**
+ * The open cells of segment `segment` on side `side`, every depth, cut into
+ * the parts no blocked cell separates (#196). Two cells are joined when they
+ * are neighbours in the strip, one place apart at the same depth or one row
+ * apart in the same column, and both open. A road across the strip covers a
+ * line of its cells, so the cells beyond it are a part of their own, as is
+ * ground cut off by water or a cliff. Neighbours on the diagonal are not
+ * joined, since a road crossing the strip at an angle leaves its open cells
+ * touching corner to corner across it.
+ */
+export function stripParts(city: City, segment: number, side: number): ZoneTarget[][] {
+  const places = placesAlong(city.roads as unknown as RoadNetwork, segment);
+  const d = ZONING_BALANCE.zoneDepthCells;
+  // Each place and depth's open cell, or null.
+  const grid: (ZoneTarget | null)[] = new Array<ZoneTarget | null>(places * d).fill(null);
+  for (let place = 0; place < places; place++) {
+    for (let depth = 0; depth < d; depth++) {
+      const t = targetOf(city, segment, side, place, depth);
+      if (t && isOpen(city, t)) grid[place * d + depth] = t;
+    }
+  }
+  const seen = new Uint8Array(grid.length);
+  const parts: ZoneTarget[][] = [];
+  for (let start = 0; start < grid.length; start++) {
+    if (seen[start] || !grid[start]) continue;
+    seen[start] = 1;
+    const part: ZoneTarget[] = [];
+    const queue = [start];
+    for (let q = 0; q < queue.length; q++) {
+      const at = queue[q] ?? 0;
+      const cell = grid[at];
+      if (!cell) continue;
+      part.push(cell);
+      const depth = at % d;
+      const next = [
+        depth > 0 ? at - 1 : -1,
+        depth < d - 1 ? at + 1 : -1,
+        at - d,
+        at + d < grid.length ? at + d : -1,
+      ];
+      for (const n of next) {
+        if (n < 0 || seen[n] || !grid[n]) continue;
+        seen[n] = 1;
+        queue.push(n);
+      }
+    }
+    // In run order, as `stripCells` gives them.
+    part.sort((a, b) => a.slot - b.slot);
+    parts.push(part);
+  }
+  return parts;
 }
 
 /** The cell at `slot` in `state.cells`, as a target, or null when there is none. */
@@ -366,6 +421,8 @@ export class ZoneToolController {
   private nextId = 1;
   /** The last targets worked out, and what they were worked out from. */
   private memo: { key: string; cells: ZoneTarget[] } = { key: "", cells: [] };
+  /** The parts of the last strip the fill hovered. */
+  private parts: { key: string; parts: ZoneTarget[][] } = { key: "", parts: [] };
   /** The road-edge cells of the last segment the fill hovered, for picking a side. */
   private edge: { key: string; cells: ZoneTarget[] } = { key: "", cells: [] };
   /** Centres of the cells in the brush stroke, so each joins once. */
@@ -477,19 +534,68 @@ export class ZoneToolController {
       const cell = ground ? cellUnder(city, ground.x, ground.z) : null;
       key = `${v},brush,${cell?.slot ?? "-"}`;
       make = () => (cell ? [cell] : []);
-    } else if (hover.segment !== NONE && ground) {
-      // Fill: the road under the pointer, on the side the pointer is.
-      const side = this.sideOf(city, v, hover.segment, ground.x, ground.z);
-      key = `${v},fill,${hover.segment},${side ?? "-"},${s.zoneDepth}`;
-      make = () => (side === null ? [] : stripCells(city, hover.segment, side, s.zoneDepth));
     } else {
-      // Or the road of the cell under it.
-      const cell = ground ? cellUnder(city, ground.x, ground.z) : null;
-      key = cell ? `${v},fill,${cell.segment},${cell.side},${s.zoneDepth}` : `${v},none`;
-      make = () => (cell ? stripCells(city, cell.segment, cell.side, s.zoneDepth) : []);
+      // Fill: the road under the pointer and the side the pointer is on, or
+      // the road of the cell under it. Only the part of that strip joined to
+      // the pointer: the cell under it, or the road-edge cell nearest it.
+      let part: { segment: number; side: number; index: number } | null = null;
+      if (hover.segment !== NONE && ground) {
+        const side = this.sideOf(city, v, hover.segment, ground.x, ground.z);
+        if (side !== null) part = this.partNearRoad(city, v, hover.segment, side, ground.x, ground.z);
+      } else {
+        const cell = ground ? cellUnder(city, ground.x, ground.z) : null;
+        if (cell) part = this.partHolding(city, v, cell);
+      }
+      if (part) {
+        const { segment, side, index } = part;
+        key = `${v},fill,${segment},${side},${index},${s.zoneDepth}`;
+        make = () => (this.partsOf(city, v, segment, side)[index] ?? []).filter((c) => c.depth < s.zoneDepth);
+      } else {
+        key = `${v},none`;
+        make = () => [];
+      }
     }
     if (key !== this.memo.key) this.memo = { key, cells: make() };
     return this.memo.cells;
+  }
+
+  /** The parts of a strip, worked out once per strip and copy. */
+  private partsOf(city: City, version: number, segment: number, side: number): ZoneTarget[][] {
+    const key = `${version},${segment},${side}`;
+    if (key !== this.parts.key) this.parts = { key, parts: stripParts(city, segment, side) };
+    return this.parts.parts;
+  }
+
+  /** The part of its strip that holds open cell `cell`. */
+  private partHolding(city: City, version: number, cell: ZoneTarget): { segment: number; side: number; index: number } | null {
+    const parts = this.partsOf(city, version, cell.segment, cell.side);
+    const index = parts.findIndex((p) => p.some((c) => c.slot === cell.slot));
+    return index < 0 ? null : { segment: cell.segment, side: cell.side, index };
+  }
+
+  /** The part of a strip that holds the open road-edge cell nearest (x, z), or null when no road-edge cell is open. */
+  private partNearRoad(
+    city: City,
+    version: number,
+    segment: number,
+    side: number,
+    x: number,
+    z: number,
+  ): { segment: number; side: number; index: number } | null {
+    const parts = this.partsOf(city, version, segment, side);
+    let best = -1;
+    let bestD = Infinity;
+    parts.forEach((part, index) => {
+      for (const c of part) {
+        if (c.depth !== 0) continue;
+        const d = (c.x - x) ** 2 + (c.z - z) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = index;
+        }
+      }
+    });
+    return best < 0 ? null : { segment, side, index: best };
   }
 
   /** The side of `segment` nearer (x, z), from its road-edge cells, worked out once per segment and copy. */
