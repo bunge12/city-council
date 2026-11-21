@@ -111,7 +111,8 @@ export function BuildBar() {
   const editing = tool === "upgrade";
   const roadMenu = active || editing || gridding;
 
-  let hint = "Pick the road tool to draw roads, the zone tool to zone along them, or the bulldozer to remove things.";
+  // With no tool on the buttons speak for themselves, so there is no hint (issue 173).
+  let hint = "";
   if (active) {
     hint = toolHint(roadMode, drawing, curving);
     hint += ` Hold ${FREE_HAND_KEY_LABEL} to draw free-hand.`;
@@ -124,6 +125,7 @@ export function BuildBar() {
   } else if (zoning) {
     hint = zoneHint(zoneMode, zoneBrushing, zoneDepth);
   }
+  const anyPending = pending + gridPending + bulldozePending + editPending + zonePending > 0;
   const shownNote = editing ? editNote : bulldozing ? bulldozeNote : gridding ? gridNote : zoning ? zoneNote : note;
 
   // An action or the grid that is on goes back to drawing roads rather than closing the menu.
@@ -346,14 +348,16 @@ export function BuildBar() {
           </button>
         </div>
       </div>
-      <p className="hint" id="road-hint">
-        {hint}
-        {pending > 0 && <span id="road-pending"> Building {pending === 1 ? "1 road" : `${pending} roads`}…</span>}
-        {gridPending > 0 && <span id="grid-pending"> Building {gridPending === 1 ? "1 grid" : `${gridPending} grids`}…</span>}
-        {bulldozePending > 0 && <span id="bulldoze-pending"> Removing {bulldozePending === 1 ? "1 thing" : `${bulldozePending} things`}…</span>}
-        {editPending > 0 && <span id="edit-pending"> Applying {editPending === 1 ? "1 change" : `${editPending} changes`}…</span>}
-        {zonePending > 0 && <span id="zone-pending"> Zoning {zonePending === 1 ? "1 stroke" : `${zonePending} strokes`}…</span>}
-      </p>
+      {(hint || anyPending) && (
+        <p className="hint" id="road-hint">
+          {hint}
+          {pending > 0 && <span id="road-pending"> Building {pending === 1 ? "1 road" : `${pending} roads`}…</span>}
+          {gridPending > 0 && <span id="grid-pending"> Building {gridPending === 1 ? "1 grid" : `${gridPending} grids`}…</span>}
+          {bulldozePending > 0 && <span id="bulldoze-pending"> Removing {bulldozePending === 1 ? "1 thing" : `${bulldozePending} things`}…</span>}
+          {editPending > 0 && <span id="edit-pending"> Applying {editPending === 1 ? "1 change" : `${editPending} changes`}…</span>}
+          {zonePending > 0 && <span id="zone-pending"> Zoning {zonePending === 1 ? "1 stroke" : `${zonePending} strokes`}…</span>}
+        </p>
+      )}
       {undoNote && (
         <p className="road-note" id="undo-note" role="status">
           {undoNote}

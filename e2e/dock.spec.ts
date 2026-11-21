@@ -36,11 +36,14 @@ test("the dock shows only the road button until a road tool is on, and opens the
   for (const id of ["#road-menu", "#bulldoze-menu", "#road-type-street", "#draw-mode-straight", "#grid-tool", "#guide-angle"]) {
     await expect(page.locator(id)).toHaveCount(0);
   }
+  // No tool on: no hint explaining the buttons (issue 173).
+  await expect(page.locator("#road-hint")).toHaveCount(0);
   await attach(page, testInfo, "1 the dock with no tool on");
 
   // The road tool: four groups, in a menu that sits above the road button.
   await page.locator("#road-tool").click();
   await expect(page.locator("#road-menu")).toBeVisible();
+  await expect(page.locator("#road-hint")).toContainText("Click on the map to start a road.");
   expect(await groups(page, "#road-menu")).toEqual(["Actions", "Road type", "Build mode", "Snapping"]);
   const menu = await page.locator("#road-menu").boundingBox();
   const button = await page.locator("#road-tool").boundingBox();
