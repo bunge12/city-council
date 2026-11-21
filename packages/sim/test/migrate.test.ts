@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { BUILDINGS_BALANCE, SNAPSHOT_VERSION, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, type SimState } from "../src/index";
+import {
+  BUILDINGS_BALANCE,
+  SNAPSHOT_VERSION,
+  TIME_BALANCE,
+  connectionEnd,
+  createBareState,
+  createState,
+  hashState,
+  migrateState,
+  step,
+  submit,
+  travelTimesReady,
+  type SimState,
+} from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
@@ -19,6 +32,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 11) gone.push("buildings");
   if (version < 13) gone.push("growth");
   if (version < 15) gone.push("cellReads");
+  if (version < 16) gone.push("travelReadyAt");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
   // Before version 14 a ZoneCells left no undo record and no record held zoning.
   if (version < 14 && Array.isArray(kept["undo"])) {
@@ -62,7 +76,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(15);
+    expect(SNAPSHOT_VERSION).toBe(16);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -78,6 +92,7 @@ describe("migrateState", () => {
       buildings: fresh.buildings,
       growth: asMigrated(fresh).growth,
       cellReads: 0,
+      travelReadyAt: 0,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -98,6 +113,7 @@ describe("migrateState", () => {
       buildings: fresh.buildings,
       growth: asMigrated(fresh).growth,
       cellReads: 0,
+      travelReadyAt: 0,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -298,6 +314,18 @@ describe("migrateState", () => {
     step(migrated);
     expect(migrated.cells.zone.length).toBeGreaterThan(0);
     expect(migrated.cells.zone.every((z) => z === 0)).toBe(true);
+  });
+
+  it("upgrades a version 15 state by adding no rebuild of the travel times under way, so they read at once", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const migrated = migrateState(older(state, 15));
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(migrated.travelReadyAt).toBe(0);
+    expect(travelTimesReady(migrated)).toBe(true);
+    expect(hashState(migrated)).toBe(hashState({ ...state, travelReadyAt: 0 }));
   });
 
   it("leaves a current state as it is", () => {

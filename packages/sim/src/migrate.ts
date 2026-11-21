@@ -75,6 +75,10 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // adds `cellReads`, the cell commands applied this tick, which starts at
   // none.
   14: (old) => ({ ...old, version: 15, cellReads: 0 }),
+  // Version 16 adds `travelReadyAt`, the tick from which the travel times
+  // between zones may be read (issue #177). A city saved before it has no
+  // rebuild under way: its table is built from its roads at load.
+  15: (old) => ({ ...old, version: 16, travelReadyAt: 0 }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */

@@ -182,14 +182,14 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["cellReads", "growth", "log", "logFrom", "rng", "seq", "speed", "steps", "tick", "timings", "type", "v"].sort(),
+      ["cellReads", "growth", "log", "logFrom", "rng", "seq", "speed", "steps", "tick", "timings", "travelReadyAt", "type", "v"].sort(),
     );
   });
 
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -244,6 +244,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       rng: new Uint32Array(4),
       growth: { quota: 0, day: -1, deadline: 0, free: 0, used: 0 },
       cellReads: 0,
+      travelReadyAt: 0,
       pending: [],
       steps: 1,
       timings: [],

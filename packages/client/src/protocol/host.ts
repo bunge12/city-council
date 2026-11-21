@@ -388,6 +388,7 @@ export class SimHost {
       rng: this.state.rng.slice(),
       growth: { ...this.state.growth },
       cellReads: this.state.cellReads,
+      travelReadyAt: this.state.travelReadyAt,
       ...(queue !== this.sentQueue ? { pending: this.state.pending.map((c) => ({ ...c })) } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,

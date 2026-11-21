@@ -397,6 +397,7 @@ export class SimMirror {
     // dropped waits for the cells to settle (the sim's waitsForCells).
     if (delta.pending) state.pending = delta.pending.map((c) => ({ ...c }));
     state.cellReads = delta.cellReads;
+    state.travelReadyAt = delta.travelReadyAt;
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
     state.growth = { ...delta.growth };

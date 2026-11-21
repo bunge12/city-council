@@ -59,6 +59,8 @@ function pair() {
     copy.undo = sim.undo;
     // The grower's plan travels in every delta, as the generator does.
     copy.growth = { ...sim.growth };
+    // So does the tick the travel times are rebuilt by (issue #177).
+    copy.travelReadyAt = sim.travelReadyAt;
     return cells;
   };
   return { sim, copy, run, send };

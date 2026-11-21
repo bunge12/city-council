@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CELLS_SYSTEM,
+  TRAVEL_SYSTEM,
   BUILDINGS_SYSTEM,
   COMMANDS_SYSTEM,
   GROWER_SYSTEM,
@@ -75,6 +76,8 @@ describe("step", () => {
       `end ${COMMANDS_SYSTEM}`,
       `start ${CELLS_SYSTEM}`,
       `end ${CELLS_SYSTEM}`,
+      `start ${TRAVEL_SYSTEM}`,
+      `end ${TRAVEL_SYSTEM}`,
       `start ${GROWER_SYSTEM}`,
       `end ${GROWER_SYSTEM}`,
     ]);

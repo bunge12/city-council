@@ -9,6 +9,7 @@ import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 import { applyUndo, hasUndo, planUndo, recordUndo, undoPutsRoadsBack } from "./undo";
 import { ZONING_BALANCE } from "./zoning/balance";
+import { endTravelWatch, startTravelWatch } from "./travel-times";
 import { cellsSettled, stepCells } from "./zoning/cell-index";
 import { checkZoneCells, checkZoneCellsPayload, strokeOf, zoneCellsIfValid } from "./zoning/zone";
 import { NO_JOURNALS, journalLostZones, journalPaint } from "./zoning/zone-undo";
@@ -455,6 +456,7 @@ export function applyPending(state: SimState): DroppedCommand[] {
       continue;
     }
     const def = commandDef(command, false);
+    startTravelWatch(state);
     let reason: string | null;
     if (typeof def === "string") reason = def;
     else if (def.applyIfValid) reason = def.applyIfValid(state, command);
@@ -462,6 +464,7 @@ export function applyPending(state: SimState): DroppedCommand[] {
       reason = def.validate(state, command);
       if (reason === null) def.apply(state, command);
     }
+    endTravelWatch(state, reason === null);
     if (reason !== null) {
       dropped.push({ seq: command.seq, playerId: command.playerId, type: command.type, reason });
     } else {

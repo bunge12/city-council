@@ -14,7 +14,16 @@ export type { CaptureBuffers } from "./state";
 export type { SimState, Speed } from "./state";
 export { COMMANDS, MAX_PENDING_COMMANDS, submit, validateCommand } from "./commands";
 export type { Command, CommandDef, CommandResult, DroppedCommand } from "./commands";
-export { BUILDINGS_SYSTEM, CELLS_SYSTEM, COMMANDS_SYSTEM, SYSTEMS, step } from "./step";
+export { BUILDINGS_SYSTEM, CELLS_SYSTEM, COMMANDS_SYSTEM, SYSTEMS, TRAVEL_SYSTEM, step } from "./step";
+export {
+  TRAVEL_ZONES,
+  buildingTravelTime,
+  buildingTravelZone,
+  prepareTravelTimes,
+  travelTimesReady,
+  travelZoneSources,
+  zoneTravelTime,
+} from "./travel-times";
 export type { System, SystemTimer } from "./step";
 export { RNG_WORDS, nextFloat, nextInt, nextU32, seedRng } from "./rng";
 export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, isLogEntry, logLength, readLog } from "./log";

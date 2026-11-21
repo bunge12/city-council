@@ -157,6 +157,14 @@
       "budget": 16,
       "mode": "blocks",
       "source": "issue 88"
+    },
+    "travel.query": {
+      "name": "one travel time between two zones, read from the table",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 0.01,
+      "mode": "blocks",
+      "source": "issue #177"
     }
   }
 }
