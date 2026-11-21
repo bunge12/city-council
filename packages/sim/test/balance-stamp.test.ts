@@ -1,6 +1,9 @@
+import { readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { BALANCE_STAMP, createState, hashState, replay, replaysUnderThisBalance } from "../src/index";
-import { balanceStampOf } from "../src/balance-stamp";
+import { BALANCE_FILES, balanceStampOf } from "../src/balance-stamp";
 
 // The balance stamp (M1 review, issue 80): a city says which balance numbers
 // it was made under, so a log is not replayed under others without notice.
@@ -34,6 +37,16 @@ describe("the balance stamp", () => {
     price["sourceUrl"] = "https://example.com";
     expect(balanceStampOf(reworded)).toBe(balanceStampOf(files));
     expect(balanceStampOf({ time: files.time, roads: files.roads })).toBe(balanceStampOf(files));
+  });
+
+  it("covers every balance file the sim reads, and is pinned", () => {
+    // budgets.json is CI's timing budgets, not the game's numbers, so it is not in the stamp.
+    const dir = join(dirname(fileURLToPath(import.meta.url)), "../balance");
+    const files = readdirSync(dir).filter((f) => f.endsWith(".json") && f !== "budgets.json").map((f) => f.replace(/\.json$/, ""));
+    expect(Object.keys(BALANCE_FILES).sort()).toEqual(files.sort());
+    expect(BALANCE_STAMP).toBe(balanceStampOf(BALANCE_FILES));
+    // Moves with any balance number. Update it with the replay fixtures and say which number moved.
+    expect(BALANCE_STAMP).toBe("bb5fa57a6d7502cd");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

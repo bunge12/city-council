@@ -717,13 +717,16 @@ describe("snapshots with a road network", () => {
     }
     // The bytes the build before #204 wrote for this state, so a split
     // that changes them shows here and not only as a mismatch with itself.
+    // The balance stamp is in them, so they move with any balance number:
+    // M3-01's new files moved it, and with the old stamp put back the bytes
+    // were the same.
     const digest = (bytes: Uint8Array): string => {
       const h = new Fnv64();
       h.bytes(bytes);
       return `${bytes.length}:${h.hex()}`;
     };
-    expect(digest(serialize(state))).toBe("8712:6f83eca401065438");
-    expect(digest(serializeDetached(state))).toBe("8688:bf01e6c626a0925e");
+    expect(digest(serialize(state))).toBe("8712:67d557fe3b9bcf92");
+    expect(digest(serializeDetached(state))).toBe("8688:eb848d418513d897");
     expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 
