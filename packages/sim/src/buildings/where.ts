@@ -606,16 +606,32 @@ function flatten(state: SimState, bi: BuildingIndex): Int32Array {
   return out;
 }
 
+/** What `buildingIndexSets` compares, for one index. */
+interface IndexSet {
+  cells: Int32Array;
+  chunks: number[];
+  /** The land value pollution grid (M3-13). */
+  pollution: Int32Array;
+  /** The sums the city centre reads (M3-13). */
+  sums: number[];
+}
+
 /**
- * The index as kept and as built afresh from state, each as the building on
- * every cell by slot and the chunk of every building, for tests that check
- * the two never part.
+ * The index as kept and as built afresh from state: the building on every
+ * cell by slot, the chunk of every building, the pollution grid and the
+ * centre's sums, for tests that check the two never part. One fresh build
+ * for all of them, as a soundness check runs this often.
  */
-export function buildingIndexSets(state: SimState): { kept: { cells: Int32Array; chunks: number[] }; fresh: { cells: Int32Array; chunks: number[] } } {
+export function buildingIndexSets(state: SimState): { kept: IndexSet; fresh: IndexSet } {
   const { bi, cellIndex } = indexOf(state);
   const fresh = build(state.buildings, cellIndex);
-  const chunks = (x: BuildingIndex) => Array.from(state.buildings.flags, (_, id) => (isLive(state.buildings, id) ? (x.chunk[id] ?? NO_BUILDING) : NO_BUILDING));
-  return { kept: { cells: flatten(state, bi), chunks: chunks(bi) }, fresh: { cells: flatten(state, fresh), chunks: chunks(fresh) } };
+  const set = (x: BuildingIndex): IndexSet => ({
+    cells: flatten(state, x),
+    chunks: Array.from(state.buildings.flags, (_, id) => (isLive(state.buildings, id) ? (x.chunk[id] ?? NO_BUILDING) : NO_BUILDING)),
+    pollution: pollutionOf(x).slice(),
+    sums: Array.from(x.sums),
+  });
+  return { kept: set(bi), fresh: set(fresh) };
 }
 
 /** The ids of the buildings filed on any of `segs`, ascending. */
