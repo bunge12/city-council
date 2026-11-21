@@ -189,7 +189,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "pops", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -635,8 +635,11 @@ describe("snapshot transfer", () => {
     const roadBuffers = Object.values(state.roads).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
     const cellBuffers = [state.cells.offset.buffer, state.cells.zone.buffer, state.cells.density.buffer];
     const buildingBuffers = Object.values(state.buildings).map((value) => value.buffer);
-    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers, ...buildingBuffers]);
+    // Every pop field but the sweep's limit, which is a number.
+    const popBuffers = Object.values(state.pops).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
+    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers, ...buildingBuffers, ...popBuffers]);
     expect(buildingBuffers).toHaveLength(19);
+    expect(popBuffers).toHaveLength(9);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });
 });

@@ -92,6 +92,24 @@ export { buildingJobs, jobsByEducation, jobsByKind, jobsForLot } from "./buildin
 export type { JobsByEducation, JobsByKind } from "./buildings/jobs";
 export { POPS_BALANCE, checkPopsBalance } from "./pops/balance";
 export type { PopsBalance } from "./pops/balance";
+export {
+  NO_WORK,
+  POP_ALIVE,
+  POP_LEVELS,
+  POP_ROW_BYTES,
+  SATISFACTION_MAX,
+  cutPeople,
+  isPop,
+  popCount,
+  popIdLimit,
+  popSizeCap,
+  popWorkers,
+  readPop,
+  workersFor,
+} from "./pops/pops";
+export type { PopProfile, PopRow, PopState } from "./pops/pops";
+export { buildingPeople, jobsFilled, popsAtHome, popsAtWork } from "./pops/where";
+export { POPS_SYSTEM, popSlice } from "./pops/sweep";
 export { DEMAND_BALANCE, checkDemandBalance } from "./demand/balance";
 export type { DemandBalance } from "./demand/balance";
 export { BUILDING_ALIVE, buildingCount, buildingIdLimit, isBuilding, readBuilding } from "./buildings/buildings";

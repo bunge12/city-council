@@ -1,5 +1,6 @@
 import { createBuildings } from "./buildings/buildings";
 import { TIME_BALANCE } from "./calendar";
+import { createPops } from "./pops/pops";
 import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -75,6 +76,9 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // adds `cellReads`, the cell commands applied this tick, which starts at
   // none.
   14: (old) => ({ ...old, version: 15, cellReads: 0 }),
+  // Version 16 adds the pops, none of them, and the daily sweep's limit,
+  // 0 (M3-03). Nothing could create a pop before them.
+  15: (old) => ({ ...old, version: 16, pops: createPops() }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */
