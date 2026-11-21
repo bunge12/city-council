@@ -297,6 +297,25 @@ describe("pops in state", () => {
     expect(buildingPeople(state, tower)).toBeLessThanOrEqual(state.buildings.residents[tower] ?? 0);
   });
 
+  it("gives no job to a pop with nobody who works, and takes the job of one left with nobody", () => {
+    const { state, house, mall } = town();
+    // One person with children: 0.4 of a worker rounds to none.
+    const alone = addPop(state, pop(house, 1, { children: 1 }));
+    expect(popWorkers(state.pops, alone)).toBe(0);
+    expect(() => setPopWork(state, alone, mall)).toThrow(/has nobody who works/);
+    setPopProfile(state, alone, { education: 1, wealth: 1, children: 0 });
+    setPopWork(state, alone, mall);
+    expect(popsAtWork(state, mall)).toEqual([alone]);
+    setPopProfile(state, alone, { education: 1, wealth: 1, children: 1 });
+    expect(readPop(state.pops, alone).work).toBe(NO_WORK);
+    expect(popsAtWork(state, mall)).toEqual([]);
+    setPopSize(state, alone, 3);
+    setPopWork(state, alone, mall);
+    setPopSize(state, alone, 1);
+    expect(readPop(state.pops, alone).work).toBe(NO_WORK);
+    expectConsistent(state);
+  });
+
   it("reuses the last removed id first and clears its row", () => {
     const { state, tower } = town();
     const a = addPop(state, pop(tower, 10));
@@ -373,7 +392,7 @@ describe("pops in state", () => {
       return "loaded";
     };
     expect(refuse(() => undefined)).toBe("loaded");
-    expect(refuse((s) => void (s.pops.size[id] = 101))).toMatch(/pops are malformed: pop 0 is past the size cap/);
+    expect(refuse((s) => void (s.pops.size[id] = 0))).toMatch(/pops are malformed: pop 0 has nobody in it/);
     expect(refuse((s) => void (s.pops.home[id] = mall))).toMatch(/pops are malformed: pop 0 lives in a building that is not a home/);
     expect(refuse((s) => void (s.pops.work[id] = tower))).toMatch(/pops are malformed: pop 0 works at a building with no jobs/);
     expect(refuse((s) => void (s.pops.education[id] = 3))).toMatch(/bad education or wealth/);
@@ -383,8 +402,11 @@ describe("pops in state", () => {
         s.pops.flags[id] = 0;
       }),
     ).toMatch(/neither live nor free/);
-    // 60 workers where there are 36 jobs.
-    expect(refuse((s) => void (s.pops.size[id] = 100))).toMatch(/building \d+ has more workers than jobs/);
+    // More people than the tower's stored room.
+    expect(refuse((s) => void (s.buildings.residents[tower] = 40))).toMatch(/building \d+ holds more people than it has room for/);
+    // Past what today's balance allows, but that is for tuning, not corruption:
+    // past the size cap, and 60 workers where there are 36 jobs.
+    expect(refuse((s) => void (s.pops.size[id] = 100))).toBe("loaded");
     expect(checkPops(createPops(), state.buildings)).toBeNull();
   });
 });
