@@ -119,6 +119,8 @@ export interface View {
   buildingFormVersion(): number;
   /** The middle of the top of building `id` as drawn, or null. */
   buildingTop(id: number): { x: number; y: number; z: number } | null;
+  /** Calls `fn` with where each building drawn under construction stands (issue M3-19). */
+  forEachRising(fn: (x: number, y: number, z: number) => void): void;
   /**
    * The game tick to draw buildings at, for those under construction (issue
    * 136). Null draws every building finished.
@@ -517,6 +519,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
     pickBuilding: (ray, limit) => terrainRoot?.buildings?.pick(ray, limit) ?? -1,
     buildingFormVersion: () => terrainRoot?.buildings?.formVersion() ?? 0,
     buildingTop: (id) => terrainRoot?.buildings?.topOf(id) ?? null,
+    forEachRising: (fn) => terrainRoot?.buildings?.forEachRising(fn),
     setPreset: async (preset) => {
       await lighting.setPreset(preset);
       dirty = true;
