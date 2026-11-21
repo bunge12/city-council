@@ -31,6 +31,7 @@ import {
 } from "../src/index";
 import { submit } from "./seen-ends";
 import { cloneState } from "../src/state";
+import { noteFrontCells } from "../src/buildings/candidates";
 import { isSegment, segmentIdLimit, type RoadNetwork } from "../src/roads/network";
 import { checkCells, fromLocal, unzonedCells } from "../src/zoning/cells";
 import { settleCells } from "../src/zoning/cell-index";
@@ -577,15 +578,21 @@ describe("keeping cells current", () => {
         step(state);
         step(twin);
       }
-      // Paint a few cells on both, as the zoning command will.
+      // Paint a few cells on both, as the zoning command will, noting them
+      // for the grower's candidates as it does (zone.ts): those catch up in
+      // the step (derived.ts), so a cell painted unnoted would stay out of
+      // them on the live city and not on a twin loaded after (issue #210).
       if (state.cells.zone.length > 0 && rnd() < 0.5) {
+        const painted: number[] = [];
         for (let i = 0; i < 20; i++) {
           const at = Math.floor(rnd() * state.cells.zone.length);
+          painted.push(at);
           for (const s of [state, twin]) {
             s.cells.zone[at] = 2;
             s.cells.density[at] = 1;
           }
         }
+        for (const s of [state, twin]) noteFrontCells(s, painted);
       }
       if (hashState(twin) !== hashState(state)) {
         problems.push(`step ${n} after ${c.type}: the twin's hash differs`);

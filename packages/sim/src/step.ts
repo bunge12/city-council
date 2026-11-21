@@ -1,6 +1,7 @@
 import { GROWER } from "./buildings/grower";
 import { keepBuildings } from "./buildings/upkeep";
 import { applyPending, type DroppedCommand } from "./commands";
+import { catchUpDerived } from "./derived";
 import type { SimState } from "./state";
 import { settleCells } from "./zoning/cell-index";
 
@@ -16,7 +17,11 @@ export const SYSTEMS: readonly System[] = [GROWER];
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";
 
-/** Name the timer hook reports for walking a slice of zoning cells still settling. */
+/**
+ * Name the timer hook reports for walking a slice of zoning cells still
+ * settling, and for the blocks and the grower's candidates catching up with
+ * the step's changes (derived.ts, `catchUpDerived`).
+ */
 export const CELLS_SYSTEM = "cells";
 
 /**
@@ -40,7 +45,8 @@ export const BUILDINGS_SYSTEM = "buildings";
 /**
  * Removes any buildings a settled change of roads left on blocked cells
  * (buildings/upkeep.ts), applies queued commands, walks a slice of any
- * zoning cells still settling, then, unless the game is paused, runs every
+ * zoning cells still settling and brings derived data up to date with the
+ * step's changes, then, unless the game is paused, runs every
  * system and advances exactly one tick.
  *
  * Returns the queued commands it dropped, with why, for the host to pass
@@ -57,7 +63,10 @@ export function step(state: SimState, timer?: SystemTimer): DroppedCommand[] {
   timed(timer, BUILDINGS_SYSTEM, () => keepBuildings(state));
   timed(timer, COMMANDS_SYSTEM, () => void (dropped = applyPending(state)));
   // Paused or not, so a change made while paused still settles.
-  timed(timer, CELLS_SYSTEM, () => settleCells(state));
+  timed(timer, CELLS_SYSTEM, () => {
+    settleCells(state);
+    catchUpDerived(state);
+  });
   if (state.speed === 0) return dropped;
   for (const system of SYSTEMS) {
     timed(timer, system.name, () => system.run(state));
