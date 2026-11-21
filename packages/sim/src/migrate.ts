@@ -79,6 +79,10 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 16 adds the pops, none of them, and the daily sweep's limit,
   // 0 (M3-03). Nothing could create a pop before them.
   15: (old) => ({ ...old, version: 16, pops: createPops() }),
+  // Version 17 adds the city centre land value measures from (M3-13). An
+  // older city has none yet and is due one on the tick it was saved on, so
+  // the first settled step after loading works it out from its buildings.
+  16: (old) => ({ ...old, version: 17, centre: { x: 0, z: 0, weight: 0, due: old["tick"] as number } }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */
