@@ -25,7 +25,7 @@ import type { SoundSettings } from "./settings";
 /** The parts of an AudioContext the engine uses, so a test can hand it a fake. */
 export type SoundContext = Pick<
   AudioContext,
-  "currentTime" | "state" | "destination" | "sampleRate" | "resume" | "createGain" | "createOscillator" | "createBufferSource" | "createBuffer" | "createBiquadFilter" | "createStereoPanner"
+  "currentTime" | "state" | "destination" | "sampleRate" | "resume" | "createGain" | "createOscillator" | "createBufferSource" | "createBuffer" | "createBiquadFilter" | "createStereoPanner" | "suspend"
 >;
 
 /**
@@ -105,6 +105,8 @@ export class SoundEngine {
   private settings: SoundSettings;
   private started: Started | null = null;
   private failed = false;
+  /** Whether the page is hidden: the context is held paused, and nothing resumes it until the page shows again. */
+  private hidden = false;
   /** When each sounding cue ends, in the context's seconds. */
   private voiceEnds: number[] = [];
   private readonly records: CueRecord[] = [];
@@ -121,7 +123,7 @@ export class SoundEngine {
     return this.started?.ctx.state === "running";
   }
 
-  /** Cues sounding now. */
+  /** Sounds from the voice cap sounding now: cues, and the ambience's short sounds. */
   get voices(): number {
     this.pruneVoices();
     return this.voiceEnds.length;
@@ -131,7 +133,7 @@ export class SoundEngine {
   unlock(): void {
     if (this.failed) return;
     if (this.started) {
-      void this.started.ctx.resume().catch(() => undefined);
+      if (!this.hidden) void this.started.ctx.resume().catch(() => undefined);
       return;
     }
     let ctx: SoundContext;
@@ -151,6 +153,19 @@ export class SoundEngine {
     for (const layer of this.layers.values()) this.wireLayer(layer);
     this.applyGains();
     void ctx.resume().catch(() => undefined);
+  }
+
+  /**
+   * The page was hidden or shown. Hidden, the context is paused, so the
+   * wind does not play on in a background tab where no frame comes to
+   * stop it; shown, it resumes.
+   */
+  setHidden(hidden: boolean): void {
+    this.hidden = hidden;
+    const s = this.started;
+    if (!s) return;
+    if (hidden) void s.ctx.suspend().catch(() => undefined);
+    else void s.ctx.resume().catch(() => undefined);
   }
 
   setSettings(settings: SoundSettings): void {
@@ -274,7 +289,7 @@ export class SoundEngine {
     if (!s) return "locked";
     if (s.ctx.state !== "running") {
       // A stopped clock would hold every voice forever, so nothing is scheduled on it.
-      void s.ctx.resume().catch(() => undefined);
+      if (!this.hidden) void s.ctx.resume().catch(() => undefined);
       return "suspended";
     }
     if (this.settings.muted) return "muted";

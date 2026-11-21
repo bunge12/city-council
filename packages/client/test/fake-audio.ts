@@ -72,6 +72,10 @@ export class FakeContext {
     this.resumed++;
     return Promise.resolve();
   }
+  suspend(): Promise<void> {
+    this.state = "suspended";
+    return Promise.resolve();
+  }
   createGain(): FakeGain {
     const g = new FakeGain();
     this.gains.push(g);

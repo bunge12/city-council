@@ -77,6 +77,8 @@ export class Ambience {
   /** Seconds until the next construction sound, while the layer plays. */
   private untilNext = 0;
   private constructionOn = false;
+  /** Set when a Web Audio call threw: the ambience stays silent rather than stop the frame loop it runs in. */
+  private failed = false;
   private report_: AmbienceReport = {
     wind: { level: 0, playing: false },
     construction: { level: 0, sites: 0, playing: false, played: 0, last: null, pan: null },
@@ -92,6 +94,21 @@ export class Ambience {
   }
 
   update(view: AmbientView): void {
+    if (this.failed) return;
+    try {
+      this.step(view);
+    } catch (error) {
+      this.failed = true;
+      console.warn("Ambient sound stopped after an error", error);
+      try {
+        this.engine.hold("wind", false, startWind);
+      } catch {
+        // Nothing more to stop.
+      }
+    }
+  }
+
+  private step(view: AmbientView): void {
     const blocked = this.engine.ambienceBlock();
     const wind = windLevel(view.height);
     this.wind.setLevel(wind);
@@ -131,28 +148,56 @@ export class Ambience {
   }
 }
 
-/** Starts the wind: looped noise, low-passed, its level drifting slowly. Returns what stops it. */
-function startWind(ctx: SoundContext, out: AudioNode): () => void {
-  const frames = Math.max(1, Math.floor(ctx.sampleRate * WIND.loopSeconds));
+/** The wind's loop, made once per audio context: restarting the wind after a mute does not make it again. */
+const windBuffers = new WeakMap<SoundContext, AudioBuffer>();
+
+/**
+ * Brown noise, a running sum of white noise kept from wandering off: softer
+ * than white, more like air. A straight line is taken off it so it ends
+ * where it starts, and the loop has no seam.
+ */
+function windBuffer(ctx: SoundContext): AudioBuffer {
+  const kept = windBuffers.get(ctx);
+  if (kept) return kept;
+  const frames = Math.max(2, Math.floor(ctx.sampleRate * WIND.loopSeconds));
   const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
   const data = buffer.getChannelData(0);
-  // Brown noise, a running sum of white noise kept from wandering off: softer than white, more like air.
   let last = 0;
   for (let i = 0; i < frames; i++) {
     last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
     data[i] = last * 3.5;
   }
+  levelEnds(data);
+  windBuffers.set(ctx, buffer);
+  return buffer;
+}
+
+/** Takes a straight line off `data` so its last sample equals its first, and a loop of it does not jump. */
+export function levelEnds(data: Float32Array): void {
+  const n = data.length;
+  if (n < 2) return;
+  const first = data[0] ?? 0;
+  const drift = (data[n - 1] ?? 0) - first;
+  for (let i = 0; i < n; i++) data[i] = (data[i] ?? 0) - (drift * i) / (n - 1);
+}
+
+/** Starts the wind: looped noise, low-passed, its level drifting slowly. Returns what stops it. */
+function startWind(ctx: SoundContext, out: AudioNode): () => void {
   const source = ctx.createBufferSource();
-  source.buffer = buffer;
+  source.buffer = windBuffer(ctx);
   source.loop = true;
   const filter = ctx.createBiquadFilter();
   filter.type = "lowpass";
   filter.frequency.setValueAtTime(WIND.cutoff, ctx.currentTime);
   const level = ctx.createGain();
   level.gain.setValueAtTime(WIND.gain, ctx.currentTime);
+  // The drifts move `level`, so stopping fades this one, after it.
+  const fade = ctx.createGain();
+  fade.gain.setValueAtTime(1, ctx.currentTime);
   source.connect(filter);
   filter.connect(level);
-  level.connect(out);
+  level.connect(fade);
+  fade.connect(out);
   const drifts = WIND.drifts.map((d) => {
     const osc = ctx.createOscillator();
     osc.type = "sine";
@@ -168,7 +213,7 @@ function startWind(ctx: SoundContext, out: AudioNode): () => void {
   return () => {
     const end = ctx.currentTime + 0.05;
     // A short fade, so stopping does not click.
-    level.gain.setTargetAtTime(0, ctx.currentTime, 0.015);
+    fade.gain.setTargetAtTime(0, ctx.currentTime, 0.015);
     source.stop(end);
     for (const osc of drifts) osc.stop(end);
   };

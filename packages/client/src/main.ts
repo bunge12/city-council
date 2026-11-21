@@ -176,6 +176,8 @@ function saveNow(): Promise<SaveStatus> {
 // tab may be frozen or discarded without further warning.
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") void saves.save("hidden");
+  // No frame comes in a hidden tab to stop the wind, so its audio is paused there (issue M3-19).
+  sound.setHidden(document.visibilityState === "hidden");
 });
 
 /**

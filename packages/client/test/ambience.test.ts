@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { ZOOM_BANDS } from "../src/camera/config";
 import { zoomBand } from "../src/camera/zoom-band";
-import { Ambience, constructionGap, constructionLevel, panAt, windLevel, type AmbientView } from "../src/sound/ambience";
+import { Ambience, constructionGap, constructionLevel, levelEnds, panAt, windLevel, type AmbientView } from "../src/sound/ambience";
 import { CONSTRUCTION_SOUND, DEFAULT_SOUND, WIND } from "../src/sound/config";
 import { engineWith, first, type FakeContext, type FakeGain } from "./fake-audio";
 
@@ -230,5 +230,62 @@ describe("Ambience", () => {
     expect(engine.voices).toBe(2);
     expect(ctx.panners).toHaveLength(0);
     expect(ambience.report().construction.last).toBe("capped");
+  });
+
+  it("pauses in a hidden tab, so the wind does not play on with no frame to stop it, and starts again when shown", () => {
+    const { engine, contexts } = engineWith();
+    const ambience = new Ambience(engine, seeded());
+    engine.unlock();
+    const ctx = first(contexts);
+    ambience.update(viewAt(STREET));
+    const wind = ctx.sources.find((s) => s.loop);
+    engine.setHidden(true);
+    expect(ctx.state).toBe("suspended");
+    // A cue asked for while hidden does not ask the context to resume.
+    const before = ctx.resumed;
+    expect(engine.play("road")).toBe("suspended");
+    expect(ctx.resumed).toBe(before);
+    ambience.update(viewAt(STREET, [500]));
+    expect(ambience.report()).toMatchObject({ blocked: "suspended", wind: { playing: false }, construction: { playing: false } });
+    expect(wind?.stopped).not.toBeNull();
+    const resumed = ctx.resumed;
+    engine.setHidden(false);
+    expect(ctx.resumed).toBe(resumed + 1);
+    // The browser runs the clock again.
+    ctx.state = "running";
+    ambience.update(viewAt(STREET));
+    expect(ambience.report().wind.playing).toBe(true);
+    // The wind's loop is made once and used again.
+    const loops = ctx.sources.filter((s) => s.loop);
+    expect(loops).toHaveLength(2);
+    expect(loops[1]?.buffer).toBe(loops[0]?.buffer);
+  });
+
+  it("goes quiet, and leaves the frame loop running, if a Web Audio call throws", () => {
+    const { engine, contexts } = engineWith();
+    const ambience = new Ambience(engine, seeded());
+    engine.unlock();
+    const ctx = first(contexts);
+    ctx.createStereoPanner = () => {
+      throw new Error("no panner in this browser");
+    };
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      expect(() => run(ambience, ctx, engine, 3, viewAt(STREET, [500]))).not.toThrow();
+    } finally {
+      console.warn = warn;
+    }
+    expect(ctx.sources.find((s) => s.loop)?.stopped).not.toBeNull();
+  });
+});
+
+describe("the wind's loop", () => {
+  it("ends where it starts, so it has no seam", () => {
+    const data = Float32Array.from([0.1, 0.3, -0.2, 0.4, 0.5]);
+    levelEnds(data);
+    expect(data[4]).toBeCloseTo(data[0] ?? NaN);
+    expect(data[0]).toBeCloseTo(0.1);
+    expect(data[2]).toBeCloseTo(-0.2 - 0.4 * 0.5);
   });
 });
