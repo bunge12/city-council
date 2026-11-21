@@ -9,6 +9,7 @@ import {
   ZONING_BALANCE,
   buildingJobs,
   cellAt,
+  cellsSettled,
   checkLandValueBalance,
   createState,
   deserialize,
@@ -371,6 +372,53 @@ describe("land value over time", () => {
     }
     expect(live.centre.due).toBe(59 * DAY);
     expect(hashState(loaded)).toBe(hashState(live));
+  });
+
+  it("waits for a change of roads to settle on a month's first tick, and a city saved then hashes and values the same", () => {
+    const live = town(30);
+    while (live.tick < 31 * DAY - 2) step(live);
+    // A grid of streets big enough to settle over several ticks, past the month's first tick.
+    ok(live, command("BuildRoadGrid", { origin: { x: 4100, z: 4620 }, along: { x: 4100 + 6 * 96, z: 4620 }, across: { x: 4100, z: 4620 + 3 * 96 }, depth: 86, width: 86, type: "street" }));
+    expect(live.cellsReadyAt).toBeGreaterThan(31 * DAY + 1);
+    while (live.tick < 31 * DAY) step(live);
+    expect(live.centre.due).toBe(31 * DAY);
+    const loaded = deserialize(serialize(live)).state;
+    const cells = [4, 20, 36].map((p) => ref(frontCell(live, 4200 + CELL * p + CELL / 2, 4600)));
+    step(live);
+    step(loaded);
+    // Due, but the cells have not settled: it waits.
+    expect(live.centre.due).toBe(31 * DAY);
+    while (live.tick < 32 * DAY) {
+      step(live);
+      step(loaded);
+      expect(hashState(loaded)).toBe(hashState(live));
+    }
+    expect(live.centre.due).toBe(59 * DAY);
+    expect(cells.map((c) => landValueAt(loaded, c))).toEqual(cells.map((c) => landValueAt(live, c)));
+  });
+
+  it("keeps its pollution and sums right through a street across the factories, its bulldozing and an undo", () => {
+    const state = town(40);
+    const check = () => {
+      while (!cellsSettled(state)) step(state);
+      step(state);
+      const pollution = pollutionSets(state);
+      expect(pollution.kept).toEqual(pollution.fresh);
+      const sums = middleSums(state);
+      expect(sums.kept).toEqual(sums.fresh);
+      expect(hashState(deserialize(serialize(state)).state)).toBe(hashState(state));
+    };
+    const before = industrialCount(state);
+    expect(before).toBeGreaterThan(0);
+    ok(state, command("BuildRoad", { from: { x: 4300, z: 4560 }, to: { x: 4300, z: 4700 }, type: "street" }));
+    check();
+    ok(state, command("UpgradeRoad", { segments: [frontCell(state, 4250, 4600).segment], type: "avenue" }));
+    check();
+    ok(state, command("BulldozeRoad", { segments: [frontCell(state, 4500, 4600).segment] }));
+    check();
+    expect(industrialCount(state)).toBeLessThan(before);
+    ok(state, command("Undo", {}));
+    check();
   });
 
   it("replays to the same values on the same ticks", () => {

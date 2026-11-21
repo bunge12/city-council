@@ -42,7 +42,7 @@ import fixtureJson from "./fixtures/replay/roads-and-buildings.json";
 import { expectReplay, runFixture, type ReplayFixture } from "./replay-helper";
 import { addBuilding, checkBuildings } from "../src/buildings/buildings";
 import { candidateSets } from "../src/buildings/candidates";
-import { buildingIndexSets, lotStands, segmentBuildings } from "../src/buildings/where";
+import { buildingIndexSets, lotStands, middleSums, pollutionSets, segmentBuildings } from "../src/buildings/where";
 import { nextInt, seedRng } from "../src/rng";
 import { isSegment, segmentIdLimit } from "../src/roads/network";
 import { cellsSettled, cellsWalked, syncCells } from "../src/zoning/cell-index";
@@ -142,6 +142,11 @@ function expectSound(state: SimState): void {
   expect(Array.from(kept.cells)).toEqual(Array.from(fresh.cells));
   const candidates = candidateSets(state, syncCells(state), () => segmentBuildings(state));
   expect(candidates.kept).toEqual(candidates.fresh);
+  // The land value grid and the sums the city centre reads (M3-13).
+  const pollution = pollutionSets(state);
+  expect(pollution.kept).toEqual(pollution.fresh);
+  const sums = middleSums(state);
+  expect(sums.kept).toEqual(sums.fresh);
   expect(hashState(deserialize(serialize(state)).state)).toBe(hashState(state));
 }
 
@@ -690,6 +695,11 @@ describe("a client's copy", () => {
       expect(Array.from(kept.cells)).toEqual(Array.from(fresh.cells));
       expect(kept.chunks).toEqual(fresh.chunks);
       expect(Array.from(kept.cells)).toEqual(Array.from(buildingIndexSets(state).kept.cells));
+      const sums = middleSums(copy);
+      expect(sums.kept).toEqual(sums.fresh);
+      expect(sums.kept).toEqual(middleSums(state).kept);
+      const pollution = pollutionSets(copy);
+      expect(pollution.kept).toEqual(pollution.fresh);
     };
     ok(state, command("UpgradeRoad", { segments: [cellAt(state, 4350, 4591)?.segment as number], type: "oneWay" }));
     check();

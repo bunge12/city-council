@@ -723,7 +723,9 @@ function pollutionOf(bi: BuildingIndex): Int32Array {
  * the buildings in state and the cells, whenever it is first built.
  */
 export function pollutionGrid(state: SimState): Int32Array {
-  return pollutionOf(indexOf(state).bi);
+  // Filing follows the segment shapes alone, so a change still settling
+  // need not be walked here, inside whatever tick or pointer move asked.
+  return pollutionOf(indexOf(state, false).bi);
 }
 
 /**

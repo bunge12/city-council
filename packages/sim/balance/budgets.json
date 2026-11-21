@@ -115,10 +115,10 @@
       "source": "M3-13"
     },
     "landvalue.query": {
-      "name": "one cell's land value, read per pointer move or per cell of a lot, inside a 60 fps frame",
+      "name": "one cell's land value, read per pointer move or per cell the grower weighs; a few microseconds, so a budget that catches a slower lookup",
       "unit": "ms",
       "statistic": "mean",
-      "budget": 16,
+      "budget": 0.1,
       "mode": "blocks",
       "source": "M3-13"
     },

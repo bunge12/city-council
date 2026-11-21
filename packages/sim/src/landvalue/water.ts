@@ -16,7 +16,7 @@ interface WaterMap {
   /** Samples the search reaches. */
   reach: number;
   /** Squared distance in samples, by sample, capped at (reach + 1)^2. */
-  d2: Uint16Array;
+  d2: Uint32Array;
 }
 
 const maps = new WeakMap<Terrain, WaterMap>();
@@ -27,7 +27,7 @@ function build(t: Terrain): WaterMap {
   const far = reach + 1;
   const h = t.heights;
   const level = t.waterLevel;
-  const col = new Uint16Array(n * n);
+  const col = new Uint32Array(n * n);
   for (let i = 0; i < n; i++) {
     let run = far;
     for (let j = 0; j < n; j++) {
@@ -43,7 +43,7 @@ function build(t: Terrain): WaterMap {
     }
   }
   const cap = far * far;
-  const d2 = new Uint16Array(n * n);
+  const d2 = new Uint32Array(n * n);
   for (let j = 0; j < n; j++) {
     const row = j * n;
     for (let i = 0; i < n; i++) {
