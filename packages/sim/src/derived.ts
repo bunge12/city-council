@@ -9,12 +9,13 @@
 // rebuilds its own and nothing about a host's history can leak into it.
 
 import { candidateCount, candidatesBuilt, prepareCandidates } from "./buildings/candidates";
-import { prepareBuildingIndex, segmentBuildings } from "./buildings/where";
+import { pollutionGrid, prepareBuildingIndex, segmentBuildings } from "./buildings/where";
 import { blockIndexOf, existingBlockIndex, listBlocks, settleBlocks } from "./roads/blocks";
 import { routingGraphOf } from "./roads/routing";
 import { roadIndexOf } from "./roads/spatial";
 import type { SimState } from "./state";
 import { terrainOf } from "./terrain/cache";
+import { prepareWaterMap } from "./landvalue/water";
 import { cellsLaidOut, syncCells } from "./zoning/cell-index";
 
 /**
@@ -30,6 +31,8 @@ export function prepareDerived(state: SimState): void {
   listBlocks(blockIndexOf(state.roads));
   const index = syncCells(state);
   prepareBuildingIndex(state);
+  prepareWaterMap(terrainOf(state.seed));
+  pollutionGrid(state);
   prepareCandidates(state, index, () => segmentBuildings(state));
 }
 

@@ -59,6 +59,7 @@ function pair() {
     copy.undo = sim.undo;
     // The grower's plan travels in every delta, as the generator does.
     copy.growth = { ...sim.growth };
+    copy.centre = { ...sim.centre };
     return cells;
   };
   return { sim, copy, run, send };

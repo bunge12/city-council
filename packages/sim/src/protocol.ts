@@ -6,6 +6,7 @@
 import type { BuildingDelta } from "./buildings/delta";
 import type { GrowthState } from "./buildings/growth";
 import type { Command, CommandResult, DroppedCommand } from "./commands";
+import type { CentreState } from "./landvalue/centre";
 import type { LogEntry } from "./log";
 import type { RoadDelta } from "./roads/delta";
 import type { SimState, Speed } from "./state";
@@ -13,7 +14,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 // ---- Client to sim ----
 
@@ -112,6 +113,12 @@ export interface DeltaMessage {
    * protocol version 12).
    */
   cellReads: number;
+  /**
+   * The city centre after the last step, a copy (M3-13, protocol version
+   * 13). Always sent, like `growth`: land value measures from it, and a copy
+   * whose centre fell behind would hash differently from the sim.
+   */
+  centre: CentreState;
   /**
    * The commands still queued, the ones waiting for the cells to settle,
    * when the queue changed since the last delta. Left out otherwise: a

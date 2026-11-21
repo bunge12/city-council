@@ -75,6 +75,10 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // adds `cellReads`, the cell commands applied this tick, which starts at
   // none.
   14: (old) => ({ ...old, version: 15, cellReads: 0 }),
+  // Version 16 adds the city centre land value measures from (M3-13). An
+  // older city has none yet and is due one on the tick it was saved on, so
+  // the first settled step after loading works it out from its buildings.
+  15: (old) => ({ ...old, version: 16, centre: { x: 0, z: 0, weight: 0, due: old["tick"] as number } }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */
