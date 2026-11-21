@@ -1,0 +1,450 @@
+// Pops in state (M3-03, PRD "M3 Demand").
+//
+// A pop is a block of people who share a home building, a workplace and a
+// profile. One row per pop id in flat typed arrays, like the buildings: a
+// removed id's row is zeros and its id goes on the free list, the next one
+// to reuse last. A row is 14 bytes: the alive flag, the home and workplace
+// as 32-bit building ids, and a byte each for size, education, wealth,
+// children and satisfaction.
+//
+// Only the functions here change a pop, and each keeps the derived index
+// (where.ts) current: which pops live in and work at each building, and
+// each building's people and jobs filled. They refuse a change that would
+// put a home over the people it holds room for, or a workplace over its
+// jobs. Nothing creates pops in play yet: newcomers arrive in M3-08.
+//
+// `sweep` is the cursor the daily systems share (sweep.ts).
+
+import { BUILDING_TYPES } from "../buildings/balance";
+import { isBuilding, type BuildingState } from "../buildings/buildings";
+import { buildingJobs } from "../buildings/jobs";
+import { resized, type AnyTypedArray } from "../roads/network";
+import type { SimState } from "../state";
+import { POPS_BALANCE } from "./balance";
+import { popIndexOf, linkHome, linkWork, unlinkHome, unlinkWork, type PopIndex } from "./where";
+
+/** Set in `flags` for a live pop. */
+export const POP_ALIVE = 1;
+
+/** A pop's workplace when it has none. */
+export const NO_WORK = -1;
+
+/** The levels of education and of wealth, as a pop stores them: 0 low, 1 medium, 2 high. */
+export const POP_LEVELS = 3;
+
+/** The highest satisfaction. */
+export const SATISFACTION_MAX = 100;
+
+/** Every pop. Plain typed arrays and one number (CLAUDE.md rule 7). */
+export interface PopState {
+  /** POP_ALIVE for a live id, 0 for a free one. */
+  flags: Uint8Array;
+  /** The building it lives in. */
+  home: Int32Array;
+  /** The building it works in, or NO_WORK. */
+  work: Int32Array;
+  /** People in it, from 1 to the size cap of its home's density. */
+  size: Uint8Array;
+  /** 0 low, 1 medium, 2 high. */
+  education: Uint8Array;
+  /** 0 low, 1 medium, 2 high. */
+  wealth: Uint8Array;
+  /** 1 if it has children, 0 if not. */
+  children: Uint8Array;
+  /** 0 to SATISFACTION_MAX. */
+  satisfaction: Uint8Array;
+  /** Removed ids, the next one to reuse last. */
+  free: Int32Array;
+  /**
+   * The pop id limit as it stood on the first tick of the game day: the
+   * daily sweep visits ids below it, a slice a tick (sweep.ts). State, so
+   * every machine visits the same pops on the same tick.
+   */
+  sweep: number;
+}
+
+/** The per-pop arrays, in the order a new state has them. */
+export const POP_ARRAYS = ["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction"] as const;
+
+type PopKey = (typeof POP_ARRAYS)[number];
+
+const ARRAY_TYPES: Readonly<Record<PopKey | "free", new (n: number) => AnyTypedArray>> = {
+  flags: Uint8Array,
+  home: Int32Array,
+  work: Int32Array,
+  size: Uint8Array,
+  education: Uint8Array,
+  wealth: Uint8Array,
+  children: Uint8Array,
+  satisfaction: Uint8Array,
+  free: Int32Array,
+};
+
+/** Bytes one pop's row takes, the free list aside. */
+export const POP_ROW_BYTES: number = POP_ARRAYS.reduce((sum, key) => sum + new ARRAY_TYPES[key](0).BYTES_PER_ELEMENT, 0);
+
+/** No pops. */
+export function createPops(): PopState {
+  return {
+    flags: new Uint8Array(0),
+    home: new Int32Array(0),
+    work: new Int32Array(0),
+    size: new Uint8Array(0),
+    education: new Uint8Array(0),
+    wealth: new Uint8Array(0),
+    children: new Uint8Array(0),
+    satisfaction: new Uint8Array(0),
+    free: new Int32Array(0),
+    sweep: 0,
+  };
+}
+
+/** Number of pop ids handed out, removed ones included. */
+export function popIdLimit(p: PopState): number {
+  return p.flags.length;
+}
+
+/** Live pops. Every id handed out is live or free, so this is a subtraction. */
+export function popCount(p: PopState): number {
+  return p.flags.length - p.free.length;
+}
+
+export function isPop(p: PopState, id: number): boolean {
+  return Number.isInteger(id) && id >= 0 && id < p.flags.length && ((p.flags[id] ?? 0) & POP_ALIVE) !== 0;
+}
+
+/** Who a pop is: everything in its row but where it lives and works. */
+export interface PopProfile {
+  /** 0 low, 1 medium, 2 high. */
+  education: number;
+  /** 0 low, 1 medium, 2 high. */
+  wealth: number;
+  /** 1 if it has children. */
+  children: number;
+}
+
+/** A new pop: its home, its size, its profile and its satisfaction. It starts with no job. */
+export interface NewPop extends PopProfile {
+  home: number;
+  size: number;
+  satisfaction: number;
+}
+
+/** One pop's row. */
+export interface PopRow extends NewPop {
+  id: number;
+  /** The building it works in, or NO_WORK. */
+  work: number;
+}
+
+/** The row of pop `id`. Throws if there is no such pop. */
+export function readPop(p: PopState, id: number): PopRow {
+  if (!isPop(p, id)) throw new RangeError(`pop ${id} does not exist`);
+  return {
+    id,
+    home: p.home[id] ?? 0,
+    work: p.work[id] ?? NO_WORK,
+    size: p.size[id] ?? 0,
+    education: p.education[id] ?? 0,
+    wealth: p.wealth[id] ?? 0,
+    children: p.children[id] ?? 0,
+    satisfaction: p.satisfaction[id] ?? 0,
+  };
+}
+
+// --- Rules that are functions of a row ---------------------------------------
+
+/** The most people one pop may hold in a home of `density`, from `popSizeCap` in pops.json. */
+export function popSizeCap(density: number): number {
+  const caps = POPS_BALANCE.popSizeCap;
+  return caps[Math.min(caps.length, Math.max(1, density)) - 1] ?? 1;
+}
+
+/**
+ * The sizes of the pops `people` residents of a home of `density` are cut
+ * into: as few pops as the size cap allows, as even as whole people make
+ * them, the larger first. A house of up to the density 1 cap is one pop; a
+ * tower of 1,000 at a cap of 100 is ten. Empty for no people.
+ */
+export function cutPeople(people: number, density: number): number[] {
+  if (!Number.isSafeInteger(people) || people <= 0) return [];
+  const cap = popSizeCap(density);
+  const count = Math.floor((people + cap - 1) / cap);
+  const base = Math.floor(people / count);
+  const larger = people - base * count;
+  const sizes: number[] = [];
+  for (let i = 0; i < count; i++) sizes.push(i < larger ? base + 1 : base);
+  return sizes;
+}
+
+/**
+ * How many of a pop's people work: `workerShare` of its size from
+ * pops.json, the lower share for a pop with children, rounded to the
+ * nearest person, halves up. A function of the row alone, so a count of
+ * workers needs no job to have been found.
+ */
+export function workersFor(size: number, children: number): number {
+  const ws = POPS_BALANCE.workerShare;
+  const share = children ? ws.withChildren : ws.withoutChildren;
+  return Math.floor(size * share + 0.5);
+}
+
+/** How many of pop `id`'s people work. 0 for a free id. */
+export function popWorkers(p: PopState, id: number): number {
+  if (((p.flags[id] ?? 0) & POP_ALIVE) === 0) return 0;
+  return workersFor(p.size[id] ?? 0, p.children[id] ?? 0);
+}
+
+// --- Changing pops -------------------------------------------------------------
+
+/** The density of building `home`, for its pops' size cap. */
+function homeDensity(b: BuildingState, home: number): number {
+  return BUILDING_TYPES[b.type[home] ?? 0]?.density ?? 1;
+}
+
+function checkProfile(profile: PopProfile): void {
+  const level = (v: number) => Number.isInteger(v) && v >= 0 && v < POP_LEVELS;
+  if (!level(profile.education) || !level(profile.wealth)) throw new RangeError("education and wealth must each be 0, 1 or 2");
+  if (profile.children !== 0 && profile.children !== 1) throw new RangeError("children must be 0 or 1");
+}
+
+function checkSatisfaction(satisfaction: number): void {
+  if (!Number.isInteger(satisfaction) || satisfaction < 0 || satisfaction > SATISFACTION_MAX) {
+    throw new RangeError(`satisfaction must be a whole number from 0 to ${SATISFACTION_MAX}`);
+  }
+}
+
+/** Throws unless `size` people fit one pop in building `home`, beside the `others` people already there. */
+function checkHomeRoom(state: SimState, home: number, size: number, others: number): void {
+  const b = state.buildings;
+  const cap = popSizeCap(homeDensity(b, home));
+  if (!Number.isInteger(size) || size < 1 || size > cap) throw new RangeError(`a pop in building ${home} holds 1 to ${cap} people, not ${size}`);
+  const room = b.residents[home] ?? 0;
+  if (others + size > room) throw new RangeError(`building ${home} has room for ${room} people, not ${others + size}`);
+}
+
+/** Throws unless `workers` more fit in building `work`'s jobs, beside the `others` already filled. */
+function checkJobs(state: SimState, work: number, workers: number, others: number): void {
+  const jobs = buildingJobs(state.buildings, work);
+  if (others + workers > jobs) throw new RangeError(`building ${work} offers ${jobs} jobs, not ${others + workers}`);
+}
+
+/**
+ * Adds a pop to its home with no job and returns its id, the last free id
+ * or a new one. Internal: the systems that move people in call it. Throws,
+ * changing nothing, if the home is not a live building people live in, if
+ * the size is past the cap for the home's density, if the home has no room
+ * for that many more, or if the profile or satisfaction is out of range.
+ */
+export function addPop(state: SimState, spec: NewPop): number {
+  if (!isBuilding(state.buildings, spec.home) || (state.buildings.residents[spec.home] ?? 0) <= 0) {
+    throw new RangeError(`building ${spec.home} is not a home`);
+  }
+  checkProfile(spec);
+  checkSatisfaction(spec.satisfaction);
+  const index = popIndexOf(state);
+  checkHomeRoom(state, spec.home, spec.size, index.people[spec.home] ?? 0);
+  const p = state.pops;
+  let id: number;
+  if (p.free.length > 0) {
+    id = p.free[p.free.length - 1] ?? 0;
+    p.free = resized(p.free, p.free.length - 1);
+  } else {
+    id = p.flags.length;
+    const arrays = p as unknown as Record<PopKey, AnyTypedArray>;
+    for (const key of POP_ARRAYS) arrays[key] = resized(arrays[key], id + 1);
+  }
+  p.flags[id] = POP_ALIVE;
+  p.home[id] = spec.home;
+  p.work[id] = NO_WORK;
+  p.size[id] = spec.size;
+  p.education[id] = spec.education;
+  p.wealth[id] = spec.wealth;
+  p.children[id] = spec.children;
+  p.satisfaction[id] = spec.satisfaction;
+  linkHome(index, p, id);
+  return id;
+}
+
+/** Removes pop `id`, freeing its home's room and its job. Its row becomes zeros and its id goes on the free list. */
+export function removePop(state: SimState, id: number): void {
+  const p = state.pops;
+  if (!isPop(p, id)) throw new RangeError(`pop ${id} does not exist`);
+  const index = popIndexOf(state);
+  unlinkWork(index, p, id);
+  unlinkHome(index, p, id);
+  clearRow(p, id);
+  const free = resized(p.free, p.free.length + 1);
+  free[p.free.length] = id;
+  p.free = free;
+}
+
+function clearRow(p: PopState, id: number): void {
+  p.flags[id] = 0;
+  p.home[id] = 0;
+  p.work[id] = 0;
+  p.size[id] = 0;
+  p.education[id] = 0;
+  p.wealth[id] = 0;
+  p.children[id] = 0;
+  p.satisfaction[id] = 0;
+}
+
+/** The live pop `id` and the index, or throws. */
+function livePop(state: SimState, id: number): PopIndex {
+  if (!isPop(state.pops, id)) throw new RangeError(`pop ${id} does not exist`);
+  return popIndexOf(state);
+}
+
+/**
+ * Sets pop `id`'s size. Throws, changing nothing, if the new size is past
+ * the cap for its home's density, its home has no room for it, or its
+ * workplace has too few jobs for the workers it then has. A pop left with
+ * nobody who works loses its job.
+ */
+export function setPopSize(state: SimState, id: number, size: number): void {
+  const index = livePop(state, id);
+  const p = state.pops;
+  const home = p.home[id] ?? 0;
+  const old = p.size[id] ?? 0;
+  checkHomeRoom(state, home, size, (index.people[home] ?? 0) - old);
+  const work = p.work[id] ?? NO_WORK;
+  const children = p.children[id] ?? 0;
+  if (work !== NO_WORK) checkJobs(state, work, workersFor(size, children), (index.filled[work] ?? 0) - workersFor(old, children));
+  unlinkWork(index, p, id);
+  index.people[home] = (index.people[home] ?? 0) - old + size;
+  p.size[id] = size;
+  keepJobIfWorking(p, id);
+  linkWork(index, p, id);
+}
+
+/** Takes the job of pop `id`, unlinked from its workplace, if it no longer has anyone who works. */
+function keepJobIfWorking(p: PopState, id: number): void {
+  if (popWorkers(p, id) === 0) p.work[id] = NO_WORK;
+}
+
+/**
+ * Sets pop `id`'s workplace, or takes its job with NO_WORK. Throws,
+ * changing nothing, if the building is not a live one that offers jobs, it
+ * has too few jobs left for the pop's workers, or the pop has no workers.
+ */
+export function setPopWork(state: SimState, id: number, work: number): void {
+  const index = livePop(state, id);
+  const p = state.pops;
+  if (work !== NO_WORK) {
+    if (!isBuilding(state.buildings, work) || buildingJobs(state.buildings, work) <= 0) throw new RangeError(`building ${work} offers no jobs`);
+    if (popWorkers(p, id) === 0) throw new RangeError(`pop ${id} has nobody who works`);
+    const already = p.work[id] === work ? popWorkers(p, id) : 0;
+    checkJobs(state, work, popWorkers(p, id), (index.filled[work] ?? 0) - already);
+  }
+  unlinkWork(index, p, id);
+  p.work[id] = work;
+  linkWork(index, p, id);
+}
+
+/**
+ * Sets pop `id`'s education, wealth and children. Throws, changing
+ * nothing, if any is out of range, or a change of children leaves its
+ * workplace too few jobs for its workers. A pop left with nobody who works
+ * loses its job.
+ */
+export function setPopProfile(state: SimState, id: number, profile: PopProfile): void {
+  const index = livePop(state, id);
+  checkProfile(profile);
+  const p = state.pops;
+  const work = p.work[id] ?? NO_WORK;
+  const size = p.size[id] ?? 0;
+  if (work !== NO_WORK) checkJobs(state, work, workersFor(size, profile.children), (index.filled[work] ?? 0) - popWorkers(p, id));
+  unlinkWork(index, p, id);
+  p.education[id] = profile.education;
+  p.wealth[id] = profile.wealth;
+  p.children[id] = profile.children;
+  keepJobIfWorking(p, id);
+  linkWork(index, p, id);
+}
+
+/** Sets pop `id`'s satisfaction. Throws if it is not a whole number from 0 to SATISFACTION_MAX. */
+export function setPopSatisfaction(state: SimState, id: number, satisfaction: number): void {
+  livePop(state, id);
+  checkSatisfaction(satisfaction);
+  state.pops.satisfaction[id] = satisfaction;
+}
+
+/**
+ * Removes the pops who live in buildings `ids` and takes the jobs of those
+ * who work in them, so state never names a building that is gone. The
+ * building module calls it before it clears the rows. M3-12 replaces this
+ * with displacement. Free when the city has no pops.
+ */
+export function removeBuildingPops(state: SimState, ids: readonly number[]): void {
+  if (popCount(state.pops) === 0) return;
+  const index = popIndexOf(state);
+  const p = state.pops;
+  for (const building of ids) {
+    for (let pop = index.workHead[building] ?? -1; pop >= 0; pop = index.workHead[building] ?? -1) {
+      unlinkWork(index, p, pop);
+      p.work[pop] = NO_WORK;
+    }
+    for (let pop = index.homeHead[building] ?? -1; pop >= 0; pop = index.homeHead[building] ?? -1) removePop(state, pop);
+  }
+}
+
+// --- Loading -----------------------------------------------------------------
+
+/**
+ * Why `value` is not a well-formed set of pops for `buildings`, or null if
+ * it is. For loading a save: every id live or free, never both, a free
+ * id's row all zeros, every live pop in a live home with at least one
+ * person and its fields in range, working nowhere or at a live building
+ * with jobs, no home holding more people than its stored room, and the
+ * sweep's limit within the ids handed out.
+ *
+ * What depends on the balance files is not checked: the size cap, a
+ * building's jobs and the share of a pop who work. A save made before they
+ * were tuned may break them, and it still loads. Until displacement and
+ * job matching settle such a pop (M3-12, M3-09), it keeps its size and its
+ * job.
+ */
+export function checkPops(value: unknown, buildings: BuildingState): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "it is not an object";
+  const raw = value as Record<string, unknown>;
+  for (const [key, Type] of Object.entries(ARRAY_TYPES)) {
+    if (!(raw[key] instanceof Type)) return `${key} is not a ${Type.name}`;
+  }
+  const extra = Object.keys(raw).find((key) => !(key in ARRAY_TYPES) && key !== "sweep");
+  if (extra !== undefined) return `it has an unknown field "${extra}"`;
+  const p = raw as unknown as PopState;
+  const limit = p.flags.length;
+  if (POP_ARRAYS.some((key) => p[key].length !== limit)) return "its arrays differ in length";
+  if (!Number.isSafeInteger(p.sweep) || p.sweep < 0 || p.sweep > limit) return "its sweep is not a pop id limit";
+  const seen = new Uint8Array(limit);
+  for (const id of p.free) {
+    if (id < 0 || id >= limit || seen[id] || isPop(p, id)) return "its free list is malformed";
+    seen[id] = 1;
+  }
+  const people = new Float64Array(buildings.flags.length);
+  for (let id = 0; id < limit; id++) {
+    const flags = p.flags[id] ?? 0;
+    if (flags !== 0 && flags !== POP_ALIVE) return `pop ${id} has unknown flags`;
+    if (flags === 0) {
+      if (!seen[id]) return `id ${id} is neither live nor free`;
+      if (POP_ARRAYS.some((key) => p[key][id] !== 0)) return `free id ${id} has a row`;
+      continue;
+    }
+    const home = p.home[id] ?? 0;
+    if (!isBuilding(buildings, home) || (buildings.residents[home] ?? 0) <= 0) return `pop ${id} lives in a building that is not a home`;
+    const size = p.size[id] ?? 0;
+    if (size < 1) return `pop ${id} has nobody in it`;
+    if ((p.education[id] ?? 0) >= POP_LEVELS || (p.wealth[id] ?? 0) >= POP_LEVELS) return `pop ${id} has a bad education or wealth`;
+    if ((p.children[id] ?? 0) > 1) return `pop ${id} has a bad children flag`;
+    if ((p.satisfaction[id] ?? 0) > SATISFACTION_MAX) return `pop ${id} is past the highest satisfaction`;
+    people[home] = (people[home] ?? 0) + size;
+    const work = p.work[id] ?? NO_WORK;
+    if (work === NO_WORK) continue;
+    if (!isBuilding(buildings, work) || buildingJobs(buildings, work) <= 0) return `pop ${id} works at a building with no jobs`;
+  }
+  for (let b = 0; b < buildings.flags.length; b++) {
+    if ((people[b] ?? 0) > (buildings.residents[b] ?? 0)) return `building ${b} holds more people than it has room for`;
+  }
+  return null;
+}

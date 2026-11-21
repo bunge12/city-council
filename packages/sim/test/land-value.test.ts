@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILDING_TYPES,
+  GROWER_SYSTEM,
   LAND_VALUE_BALANCE,
   LAND_VALUE_SYSTEM,
   ROAD_TYPES,
@@ -281,7 +282,9 @@ describe("the city centre", () => {
   });
 
   it("is worked out on the first tick of each game month, and each day until the city has one", () => {
-    expect(SYSTEMS.map((s) => s.name).indexOf(LAND_VALUE_SYSTEM)).toBe(0);
+    // Before the grower, so a building grown on a month's first tick sees that month's centre.
+    const order = SYSTEMS.map((s) => s.name);
+    expect(order.indexOf(LAND_VALUE_SYSTEM)).toBeLessThan(order.indexOf(GROWER_SYSTEM));
     expect(nextMonth(0)).toBe(31 * DAY);
     expect(nextMonth(31 * DAY - 1)).toBe(31 * DAY);
     expect(nextMonth(31 * DAY)).toBe(59 * DAY);

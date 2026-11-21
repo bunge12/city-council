@@ -6,7 +6,7 @@ import { DEFAULT_SOUND } from "./config";
 export interface SoundSettings {
   /** Interface cue volume, 0 to 1. */
   interface: number;
-  /** Ambience volume, 0 to 1. No layer plays yet; issue M3-19 adds the first. */
+  /** Ambience volume, 0 to 1: the wind and construction layers (issue M3-19). */
   ambience: number;
   muted: boolean;
 }
