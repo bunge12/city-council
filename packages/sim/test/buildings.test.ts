@@ -120,7 +120,7 @@ describe("building types", () => {
   });
 
   it("refuse a type missing any field", () => {
-    for (const field of ["id", "name", "zone", "density", "width", "depth", "residents"]) {
+    for (const field of ["id", "name", "zone", "density", "width", "depth", "residents", "jobsPerCell"]) {
       const types = buildingsJson.types.map((t, i) => (i === 3 ? Object.fromEntries(Object.entries(t).filter(([key]) => key !== field)) : t));
       const errors = checkBuildingsBalance({ ...buildingsJson, types });
       expect(errors.some((e) => e.includes(`types[3].${field} is missing`)), field).toBe(true);

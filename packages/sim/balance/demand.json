@@ -1,0 +1,11 @@
+{
+  "_about": "Demand (PRD, \"Four demand bars\" and \"Pacing\"). Set by M3-01 for the issues after it to read; each issue that reads a field may change it and says so. Every value here is a starting value with no source behind it, to tune in M3-21. Each bar runs from -100 to 100 (M3-06). Its inputs are ratios of running totals, and each weight is the bar points one whole unit of its input is worth: an input that raises the bar has a weight of 0 or more, and one that lowers it 0 or less. Residential reads open jobs and unemployed workers, each per worker. Commercial reads spending power (residents weighted by `spendingByWealth`) and workers without a job, per resident, and shop jobs beyond what that spending fills, per shop job. Office reads medium and high education workers without an office job, per worker, and residents and businesses that buy services, per resident. Industrial reads unemployed low and medium education workers, per worker, shop jobs that need goods, per resident, and open office jobs, per worker, which lower it so a dense city leans on offices. `dailyShare` is how far each bar moves toward its new value each game day, so bars do not flicker. `outsidePull` holds the residential bar at least at `bar` until the city has `untilResidents` residents, so the first houses always come (M3-06). `arrivalsPerYearAtFullDemand` is how many residents move in a game year with the residential bar at 100, about 17,000 from \"Pacing\" in the PRD; fewer come as the bar falls (M3-08). No prices here, so no source years.",
+  "dailyShare": 0.2,
+  "residential": { "openJobs": 150, "unemployment": -200 },
+  "commercial": { "spendingPower": 100, "availableWorkers": 50, "shopSurplus": -150 },
+  "office": { "educatedWorkers": 120, "serviceBuyers": 40 },
+  "industrial": { "unemployedWorkers": 150, "goodsNeeded": 60, "openOfficeJobs": -100 },
+  "spendingByWealth": { "low": 0.5, "medium": 1, "high": 2 },
+  "outsidePull": { "bar": 25, "untilResidents": 500 },
+  "arrivalsPerYearAtFullDemand": 17000
+}

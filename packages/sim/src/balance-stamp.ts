@@ -13,6 +13,8 @@
 
 import buildings from "../balance/buildings.json" with { type: "json" };
 import connections from "../balance/connections.json" with { type: "json" };
+import demand from "../balance/demand.json" with { type: "json" };
+import pops from "../balance/pops.json" with { type: "json" };
 import roads from "../balance/roads.json" with { type: "json" };
 import routing from "../balance/routing.json" with { type: "json" };
 import terrain from "../balance/terrain.json" with { type: "json" };
@@ -38,8 +40,11 @@ export function balanceStampOf(files: Readonly<Record<string, unknown>>): string
   return hashState(numbersOnly(files));
 }
 
+/** Every balance file the sim reads, by name: what the stamp covers. */
+export const BALANCE_FILES: Readonly<Record<string, unknown>> = { buildings, connections, demand, pops, roads, routing, terrain, time, zoning };
+
 /** The stamp of the balance this build of the sim runs. */
-export const BALANCE_STAMP = balanceStampOf({ buildings, connections, roads, routing, terrain, time, zoning });
+export const BALANCE_STAMP = balanceStampOf(BALANCE_FILES);
 
 /**
  * Whether `state` was created under the balance this build runs, so its log

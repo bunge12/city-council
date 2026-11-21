@@ -36,6 +36,7 @@
 import { BUILDING_ALIVE, BUILDING_ARRAYS, type BuildingState } from "./buildings";
 import { noteColumns, noteFrontColumns, segmentsNear } from "./candidates";
 import { noteBuildingChanged } from "./changes";
+import { buildingJobs } from "./jobs";
 import type { SimState } from "../state";
 import {
   CELL_OPEN,
@@ -659,6 +660,8 @@ export interface BuildingInfo {
   density: number;
   type: number;
   residents: number;
+  /** The jobs it offers, from its type and lot (jobs.ts); 0 for a type with none. Not a column: derived from the row. */
+  jobs: number;
   variant: number;
   builtAt: number;
   /**
@@ -680,7 +683,7 @@ export function buildingInfo(state: SimState, id: number): BuildingInfo | null {
   const { bi, cellIndex } = indexOf(state);
   const row = Object.fromEntries(BUILDING_ARRAYS.filter((key) => key !== "flags").map((key) => [key, b[key][id] ?? 0])) as Omit<
     BuildingInfo,
-    "id" | "corners" | "chunk"
+    "id" | "jobs" | "corners" | "chunk"
   >;
-  return { id, ...row, corners: lotShapeCorners(cellIndex, shapeOfBuilding(b, id)), chunk: bi.chunk[id] ?? NO_BUILDING };
+  return { id, ...row, jobs: buildingJobs(b, id), corners: lotShapeCorners(cellIndex, shapeOfBuilding(b, id)), chunk: bi.chunk[id] ?? NO_BUILDING };
 }

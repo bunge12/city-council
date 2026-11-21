@@ -3,6 +3,7 @@
 // buildings.ts and the lot finder in lots.ts.
 
 import balance from "../../balance/buildings.json" with { type: "json" };
+import { SHARE_SLACK, isRecord, isShare, shareProblems } from "../balance-fields";
 import { ZONING_BALANCE } from "../zoning/balance";
 
 /** One building type as written in the balance file. */
@@ -19,6 +20,8 @@ export interface BuildingTypeBalance {
   depth: [number, number];
   /** Residents [low, high]; [0, 0] for a type nobody lives in. */
   residents: [number, number];
+  /** Jobs per cell of lot, 0 for a type that offers none (M3-01). See `jobsOf` in jobs.ts. */
+  jobsPerCell: number;
   /** True for a starting value from M2-09 with nothing behind it yet. */
   proposal?: boolean;
   /** True to draw residents per building between low and high; otherwise they scale with lot area (M2-10). */
@@ -45,8 +48,23 @@ export interface BuildingsBalance {
   growthTries: number;
   /** The most buildings one `BulldozeBuilding` may name (M2-11). */
   bulldozeMaxBuildings: number;
+  /** For each kind of job, the share of its jobs at each education level (M3-01). */
+  jobKinds: Record<JobKind, EducationShares>;
+  /** For each zone id, densities 1 to 3 in order: the share of a building's jobs of each kind (M3-01). */
+  jobMix: Record<string, Partial<Record<JobKind, number>>[]>;
   types: BuildingTypeBalance[];
 }
+
+/** The kinds of job, as the running totals and the demand bars count them (PRD, "City statistics"). */
+export const JOB_KINDS = ["commercial", "office", "industrial"] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
+/** The three education levels, lowest first (PRD, "M3 Demand"). Pops have the same levels. */
+export const EDUCATION_LEVELS = ["low", "medium", "high"] as const;
+export type EducationLevel = (typeof EDUCATION_LEVELS)[number];
+
+/** A share for each education level, adding to 1. */
+export type EducationShares = Record<EducationLevel, number>;
 
 /** A building type as the sim uses it: the balance entry with its zone as a number. */
 export interface BuildingType extends BuildingTypeBalance {
@@ -56,15 +74,68 @@ export interface BuildingType extends BuildingTypeBalance {
   zoneNumber: number;
 }
 
-const FIELDS = ["id", "name", "zone", "density", "width", "depth", "residents"] as const;
+const FIELDS = ["id", "name", "zone", "density", "width", "depth", "residents", "jobsPerCell"] as const;
 const KNOWN = new Set<string>([...FIELDS, "proposal", "drawResidents", "throughLot"]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function isText(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * Problems with the job shares: `jobKinds` gives every kind its education
+ * shares, and `jobMix` gives every zone one entry per density, each either
+ * empty, for a zone and density with no jobs, or shares of the kinds
+ * adding to 1. Whether a type with jobs has a mix is checked per type.
+ */
+function jobShareProblems(data: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const kinds = data["jobKinds"];
+  if (!isRecord(kinds)) errors.push("jobKinds must be an object");
+  else {
+    for (const kind of JOB_KINDS) {
+      if (!(kind in kinds)) errors.push(`jobKinds.${kind} is missing`);
+      else errors.push(...shareProblems(kinds[kind], EDUCATION_LEVELS, `jobKinds.${kind}`));
+    }
+    for (const key of Object.keys(kinds)) if (!(JOB_KINDS as readonly string[]).includes(key) && !key.startsWith("_")) errors.push(`jobKinds has an unknown kind "${key}"`);
+  }
+  const mix = data["jobMix"];
+  if (!isRecord(mix)) {
+    errors.push("jobMix must be an object");
+    return errors;
+  }
+  const levels = ZONING_BALANCE.densities.length;
+  for (const zone of ZONING_BALANCE.zones) {
+    const list = mix[zone.id];
+    const where = `jobMix.${zone.id}`;
+    if (!(zone.id in mix)) errors.push(`${where} is missing`);
+    else if (!Array.isArray(list) || list.length !== levels) errors.push(`${where} must list ${levels} densities`);
+    else {
+      list.forEach((entry: unknown, i) => {
+        // A kind left out has no share. An empty entry is a zone and density without jobs.
+        if (!isRecord(entry)) errors.push(`${where}[${i}] must be an object`);
+        else if (Object.keys(entry).some((k) => !k.startsWith("_"))) {
+          errors.push(...shareProblems({ ...Object.fromEntries(JOB_KINDS.map((k) => [k, 0])), ...entry }, JOB_KINDS, `${where}[${i}]`));
+        }
+      });
+    }
+  }
+  for (const key of Object.keys(mix)) if (!ZONING_BALANCE.zones.some((z) => z.id === key) && !key.startsWith("_")) errors.push(`jobMix has an unknown zone "${key}"`);
+  return errors;
+}
+
+/** Whether `zone` at `density` has job shares that add to 1 in `data.jobMix`. False when the mix is malformed. */
+function zoneHasJobs(data: Record<string, unknown>, zone: unknown, density: unknown): boolean {
+  const mix = data["jobMix"];
+  if (!isRecord(mix) || typeof zone !== "string" || typeof density !== "number") return false;
+  const list = mix[zone];
+  const entry = Array.isArray(list) ? (list[density - 1] as unknown) : undefined;
+  if (!isRecord(entry)) return false;
+  let sum = 0;
+  for (const kind of JOB_KINDS) {
+    const v = entry[kind];
+    if (isShare(v)) sum += v;
+  }
+  return Math.abs(sum - 1) <= SHARE_SLACK;
 }
 
 /** Whether `value` is [low, high], whole numbers with low <= high, each from `min` to `max`. */
@@ -104,6 +175,7 @@ export function checkBuildingsBalance(data: unknown): string[] {
   if (!Number.isSafeInteger(tries) || (tries as number) < 1) errors.push("growthTries must be a whole number of at least 1");
   const most = data["bulldozeMaxBuildings"];
   if (!Number.isSafeInteger(most) || (most as number) < 1) errors.push("bulldozeMaxBuildings must be a whole number of at least 1");
+  errors.push(...jobShareProblems(data));
   const deepest = ZONING_BALANCE.zoneDepthCells;
   const types = data["types"];
   if (!Array.isArray(types) || types.length === 0) {
@@ -121,7 +193,7 @@ export function checkBuildingsBalance(data: unknown): string[] {
     }
     for (const field of FIELDS) if (!(field in type)) errors.push(`${where}.${field} is missing`);
     for (const key of Object.keys(type)) if (!KNOWN.has(key) && !key.startsWith("_")) errors.push(`${where} has an unknown field "${key}"`);
-    const { id, name, zone, density, width, depth, residents, proposal, drawResidents, throughLot } = type;
+    const { id, name, zone, density, width, depth, residents, jobsPerCell, proposal, drawResidents, throughLot } = type;
     if (!isText(id)) errors.push(`${where}.id must be text`);
     else if (ids.has(id)) errors.push(`${where}.id "${id}" appears twice`);
     else ids.add(id);
@@ -145,6 +217,15 @@ export function checkBuildingsBalance(data: unknown): string[] {
       );
     }
     if ("residents" in type && !isRange(residents, 0, Number.MAX_SAFE_INTEGER)) errors.push(`${where}.residents must be [low, high], whole numbers`);
+    if ("jobsPerCell" in type) {
+      if (typeof jobsPerCell !== "number" || !Number.isFinite(jobsPerCell) || jobsPerCell < 0) errors.push(`${where}.jobsPerCell must be a number of at least 0`);
+      else if (zoneOk && densityOk && jobsPerCell > 0 && !zoneHasJobs(data, zone, density)) {
+        errors.push(`${where}.jobsPerCell is above 0 but jobMix.${zone as string}[${(density as number) - 1}] gives its jobs no kind`);
+      } else if (zoneOk && densityOk && jobsPerCell === 0 && zoneHasJobs(data, zone, density)) {
+        // A zone and density with a mix offers jobs, so a 0 here is a slip, not a type with none.
+        errors.push(`${where}.jobsPerCell is 0 but jobMix.${zone as string}[${(density as number) - 1}] gives jobs there`);
+      }
+    }
     if (proposal !== undefined && typeof proposal !== "boolean") errors.push(`${where}.proposal must be true or false`);
     if (drawResidents !== undefined && typeof drawResidents !== "boolean") errors.push(`${where}.drawResidents must be true or false`);
     if (!zoneOk || !densityOk || !widthRange || !depthRange) return;
