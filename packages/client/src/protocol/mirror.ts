@@ -4,6 +4,7 @@ import {
   PROTOCOL_VERSION,
   applyBuildingDelta,
   applyStatsDelta,
+  STAT_TOTALS,
   applyCellDelta,
   applyRoadDelta,
   applyUndoDelta,
@@ -352,6 +353,11 @@ export class SimMirror {
       this.outOfStep();
       return;
     }
+    // So are the statistics' samples, which must be whole rows of totals.
+    if (delta.stats.samples.length % STAT_TOTALS.length !== 0) {
+      this.outOfStep();
+      return;
+    }
     // Roads first: a delta whose rows do not fit the copy changes nothing.
     let roadChunks: readonly number[] = [];
     let roadNodes: readonly number[] = [];
@@ -402,11 +408,7 @@ export class SimMirror {
     state.rng.set(delta.rng);
     state.growth = { ...delta.growth };
     state.centre = { ...delta.centre };
-    const statsProblem = applyStatsDelta(state.stats, delta.stats);
-    if (statsProblem !== null) {
-      this.outOfStep();
-      return;
-    }
+    applyStatsDelta(state.stats, delta.stats);
     for (const entry of delta.log) state.log.push(entry);
     this.logFrom += delta.log.length;
     // Same paging as live state, so the copy stays the same shape.
