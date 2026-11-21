@@ -106,6 +106,22 @@
       "mode": "blocks",
       "source": "issue #166"
     },
+    "landvalue.tick": {
+      "name": "the land value system's worst tick on the scale town, working out the city centre on a month's first tick, its tenth of the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 2,
+      "mode": "blocks",
+      "source": "M3-13"
+    },
+    "landvalue.query": {
+      "name": "one cell's land value, read per pointer move or per cell the grower weighs; a few microseconds, so a budget that catches a slower lookup",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 0.1,
+      "mode": "blocks",
+      "source": "M3-13"
+    },
     "soak.command-steps": {
       "name": "steps of one command type over the tick in the soak hour, two runner pauses allowed",
       "unit": "steps",

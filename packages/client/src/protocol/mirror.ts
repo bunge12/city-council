@@ -400,6 +400,7 @@ export class SimMirror {
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
     state.growth = { ...delta.growth };
+    state.centre = { ...delta.centre };
     for (const entry of delta.log) state.log.push(entry);
     this.logFrom += delta.log.length;
     // Same paging as live state, so the copy stays the same shape.

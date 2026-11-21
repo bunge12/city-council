@@ -4,6 +4,7 @@ import {
   BUILDINGS_SYSTEM,
   COMMANDS_SYSTEM,
   GROWER_SYSTEM,
+  LAND_VALUE_SYSTEM,
   LOG_PAGE_SIZE,
   MAX_PENDING_COMMANDS,
   SNAPSHOT_VERSION,
@@ -75,6 +76,8 @@ describe("step", () => {
       `end ${COMMANDS_SYSTEM}`,
       `start ${CELLS_SYSTEM}`,
       `end ${CELLS_SYSTEM}`,
+      `start ${LAND_VALUE_SYSTEM}`,
+      `end ${LAND_VALUE_SYSTEM}`,
       `start ${GROWER_SYSTEM}`,
       `end ${GROWER_SYSTEM}`,
     ]);

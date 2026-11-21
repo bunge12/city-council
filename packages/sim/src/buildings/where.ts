@@ -56,6 +56,7 @@ import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { localIndex, segmentOfSlot } from "../zoning/cells";
 import { anchorSpan, measureCurve } from "../zoning/shape";
 import { readAnchor } from "../roads/network";
+import { createPollutionGrid, pollutionSourceOf, stampPollution } from "../landvalue/pollution";
 
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
 
@@ -71,6 +72,26 @@ interface BuildingIndex {
   chunk: number[];
   /** Building ids by chunk. */
   byChunk: Map<number, Set<number>>;
+  /** By building id: its lot's centre, where `chunk` is not NO_BUILDING. */
+  x: number[];
+  z: number[];
+  /** By building id: the industrial density it was filed with (landvalue/pollution.ts), or 0. */
+  source: number[];
+  /**
+   * Pollution from every filed industrial building, by square (M3-13).
+   * Built on first use, then stamped as buildings are filed and unfiled.
+   */
+  pollution: Int32Array | null;
+  /** By building id: the jobs and the room in homes it was filed with, for `sums`. */
+  jobs: number[];
+  room: number[];
+  /**
+   * Over every building filed with a lot centre: jobs, jobs times x, jobs
+   * times z, room, room times x and room times z, x and z in eighths of a
+   * metre rounded (`eighths`). Whole numbers, so the same in any order: the
+   * city centre reads them (landvalue/land-value.ts, M3-13).
+   */
+  sums: Float64Array;
   /** By building id: the segment, front cell and depth filed of each column it holds, three numbers a column. */
   filed: (number[] | null)[];
   /**
@@ -202,6 +223,8 @@ const isLive = (b: BuildingState, id: number): boolean => ((b.flags[id] ?? 0) & 
 function file(bi: BuildingIndex, b: BuildingState, id: number): boolean {
   const shape = shapeOfBuilding(b, id);
   const index = bi.cellIndex;
+  // Filed twice without an unfile between, the pollution would count twice.
+  unstamp(bi, id);
   bi.chunk[id] = NO_BUILDING;
   const parts = lotParts(index, shape);
   if (!parts) {
@@ -228,10 +251,50 @@ function file(bi: BuildingIndex, b: BuildingState, id: number): boolean {
   const z = ((corners[1] ?? 0) + (corners[3] ?? 0) + (corners[5] ?? 0) + (corners[7] ?? 0)) / 4;
   const chunk = chunkAt(x, z);
   bi.chunk[id] = chunk;
+  bi.x[id] = x;
+  bi.z[id] = z;
   let set = bi.byChunk.get(chunk);
   if (!set) bi.byChunk.set(chunk, (set = new Set()));
   set.add(id);
+  const jobs = buildingJobs(b, id);
+  const room = b.residents[id] ?? 0;
+  bi.jobs[id] = jobs;
+  bi.room[id] = room;
+  addSums(bi.sums, x, z, jobs, room, 1);
+  const source = pollutionSourceOf(b.type[id] ?? 0);
+  bi.source[id] = source;
+  if (source > 0 && bi.pollution) stampPollution(bi.pollution, x, z, source, 1);
   return true;
+}
+
+/** A lot centre's coordinate in whole eighths of a metre, so sums of them are exact. */
+function eighths(v: number): number {
+  return Math.floor(v * 8 + 0.5);
+}
+
+function addSums(sums: Float64Array, x: number, z: number, jobs: number, room: number, sign: 1 | -1): void {
+  if (jobs === 0 && room === 0) return;
+  const qx = eighths(x);
+  const qz = eighths(z);
+  sums[0] = (sums[0] ?? 0) + sign * jobs;
+  sums[1] = (sums[1] ?? 0) + sign * jobs * qx;
+  sums[2] = (sums[2] ?? 0) + sign * jobs * qz;
+  sums[3] = (sums[3] ?? 0) + sign * room;
+  sums[4] = (sums[4] ?? 0) + sign * room * qx;
+  sums[5] = (sums[5] ?? 0) + sign * room * qz;
+}
+
+/** Takes building `id`'s pollution off the grid, and its jobs and room off the sums, from where it was filed. */
+function unstamp(bi: BuildingIndex, id: number): void {
+  if ((bi.chunk[id] ?? NO_BUILDING) !== NO_BUILDING) {
+    addSums(bi.sums, bi.x[id] ?? 0, bi.z[id] ?? 0, bi.jobs[id] ?? 0, bi.room[id] ?? 0, -1);
+    bi.jobs[id] = 0;
+    bi.room[id] = 0;
+  }
+  const source = bi.source[id] ?? 0;
+  if (source === 0) return;
+  if (bi.pollution) stampPollution(bi.pollution, bi.x[id] ?? 0, bi.z[id] ?? 0, source, -1);
+  bi.source[id] = 0;
 }
 
 /**
@@ -253,6 +316,7 @@ function unfile(bi: BuildingIndex, id: number, fronts: number[] = []): number[] 
     }
   }
   bi.filed[id] = null;
+  unstamp(bi, id);
   const chunk = bi.chunk[id] ?? NO_BUILDING;
   if (chunk !== NO_BUILDING) bi.byChunk.get(chunk)?.delete(id);
   bi.chunk[id] = NO_BUILDING;
@@ -266,6 +330,13 @@ function build(b: BuildingState, cellIndex: CellIndex): BuildingIndex {
     segCells: new Array<Int32Array | null>(cellIndex.segs.length).fill(null),
     chunk: [],
     byChunk: new Map(),
+    x: [],
+    z: [],
+    source: [],
+    pollution: null,
+    jobs: [],
+    room: [],
+    sums: new Float64Array(6),
     filed: [],
     toCheck: new Set(),
     lost: new Set(),
@@ -632,6 +703,71 @@ export function takeBuildingsToCheck(state: SimState): number[] {
   // A new set rather than clear(): see `CellWatch` in zoning/cell-index.ts.
   if (watch && watch.blocked.size > 0) watch.blocked = new Set();
   return ids;
+}
+
+/** `bi`'s pollution grid, built from every filed industrial building if it has none yet. */
+function pollutionOf(bi: BuildingIndex): Int32Array {
+  if (bi.pollution) return bi.pollution;
+  const grid = createPollutionGrid();
+  for (let id = 0; id < bi.source.length; id++) {
+    const source = bi.source[id] ?? 0;
+    if (source > 0) stampPollution(grid, bi.x[id] ?? 0, bi.z[id] ?? 0, source, 1);
+  }
+  bi.pollution = grid;
+  return grid;
+}
+
+/**
+ * Pollution from industry by square (landvalue/pollution.ts), with the
+ * buildings filed as they stand now. Read only. Derived: it follows from
+ * the buildings in state and the cells, whenever it is first built.
+ */
+export function pollutionGrid(state: SimState): Int32Array {
+  // Filing follows the segment shapes alone, so a change still settling
+  // need not be walked here, inside whatever tick or pointer move asked.
+  return pollutionOf(indexOf(state, false).bi);
+}
+
+/**
+ * The pollution grid as kept and as built afresh from state, for tests
+ * that check the two never part.
+ */
+export function pollutionSets(state: SimState): { kept: Int32Array; fresh: Int32Array } {
+  const { bi, cellIndex } = indexOf(state);
+  const kept = pollutionOf(bi).slice();
+  return { kept, fresh: pollutionOf(build(state.buildings, cellIndex)) };
+}
+
+/**
+ * The city's jobs and room in homes, each with the middle of the lots
+ * that hold them, from the sums the index keeps: the same numbers on every
+ * machine however the index was built. A middle is 0, 0 where its weight is.
+ */
+export function jobAndHomeMiddles(state: SimState): { jobs: number; jobX: number; jobZ: number; room: number; roomX: number; roomZ: number } {
+  const sums = indexOf(state).bi.sums;
+  const [jobs = 0, jx = 0, jz = 0, room = 0, rx = 0, rz = 0] = sums;
+  const mid = (sum: number, weight: number) => (weight > 0 ? sum / weight / 8 : 0);
+  return { jobs, jobX: mid(jx, jobs), jobZ: mid(jz, jobs), room, roomX: mid(rx, room), roomZ: mid(rz, room) };
+}
+
+/** The index's sums as kept and as built afresh from state, for tests that check the two never part. */
+export function middleSums(state: SimState): { kept: number[]; fresh: number[] } {
+  const { bi, cellIndex } = indexOf(state);
+  return { kept: Array.from(bi.sums), fresh: Array.from(build(state.buildings, cellIndex).sums) };
+}
+
+/**
+ * Calls `visit` with every live building whose lot is there and its lot's
+ * centre, in id order, so sums over them come out the same on every
+ * machine.
+ */
+export function forPlacedBuildings(state: SimState, visit: (id: number, x: number, z: number) => void): void {
+  const { bi } = indexOf(state);
+  const b = state.buildings;
+  for (let id = 0; id < b.flags.length; id++) {
+    if (!isLive(b, id) || (bi.chunk[id] ?? NO_BUILDING) === NO_BUILDING) continue;
+    visit(id, bi.x[id] ?? 0, bi.z[id] ?? 0);
+  }
 }
 
 /** The ids of the buildings whose lot's centre is in 500 m chunk `chunk`, ascending. */

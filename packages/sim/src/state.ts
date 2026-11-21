@@ -2,6 +2,7 @@ import { BALANCE_STAMP } from "./balance-stamp";
 import { createBuildings, type BuildingState } from "./buildings/buildings";
 import { createGrowth, type GrowthState } from "./buildings/growth";
 import type { Command } from "./commands";
+import { createCentre, type CentreState } from "./landvalue/centre";
 import type { LogEntry } from "./log";
 import { seedRng } from "./rng";
 import { placeConnections } from "./roads/connections";
@@ -14,7 +15,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 15;
+export const SNAPSHOT_VERSION = 16;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -95,6 +96,11 @@ export interface SimState {
    * free frontage out by (buildings/grower.ts, issue 135).
    */
   growth: GrowthState;
+  /**
+   * The city centre land value measures from, and when it is worked out
+   * again (landvalue/land-value.ts, M3-13). Land value itself is derived.
+   */
+  centre: CentreState;
 }
 
 /**
@@ -138,6 +144,8 @@ export function createBareState(seed: number): SimState {
     growth: createGrowth(),
     // Last, where the version 15 migration puts it: the key order is the order a snapshot writes and the hash reads.
     cellReads: 0,
+    // After it, where the version 16 migration puts it.
+    centre: createCentre(),
   };
 }
 
