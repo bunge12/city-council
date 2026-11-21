@@ -78,3 +78,70 @@ export const CUES = {
 } as const satisfies Record<string, CueRecipe>;
 
 export type Cue = keyof typeof CUES;
+
+/**
+ * The ambient layers (issue M3-19). What is heard follows the camera's
+ * height and what is on screen (PRD, "Sound"). Both are quiet enough to
+ * leave on for an hour.
+ *
+ * Wind is a few seconds of noise, looped, through a low-pass filter, its
+ * level drifting with two slow sine waves that never line up. Its layer
+ * sits at `street` in the street band and climbs with the camera's height
+ * through the district band to `city`.
+ */
+export const WIND = {
+  /** The layer's level in the street band and in the city band, 0 to 1. */
+  street: 0.15,
+  city: 1,
+  /** The source's level under the layer's, before the ambience volume. */
+  gain: 0.5,
+  /** Seconds of noise looped. Long enough that the loop is not heard. */
+  loopSeconds: 4,
+  /** Low-pass cut-off in Hz. */
+  cutoff: 420,
+  /** The slow drifts in level: each a sine of `hz` that moves the level by up to `depth` of it. */
+  drifts: [
+    { hz: 0.071, depth: 0.3 },
+    { hz: 0.029, depth: 0.25 },
+  ],
+} as const;
+
+/**
+ * Construction: short knocks and clanks at uneven times while buildings go
+ * up in view, in the street band only, each placed left or right by where
+ * one of the buildings sits on screen. However many go up, no more than
+ * `voices` sound at once, from the cap the cues share.
+ */
+export const CONSTRUCTION_SOUND = {
+  /** The layer's level in the street band, 0 to 1. Zero in the others. */
+  level: 0.6,
+  /** Seconds between sounds with one building going up: anywhere from `gapMin` to `gapMax`. */
+  gapMin: 0.4,
+  gapMax: 1.8,
+  /** More buildings make the gaps shorter, by the square root of their count, up to this many times. */
+  busiest: 2.5,
+  /** The most construction sounds playing at once. */
+  voices: 2,
+  /** How far left or right a building at the edge of the screen is placed: 1 is all the way. */
+  panSpread: 0.8,
+  /** Each sound is one of these, at random. A hammer is two blows, a little uneven. */
+  sounds: [
+    {
+      tones: [
+        { wave: "triangle", from: 1150, to: 900, at: 0, length: 0.05, peak: 0.3 },
+        { wave: "triangle", from: 1120, to: 880, at: 0.23, length: 0.05, peak: 0.25 },
+      ],
+      noise: { at: 0, length: 0.035, peak: 0.2, cutoff: 3200 },
+    },
+    {
+      tones: [
+        { wave: "sine", from: 1870, to: 1850, at: 0, length: 0.14, peak: 0.12 },
+        { wave: "sine", from: 2730, to: 2700, at: 0, length: 0.09, peak: 0.07 },
+      ],
+    },
+    {
+      tones: [{ wave: "sine", from: 130, to: 70, at: 0, length: 0.14, peak: 0.4 }],
+      noise: { at: 0, length: 0.09, peak: 0.2, cutoff: 600 },
+    },
+  ],
+} as const satisfies { sounds: readonly CueRecipe[] } & Record<string, unknown>;

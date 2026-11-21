@@ -4,103 +4,9 @@
 import { describe, expect, it } from "vitest";
 import { CommandCues } from "../src/sound/command-cues";
 import { CUES, DEFAULT_SOUND, MAX_VOICES } from "../src/sound/config";
-import { SoundEngine, type SoundContext } from "../src/sound/engine";
-import { SOUND_STORAGE_KEY, loadSound, saveSound, type SoundSettings } from "../src/sound/settings";
-
-class FakeParam {
-  value = 1;
-  events: string[] = [];
-  setValueAtTime(v: number): this {
-    this.value = v;
-    this.events.push("set");
-    return this;
-  }
-  linearRampToValueAtTime(): this {
-    this.events.push("linear");
-    return this;
-  }
-  exponentialRampToValueAtTime(): this {
-    this.events.push("exp");
-    return this;
-  }
-}
-
-class FakeNode {
-  readonly outputs: FakeNode[] = [];
-  connect(to: FakeNode): FakeNode {
-    this.outputs.push(to);
-    return to;
-  }
-}
-
-class FakeGain extends FakeNode {
-  readonly gain = new FakeParam();
-}
-
-class FakeSource extends FakeNode {
-  readonly frequency = new FakeParam();
-  type = "sine";
-  buffer: unknown = null;
-  started: number | null = null;
-  start(t: number): void {
-    this.started = t;
-  }
-  stop(): void {}
-}
-
-class FakeContext {
-  currentTime = 0;
-  state: AudioContextState = "running";
-  readonly sampleRate = 8000;
-  readonly destination = new FakeNode();
-  readonly gains: FakeGain[] = [];
-  readonly sources: FakeSource[] = [];
-  resumed = 0;
-  resume(): Promise<void> {
-    this.resumed++;
-    return Promise.resolve();
-  }
-  createGain(): FakeGain {
-    const g = new FakeGain();
-    this.gains.push(g);
-    return g;
-  }
-  createOscillator(): FakeSource {
-    const s = new FakeSource();
-    this.sources.push(s);
-    return s;
-  }
-  createBufferSource(): FakeSource {
-    return this.createOscillator();
-  }
-  createBiquadFilter(): FakeNode & { type: string; frequency: FakeParam } {
-    return Object.assign(new FakeNode(), { type: "", frequency: new FakeParam() });
-  }
-  createBuffer(_channels: number, length: number): { getChannelData(): Float32Array } {
-    const data = new Float32Array(length);
-    return { getChannelData: () => data };
-  }
-}
-
-function first(contexts: FakeContext[]): FakeContext {
-  const ctx = contexts[0];
-  if (!ctx) throw new Error("no audio context was made");
-  return ctx;
-}
-
-function engineWith(settings: SoundSettings = { ...DEFAULT_SOUND }, maxVoices?: number) {
-  const contexts: FakeContext[] = [];
-  const engine = new SoundEngine({
-    createContext: () => {
-      const ctx = new FakeContext();
-      contexts.push(ctx);
-      return ctx as unknown as SoundContext;
-    },
-    settings,
-    ...(maxVoices === undefined ? {} : { maxVoices }),
-  });
-  return { engine, contexts };
-}
+import { SoundEngine } from "../src/sound/engine";
+import { engineWith, first, type FakeGain } from "./fake-audio";
+import { SOUND_STORAGE_KEY, loadSound, saveSound } from "../src/sound/settings";
 
 describe("SoundEngine", () => {
   it("makes no audio context and schedules nothing before the first interaction", () => {
@@ -221,7 +127,7 @@ describe("SoundEngine", () => {
     const ambienceBus = input.outputs[0] as FakeGain;
     expect(ambienceBus.gain.value).toBe(0.25);
     expect(engine.layer("wind")).toBe(layer);
-    // A layer makes no sound of its own here.
+    // A layer makes no sound until the ambience starts a source on it (ambience.test.ts).
     expect(ctx.sources).toHaveLength(0);
   });
 });

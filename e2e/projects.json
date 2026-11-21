@@ -28,6 +28,7 @@
     "minMinutes": 10
   },
   "seconds": {
+    "ambience.spec.ts": 60,
     "blocks.spec.ts": 34,
     "bridges.spec.ts": 62,
     "building-lod-memory.spec.ts": 241,
