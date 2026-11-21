@@ -4,6 +4,7 @@ import {
   BUILDINGS_SYSTEM,
   COMMANDS_SYSTEM,
   GROWER_SYSTEM,
+  POPS_SYSTEM,
   LOG_PAGE_SIZE,
   MAX_PENDING_COMMANDS,
   SNAPSHOT_VERSION,
@@ -75,6 +76,8 @@ describe("step", () => {
       `end ${COMMANDS_SYSTEM}`,
       `start ${CELLS_SYSTEM}`,
       `end ${CELLS_SYSTEM}`,
+      `start ${POPS_SYSTEM}`,
+      `end ${POPS_SYSTEM}`,
       `start ${GROWER_SYSTEM}`,
       `end ${GROWER_SYSTEM}`,
     ]);

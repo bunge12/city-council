@@ -1,6 +1,7 @@
 // Pop numbers from `balance/pops.json`, checked when the module loads
-// (M3-01, PRD "M3 Demand" and "Turnover"). Nothing reads them yet: pops
-// arrive in M3-03, newcomers in M3-08 and turnover in M3-11.
+// (M3-01, PRD "M3 Demand" and "Turnover"). Pops in state (M3-03) read the
+// size cap and the worker shares; newcomers read the rest in M3-08 and
+// turnover in M3-11.
 
 import balance from "../../balance/pops.json" with { type: "json" };
 import { EDUCATION_LEVELS, type EducationShares } from "../buildings/balance";
@@ -35,6 +36,9 @@ export interface PopsBalance {
   };
 }
 
+/** The most a size cap may be: a pop's size is a byte in state (pops.ts). */
+export const POP_SIZE_LIMIT = 255;
+
 const TOP = ["popSizeCap", "newcomer", "workerShare", "turnover"];
 
 /** Every problem with a pops balance file, or none. A missing field is a problem, and so is a share out of 0 to 1. */
@@ -47,8 +51,8 @@ export function checkPopsBalance(data: unknown): string[] {
   if ("popSizeCap" in data) {
     const caps = data["popSizeCap"];
     const levels = ZONING_BALANCE.densities.length;
-    if (!Array.isArray(caps) || caps.length !== levels || !caps.every((c) => Number.isSafeInteger(c) && (c as number) >= 1)) {
-      errors.push(`popSizeCap must list ${levels} whole numbers of at least 1, one per density`);
+    if (!Array.isArray(caps) || caps.length !== levels || !caps.every((c) => Number.isSafeInteger(c) && (c as number) >= 1 && (c as number) <= POP_SIZE_LIMIT)) {
+      errors.push(`popSizeCap must list ${levels} whole numbers from 1 to ${POP_SIZE_LIMIT}, one per density`);
     } else if (caps.some((c, i) => i > 0 && (c as number) < (caps[i - 1] as number))) {
       errors.push("popSizeCap must not fall as density rises");
     }
