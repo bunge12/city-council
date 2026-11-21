@@ -7,6 +7,8 @@ import { create } from "zustand";
 import type { BuildingInfo } from "@city-council/sim";
 import { DEFAULT_PRESET } from "../render/config";
 import type { Preset, PresetSource } from "../render/presets";
+import { DEFAULT_SOUND } from "../sound/config";
+import type { SoundSettings } from "../sound/settings";
 import { INITIAL_BLOCK_OVERLAY, type BlockOverlayState } from "../tools/block-overlay";
 import { INITIAL_BULLDOZE_TOOL, type BulldozePreview, type BulldozeToolState } from "../tools/bulldoze-tool";
 import { INITIAL_EDIT_TOOL, type EditPreview, type EditToolState } from "../tools/edit-tool";
@@ -281,3 +283,6 @@ export const useGraphics = create<GraphicsState>(() => ({
   source: "benchmark",
   benchmark: { state: "none", ms: null, backend: null, thisVisit: false },
 }));
+
+/** The sound settings, kept per browser by main.ts, never in sim state. */
+export const useSound = create<SoundSettings>(() => ({ ...DEFAULT_SOUND }));

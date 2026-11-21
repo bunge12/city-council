@@ -69,6 +69,7 @@
     "sim-worker.spec.ts": 25,
     "smoke.spec.ts": 1,
     "snapping.spec.ts": 124,
+    "sound.spec.ts": 40,
     "terrain.spec.ts": 7,
     "through-lots.spec.ts": 86,
     "tools-and-buildings.spec.ts": 101,

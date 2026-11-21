@@ -5,6 +5,7 @@
 import type { CommandResult } from "@city-council/sim";
 import type { Preset } from "../render/presets";
 import type { SimMirror } from "../protocol/mirror";
+import type { SoundSettings } from "../sound/settings";
 import type { SaveStatus } from "../save/channel";
 import type { SaveClient } from "../save/page";
 import type { BlockOverlayController } from "../tools/block-overlay";
@@ -57,4 +58,6 @@ export interface AppServices {
   blockOverlay: BlockOverlayController;
   /** The player chose a graphics preset. Kept in this browser; the renderer switches once its shaders are ready. */
   setPreset(preset: Preset): void;
+  /** The player changed a sound setting. Kept in this browser, and heard at once. */
+  setSound(patch: Partial<SoundSettings>): void;
 }

@@ -3,7 +3,7 @@ import { PRESETS } from "../render/config";
 import { isPreset, presetLabel } from "../render/presets";
 import { formatGameDate, formatHomesTitle } from "./format";
 import { useHomes, useSaveStatus, useServices, useSim } from "./hooks";
-import { toggleDebug, toggleLog, toggleMenu, useGraphics, useUi } from "./store";
+import { toggleDebug, toggleLog, toggleMenu, useGraphics, useSound, useUi } from "./store";
 
 /** The graphics setting: Low, Balanced or High, kept in this browser. */
 function GraphicsSetting() {
@@ -28,6 +28,44 @@ function GraphicsSetting() {
         ))}
       </select>
     </label>
+  );
+}
+
+/** A volume slider, 0 to 100 on screen and 0 to 1 in the settings. */
+function Volume({ id, label, value, onChange }: { id: string; label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <label htmlFor={id}>
+      {label}
+      <input
+        id={id}
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={Math.round(value * 100)}
+        onChange={(e) => onChange(Number(e.target.value) / 100)}
+      />
+      <output htmlFor={id}>{Math.round(value * 100)}</output>
+    </label>
+  );
+}
+
+/** The sound settings: interface and ambience volumes and a mute, kept in this browser. */
+function SoundSetting() {
+  const { setSound } = useServices();
+  const sound = useSound();
+  return (
+    <details className="sound-setting" id="sound-settings">
+      <summary title="Sound settings. Kept in this browser.">{sound.muted ? "Sound: muted" : "Sound"}</summary>
+      <div className="sound-panel" role="group" aria-label="Sound">
+        <Volume id="sound-interface" label="Interface" value={sound.interface} onChange={(v) => setSound({ interface: v })} />
+        <Volume id="sound-ambience" label="Ambience" value={sound.ambience} onChange={(v) => setSound({ ambience: v })} />
+        <label htmlFor="sound-mute" className="sound-mute">
+          <input id="sound-mute" type="checkbox" checked={sound.muted} onChange={(e) => setSound({ muted: e.target.checked })} />
+          Mute
+        </label>
+      </div>
+    </details>
   );
 }
 
@@ -76,6 +114,7 @@ export function TopBar() {
         Undo
       </button>
       <GraphicsSetting />
+      <SoundSetting />
       <nav className="panels" aria-label="Panels">
         <button type="button" aria-expanded={menuOpen} aria-controls="city-menu" onClick={toggleMenu}>City</button>
         <button type="button" aria-expanded={logOpen} aria-controls="activity-log" onClick={toggleLog}>Log</button>
