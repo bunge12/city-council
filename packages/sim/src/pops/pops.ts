@@ -9,7 +9,10 @@
 //
 // Only the functions here change a pop, and each keeps the derived index
 // (where.ts) current: which pops live in and work at each building, and
-// each building's people and jobs filled. They refuse a change that would
+// each building's people and jobs filled. Each keeps the city's running
+// totals current too (stats/stats.ts, M3-04): it takes the pop and the
+// jobs filled at the workplaces it touches out of them before the change
+// and puts them back after. They refuse a change that would
 // put a home over the people it holds room for, or a workplace over its
 // jobs. Nothing creates pops in play yet: newcomers arrive in M3-08.
 //
@@ -20,6 +23,7 @@ import { isBuilding, type BuildingState } from "../buildings/buildings";
 import { buildingJobs } from "../buildings/jobs";
 import { resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
+import { countFilled, countPop } from "../stats/stats";
 import { POPS_BALANCE } from "./balance";
 import { popIndexOf, linkHome, linkWork, unlinkHome, unlinkWork, type PopIndex } from "./where";
 
@@ -263,6 +267,7 @@ export function addPop(state: SimState, spec: NewPop): number {
   p.children[id] = spec.children;
   p.satisfaction[id] = spec.satisfaction;
   linkHome(index, p, id);
+  countPop(state, id, 1);
   return id;
 }
 
@@ -271,8 +276,11 @@ export function removePop(state: SimState, id: number): void {
   const p = state.pops;
   if (!isPop(p, id)) throw new RangeError(`pop ${id} does not exist`);
   const index = popIndexOf(state);
+  const work = p.work[id] ?? NO_WORK;
+  uncount(state, id, work, NO_WORK);
   unlinkWork(index, p, id);
   unlinkHome(index, p, id);
+  if (work !== NO_WORK) countFilled(state, work, 1);
   clearRow(p, id);
   const free = resized(p.free, p.free.length + 1);
   free[p.free.length] = id;
@@ -288,6 +296,24 @@ function clearRow(p: PopState, id: number): void {
   p.wealth[id] = 0;
   p.children[id] = 0;
   p.satisfaction[id] = 0;
+}
+
+/**
+ * Takes live pop `id`, and the jobs filled at workplaces `a` and `b`, out
+ * of the running totals before a change. Either may be NO_WORK, and `b`
+ * may be `a`.
+ */
+function uncount(state: SimState, id: number, a: number, b: number): void {
+  countPop(state, id, -1);
+  if (a !== NO_WORK) countFilled(state, a, -1);
+  if (b !== NO_WORK && b !== a) countFilled(state, b, -1);
+}
+
+/** Puts live pop `id`, and the jobs filled at `a` and `b`, back into the running totals after the change `uncount` came before. */
+function recount(state: SimState, id: number, a: number, b: number): void {
+  countPop(state, id, 1);
+  if (a !== NO_WORK) countFilled(state, a, 1);
+  if (b !== NO_WORK && b !== a) countFilled(state, b, 1);
 }
 
 /** The live pop `id` and the index, or throws. */
@@ -311,11 +337,13 @@ export function setPopSize(state: SimState, id: number, size: number): void {
   const work = p.work[id] ?? NO_WORK;
   const children = p.children[id] ?? 0;
   if (work !== NO_WORK) checkJobs(state, work, workersFor(size, children), (index.filled[work] ?? 0) - workersFor(old, children));
+  uncount(state, id, work, NO_WORK);
   unlinkWork(index, p, id);
   index.people[home] = (index.people[home] ?? 0) - old + size;
   p.size[id] = size;
   keepJobIfWorking(p, id);
   linkWork(index, p, id);
+  recount(state, id, work, NO_WORK);
 }
 
 /** Takes the job of pop `id`, unlinked from its workplace, if it no longer has anyone who works. */
@@ -337,9 +365,12 @@ export function setPopWork(state: SimState, id: number, work: number): void {
     const already = p.work[id] === work ? popWorkers(p, id) : 0;
     checkJobs(state, work, popWorkers(p, id), (index.filled[work] ?? 0) - already);
   }
+  const before = p.work[id] ?? NO_WORK;
+  uncount(state, id, before, work);
   unlinkWork(index, p, id);
   p.work[id] = work;
   linkWork(index, p, id);
+  recount(state, id, before, work);
 }
 
 /**
@@ -355,12 +386,14 @@ export function setPopProfile(state: SimState, id: number, profile: PopProfile):
   const work = p.work[id] ?? NO_WORK;
   const size = p.size[id] ?? 0;
   if (work !== NO_WORK) checkJobs(state, work, workersFor(size, profile.children), (index.filled[work] ?? 0) - popWorkers(p, id));
+  uncount(state, id, work, NO_WORK);
   unlinkWork(index, p, id);
   p.education[id] = profile.education;
   p.wealth[id] = profile.wealth;
   p.children[id] = profile.children;
   keepJobIfWorking(p, id);
   linkWork(index, p, id);
+  recount(state, id, work, NO_WORK);
 }
 
 /** Sets pop `id`'s satisfaction. Throws if it is not a whole number from 0 to SATISFACTION_MAX. */
@@ -381,9 +414,12 @@ export function removeBuildingPops(state: SimState, ids: readonly number[]): voi
   const index = popIndexOf(state);
   const p = state.pops;
   for (const building of ids) {
+    countFilled(state, building, -1);
     for (let pop = index.workHead[building] ?? -1; pop >= 0; pop = index.workHead[building] ?? -1) {
+      countPop(state, pop, -1);
       unlinkWork(index, p, pop);
       p.work[pop] = NO_WORK;
+      countPop(state, pop, 1);
     }
     for (let pop = index.homeHead[building] ?? -1; pop >= 0; pop = index.homeHead[building] ?? -1) removePop(state, pop);
   }

@@ -16,6 +16,8 @@ import {
   type Command,
   type RoadChanges,
   type SimState,
+  applyStatsDelta,
+  encodeStatsDelta,
 } from "../src/index";
 import { submit } from "./seen-ends";
 import { cloneState } from "../src/state";
@@ -60,6 +62,8 @@ function pair() {
     // The grower's plan travels in every delta, as the generator does.
     copy.growth = { ...sim.growth };
     copy.centre = { ...sim.centre };
+    // So do the statistics.
+    expect(applyStatsDelta(copy.stats, encodeStatsDelta(sim.stats, copy.stats.next))).toBeNull();
     return cells;
   };
   return { sim, copy, run, send };

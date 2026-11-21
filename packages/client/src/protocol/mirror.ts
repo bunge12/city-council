@@ -3,6 +3,7 @@ import {
   LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
   applyBuildingDelta,
+  applyStatsDelta,
   applyCellDelta,
   applyRoadDelta,
   applyUndoDelta,
@@ -401,6 +402,11 @@ export class SimMirror {
     state.rng.set(delta.rng);
     state.growth = { ...delta.growth };
     state.centre = { ...delta.centre };
+    const statsProblem = applyStatsDelta(state.stats, delta.stats);
+    if (statsProblem !== null) {
+      this.outOfStep();
+      return;
+    }
     for (const entry of delta.log) state.log.push(entry);
     this.logFrom += delta.log.length;
     // Same paging as live state, so the copy stays the same shape.

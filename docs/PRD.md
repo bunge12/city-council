@@ -901,6 +901,12 @@ What the player sees:
 
 Milestones read the highest population the city has reached, so a city that shrinks does not lose what it has unlocked.
 
+How the statistics are kept (M3-04). There are 35 totals: population and the number of pops, residents by density, education and wealth (three each), workers employed and unemployed, jobs offered and filled for each of commercial, office and industrial, pops with children, and buildings for each of the 15 zone and density pairs. People are counted for population and the residents' breakdowns, and pops for `pops` and `popsWithChildren`. A building's jobs, offered and filled, are split by kind with its `jobMix`, so a mixed building counts commercial jobs, and at density 3 office jobs as well. The functions that change a pop take it out of the totals before the change and put it back after. Adding or removing a building does the same for its counts and jobs. A recount from the pop and building rows exists for tests only.
+
+The history keeps one Int32Array per total and one write position shared by all of them. The arrays grow by one sample a month until they hold 1,200, and after that each new sample overwrites the oldest. A new city's save therefore carries no history, and a full one is about 172 KB. The sample is taken on the first tick of each month, before any other system runs on that tick. The yearly counts of births, deaths, arrivals and departures start again from zero on 1 January, and the year that just ended is kept next to them. A city saved before version 18 has its totals counted when it loads. Its history starts empty, and its first sample is the next month's.
+
+Each delta carries a copy of the totals and the yearly counts, plus any samples taken since the previous delta. The client's copy therefore matches the sim's hash. M3-05 cuts this down to the totals that changed.
+
 ### M4 Economy
 
 One treasury per city. The budget closes once per game month.

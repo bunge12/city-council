@@ -14,6 +14,7 @@ import {
   roadTypeIndex,
   type BuildingDelta,
   type FromSimMessage,
+  encodeStatsDelta,
 } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
@@ -85,6 +86,7 @@ describe("building deltas in the mirror", () => {
         growth: { ...state.growth },
         cellReads: state.cellReads,
         centre: { ...state.centre },
+        stats: encodeStatsDelta(state.stats, state.stats.next),
         pending: [],
         steps: 0,
         timings: [],
