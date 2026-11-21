@@ -10,8 +10,9 @@ import { withEnds } from "./seen-ends";
  * `state` as an older version: its fields minus the ones that version did
  * not have. Every version before 10 also lacks the zoning cells and the tick
  * they settle by, every version before 11 the buildings, every version
- * before 13 the grower's plan, and every version before 14 the zoning in
- * its undo history.
+ * before 13 the grower's plan, every version before 14 the zoning in its
+ * undo history, every version before 15 the count of cell commands and
+ * every version before 16 the pops.
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
@@ -19,6 +20,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 11) gone.push("buildings");
   if (version < 13) gone.push("growth");
   if (version < 15) gone.push("cellReads");
+  if (version < 16) gone.push("pops");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
   // Before version 14 a ZoneCells left no undo record and no record held zoning.
   if (version < 14 && Array.isArray(kept["undo"])) {
@@ -62,7 +64,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(15);
+    expect(SNAPSHOT_VERSION).toBe(16);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -78,6 +80,7 @@ describe("migrateState", () => {
       buildings: fresh.buildings,
       growth: asMigrated(fresh).growth,
       cellReads: 0,
+      pops: fresh.pops,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -98,6 +101,7 @@ describe("migrateState", () => {
       buildings: fresh.buildings,
       growth: asMigrated(fresh).growth,
       cellReads: 0,
+      pops: fresh.pops,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -298,6 +302,21 @@ describe("migrateState", () => {
     step(migrated);
     expect(migrated.cells.zone.length).toBeGreaterThan(0);
     expect(migrated.cells.zone.every((z) => z === 0)).toBe(true);
+  });
+
+  it("upgrades a version 15 state by adding the pops, none of them, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const v15 = older(state, 15);
+    expect(v15).not.toHaveProperty("pops");
+    const migrated = migrateState(v15);
+    expect(migrated).toEqual(state);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(migrated.pops.flags).toHaveLength(0);
+    expect(migrated.pops.free).toHaveLength(0);
+    expect(migrated.pops.sweep).toBe(0);
+    expect(hashState(migrated)).toBe(hashState(state));
   });
 
   it("leaves a current state as it is", () => {

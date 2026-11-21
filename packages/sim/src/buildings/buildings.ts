@@ -31,6 +31,7 @@ import { BUILDING_TYPES } from "./balance";
 import { noteColumns } from "./candidates";
 import { noteBuildingChanged } from "./changes";
 import { ZONING_BALANCE } from "../zoning/balance";
+import { removeBuildingPops } from "../pops/pops";
 import { fileBuilding, lotColumns, lotProblem, lotShapeOf, unfileBuildings } from "./where";
 
 /** Set in `flags` for a live building. */
@@ -330,6 +331,9 @@ export function removeBuildings(state: SimState, ids: readonly number[]): void {
     }
   }
   if (ids.length === 0) return;
+  // Their pops go with them, and their jobs are freed, while the rows still
+  // say what each building was (M3-03; M3-12 moves them instead).
+  removeBuildingPops(state, ids);
   // The columns each was filed on, which a lot a change of roads took may
   // no longer walk to from its row.
   unfileBuildings(state, ids);
