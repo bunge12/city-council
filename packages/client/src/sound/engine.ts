@@ -6,9 +6,11 @@
 // schedules nothing before then.
 //
 // The graph is master <- interface bus <- cues, and master <- ambience bus <-
-// layers. Mute zeroes the master, so it silences both. A layer is the seam
-// issue M3-19 builds on: the view sets its level, and its sources connect to
-// its input. No layer makes a sound yet.
+// layers. Mute zeroes the master, so it silences both. A layer's level is
+// set by the view (ambience.ts, issue M3-19). A layer plays two kinds of
+// sound: one held source, such as the wind, kept running only while the
+// ambience may be heard, and short sounds placed left or right, such as a
+// hammer, which take voices from the same cap as the cues.
 //
 // A context can also be held paused: a touch the browser does not count as a
 // gesture, or a tab it put to sleep. Its clock stops, so nothing is
@@ -23,7 +25,7 @@ import type { SoundSettings } from "./settings";
 /** The parts of an AudioContext the engine uses, so a test can hand it a fake. */
 export type SoundContext = Pick<
   AudioContext,
-  "currentTime" | "state" | "destination" | "sampleRate" | "resume" | "createGain" | "createOscillator" | "createBufferSource" | "createBuffer" | "createBiquadFilter"
+  "currentTime" | "state" | "destination" | "sampleRate" | "resume" | "createGain" | "createOscillator" | "createBufferSource" | "createBuffer" | "createBiquadFilter" | "createStereoPanner" | "suspend"
 >;
 
 /**
@@ -34,6 +36,12 @@ export type SoundContext = Pick<
  * zero, and `capped` with every voice in use.
  */
 export type CueOutcome = "played" | "locked" | "suspended" | "unavailable" | "muted" | "silent" | "capped";
+
+/** Why the ambience may not be scheduled now: the reasons a cue may not, with `silent` for the ambience volume at zero. */
+export type AmbienceBlock = Exclude<CueOutcome, "played" | "capped">;
+
+/** Starts a held source feeding `out` and returns what stops it. */
+export type HeldSource = (ctx: SoundContext, out: AudioNode) => () => void;
 
 export interface CueRecord {
   cue: Cue;
@@ -58,6 +66,8 @@ export interface SoundEngineOptions {
 }
 
 const QUIET = 0.0001;
+/** Seconds a layer's level takes to settle on a new value, so a zoom does not click. */
+const LEVEL_SMOOTHING = 0.15;
 /** Seconds ahead of now a cue is scheduled, so its first sample is not late. */
 const LEAD = 0.005;
 
@@ -73,10 +83,16 @@ class Layer implements AmbientLayer {
   level = 0;
   gain: GainNode | null = null;
   ctx: SoundContext | null = null;
+  /** What stops the layer's held source, while one runs. */
+  stopHeld: (() => void) | null = null;
+  /** When each of the layer's short sounds ends, in the context's seconds. */
+  voiceEnds: number[] = [];
   constructor(readonly name: string) {}
   setLevel(level: number): void {
-    this.level = Math.min(1, Math.max(0, level));
-    if (this.gain && this.ctx) this.gain.gain.setValueAtTime(this.level, this.ctx.currentTime);
+    const next = Math.min(1, Math.max(0, level));
+    if (next === this.level) return;
+    this.level = next;
+    if (this.gain && this.ctx) this.gain.gain.setTargetAtTime(this.level, this.ctx.currentTime, LEVEL_SMOOTHING / 3);
   }
   input(): AudioNode | null {
     return this.gain;
@@ -89,6 +105,8 @@ export class SoundEngine {
   private settings: SoundSettings;
   private started: Started | null = null;
   private failed = false;
+  /** Whether the page is hidden: the context is held paused, and nothing resumes it until the page shows again. */
+  private hidden = false;
   /** When each sounding cue ends, in the context's seconds. */
   private voiceEnds: number[] = [];
   private readonly records: CueRecord[] = [];
@@ -105,7 +123,7 @@ export class SoundEngine {
     return this.started?.ctx.state === "running";
   }
 
-  /** Cues sounding now. */
+  /** Sounds from the voice cap sounding now: cues, and the ambience's short sounds. */
   get voices(): number {
     this.pruneVoices();
     return this.voiceEnds.length;
@@ -115,7 +133,7 @@ export class SoundEngine {
   unlock(): void {
     if (this.failed) return;
     if (this.started) {
-      void this.started.ctx.resume().catch(() => undefined);
+      if (!this.hidden) void this.started.ctx.resume().catch(() => undefined);
       return;
     }
     let ctx: SoundContext;
@@ -137,6 +155,19 @@ export class SoundEngine {
     void ctx.resume().catch(() => undefined);
   }
 
+  /**
+   * The page was hidden or shown. Hidden, the context is paused, so the
+   * wind does not play on in a background tab where no frame comes to
+   * stop it; shown, it resumes.
+   */
+  setHidden(hidden: boolean): void {
+    this.hidden = hidden;
+    const s = this.started;
+    if (!s) return;
+    if (hidden) void s.ctx.suspend().catch(() => undefined);
+    else void s.ctx.resume().catch(() => undefined);
+  }
+
   setSettings(settings: SoundSettings): void {
     this.settings = { ...settings };
     this.applyGains();
@@ -150,6 +181,61 @@ export class SoundEngine {
     return outcome;
   }
 
+  /** Why the ambience may not be scheduled now, or null when it may. */
+  ambienceBlock(): AmbienceBlock | null {
+    if (this.failed) return "unavailable";
+    const s = this.started;
+    if (!s) return "locked";
+    if (s.ctx.state !== "running") return "suspended";
+    if (this.settings.muted) return "muted";
+    if (this.settings.ambience <= 0) return "silent";
+    return null;
+  }
+
+  /**
+   * Keeps layer `name`'s held source running while `on` and the ambience may
+   * be heard, starting it with `start` when it is not, and stops it
+   * otherwise, so nothing is scheduled while it is muted or at zero.
+   * Returns whether it runs.
+   */
+  hold(name: string, on: boolean, start: HeldSource): boolean {
+    const layer = this.layerOf(name);
+    const s = this.started;
+    const may = on && this.ambienceBlock() === null && s !== null && layer.gain !== null;
+    if (!may) {
+      layer.stopHeld?.();
+      layer.stopHeld = null;
+      return false;
+    }
+    if (!layer.stopHeld && layer.gain) layer.stopHeld = start(s.ctx, layer.gain);
+    return true;
+  }
+
+  /**
+   * Plays `recipe` once on layer `name`, placed at `pan` (-1 left to 1
+   * right). It takes a voice from the cap the cues share, and no more than
+   * `limit` of the layer's sounds play at once.
+   */
+  playOnLayer(name: string, recipe: CueRecipe, pan: number, limit: number): CueOutcome {
+    const block = this.ambienceBlock();
+    if (block) return block;
+    const s = this.started;
+    const layer = this.layerOf(name);
+    if (!s || !layer.gain) return "locked";
+    this.pruneVoices();
+    const now = s.ctx.currentTime;
+    layer.voiceEnds = layer.voiceEnds.filter((end) => end > now);
+    if (this.voiceEnds.length >= this.maxVoices || layer.voiceEnds.length >= limit) return "capped";
+    const start = now + LEAD;
+    const panner = s.ctx.createStereoPanner();
+    panner.pan.setValueAtTime(Math.min(1, Math.max(-1, pan)), start);
+    panner.connect(layer.gain);
+    const end = start + synthesise(s, recipe, start, panner);
+    this.voiceEnds.push(end);
+    layer.voiceEnds.push(end);
+    return "played";
+  }
+
   /** The cues asked for, oldest first, with what became of each. */
   requests(): CueRecord[] {
     return this.records.map((r) => ({ ...r }));
@@ -161,6 +247,10 @@ export class SoundEngine {
 
   /** The ambient layer named `name`, made on first use. Its level starts at zero. */
   layer(name: string): AmbientLayer {
+    return this.layerOf(name);
+  }
+
+  private layerOf(name: string): Layer {
     let layer = this.layers.get(name);
     if (!layer) {
       layer = new Layer(name);
@@ -199,7 +289,7 @@ export class SoundEngine {
     if (!s) return "locked";
     if (s.ctx.state !== "running") {
       // A stopped clock would hold every voice forever, so nothing is scheduled on it.
-      void s.ctx.resume().catch(() => undefined);
+      if (!this.hidden) void s.ctx.resume().catch(() => undefined);
       return "suspended";
     }
     if (this.settings.muted) return "muted";
@@ -207,13 +297,13 @@ export class SoundEngine {
     this.pruneVoices();
     if (this.voiceEnds.length >= this.maxVoices) return "capped";
     const start = s.ctx.currentTime + LEAD;
-    this.voiceEnds.push(start + synthesise(s, CUES[cue], start));
+    this.voiceEnds.push(start + synthesise(s, CUES[cue], start, s.interfaceBus));
     return "played";
   }
 }
 
-/** Schedules one cue on the interface bus at `start`. Returns how long it sounds, in seconds. */
-function synthesise(s: Started, recipe: CueRecipe, start: number): number {
+/** Schedules one sound into `out` at `start`. Returns how long it sounds, in seconds. */
+function synthesise(s: Started, recipe: CueRecipe, start: number, out: AudioNode): number {
   const { ctx } = s;
   let length = 0;
   for (const tone of recipe.tones) {
@@ -224,7 +314,7 @@ function synthesise(s: Started, recipe: CueRecipe, start: number): number {
     if (tone.to !== tone.from) osc.frequency.exponentialRampToValueAtTime(tone.to, t + tone.length);
     const env = envelope(ctx, t, tone.length, tone.peak);
     osc.connect(env);
-    env.connect(s.interfaceBus);
+    env.connect(out);
     osc.start(t);
     osc.stop(t + tone.length + 0.02);
     length = Math.max(length, tone.at + tone.length);
@@ -240,7 +330,7 @@ function synthesise(s: Started, recipe: CueRecipe, start: number): number {
     const env = envelope(ctx, t, n.length, n.peak);
     source.connect(filter);
     filter.connect(env);
-    env.connect(s.interfaceBus);
+    env.connect(out);
     source.start(t);
     source.stop(t + n.length + 0.02);
     length = Math.max(length, n.at + n.length);
