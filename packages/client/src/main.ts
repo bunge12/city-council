@@ -25,6 +25,9 @@ import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { ClockClient } from "./protocol/clock";
 import { createWorkerTransport } from "./protocol/transport";
 import { readTestSwitch } from "./test-switch";
+import { CommandCues } from "./sound/command-cues";
+import { SoundEngine, type CueRecord } from "./sound/engine";
+import { loadSound, saveSound, type SoundSettings } from "./sound/settings";
 import { SaveClient, fetchCityFile, requestPersistence, takeLoadAddress, type PersistenceResult } from "./save/page";
 import { SAVES_CHANNEL, type LoadFileMessage, type SaveStatus } from "./save/channel";
 import { createCameraControls, type CameraControls } from "./camera/controls";
@@ -59,7 +62,7 @@ import { ZoneToolController, type ZoneHover, type ZonePreview } from "./tools/zo
 import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useUi, type BlockLabel } from "./ui/store";
+import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
 const TAB_CITY_KEY = "city-council:city";
@@ -107,6 +110,24 @@ if (load.address !== null) {
     .then((file) => worker.saves.send(file, file.bytes ? [file.bytes] : []));
 }
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
+
+// Sound (issue M3-02). The settings are kept in this browser, like the
+// graphics preset. The audio context is made on the first click or key,
+// because browsers block audio before one.
+useSound.setState(loadSound(localStore()));
+const sound = new SoundEngine({ createContext: () => new AudioContext(), settings: useSound.getState() });
+const commandCues = new CommandCues();
+const unlockSound = (): void => sound.unlock();
+// Some browsers count only a finished tap or click as a gesture that may start audio, so each of these tries.
+for (const event of ["pointerdown", "pointerup", "click", "touchend", "keydown"]) window.addEventListener(event, unlockSound, { capture: true });
+
+/** The player changed a sound setting. */
+function setSound(patch: Partial<SoundSettings>): void {
+  const next = { ...useSound.getState(), ...patch };
+  useSound.setState(next);
+  saveSound(localStore(), next);
+  sound.setSettings(next);
+}
 const saves = new SaveClient(worker.saves);
 const simClock = new ClockClient(worker.clock);
 // For tests: with `?heldclock` the sim steps only when the page says, from
@@ -161,6 +182,9 @@ document.addEventListener("visibilitychange", () => {
 async function sendCommand(type: string, payload: unknown = {}): Promise<CommandResult> {
   const result = await mirror.sendCommandSettled(type, payload);
   useUi.setState({ lastCommand: result.ok ? `${type}: ok` : `${type}: refused, ${result.reason}` });
+  // The cue follows the sim's answer, so a refusal never sounds like a success.
+  const cue = commandCues.cueFor(type, payload, result);
+  if (cue) sound.play(cue);
   return result;
 }
 
@@ -415,6 +439,7 @@ const services: AppServices = {
   routeTool,
   blockOverlay,
   setPreset: choosePresetInSettings,
+  setSound,
 };
 const uiRoot = document.getElementById("ui");
 if (!uiRoot) throw new Error("#ui is missing from index.html");
@@ -1310,6 +1335,8 @@ declare global {
       advance: (steps: number) => Promise<number>;
       /** Hands stepping back to the worker's clock. */
       releaseClock: () => Promise<number>;
+      /** The cues the sound engine was asked to play, oldest first, and what became of each (issue M3-02). */
+      sound: { cues: () => CueRecord[]; clear: () => void; unlocked: () => boolean };
     };
   }
 }
@@ -1329,4 +1356,5 @@ window.cityCouncil = {
   holdClock: () => simClock.hold(),
   advance: (steps) => simClock.advance(steps).then((tick) => untilMirrorAt(tick)),
   releaseClock: () => simClock.release(),
+  sound: { cues: () => sound.requests(), clear: () => sound.clearRequests(), unlocked: () => sound.unlocked },
 };
