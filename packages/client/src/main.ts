@@ -25,6 +25,7 @@ import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { ClockClient } from "./protocol/clock";
 import { createWorkerTransport } from "./protocol/transport";
 import { readTestSwitch } from "./test-switch";
+import { Ambience, type AmbienceReport } from "./sound/ambience";
 import { CommandCues } from "./sound/command-cues";
 import { SoundEngine, type CueRecord } from "./sound/engine";
 import { loadSound, saveSound, type SoundSettings } from "./sound/settings";
@@ -117,6 +118,8 @@ const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
 useSound.setState(loadSound(localStore()));
 const sound = new SoundEngine({ createContext: () => new AudioContext(), settings: useSound.getState() });
 const commandCues = new CommandCues();
+// Wind and construction (issue M3-19), set from the camera each frame in startCamera.
+const ambience = new Ambience(sound);
 const unlockSound = (): void => sound.unlock();
 // Some browsers count only a finished tap or click as a gesture that may start audio, so each of these tries.
 for (const event of ["pointerdown", "pointerup", "click", "touchend", "keydown"]) window.addEventListener(event, unlockSound, { capture: true });
@@ -173,6 +176,8 @@ function saveNow(): Promise<SaveStatus> {
 // tab may be frozen or discarded without further warning.
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") void saves.save("hidden");
+  // No frame comes in a hidden tab to stop the wind, so its audio is paused there (issue M3-19).
+  sound.setHidden(document.visibilityState === "hidden");
 });
 
 /**
@@ -1118,12 +1123,24 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     }
     return id;
   };
+  /** Where each building going up in view sits across the screen, in pixels, refilled each frame for the ambience. */
+  const sites: number[] = [];
   view.onBeforeFrame((seconds) => {
     controls.update(seconds);
     const p = view.camera.position;
     const band = rig.zoomBand();
     document.body.dataset["zoomBand"] = band;
     view.setZoomBand(band, rig.heightAboveGround());
+    // The construction layer is heard in the street band only, so only there are the buildings going up looked for.
+    sites.length = 0;
+    const width = canvas.clientWidth;
+    if (band === "street") {
+      view.forEachRising((x, y, z) => {
+        v.set(x, y, z).project(view.camera);
+        if (v.z < 1 && v.x >= -1 && v.x <= 1 && v.y >= -1 && v.y <= 1) sites.push(((v.x + 1) / 2) * width);
+      });
+    }
+    ambience.update({ height: rig.heightAboveGround(), band, seconds, sites, width, running: (mirror.state?.speed ?? 0) > 0 });
     const cursor = controls.cursor();
     const snap = snapAt(cursor);
     lastSnap = snap;
@@ -1336,7 +1353,13 @@ declare global {
       /** Hands stepping back to the worker's clock. */
       releaseClock: () => Promise<number>;
       /** The cues the sound engine was asked to play, oldest first, and what became of each (issue M3-02). */
-      sound: { cues: () => CueRecord[]; clear: () => void; unlocked: () => boolean };
+      sound: {
+        cues: () => CueRecord[];
+        clear: () => void;
+        unlocked: () => boolean;
+        /** What the wind and construction layers are doing (issue M3-19). */
+        ambience: () => AmbienceReport;
+      };
     };
   }
 }
@@ -1356,5 +1379,5 @@ window.cityCouncil = {
   holdClock: () => simClock.hold(),
   advance: (steps) => simClock.advance(steps).then((tick) => untilMirrorAt(tick)),
   releaseClock: () => simClock.release(),
-  sound: { cues: () => sound.requests(), clear: () => sound.clearRequests(), unlocked: () => sound.unlocked },
+  sound: { cues: () => sound.requests(), clear: () => sound.clearRequests(), unlocked: () => sound.unlocked, ambience: () => ambience.report() },
 };

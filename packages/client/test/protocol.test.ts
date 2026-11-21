@@ -173,7 +173,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     });
   });
 
-  it("sends deltas only when something changed, carrying only tick, speed, the generator, the grower's plan, the cell count and new log", async () => {
+  it("sends deltas only when something changed, carrying only tick, speed, the generator, the grower's plan, the cell count, the city centre and new log", async () => {
     const { mirror, run, received } = setup();
     await mirror.sendCommand("SetSpeed", { speed: 0 });
     run(100);
@@ -182,14 +182,14 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["cellReads", "growth", "log", "logFrom", "rng", "seq", "speed", "steps", "tick", "timings", "travelReadyAt", "type", "v"].sort(),
+      ["cellReads", "centre", "growth", "log", "logFrom", "rng", "seq", "speed", "steps", "tick", "timings", "travelReadyAt", "type", "v"].sort(),
     );
   });
 
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "pops", "landValue", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -244,6 +244,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       rng: new Uint32Array(4),
       growth: { quota: 0, day: -1, deadline: 0, free: 0, used: 0 },
       cellReads: 0,
+      centre: { x: 0, z: 0, weight: 0, due: 0 },
       travelReadyAt: 0,
       pending: [],
       steps: 1,
@@ -636,8 +637,11 @@ describe("snapshot transfer", () => {
     const roadBuffers = Object.values(state.roads).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
     const cellBuffers = [state.cells.offset.buffer, state.cells.zone.buffer, state.cells.density.buffer];
     const buildingBuffers = Object.values(state.buildings).map((value) => value.buffer);
-    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers, ...buildingBuffers]);
+    // Every pop field but the sweep's limit, which is a number.
+    const popBuffers = Object.values(state.pops).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
+    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers, ...buildingBuffers, ...popBuffers]);
     expect(buildingBuffers).toHaveLength(19);
+    expect(popBuffers).toHaveLength(9);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });
 });

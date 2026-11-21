@@ -101,6 +101,24 @@ export { buildingJobs, jobsByEducation, jobsByKind, jobsForLot } from "./buildin
 export type { JobsByEducation, JobsByKind } from "./buildings/jobs";
 export { POPS_BALANCE, checkPopsBalance } from "./pops/balance";
 export type { PopsBalance } from "./pops/balance";
+export {
+  NO_WORK,
+  POP_ALIVE,
+  POP_LEVELS,
+  POP_ROW_BYTES,
+  SATISFACTION_MAX,
+  cutPeople,
+  isPop,
+  popCount,
+  popIdLimit,
+  popSizeCap,
+  popWorkers,
+  readPop,
+  workersFor,
+} from "./pops/pops";
+export type { PopProfile, PopRow, PopState } from "./pops/pops";
+export { buildingPeople, jobsFilled, popsAtHome, popsAtWork } from "./pops/where";
+export { POPS_SYSTEM, popSlice } from "./pops/sweep";
 export { DEMAND_BALANCE, checkDemandBalance } from "./demand/balance";
 export type { DemandBalance } from "./demand/balance";
 export { BUILDING_ALIVE, buildingCount, buildingIdLimit, isBuilding, readBuilding } from "./buildings/buildings";
@@ -110,6 +128,10 @@ export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
 export { GROWER_SYSTEM, dayOf, freeFrontCells, growthOnTick, planDay, residentsFor } from "./buildings/grower";
 export { createGrowth, type GrowthState } from "./buildings/growth";
+export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
+export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
+export { createCentre, type CentreState } from "./landvalue/centre";
+export { LAND_VALUE_SYSTEM, falloff, findCentre, landValueAt, landValueAtPoint, nextMonth, type LandValue } from "./landvalue/land-value";
 export { NO_BUILDING, buildingInfo, buildingOnSlot, buildingsInChunk, buildingsOnSlots, cellBuildings } from "./buildings/where";
 export type { BuildingInfo } from "./buildings/where";
 export {

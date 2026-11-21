@@ -142,6 +142,9 @@ function expectSound(state: SimState): void {
   expect(Array.from(kept.cells)).toEqual(Array.from(fresh.cells));
   const candidates = candidateSets(state, syncCells(state), () => segmentBuildings(state));
   expect(candidates.kept).toEqual(candidates.fresh);
+  // The land value grid and the sums the city centre reads (M3-13).
+  expect(kept.pollution).toEqual(fresh.pollution);
+  expect(kept.sums).toEqual(fresh.sums);
   expect(hashState(deserialize(serialize(state)).state)).toBe(hashState(state));
 }
 
@@ -690,6 +693,9 @@ describe("a client's copy", () => {
       expect(Array.from(kept.cells)).toEqual(Array.from(fresh.cells));
       expect(kept.chunks).toEqual(fresh.chunks);
       expect(Array.from(kept.cells)).toEqual(Array.from(buildingIndexSets(state).kept.cells));
+      expect(kept.sums).toEqual(fresh.sums);
+      expect(kept.sums).toEqual(buildingIndexSets(state).kept.sums);
+      expect(kept.pollution).toEqual(fresh.pollution);
     };
     ok(state, command("UpgradeRoad", { segments: [cellAt(state, 4350, 4591)?.segment as number], type: "oneWay" }));
     check();

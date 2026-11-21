@@ -1,8 +1,8 @@
 // Derived data: structures rebuilt from state that are never saved or
 // hashed: the terrain, the road spatial index, the routing graph, the
 // blocks, where the zoning cells are, which building stands on each, the
-// grower's candidates and the travel times between zones. See "Derived
-// data" in the PRD.
+// grower's candidates, who lives and works in each building, and the
+// travel times between zones. See "Derived data" in the PRD.
 //
 // The terrain is cached by seed (terrain/cache.ts). Each other one is cached
 // by the state object it comes from and built from its
@@ -10,13 +10,15 @@
 // rebuilds its own and nothing about a host's history can leak into it.
 
 import { candidateCount, candidatesBuilt, prepareCandidates } from "./buildings/candidates";
-import { prepareBuildingIndex, segmentBuildings } from "./buildings/where";
+import { pollutionGrid, prepareBuildingIndex, segmentBuildings } from "./buildings/where";
 import { blockIndexOf, existingBlockIndex, listBlocks, settleBlocks } from "./roads/blocks";
+import { popIndexOf } from "./pops/where";
 import { routingGraphOf } from "./roads/routing";
 import { roadIndexOf } from "./roads/spatial";
 import type { SimState } from "./state";
 import { prepareTravelTimes } from "./travel-times";
 import { terrainOf } from "./terrain/cache";
+import { prepareWaterMap } from "./landvalue/water";
 import { cellsLaidOut, syncCells } from "./zoning/cell-index";
 
 /**
@@ -32,7 +34,10 @@ export function prepareDerived(state: SimState): void {
   listBlocks(blockIndexOf(state.roads));
   const index = syncCells(state);
   prepareBuildingIndex(state);
+  prepareWaterMap(terrainOf(state.seed));
+  pollutionGrid(state);
   prepareCandidates(state, index, () => segmentBuildings(state));
+  popIndexOf(state);
   prepareTravelTimes(state);
 }
 

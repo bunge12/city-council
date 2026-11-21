@@ -67,9 +67,9 @@ describe("the pops balance", () => {
 
   it("refuses numbers out of range", () => {
     const bad = (path: string[], value: unknown) => checkPopsBalance(withField(popsJson, path, value));
-    expect(bad(["popSizeCap"], [5, 20])).toEqual(["popSizeCap must list 3 whole numbers of at least 1, one per density"]);
-    expect(bad(["popSizeCap"], [0, 20, 100])).toEqual(["popSizeCap must list 3 whole numbers of at least 1, one per density"]);
-    expect(bad(["popSizeCap"], [5, 2.5, 100])).toEqual(["popSizeCap must list 3 whole numbers of at least 1, one per density"]);
+    expect(bad(["popSizeCap"], [5, 20])).toEqual(["popSizeCap must list 3 whole numbers from 1 to 255, one per density"]);
+    expect(bad(["popSizeCap"], [0, 20, 100])).toEqual(["popSizeCap must list 3 whole numbers from 1 to 255, one per density"]);
+    expect(bad(["popSizeCap"], [5, 2.5, 100])).toEqual(["popSizeCap must list 3 whole numbers from 1 to 255, one per density"]);
     expect(bad(["popSizeCap"], [20, 5, 100])).toEqual(["popSizeCap must not fall as density rises"]);
     expect(bad(["newcomer", "education", "high"], 1.2)).toEqual(["newcomer.education.high must be a share from 0 to 1"]);
     expect(bad(["newcomer", "wealth", "high"], 0.3)).toEqual([expect.stringMatching(/^newcomer\.wealth must add to 1/)]);

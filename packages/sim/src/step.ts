@@ -1,5 +1,7 @@
 import { GROWER } from "./buildings/grower";
+import { POPS } from "./pops/sweep";
 import { keepBuildings } from "./buildings/upkeep";
+import { LAND_VALUE } from "./landvalue/land-value";
 import { applyPending, type DroppedCommand } from "./commands";
 import { catchUpDerived } from "./derived";
 import type { SimState } from "./state";
@@ -12,8 +14,13 @@ export interface System {
   run(state: SimState): void;
 }
 
-/** The systems `step` runs each tick, in this fixed order. */
-export const SYSTEMS: readonly System[] = [GROWER];
+/**
+ * The systems `step` runs each tick, in this fixed order. The pops' sweep
+ * comes first, so every system after it reads the day's slice. Land value
+ * keeps the city centre before the grower builds, so a building grown on
+ * the first tick of a month sees the month's centre.
+ */
+export const SYSTEMS: readonly System[] = [POPS, LAND_VALUE, GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";

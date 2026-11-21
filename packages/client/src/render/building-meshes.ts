@@ -224,6 +224,12 @@ export interface BuildingLayer {
   formVersion(): number;
   /** The middle of the top of building `id`'s box as drawn, in world metres, or null. Where the bulldozer's price tag stands. */
   topOf(id: number): { x: number; y: number; z: number } | null;
+  /**
+   * Calls `fn` with the middle of the lot of every building drawn under
+   * construction, at the ground (issue M3-19): where the construction layer
+   * places its sound.
+   */
+  forEachRising(fn: (x: number, y: number, z: number) => void): void;
   stats(): BuildingStats;
   dispose(): void;
 }
@@ -1769,6 +1775,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       const c = Math.cos(box.angle);
       const s = Math.sin(box.angle);
       return { x: box.x + lx * c + lz * s, y: box.y + e.maxY, z: box.z - lx * s + lz * c };
+    },
+    forEachRising(fn) {
+      for (const p of young) fn(p.place.x, p.place.y, p.place.z);
     },
     stats: () => stats,
     dispose() {

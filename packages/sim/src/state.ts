@@ -2,7 +2,9 @@ import { BALANCE_STAMP } from "./balance-stamp";
 import { createBuildings, type BuildingState } from "./buildings/buildings";
 import { createGrowth, type GrowthState } from "./buildings/growth";
 import type { Command } from "./commands";
+import { createCentre, type CentreState } from "./landvalue/centre";
 import type { LogEntry } from "./log";
+import { createPops, type PopState } from "./pops/pops";
 import { seedRng } from "./rng";
 import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, type RoadNetwork } from "./roads/network";
@@ -14,7 +16,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 16;
+export const SNAPSHOT_VERSION = 18;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -96,6 +98,17 @@ export interface SimState {
    */
   growth: GrowthState;
   /**
+   * Every pop, in flat arrays by id, and the daily sweep's cursor
+   * (pops/pops.ts, M3-03). Who lives and works where is derived
+   * (pops/where.ts).
+   */
+  pops: PopState;
+  /**
+   * The city centre land value measures from, and when it is worked out
+   * again (landvalue/land-value.ts, M3-13). Land value itself is derived.
+   */
+  centre: CentreState;
+  /**
    * The tick from which the sim may read the travel times between zones. A
    * change of roads gives the table the ticks up to this one to be rebuilt
    * in (travel-times.ts). At or below `tick` when nothing is being rebuilt.
@@ -145,6 +158,10 @@ export function createBareState(seed: number): SimState {
     // Last, where the version 15 migration puts it: the key order is the order a snapshot writes and the hash reads.
     cellReads: 0,
     // After it, where the version 16 migration puts it.
+    pops: createPops(),
+    // After the pops, where the version 17 migration puts it.
+    centre: createCentre(),
+    // After the centre, where the version 18 migration puts it.
     travelReadyAt: 0,
   };
 }

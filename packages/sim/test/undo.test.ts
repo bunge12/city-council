@@ -84,8 +84,8 @@ function refusal(state: SimState, c: Command): string {
 
 /** The state hash leaving out the log and the undo history, and the tick, which every step moves. */
 function cityHash(state: SimState): string {
-  // The ticks a change of cells settles by and the travel times are rebuilt by are deadlines, like the tick, not part of the city, and so is the grower's plan.
-  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0, growth: createGrowth(), travelReadyAt: 0 });
+  // The ticks a change of cells settles by and the travel times are rebuilt by are deadlines, like the tick, not part of the city, and so are the grower's plan and when the centre is next due.
+  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0, growth: createGrowth(), centre: { ...state.centre, due: 0 }, travelReadyAt: 0 });
 }
 
 function findNode(net: RoadNetwork, x: number, z: number): number {
