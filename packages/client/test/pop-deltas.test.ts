@@ -1,10 +1,13 @@
 // M3-05: people and statistics in the protocol and the mirror. The same
 // SimHost the worker runs, over an in-memory transport, on a street the
-// grower has built. Nothing moves pops in play until M3-08, so the test
-// changes them on the host's state between steps, as a system would.
+// grower has built. Most tests change pops on the host's state between
+// steps, as a system would; the last lets newcomers arrive in play (M3-08).
 import { describe, expect, it } from "vitest";
 import {
+  CONNECTION_BALANCE,
+  NONE,
   NO_WORK,
+  connectionEnd,
   PROTOCOL_VERSION,
   STAT_TOTALS,
   addPop,
@@ -272,5 +275,53 @@ describe("people and statistics in deltas", () => {
     // The bad delta itself, then the snapshot the mirror asked for.
     expect(received.slice(asked).map((m) => m.type)).toEqual(["delta", "snapshot"]);
     expect(bad.v).toBe(PROTOCOL_VERSION);
+  });
+});
+
+describe("newcomers in play (M3-08)", () => {
+  /** A street from the first outside connection's stub and one joined to nothing, both zoned R1 on one side. */
+  function twoStreets(): SimState {
+    const state = createState(SEED);
+    const seq = { n: 0 };
+    const r = state.roads;
+    const edge = state.connections[0] ?? NONE;
+    const inner = connectionEnd(r, edge);
+    const x = r.nodeX[inner] ?? 0;
+    const z = r.nodeZ[inner] ?? 0;
+    const dx = (x - (r.nodeX[edge] ?? 0)) / CONNECTION_BALANCE.stubLength;
+    const dz = (z - (r.nodeZ[edge] ?? 0)) / CONNECTION_BALANCE.stubLength;
+    run(state, "BuildRoad", { from: { x, z }, to: { x: x + dx * 128, z: z + dz * 128 }, type: "street" }, seq);
+    const off = 5 + 24;
+    run(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: x + dx * 2 - dz * off, z: z + dz * 2 + dx * off }, to: { x: x + dx * 126 - dz * off, z: z + dz * 126 + dx * off }, width: 44 }] }, seq);
+    run(state, "BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" }, seq);
+    run(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4571 }, to: { x: 4390, z: 4571 }, width: 44 }] }, seq);
+    return state;
+  }
+
+  it("brings newcomers' people to the mirror, and the mirror says why homes on a street joined to nothing stay empty", () => {
+    const state = twoStreets();
+    const { host, mirror } = setup(state);
+    for (let round = 0; round < 60; round++) {
+      host.advance(25);
+      expectLevel(mirror, state, `round ${round}`);
+    }
+    expect(livePops(state).length).toBeGreaterThan(5);
+    const empty = homes(state).filter((id) => buildingPeople(state, id) === 0);
+    const full = homes(state).filter((id) => buildingPeople(state, id) > 0);
+    expect(full.length).toBeGreaterThan(3);
+    // Homes on the street joined to nothing stand empty, and say why.
+    const cutOff = empty.filter((id) => mirror.whyNoNewcomers(id) === "noRoute");
+    expect(cutOff.length).toBeGreaterThan(3);
+    for (const id of cutOff) expect(mirror.buildingPeople(id)).toBe(0);
+    for (const id of full) expect(mirror.whyNoNewcomers(id)).toBeNull();
+    // Held below zero, every joined home waits for demand.
+    const release = holdDemandBars(-50);
+    try {
+      host.advance(1);
+    } finally {
+      release();
+    }
+    for (const id of full) expect(mirror.whyNoNewcomers(id)).toBe("noDemand");
+    expect(mirror.state?.stats.year.arrivals).toBe(state.stats.totals["population"]);
   });
 });

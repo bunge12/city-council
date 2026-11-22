@@ -1,6 +1,7 @@
 // Demand numbers from `balance/demand.json`, checked when the module loads
 // (M3-01, PRD "Four demand bars" and "Pacing"). The bars (demand.ts, M3-06)
-// read all but `arrivalsPerYearAtFullDemand`, which arrivals read (M3-08),
+// read all but `arrivalsPerYearAtFullDemand`, which arrivals read, and
+// `emptyRoomShareMax`, which the grower reads for homes (M3-08),
 // and `buildingsPerDayAtFullDemand`, which the grower reads (M3-07).
 
 import balance from "../../balance/demand.json" with { type: "json" };
@@ -26,8 +27,10 @@ export interface DemandBalance {
   factoryJobsPerShopJob: number;
   /** The least the residential bar reads while the city is small. */
   outsidePull: { bar: number; untilResidents: number };
-  /** Residents a game year with the residential bar at 100. */
+  /** Residents a game year with the residential bar at 100 (M3-08). */
   arrivalsPerYearAtFullDemand: number;
+  /** New homes wait while the empty room in homes newcomers can reach is above this share of their room (M3-08). */
+  emptyRoomShareMax: number;
   /** By zone id: buildings the grower adds a game day with the zone's bar at 100 (M3-07). */
   buildingsPerDayAtFullDemand: Record<string, number>;
 }
@@ -46,6 +49,7 @@ const BARS: Readonly<Record<string, Readonly<Record<string, NumberRule>>>> = {
 const TOP: Readonly<Record<string, NumberRule>> = {
   dailyShare: { min: 0, max: 1, aboveMin: true },
   arrivalsPerYearAtFullDemand: { min: 0 },
+  emptyRoomShareMax: { min: 0, max: 1 },
   shopJobsPerSpending: { min: 0, max: 10 },
   officeJobsPerBuyer: { min: 0, max: 10 },
   factoryJobsPerShopJob: { min: 0, max: 10 },

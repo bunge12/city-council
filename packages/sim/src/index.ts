@@ -126,6 +126,9 @@ export type { Occupancy, PopDelta } from "./pops/delta";
 export { addPop, removePop, setPopProfile, setPopSize, setPopWork } from "./pops/pops";
 export type { NewPop } from "./pops/pops";
 export { POPS_SYSTEM, popSlice } from "./pops/sweep";
+export { ARRIVALS, ARRIVALS_SYSTEM, dayArrivals, drawSize } from "./pops/arrivals";
+export { homeReachesOutside, homeRoomLeft, homesWithRoom, reachableRoom, whyNoNewcomers } from "./pops/room";
+export type { ReachableRoom } from "./pops/room";
 export { DEMAND_BALANCE, checkDemandBalance } from "./demand/balance";
 export type { DemandBalance } from "./demand/balance";
 export {
@@ -150,7 +153,7 @@ export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
-export { GROWER_SYSTEM, dayOf, dayQuotas, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
+export { GROWER_SYSTEM, dayOf, dayQuotas, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";

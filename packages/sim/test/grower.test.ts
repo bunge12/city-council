@@ -132,25 +132,21 @@ describe("residents", () => {
   };
 
   it("scale with lot area between the type's low and high figure", () => {
-    const rng = seedRng(1);
     const apartments = byId("apartments");
-    expect(residentsFor(rng, apartments, 3, 4)).toBe(50);
-    expect(residentsFor(rng, apartments, 4, 6)).toBe(100);
-    expect(residentsFor(rng, apartments, 4, 4)).toBe(67);
+    expect(residentsFor(apartments, 3, 4)).toBe(50);
+    expect(residentsFor(apartments, 4, 6)).toBe(100);
+    expect(residentsFor(apartments, 4, 4)).toBe(67);
     const tower = byId("high-tower");
-    expect(residentsFor(rng, tower, 5, 5)).toBe(600);
-    expect(residentsFor(rng, tower, 6, 6)).toBe(1000);
-    expect(residentsFor(rng, byId("corner-store"), 2, 2)).toBe(0);
-    // Nothing drawn for a type that scales.
-    expect(rng).toEqual(seedRng(1));
+    expect(residentsFor(tower, 5, 5)).toBe(600);
+    expect(residentsFor(tower, 6, 6)).toBe(1000);
+    expect(residentsFor(byId("corner-store"), 2, 2)).toBe(0);
   });
 
-  it("are drawn per building for a single family home, between its low and high figure", () => {
-    const rng = seedRng(1);
+  it("are four for every single family home, which takes one household (M3-08)", () => {
     const home = byId("single-family-home");
-    const seen = new Set<number>();
-    for (let i = 0; i < 200; i++) seen.add(residentsFor(rng, home, 2, 4));
-    expect([...seen].sort()).toEqual([1, 2, 3, 4]);
+    expect(home.oneHousehold).toBe(true);
+    expect(residentsFor(home, 1, 2)).toBe(4);
+    expect(residentsFor(home, 2, 4)).toBe(4);
   });
 });
 
@@ -165,7 +161,10 @@ describe("a street zoned R1", () => {
     expect(all.length).toBeGreaterThan(10);
     const homes = all.filter((b) => typeId(b.type) === "single-family-home");
     expect(homes.length).toBeGreaterThan(3);
-    expect(new Set(homes.map((b) => b.residents)).size).toBeGreaterThan(1);
+    // Every house has room for four. The households that move in draw their
+    // own sizes (M3-08, arrivals.test.ts); this street reaches no outside
+    // connection, so nobody does.
+    for (const home of homes) expect(home.residents).toBe(4);
     for (const b of all) {
       expect(["single-family-home", "plex"]).toContain(typeId(b.type));
       expect(b.builtAt).toBeGreaterThan(zonedAt);
@@ -361,7 +360,6 @@ describe("the grower and state", () => {
     zone(state, "mixed", 1, 0, 24, 6, "south");
     runDays(state, 12);
     expectCandidatesCurrent(state);
-    const before = buildings(state).length;
     // A street across the strips: it cuts the street in two and blocks the cells under it.
     ok(state, command("BuildRoad", { from: { x: 4300, z: 4500 }, to: { x: 4300, z: 4700 }, type: "street" }));
     expectCandidatesCurrent(state);
@@ -381,9 +379,11 @@ describe("the grower and state", () => {
     expect(across.length).toBeGreaterThan(0);
     ok(state, command("BulldozeRoad", { segments: across }));
     expectCandidatesCurrent(state);
+    // The cells under the street across come back, and grow again.
+    const bulldozed = buildings(state).length;
     runDays(state, 4);
     expectCandidatesCurrent(state);
-    expect(buildings(state).length).toBeGreaterThan(before);
+    expect(buildings(state).length).toBeGreaterThan(bulldozed);
   });
 
   it("keeps its candidates current through random roads, zoning and growth", () => {

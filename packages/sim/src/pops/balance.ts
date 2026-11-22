@@ -1,6 +1,6 @@
 // Pop numbers from `balance/pops.json`, checked when the module loads
 // (M3-01, PRD "M3 Demand" and "Turnover"). Pops in state (M3-03) read the
-// size cap and the worker shares; newcomers read the rest in M3-08 and
+// size cap and the worker shares; newcomers read the newcomer mix in M3-08 and
 // turnover in M3-11.
 
 import balance from "../../balance/pops.json" with { type: "json" };
@@ -20,6 +20,10 @@ export interface PopsBalance {
     wealth: EducationShares;
     /** The share of newcomers with children. */
     childrenShare: number;
+    /** For a home of density 1, 2 and 3 in order: the least and most people in a newcomer household (M3-08). */
+    size: [number, number][];
+    /** The satisfaction a newcomer starts at, from 0 to 100 (M3-08). */
+    satisfaction: number;
   };
   /** The share of a pop's people who work. */
   workerShare: { withoutChildren: number; withChildren: number };
@@ -48,6 +52,7 @@ export function checkPopsBalance(data: unknown): string[] {
   for (const key of TOP) if (!(key in data)) errors.push(`${key} is missing`);
   errors.push(...unknownKeys(data, TOP, "the file"));
 
+  let capsOk = false;
   if ("popSizeCap" in data) {
     const caps = data["popSizeCap"];
     const levels = ZONING_BALANCE.densities.length;
@@ -55,7 +60,7 @@ export function checkPopsBalance(data: unknown): string[] {
       errors.push(`popSizeCap must list ${levels} whole numbers from 1 to ${POP_SIZE_LIMIT}, one per density`);
     } else if (caps.some((c, i) => i > 0 && (c as number) < (caps[i - 1] as number))) {
       errors.push("popSizeCap must not fall as density rises");
-    }
+    } else capsOk = true;
   }
 
   if ("newcomer" in data) {
@@ -68,7 +73,12 @@ export function checkPopsBalance(data: unknown): string[] {
       }
       if (!("childrenShare" in n)) errors.push("newcomer.childrenShare is missing");
       else if (!isShare(n["childrenShare"])) errors.push("newcomer.childrenShare must be a share from 0 to 1");
-      errors.push(...unknownKeys(n, ["education", "wealth", "childrenShare"], "newcomer"));
+      if (!("size" in n)) errors.push("newcomer.size is missing");
+      else errors.push(...sizeProblems(n["size"], capsOk ? (data["popSizeCap"] as number[]) : null));
+      const s = n["satisfaction"];
+      if (!("satisfaction" in n)) errors.push("newcomer.satisfaction is missing");
+      else if (!Number.isSafeInteger(s) || (s as number) < 0 || (s as number) > 100) errors.push("newcomer.satisfaction must be a whole number from 0 to 100");
+      errors.push(...unknownKeys(n, ["education", "wealth", "childrenShare", "size", "satisfaction"], "newcomer"));
     }
   }
 
@@ -92,6 +102,24 @@ export function checkPopsBalance(data: unknown): string[] {
       ),
     );
   }
+  return errors;
+}
+
+/** Problems with `newcomer.size`: one [least, most] per density, whole numbers from 1, the most within that density's size cap when the caps are sound. */
+function sizeProblems(sizes: unknown, caps: readonly number[] | null): string[] {
+  const levels = ZONING_BALANCE.densities.length;
+  const where = "newcomer.size";
+  if (!Array.isArray(sizes) || sizes.length !== levels) return [`${where} must list ${levels} ranges, one per density`];
+  const errors: string[] = [];
+  sizes.forEach((range: unknown, i) => {
+    const [least, most] = Array.isArray(range) && range.length === 2 ? (range as unknown[]) : [];
+    if (!Number.isSafeInteger(least) || !Number.isSafeInteger(most) || (least as number) < 1 || (most as number) < (least as number)) {
+      errors.push(`${where}[${i}] must be [least, most], whole numbers from 1 with the least no more than the most`);
+      return;
+    }
+    const cap = caps?.[i];
+    if (cap !== undefined && (most as number) > cap) errors.push(`${where}[${i}] must not hold more than popSizeCap[${i}], ${cap}`);
+  });
   return errors;
 }
 

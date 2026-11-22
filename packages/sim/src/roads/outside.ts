@@ -170,3 +170,13 @@ export function segmentReachesOutside(state: { roads: RoadNetwork; connections: 
 export function segmentsReachingOutside(state: { roads: RoadNetwork; connections: Int32Array }): number {
   return indexOf(state.roads, state.connections).outsideSegments;
 }
+
+/**
+ * By road node: 1 if its piece reaches an outside connection. For a loop
+ * over many segments, such as the homes newcomers can reach (M3-08), which
+ * would otherwise look the answer up once a segment. Read it at once: a
+ * change of roads may replace it.
+ */
+export function outsideReachByNode(state: { roads: RoadNetwork; connections: Int32Array }): Uint8Array {
+  return indexOf(state.roads, state.connections).reaches;
+}
