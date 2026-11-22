@@ -358,12 +358,11 @@ interface GlassColours {
   /** One per seed in turn. */
   tints: Node<"vec3">[];
   sky: Node<"vec3">;
-  blinds: Node<"vec3">;
 }
 
 function glassColours(theme: Theme): GlassColours {
   const tints = theme.fixed.glassTints.length > 0 ? theme.fixed.glassTints : [theme.fixed.glass];
-  return { tints: tints.map(linear), sky: linear(theme.fixed.sky), blinds: linear(theme.fixed.blinds) };
+  return { tints: tints.map(linear), sky: linear(theme.fixed.sky) };
 }
 
 /**
@@ -378,8 +377,8 @@ function glassColours(theme: Theme): GlassColours {
  * Glass is drawn so it never reads as asphalt (issue #137): each building's
  * windows take one of the theme's glass tints, each pane a little lighter
  * or darker than the next, lighter again towards its top where it reflects
- * the sky, and a few panes with a blind part way down. The reflection is
- * emitted, not lit, so windows on a wall in shadow still show.
+ * the sky. There are no blinds: a pale blind read as a missing window. The
+ * reflection is emitted, not lit, so windows on a wall in shadow still show.
  */
 function patterned(colour: Node<"vec3">, glass: GlassColours, kind: Node<"float">, bay: Node<"float">, up: Node<"float">, look: Node<"float">) {
   // Whole numbers first: the look reaches the fragment a hair either side
@@ -401,10 +400,9 @@ function patterned(colour: Node<"vec3">, glass: GlassColours, kind: Node<"float"
   const blur = smoothstep(0.25, 0.6, max(fwidth(select(kind.lessThan(1.5).and(style.greaterThan(2.5)), bay.mul(2), bay)), fwidth(up)));
   const cover = rect.y.sub(rect.x).mul(rect.w.sub(rect.z));
   const pane = select(kind.lessThan(0.5), 0, mix(insideRect(u, v, rect), cover, blur));
-  // Each pane's shade, and whether it has a blind, from where it is and the building's seed.
+  // Each pane's shade, from where it is and the building's seed.
   const cell = vec2(floor(bay), floor(up)).add(vec2(seed.mul(17.3), seed.mul(5.9)));
   const shade = hash2(cell);
-  const blind = hash2(cell.add(vec2(41.7, 13.1)));
   // How far up the pane, 0 at its sill and 1 at its head.
   const high = clamp(v.sub(rect.z).div(rect.w.sub(rect.z)), 0, 1);
   let tint = glass.tints[0] as Node<"vec3">;
@@ -412,16 +410,12 @@ function patterned(colour: Node<"vec3">, glass: GlassColours, kind: Node<"float"
   for (let k = 1; k < glass.tints.length; k++) tint = select(pick.greaterThan(k - 0.5), glass.tints[k] as Node<"vec3">, tint);
   const lit = tint.mul(shade.mul(BUILDINGS.glass.variation).add(1 - BUILDINGS.glass.variation / 2));
   const reflected = mix(lit, glass.sky, high.mul(high).mul(BUILDINGS.glass.skyMix));
-  // Fewer blinds behind a glass wall, where a pane is a whole storey.
-  const share = select(kind.greaterThan(2.5).and(kind.lessThan(3.5)), BUILDINGS.glass.blindShare / 3, BUILDINGS.glass.blindShare);
-  const drawn = step(share.oneMinus(), blind).mul(step(fract(blind.mul(7)).mul(0.5).add(0.3), high.oneMinus()).oneMinus());
-  const paneColour = mix(reflected, glass.blinds, drawn.mul(0.85));
   const door = kind.greaterThan(3.5).and(kind.lessThan(4.5));
-  const opening = select(door, colour.mul(0.6), paneColour);
+  const opening = select(door, colour.mul(0.6), reflected);
   const glassy = select(door, 0, pane);
   return {
     colour: mix(colour, opening, pane),
-    emissive: glass.sky.mul(glassy.mul(drawn.oneMinus()).mul(high.mul(0.6).add(0.4)).mul(BUILDINGS.glass.reflection)),
+    emissive: glass.sky.mul(glassy.mul(high.mul(0.6).add(0.4)).mul(BUILDINGS.glass.reflection)),
   };
 }
 

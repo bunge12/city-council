@@ -35,8 +35,7 @@ export interface Theme {
    * Colours no building tints. `glass` is the glass of skylights and saw
    * roofs, and `glassTints` the glass of windows, one tint per building by
    * its look (render/building-tint.ts). `sky` is what the glass reflects,
-   * lighter towards the top of each pane, and `blinds` the colour of a blind
-   * drawn part way down a pane.
+   * lighter towards the top of each pane.
    */
-  fixed: { glass: number; glassTints: readonly number[]; sky: number; blinds: number; paving: number };
+  fixed: { glass: number; glassTints: readonly number[]; sky: number; paving: number };
 }
