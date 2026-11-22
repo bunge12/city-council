@@ -31,11 +31,18 @@
 // vacant until arrivals fill it.
 //
 // A birth or a child leaving can change how many of a pop's people work
-// (`workersFor`). When its workplace has no job for the extra worker, the
-// pop gives the job up and job matching, which runs after this in the same
-// tick and visits the same slice, finds it one again, splitting it if it
-// has to (matching.ts). A replaced household is on the same id, so it too
-// looks for work that tick.
+// (`workersFor`): a tower pop of 100 whose child leaves goes from 40 workers
+// to 59. When its workplace has no job for the extra workers, the pop splits
+// as job matching splits one: the part whose workers fit keeps the job and
+// the rest looks again. A single family home's household is not split; it
+// gives the job up, and job matching, which runs after this in the same
+// tick and visits the same slice, looks for one again. A replaced household
+// is on the same id, so it too looks for work that tick.
+//
+// A replacement's newcomer is sized to the room the old household leaves
+// and any other room beside it, even when that is below the least newcomer
+// household for the density (room.ts): the slot stays filled rather than
+// standing as a gap no arrival may take.
 //
 // Arithmetic is add, multiply and divide (CLAUDE.md rule 6), and nothing
 // here is state beyond the pops and the generator.
@@ -47,11 +54,16 @@ import type { System } from "../step";
 import { noteYear } from "../stats/stats";
 import { drawProfile, drawSize } from "./arrivals";
 import { POPS_BALANCE } from "./balance";
-import { jobsProblem } from "./open-jobs";
-import { NO_WORK, POP_ALIVE, addPop, popSizeCap, removePop, setPopHousehold, setPopWork, workersFor } from "./pops";
+import { BUILDING_TYPES } from "../buildings/balance";
+import { partThatFits } from "./matching";
+import { jobsProblem, openJobsFor } from "./open-jobs";
+import { NO_WORK, POP_ALIVE, addPop, popSizeCap, removePop, setPopHousehold, setPopSize, setPopWork, workersFor } from "./pops";
 import { homeReachesOutside, homeRoomLeft } from "./room";
 import { popSlice } from "./sweep";
 import { popIndexOf } from "./where";
+
+/** By type index: 1 for a type one household lives in, whose pop is never split. */
+const ONE_HOUSEHOLD = Uint8Array.from(BUILDING_TYPES, (t) => (t.oneHousehold ? 1 : 0));
 
 /** The name the timer hook reports for turnover. */
 export const TURNOVER_SYSTEM = "turnover";
@@ -113,7 +125,15 @@ function replace(state: SimState, id: number): void {
   noteYear(state, "arrivals", size);
 }
 
-/** Sets pop `id` to `size` people and `children`, removing it at nobody, and giving up its job first when its workplace has none for its new workers. */
+/**
+ * Sets pop `id` to `size` people and `children`, removing it at nobody. When
+ * its workplace has no job for the workers it then has, it gives the job up
+ * and, outside a single family home, splits as job matching splits a pop
+ * (matching.ts): the largest part whose workers fit the open jobs keeps the
+ * job, and the rest becomes a pop of its own that looks again. So a tower pop
+ * whose child leaves does not put all of its workers out of work for the one
+ * more it gained.
+ */
 function reshape(state: SimState, id: number, size: number, children: number): void {
   if (size === 0) {
     removePop(state, id);
@@ -121,12 +141,22 @@ function reshape(state: SimState, id: number, size: number, children: number): v
   }
   const p = state.pops;
   const work = p.work[id] ?? NO_WORK;
-  if (work !== NO_WORK) {
-    const education = p.education[id] ?? 0;
-    const was = workersFor(p.size[id] ?? 0, p.children[id] ?? 0);
-    if (jobsProblem(state, state.buildings, work, education, workersFor(size, children), education, was) !== null) setPopWork(state, id, NO_WORK);
+  const education = p.education[id] ?? 0;
+  const was = workersFor(p.size[id] ?? 0, p.children[id] ?? 0);
+  if (work === NO_WORK || jobsProblem(state, state.buildings, work, education, workersFor(size, children), education, was) === null) {
+    setPopHousehold(state, id, size, children);
+    return;
   }
+  setPopWork(state, id, NO_WORK);
   setPopHousehold(state, id, size, children);
+  const home = p.home[id] ?? 0;
+  if (ONE_HOUSEHOLD[state.buildings.type[home] ?? 0] === 1) return;
+  const part = partThatFits(size, children, openJobsFor(state, work, education));
+  if (part === 0) return;
+  setPopSize(state, id, part);
+  // The rest keeps the household's score and its days low, as a split in job matching does.
+  addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0 });
+  setPopWork(state, id, work);
 }
 
 /** Whether pop `id` may gain a person: its home has room for one more and it is below its size cap. */

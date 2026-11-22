@@ -140,6 +140,10 @@ const population = (state: SimState): number => state.stats.totals["population"]
 
 function expectRecount(state: SimState): void {
   expect(state.stats.totals).toEqual(recountTotals(state));
+  // The pop index kept as pops change equals one built afresh from the rows.
+  const kept = popIndexOf(state);
+  const fresh = popIndexOf(deserialize(serialize(state)).state);
+  for (const key of ["people", "filled", "filledByEducation", "peopleBySatisfaction"] as const) expect(Array.from(kept[key]), key).toEqual(Array.from(fresh[key]));
   // No workplace holds more workers than it has jobs.
   const filled = popIndexOf(state).filled;
   for (const id of workplaces(state)) expect(filled[id] ?? 0).toBeLessThanOrEqual(buildingJobs(state.buildings, id));
@@ -367,6 +371,39 @@ describe("each event", () => {
   });
 });
 
+describe("a tower pop whose child leaves", () => {
+  it("splits when its workplace has no job for the workers it gains: the part that fits keeps the job", () => {
+    const state = createState(SEED);
+    const s = street(state, 30);
+    zone(state, s, "residential", 3, 4, 4, 4, 1);
+    zone(state, s, "commercial", 1, 12, 6, 2, -1);
+    holdDemand({ residential: 100, commercial: 100 }, () => withValue(DEMAND_BALANCE, "openJobsShareMax", 1, () => runTicks(state, 10 * DAY)));
+    const tower = buildingsOf(state, "low-tower")[0] ?? buildingsOf(state, "high-tower")[0] ?? -1;
+    expect(tower).toBeGreaterThanOrEqual(0);
+    // On a day's first tick, so the day of turnover alone below steps nothing else.
+    toDayStart(state);
+    for (const id of livePops(state)) removePop(state, id);
+    // The shop with the most jobs, and a pop whose workers fill all but a few of them.
+    const shop = workplaces(state).reduce((a, b) => (buildingJobs(state.buildings, b) > buildingJobs(state.buildings, a) ? b : a));
+    let size = 2;
+    while (workersFor(size + 1, 1) <= openJobsFor(state, shop, 0)) size++;
+    expect(workersFor(size - 1, 0)).toBeGreaterThan(workersFor(size, 1));
+    const id = addPop(state, { home: tower, size, education: 0, wealth: 1, children: 1, satisfaction: 66, daysLow: 0 });
+    setPopWork(state, id, shop);
+    const open = openJobsFor(state, shop, 0);
+    expect(workersFor(size - 1, 0) - workersFor(size, 1)).toBeGreaterThan(open);
+    withRates({ childrenLeaveYears: 1 / SURE }, () => turnoverDay(state));
+    const household = livePops(state).filter((p) => state.pops.home[p] === tower);
+    expect(household.length).toBe(2);
+    expect(household.reduce((sum, p) => sum + (state.pops.size[p] ?? 0), 0)).toBe(size - 1);
+    expect(state.pops.work[id]).toBe(shop);
+    const rest = household.find((p) => p !== id) ?? -1;
+    expect(readPop(state.pops, rest)).toMatchObject({ work: NO_WORK, children: 0, satisfaction: 66, education: 0, wealth: 1 });
+    expect(state.pops.children[id]).toBe(0);
+    expectRecount(state);
+  });
+});
+
 describe("setPopHousehold", () => {
   it("sets size and children together and refuses a row the home or workplace cannot hold", () => {
     const { state } = housesStreet();
@@ -416,7 +453,7 @@ describe("room for newcomers", () => {
 });
 
 describe("over game decades", () => {
-  it("finds a street of houses filled with families dips as the children leave, then holds at a steady level (PRD, scenario test)", () => {
+  it("finds a street of houses filled with families dips as the children leave, then climbs back toward a steady level (PRD, scenario test)", () => {
     const { state } = housesStreet(1);
     const filled = population(state);
     expect(filled).toBeGreaterThan(100);
@@ -441,19 +478,21 @@ describe("over game decades", () => {
     const mean = (runs[0] ?? []).map((_, y) => runs.reduce((sum, r) => sum + (r[y] ?? 0), 0) / runs.length);
     const trough = Math.min(...mean);
     const troughYear = mean.indexOf(trough) + 1;
-    note(`filled ${filled}, by year ${mean.map((m) => m.toFixed(1)).join(" ")}`);
-    const late = mean.slice(24).reduce((a, b) => a + b, 0) / (mean.length - 24);
-    // The dip: a tenth or more of the street gone as the children leave, over the first two decades or so.
+    const average = (ys: number[]) => ys.reduce((x, y) => x + y, 0) / ys.length;
+    // The dip: a tenth or more of the street gone as the children leave, its lowest over the first two decades or so.
     expect(trough).toBeLessThan(0.9 * filled);
     expect(troughYear).toBeGreaterThanOrEqual(5);
-    expect(troughYear).toBeLessThanOrEqual(30);
+    expect(troughYear).toBeLessThanOrEqual(25);
     expect(mean[19] ?? 0).toBeLessThan(0.92 * filled);
-    // Then it holds: the last dozen years sit at or above the trough and
-    // well below the fill, with no second fall. How far it climbs back is
-    // the replacement rate against the children leaving, tuned in M3-21.
-    expect(late).toBeGreaterThanOrEqual(trough);
+    // Then the climb back: the last ten years sit above the ten around the
+    // trough, and well below the fill. The starting rates give a climb of
+    // only two or three percent, the replacement rate against the children
+    // leaving, which M3-21 tunes; a street that dips and stays flat fails.
+    const around = average(mean.slice(Math.max(0, troughYear - 6), troughYear + 4));
+    const late = average(mean.slice(-10));
+    expect(mean.length - 10).toBeGreaterThanOrEqual(troughYear + 4);
+    expect(late).toBeGreaterThan(1.01 * around);
     expect(late).toBeLessThan(0.95 * filled);
-    for (const y of mean.slice(24)) expect(y).toBeGreaterThan(0.95 * trough);
   }, 180_000);
 
   it("finds a city held at steady demand keeps its population for fifty game years, and each year's counts add up to its change (scenario test)", () => {
