@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { syncCells } from "../src/zoning/cell-index";
 import {
   createGrowth,
+  createDemand,
   LEVEL_BRIDGE,
   ROAD_TYPES,
   UNDO_STEPS,
@@ -97,6 +98,8 @@ function cityHash(state: SimState): string {
     centre: { ...state.centre, due: 0 },
     stats: { ...state.stats, history: {}, next: 0 },
     travelReadyAt: 0,
+    // The bars move a share of the way each day, so they follow the days passed too.
+    demand: createDemand(),
   });
 }
 

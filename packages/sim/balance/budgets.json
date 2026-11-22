@@ -122,6 +122,22 @@
       "mode": "blocks",
       "source": "M3-13"
     },
+    "demand.tick": {
+      "name": "the demand system's worst tick on the scale town, a day's first, from the issue's 0.1 ms",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 0.1,
+      "mode": "blocks",
+      "source": "M3-06"
+    },
+    "demand.outside": {
+      "name": "working out which of the scale town's 30,000 segments reach outside again, in the step after a change of roads",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 2,
+      "mode": "blocks",
+      "source": "M3-06"
+    },
     "soak.command-steps": {
       "name": "steps of one command type over the tick in the soak hour, two runner pauses allowed",
       "unit": "steps",

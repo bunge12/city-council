@@ -13,6 +13,7 @@ import {
   TIME_BALANCE,
   createStats,
   encodeStatsDelta,
+  createDemand,
   sampleCount,
   deserialize,
   hashState,
@@ -21,6 +22,7 @@ import {
   replay,
   seedRng,
   type FromSimMessage,
+  type SimState,
   segmentEnds,
   segmentTypeId,
 } from "@city-council/sim";
@@ -187,7 +189,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["cellReads", "centre", "growth", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "timings", "travelReadyAt", "type", "v"].sort(),
+      ["cellReads", "centre", "growth", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "demand", "timings", "travelReadyAt", "type", "v"].sort(),
     );
     // No month began since the last delta, so it carries no sample.
     expect(delta?.type === "delta" && delta.stats.samples.length).toBe(0);
@@ -196,7 +198,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "pops", "landValue", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "demand", "pops", "landValue", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -271,6 +273,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       cellReads: 0,
       centre: { x: 0, z: 0, weight: 0, due: 0 },
       travelReadyAt: 0,
+      demand: createDemand(),
       pending: [],
       steps: 1,
       timings: [],
@@ -278,6 +281,46 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(mirror.state?.tick).toBe(0);
     expect(received.length).toBe(before + 1);
     expect(received.at(-1)?.type).toBe("snapshot");
+  });
+
+  it("keeps the demand bars level with the sim, and asks for a snapshot on bars of the wrong shape (M3-06)", () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    let spoil = false;
+    const filtered: typeof client = {
+      send: (m, t) => client.send(m, t),
+      onMessage: (handler) =>
+        client.onMessage((m) => {
+          if (spoil && m.type === "delta") {
+            const demand: Record<string, unknown> = { ...m.demand };
+            delete demand["office"];
+            handler({ ...m, demand: demand as typeof m.demand });
+          } else handler(m);
+        }),
+    };
+    let now = 0;
+    const host = new SimHost(createBareState(7), hostEnd, () => now);
+    const mirror = new SimMirror(filtered, "p1");
+    const run = (ms: number) => {
+      for (let t = 0; t < ms; t += PUMP_INTERVAL_MS) {
+        now += PUMP_INTERVAL_MS;
+        host.pump();
+      }
+    };
+    const sim = (host as unknown as { state: SimState }).state;
+    // Two game days: the pull from outside lifts the residential bar on each day's first tick.
+    run(21_000);
+    expect(mirror.state?.demand.residential.value).toBeGreaterThan(0);
+    expect(mirror.state?.demand).toEqual(sim.demand);
+    expect(mirror.state && hashState(mirror.state)).toBe(hashState(sim));
+    // A delta without the office bar changes nothing, and the mirror asks again.
+    const tick = mirror.state?.tick;
+    spoil = true;
+    run(PUMP_INTERVAL_MS);
+    expect(mirror.state?.tick).toBe(tick);
+    spoil = false;
+    run(1000);
+    expect(mirror.state?.demand).toEqual(sim.demand);
+    expect(mirror.state && hashState(mirror.state)).toBe(hashState(sim));
   });
 });
 
