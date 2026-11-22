@@ -47,6 +47,8 @@ import {
   ringDistance,
   roadMask,
   roadSegmentsAt,
+  taperPoint,
+  taperShape,
   trimAt,
   segPath,
   tileMesh,
@@ -562,10 +564,12 @@ describe("corners and tapers (issue 87)", () => {
     // A street is 5 m from centre to kerb and an avenue 9, so the taper is 4 m times the ratio long.
     const length = 4 * ROADS.taper.ratio;
     expect(trimAt(j, street)).toBeCloseTo(length, 9);
-    // Half way along it the road is 7 m from centre to kerb.
-    expect(covers(net, x - length / 2, z + 6.8)).toBe(1);
-    expect(covers(net, x - length / 2, z + 7.2)).toBe(0);
-    expect(covers(net, x - length / 2, z - 6.8)).toBe(1);
+    // Half way along it the road is 7 m from centre to kerb. (Just off the
+    // half-way station: the taper's quads share an edge along it.)
+    const mid = x - length / 2 + 0.3;
+    expect(covers(net, mid, z + 6.8)).toBe(1);
+    expect(covers(net, mid, z + 7.2)).toBe(0);
+    expect(covers(net, mid, z - 6.8)).toBe(1);
     expectTiled(net, x - 40, z - 15, x + 20, z + 15, 0.4);
   });
 
@@ -585,6 +589,91 @@ describe("corners and tapers (issue 87)", () => {
     expect(trimAt(sharp, sharpStreet)).toBeLessThan(4 * ROADS.taper.ratio);
     expectTiled(net, 4220, 4420, 4290, 4480, 0.4);
     expectTiled(net, 4220, 4620, 4290, 4690, 0.4);
+  });
+
+  it("taper a curved road along its curve, right up to the wide road's kerbs", () => {
+    const x = 4250;
+    const z = 4450;
+    const net = city([
+      [[x - 100, z], [x, z], "avenue"],
+      [[x, z], [x + 150, z + 40], "street", [x + 75, z]],
+    ]);
+    const node = [0, 1, 2].find((n) => net.nodeX[n] === x && net.nodeZ[n] === z) ?? -1;
+    const j = junctionAt(net, node);
+    const street = j?.segs.find((s) => net.segType[s] === 0) ?? -1;
+    const length = 4 * ROADS.taper.ratio;
+    expect(trimAt(j, street)).toBeCloseTo(length, 9);
+    // Half way along the curve the kerbs are half way out: 7 m from the curved centre line.
+    const path = segPath(net, street);
+    const fromA = net.segA[street] === node;
+    for (const side of [1, -1]) {
+      const inside = taperPoint(path, fromA, length / 2, side * 6.7);
+      const outside = taperPoint(path, fromA, length / 2, side * 7.3);
+      expect(covers(net, inside.x, inside.z)).toBe(1);
+      expect(covers(net, outside.x, outside.z)).toBe(0);
+    }
+    // At the node the taper is as wide as the avenue, with no step in from its kerbs.
+    expect(covers(net, x - 0.3, z + 8.7)).toBe(1);
+    expect(covers(net, x + 0.3, z + 8.6)).toBe(1);
+    expect(covers(net, x + 0.3, z - 8.6)).toBe(1);
+    expectTiled(net, x - 30, z - 15, x + 30, z + 20, 0.4);
+  });
+
+  it("meet a bent wide road's cut edge exactly, with no hole on the inside of the bend", () => {
+    const net = city([
+      [[4150, 4450], [4250, 4450], "street"],
+      [[4250, 4450], [4323, 4518], "oneWay"],
+      [[4150, 4650], [4250, 4650], "avenue"],
+      [[4250, 4650], [4338, 4698], "street"],
+    ]);
+    expectTiled(net, 4220, 4420, 4290, 4490, 0.4);
+    expectTiled(net, 4220, 4620, 4290, 4690, 0.4);
+    // The avenue's kerb runs on into the taper's past the node, not in a notch behind it.
+    const node = [0, 1, 2, 3, 4, 5].find((n) => net.nodeX[n] === 4250 && net.nodeZ[n] === 4650) ?? -1;
+    const j = junctionAt(net, node);
+    const ring = j?.ring ?? [];
+    expect(ring.length).toBeGreaterThan(8);
+    expect(ringDistance(ring, 4250.3, 4650 + 8.7)).toBe(0);
+  });
+
+  it("carry the lines through a taper and mark the lane that ends", () => {
+    const x = 4250;
+    const z = 4450;
+    const net = city([
+      [[x - 100, z], [x, z], "avenue"],
+      [[x, z], [x + 150, z], "street"],
+    ]);
+    const marks: number[][] = [];
+    for (const g of allChunks(net).values()) {
+      const { positions: p, indices } = g.markings;
+      for (let k = 0; k < indices.length; k += 3) {
+        const tri: number[] = [];
+        for (let v = 0; v < 3; v++) tri.push(p[(indices[k + v] ?? 0) * 3] ?? 0, p[(indices[k + v] ?? 0) * 3 + 2] ?? 0);
+        marks.push(tri);
+      }
+    }
+    const painted = (px: number, pz: number) => marks.some((t) => inside(t, px, pz));
+    const length = 4 * ROADS.taper.ratio;
+    const m = ROADS.markings;
+    // The avenue's edge line starts where the street's would be and widens out with the kerbs.
+    const from = 5 - (ROADS.sidewalks.width["street"] ?? 0) - m.edgeInset;
+    const to = 9 - (ROADS.sidewalks.width["avenue"] ?? 0) - m.edgeInset;
+    const mid = from + (to - from) * taperShape(0.5);
+    expect(painted(x + length / 2, z + mid)).toBe(true);
+    expect(painted(x + length / 2, z - mid)).toBe(true);
+    expect(painted(x + length / 2, z + mid + 0.3)).toBe(false);
+    // The avenue's double yellow line runs on over the half of the taper by the avenue.
+    const yellow = m.doubleGap / 2 + m.width / 2;
+    expect(painted(x + length / 4, z + yellow)).toBe(true);
+    expect(painted(x + length / 4, z - yellow)).toBe(true);
+    expect(painted(x + length / 4, z)).toBe(false);
+    // A merge arrow in the avenue lane that ends, on the right of traffic driving toward the street, and none in the other.
+    const a = m.mergeArrow;
+    const tail = a.before + a.straight + (a.bend + m.arrowHead.length) * Math.cos(a.turn);
+    const lane = (9 - (ROADS.sidewalks.width["avenue"] ?? 0)) / 2;
+    expect(painted(x - tail + a.straight / 2, z + 1.5 * lane)).toBe(true);
+    expect(painted(x - tail + a.straight / 2, z - 1.5 * lane)).toBe(false);
+    expect(painted(x - tail + a.straight / 2, z + 0.5 * lane)).toBe(false);
   });
 
   it("keep trees and grass off the rounded corner, not just the strips", () => {
