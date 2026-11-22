@@ -58,7 +58,6 @@ export const NORTH_AMERICAN: Theme = {
     glass: hex(palettes.fixed.glass),
     glassTints: palettes.fixed.glassTints.map(hex),
     sky: hex(palettes.fixed.sky),
-    blinds: hex(palettes.fixed.blinds),
     paving: hex(palettes.fixed.paving),
   },
 };
