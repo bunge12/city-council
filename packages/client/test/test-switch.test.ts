@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BoxGeometry, Group, InstancedMesh, Matrix4, Mesh, MeshBasicNodeMaterial, PerspectiveCamera, Scene } from "three/webgpu";
 import { frameSignature } from "../src/render/frame-signature";
-import { cityFromWorkerName, loadsFileFromWorkerName, startFromWorkerName, workerName } from "../src/save/lock";
+import { cityFromWorkerName, heldDemandValue, loadsFileFromWorkerName, startFromWorkerName, workerName } from "../src/save/lock";
 import { PLAYER_SETTINGS, TEST_SWITCH_KEY, readTestSwitch } from "../src/test-switch";
 
 const storage = (value: string | null): Pick<Storage, "getItem"> => ({ getItem: (key) => (key === TEST_SWITCH_KEY ? value : null) });
@@ -9,12 +9,14 @@ const storage = (value: string | null): Pick<Storage, "getItem"> => ({ getItem: 
 describe("the test switch (issue #226)", () => {
   it("is off for a player, whose storage has no key", () => {
     expect(readTestSwitch(null)).toEqual(PLAYER_SETTINGS);
-    expect(readTestSwitch(storage(null))).toEqual({ cheapFrames: false, autosave: true });
+    expect(readTestSwitch(storage(null))).toEqual({ cheapFrames: false, autosave: true, heldDemand: null });
   });
 
   it("reads what the test stored, and a player's setting for anything missing or unreadable", () => {
-    expect(readTestSwitch(storage(JSON.stringify({ cheapFrames: true, autosave: false })))).toEqual({ cheapFrames: true, autosave: false });
-    expect(readTestSwitch(storage(JSON.stringify({ cheapFrames: true })))).toEqual({ cheapFrames: true, autosave: true });
+    expect(readTestSwitch(storage(JSON.stringify({ cheapFrames: true, autosave: false, heldDemand: 100 })))).toEqual({ cheapFrames: true, autosave: false, heldDemand: 100 });
+    expect(readTestSwitch(storage(JSON.stringify({ cheapFrames: true })))).toEqual({ cheapFrames: true, autosave: true, heldDemand: null })
+    expect(readTestSwitch(storage(JSON.stringify({ heldDemand: 101 }))).heldDemand).toBeNull();
+    expect(readTestSwitch(storage(JSON.stringify({ heldDemand: "100" }))).heldDemand).toBeNull();;
     expect(readTestSwitch(storage(JSON.stringify({ cheapFrames: "yes", autosave: 0 })))).toEqual(PLAYER_SETTINGS);
     expect(readTestSwitch(storage("not json"))).toEqual(PLAYER_SETTINGS);
     expect(readTestSwitch(storage("null"))).toEqual(PLAYER_SETTINGS);
@@ -24,17 +26,26 @@ describe("the test switch (issue #226)", () => {
 
   it("carries autosave to the worker in its name, beside the tab's city and a file on its way", () => {
     expect(workerName("abc-123")).toBe(workerName("abc-123", false, true));
-    expect(startFromWorkerName(workerName("abc-123", false, false))).toEqual({ cityId: "abc-123", loadsFile: false, autosave: false });
-    expect(startFromWorkerName(workerName(null, false, false))).toEqual({ cityId: null, loadsFile: false, autosave: false });
-    expect(startFromWorkerName(workerName("abc-123", true, false))).toEqual({ cityId: "abc-123", loadsFile: true, autosave: false });
-    expect(startFromWorkerName(workerName(null, true, false))).toEqual({ cityId: null, loadsFile: true, autosave: false });
-    expect(startFromWorkerName(workerName("abc-123"))).toEqual({ cityId: "abc-123", loadsFile: false, autosave: true });
-    expect(startFromWorkerName(workerName(null))).toEqual({ cityId: null, loadsFile: false, autosave: true });
+    expect(startFromWorkerName(workerName("abc-123", false, false))).toEqual({ cityId: "abc-123", loadsFile: false, autosave: false, heldDemand: null });
+    expect(startFromWorkerName(workerName(null, false, false))).toEqual({ cityId: null, loadsFile: false, autosave: false, heldDemand: null });
+    expect(startFromWorkerName(workerName("abc-123", true, false))).toEqual({ cityId: "abc-123", loadsFile: true, autosave: false, heldDemand: null });
+    expect(startFromWorkerName(workerName(null, true, false))).toEqual({ cityId: null, loadsFile: true, autosave: false, heldDemand: null });
+    expect(startFromWorkerName(workerName("abc-123"))).toEqual({ cityId: "abc-123", loadsFile: false, autosave: true, heldDemand: null });
+    expect(startFromWorkerName(workerName(null))).toEqual({ cityId: null, loadsFile: false, autosave: true, heldDemand: null });
     expect(cityFromWorkerName(workerName("abc-123", true, false))).toBe("abc-123");
     expect(loadsFileFromWorkerName(workerName("abc-123", true, false))).toBe(true);
     expect(loadsFileFromWorkerName(workerName("abc-123", false, false))).toBe(false);
     // A name the page did not make asks for no city and no file, and saves as a player's worker does.
-    expect(startFromWorkerName("something else")).toEqual({ cityId: null, loadsFile: false, autosave: true });
+    expect(startFromWorkerName("something else")).toEqual({ cityId: null, loadsFile: false, autosave: true, heldDemand: null });
+  });
+
+  it("carries a held demand value to the worker in its name, and only a number from -100 to 100 (M3-07)", () => {
+    expect(startFromWorkerName(workerName("abc-123", true, false, 100))).toEqual({ cityId: "abc-123", loadsFile: true, autosave: false, heldDemand: 100 });
+    expect(startFromWorkerName(workerName(null, false, true, -12.5))).toEqual({ cityId: null, loadsFile: false, autosave: true, heldDemand: -12.5 });
+    expect(startFromWorkerName(workerName(null, false, true, 0)).heldDemand).toBe(0);
+    for (const text of [null, "", " ", "abc", "101", "-101", "NaN", "Infinity"]) expect(heldDemandValue(text), String(text)).toBeNull();
+    expect(heldDemandValue("100")).toBe(100);
+    expect(heldDemandValue("-3")).toBe(-3);
   });
 });
 

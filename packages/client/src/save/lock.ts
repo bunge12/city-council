@@ -57,6 +57,8 @@ const WORKER_NAME = "sim";
 const LOAD_FLAG = "load";
 /** Flag in the worker's name when the test switch turns autosave off (issue #226). */
 const NO_AUTOSAVE_FLAG = "noautosave";
+/** Flag in the worker's name, with `=` and a value, when a test holds the demand bars (M3-07). */
+const DEMAND_FLAG = "demand";
 
 /** What the page tells the worker in its name, before any message can reach it. */
 export interface WorkerStart {
@@ -66,14 +68,18 @@ export interface WorkerStart {
   loadsFile: boolean;
   /** Whether the worker saves on its interval. Off only under the test switch. */
   autosave: boolean;
+  /** The value a test holds every demand bar at, from the test switch's `heldDemand`, or null for none (M3-07). */
+  heldDemand: number | null;
 }
 
 /**
- * The name the page gives the worker: `sim`, then `+load` and `+noautosave`
- * as they apply, then `:` and the city this tab last ran, if any.
+ * The name the page gives the worker: `sim`, then `+load`, `+noautosave`
+ * and `+demand=` with the held value as they apply, then `:` and the city
+ * this tab last ran, if any.
  */
-export function workerName(cityId: string | null, loadsFile = false, autosave = true): string {
-  const prefix = WORKER_NAME + (loadsFile ? `+${LOAD_FLAG}` : "") + (autosave ? "" : `+${NO_AUTOSAVE_FLAG}`);
+export function workerName(cityId: string | null, loadsFile = false, autosave = true, heldDemand: number | null = null): string {
+  const prefix =
+    WORKER_NAME + (loadsFile ? `+${LOAD_FLAG}` : "") + (autosave ? "" : `+${NO_AUTOSAVE_FLAG}`) + (heldDemand === null ? "" : `+${DEMAND_FLAG}=${heldDemand}`);
   return cityId ? `${prefix}:${cityId}` : prefix;
 }
 
@@ -82,12 +88,21 @@ export function startFromWorkerName(name: string): WorkerStart {
   const colon = name.indexOf(":");
   const prefix = colon < 0 ? name : name.slice(0, colon);
   const [base, ...flags] = prefix.split("+");
-  if (base !== WORKER_NAME) return { cityId: null, loadsFile: false, autosave: true };
+  if (base !== WORKER_NAME) return { cityId: null, loadsFile: false, autosave: true, heldDemand: null };
+  const demand = flags.find((flag) => flag.startsWith(`${DEMAND_FLAG}=`));
   return {
     cityId: colon < 0 ? null : name.slice(colon + 1) || null,
     loadsFile: flags.includes(LOAD_FLAG),
     autosave: !flags.includes(NO_AUTOSAVE_FLAG),
+    heldDemand: demand === undefined ? null : heldDemandValue(demand.slice(DEMAND_FLAG.length + 1)),
   };
+}
+
+/** A held demand value from text, or null unless it is a number from -100 to 100. */
+export function heldDemandValue(text: string | null): number | null {
+  if (text === null || text.trim() === "") return null;
+  const value = Number(text);
+  return Number.isFinite(value) && value >= -100 && value <= 100 ? value : null;
 }
 
 /** The city id in a worker name made by `workerName`, or null. */

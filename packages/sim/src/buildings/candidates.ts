@@ -23,6 +23,11 @@
 // ones at each node, and on through shorter segments while the places
 // passed are fewer than the widest lot (`segmentsNear`). A lot that no longer fits its roads
 // stands on no cells (where.ts), and those cells come back as candidates.
+//
+// Counted by zone too (M3-07), so the grower can draw among the free cells
+// of one zone alone: a zone whose demand bar is at or below zero then costs
+// no draws. Each column holds its zone's number, or 0 when it is not a
+// candidate, and every count is kept for each zone and for all of them.
 
 import { WIDEST_LOT } from "./balance";
 import type { BuildingState } from "./buildings";
@@ -34,6 +39,8 @@ import { CELL_OPEN, type CellIndex, type Column } from "../zoning/cell-index";
 import { ZONE_NONE, segmentOfSlot, type CellRef } from "../zoning/cells";
 
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
+/** Zone numbers run from 1 to this. Counts at index 0 are for every zone together. */
+const ZONES = ZONING_BALANCE.zones.length;
 /** Segments per counted block. */
 const BLOCK = 64;
 /** As where.ts has it. Not imported, to keep this module free of the building index. */
@@ -42,13 +49,14 @@ const NO_BUILDING = -1;
 interface Candidates {
   /** The cell index this was built from. */
   index: CellIndex;
-  /** By segment id: per column, `place * 2 + side`, 1 for a candidate. Null for a segment with none. */
+  /** By segment id: per column, `place * 2 + side`, the zone number of a candidate, 0 for none. Null for a segment with none. */
   bits: (Uint8Array | null)[];
-  /** By segment id: its candidates. */
-  counts: Int32Array;
-  /** Candidates in each block of BLOCK segment ids. */
-  blocks: Int32Array;
-  count: number;
+  /** By zone number, 0 for every zone, then by segment id: its candidates. */
+  counts: Int32Array[];
+  /** By zone number, 0 for every zone: candidates in each block of BLOCK segment ids. */
+  blocks: Int32Array[];
+  /** By zone number, 0 for every zone: candidates. */
+  count: Int32Array;
   /** Segments to look at again whole. */
   segs: Set<number>;
   /**
@@ -121,54 +129,64 @@ export function noteFrontColumns(state: SimState, keys: readonly number[]): void
   for (const key of keys) noteFront(c, key);
 }
 
-/** Whether column `col` of segment `seg` is a candidate, with the cells as they are now: 1 or 0. */
+/** The zone number of column `col` of segment `seg` if it is a candidate, with the cells as they are now, else 0. */
 function isCandidate(state: SimState, index: CellIndex, onCell: OnCell, seg: number, col: number): number {
   const status = index.segs[seg]?.status;
   if (!status || status[col * DEPTH] !== CELL_OPEN) return 0;
   const slot = (state.cells.offset[seg] ?? 0) + col * DEPTH;
-  return state.cells.zone[slot] !== ZONE_NONE && (onCell()[seg]?.[col * DEPTH] ?? NO_BUILDING) === NO_BUILDING ? 1 : 0;
+  const zone = state.cells.zone[slot] ?? ZONE_NONE;
+  return zone !== ZONE_NONE && (onCell()[seg]?.[col * DEPTH] ?? NO_BUILDING) === NO_BUILDING ? zone : 0;
 }
 
 /** Makes room for segment ids below `limit`. */
 function fit(c: Candidates, limit: number): void {
-  if (c.counts.length < limit) {
-    const counts = new Int32Array(Math.max(limit, c.counts.length * 2));
-    counts.set(c.counts);
-    c.counts = counts;
+  for (let z = 0; z <= ZONES; z++) {
+    const old = c.counts[z] as Int32Array;
+    if (old.length >= limit) continue;
+    const counts = new Int32Array(Math.max(limit, old.length * 2));
+    counts.set(old);
+    c.counts[z] = counts;
     const blocks = new Int32Array(Math.ceil(counts.length / BLOCK));
-    blocks.set(c.blocks);
-    c.blocks = blocks;
+    blocks.set(c.blocks[z] as Int32Array);
+    c.blocks[z] = blocks;
   }
   while (c.bits.length < limit) c.bits.push(null);
 }
 
-function setCount(c: Candidates, seg: number, n: number): void {
-  const was = c.counts[seg] ?? 0;
-  if (n === was) return;
-  c.counts[seg] = n;
+/** Adds `n`, which may be below 0, to the candidates of `seg` in zone `zone`, and in every zone. */
+function addCount(c: Candidates, seg: number, zone: number, n: number): void {
+  if (n === 0) return;
   const block = Math.floor(seg / BLOCK);
-  c.blocks[block] = (c.blocks[block] ?? 0) + n - was;
-  c.count += n - was;
+  // Two calls, not a loop over [0, zone]: this runs per candidate, and an array a call is garbage (issue #209).
+  addZoneCount(c, seg, block, 0, n);
+  addZoneCount(c, seg, block, zone, n);
+}
+
+function addZoneCount(c: Candidates, seg: number, block: number, z: number, n: number): void {
+  const counts = c.counts[z] as Int32Array;
+  const blocks = c.blocks[z] as Int32Array;
+  counts[seg] = (counts[seg] ?? 0) + n;
+  blocks[block] = (blocks[block] ?? 0) + n;
+  c.count[z] = (c.count[z] ?? 0) + n;
 }
 
 /** Looks at every column of `seg` again. */
 function refreshSegment(c: Candidates, state: SimState, onCell: OnCell, seg: number): void {
   const places = c.index.segs[seg]?.places ?? 0;
+  for (let z = 1; z <= ZONES; z++) addCount(c, seg, z, -((c.counts[z] as Int32Array)[seg] ?? 0));
   if (places === 0) {
     c.bits[seg] = null;
-    setCount(c, seg, 0);
     return;
   }
   let bits: Uint8Array | null = null;
-  let n = 0;
   for (let col = 0; col < places * 2; col++) {
-    if (isCandidate(state, c.index, onCell, seg, col) === 0) continue;
+    const zone = isCandidate(state, c.index, onCell, seg, col);
+    if (zone === 0) continue;
     bits ??= new Uint8Array(places * 2);
-    bits[col] = 1;
-    n++;
+    bits[col] = zone;
+    addCount(c, seg, zone, 1);
   }
   c.bits[seg] = bits;
-  setCount(c, seg, n);
 }
 
 /** Looks at one column again. */
@@ -177,10 +195,12 @@ function refreshColumn(c: Candidates, state: SimState, onCell: OnCell, seg: numb
   if (col >= columns) return;
   const now = isCandidate(state, c.index, onCell, seg, col);
   let bits = c.bits[seg] ?? null;
-  if ((bits?.[col] ?? 0) === now) return;
+  const was = bits?.[col] ?? 0;
+  if (was === now) return;
   if (!bits) c.bits[seg] = bits = new Uint8Array(columns);
   bits[col] = now;
-  setCount(c, seg, (c.counts[seg] ?? 0) + (now === 1 ? 1 : -1));
+  if (was !== 0) addCount(c, seg, was, -1);
+  if (now !== 0) addCount(c, seg, now, 1);
 }
 
 /**
@@ -222,9 +242,9 @@ function build(state: SimState, index: CellIndex, onCell: OnCell): Candidates {
   const c: Candidates = {
     index,
     bits: new Array<Uint8Array | null>(limit).fill(null),
-    counts: new Int32Array(limit),
-    blocks: new Int32Array(Math.ceil(limit / BLOCK)),
-    count: 0,
+    counts: Array.from({ length: ZONES + 1 }, () => new Int32Array(limit)),
+    blocks: Array.from({ length: ZONES + 1 }, () => new Int32Array(Math.ceil(limit / BLOCK))),
+    count: new Int32Array(ZONES + 1),
     segs: new Set(),
     fronts: [],
     frontsCap: MOST_FRONTS,
@@ -285,24 +305,32 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
   return c;
 }
 
-/** How many candidates `state` has now. */
-export function candidateCount(state: SimState, index: CellIndex, onCell: OnCell): number {
-  return candidatesOf(state, index, onCell).count;
+/** How many candidates `state` has now in zone number `zone`, or in every zone for 0, the default. */
+export function candidateCount(state: SimState, index: CellIndex, onCell: OnCell, zone = 0): number {
+  return candidatesOf(state, index, onCell).count[zone] ?? 0;
 }
 
-/** The `k`-th candidate, from 0, in slot order, as a cell name. `k` must be under `candidateCount`. */
-export function candidateAt(state: SimState, index: CellIndex, onCell: OnCell, k: number): CellRef {
+/**
+ * The `k`-th candidate, from 0, in slot order, as a cell name, among those
+ * of zone number `zone`, or of every zone for 0, the default. `k` must be
+ * under `candidateCount` for the same zone.
+ */
+export function candidateAt(state: SimState, index: CellIndex, onCell: OnCell, k: number, zone = 0): CellRef {
   const c = candidatesOf(state, index, onCell);
-  if (!(Number.isInteger(k) && k >= 0 && k < c.count)) throw new RangeError(`no candidate ${k} of ${c.count}`);
+  const count = c.count[zone] ?? 0;
+  if (!(Number.isInteger(k) && k >= 0 && k < count)) throw new RangeError(`no candidate ${k} of ${count} in zone ${zone}`);
+  const blocks = c.blocks[zone] as Int32Array;
+  const counts = c.counts[zone] as Int32Array;
   let left = k;
   let block = 0;
-  while (left >= (c.blocks[block] ?? 0)) left -= c.blocks[block++] ?? 0;
+  while (left >= (blocks[block] ?? 0)) left -= blocks[block++] ?? 0;
   let seg = block * BLOCK;
-  while (left >= (c.counts[seg] ?? 0)) left -= c.counts[seg++] ?? 0;
+  while (left >= (counts[seg] ?? 0)) left -= counts[seg++] ?? 0;
   const bits = c.bits[seg] as Uint8Array;
   let col = 0;
   for (; ; col++) {
-    if (bits[col] !== 1) continue;
+    const bit = bits[col] ?? 0;
+    if (bit === 0 || (zone !== 0 && bit !== zone)) continue;
     if (left === 0) break;
     left--;
   }
@@ -321,7 +349,8 @@ export function prepareCandidates(state: SimState, index: CellIndex, onCell: OnC
 export function candidateSets(state: SimState, index: CellIndex, onCell: OnCell): { kept: number[]; fresh: number[] } {
   const list = (c: Candidates): number[] => {
     const out: number[] = [];
-    c.bits.forEach((bits, seg) => bits?.forEach((bit, col) => bit === 1 && out.push(seg * CELL_KEY_STRIDE + col)));
+    // The zone after the point, so a column filed under the wrong zone shows.
+    c.bits.forEach((bits, seg) => bits?.forEach((bit, col) => bit !== 0 && out.push(seg * CELL_KEY_STRIDE + col + bit / 10)));
     return out;
   };
   const kept = candidatesOf(state, index, onCell);
@@ -331,14 +360,21 @@ export function candidateSets(state: SimState, index: CellIndex, onCell: OnCell)
 }
 
 function expectSameCounts(kept: Candidates, fresh: Candidates): void {
-  let total = 0;
-  for (let block = 0; block < kept.blocks.length; block++) {
-    let sum = 0;
-    for (let seg = block * BLOCK; seg < (block + 1) * BLOCK && seg < kept.counts.length; seg++) sum += kept.counts[seg] ?? 0;
-    if (sum !== kept.blocks[block]) throw new Error(`block ${block} counts ${kept.blocks[block]}, its segments ${sum}`);
-    total += sum;
+  let zones = 0;
+  for (let z = 0; z <= ZONES; z++) {
+    const blocks = kept.blocks[z] as Int32Array;
+    const counts = kept.counts[z] as Int32Array;
+    let total = 0;
+    for (let block = 0; block < blocks.length; block++) {
+      let sum = 0;
+      for (let seg = block * BLOCK; seg < (block + 1) * BLOCK && seg < counts.length; seg++) sum += counts[seg] ?? 0;
+      if (sum !== blocks[block]) throw new Error(`zone ${z} block ${block} counts ${blocks[block]}, its segments ${sum}`);
+      total += sum;
+    }
+    if (total !== kept.count[z] || kept.count[z] !== fresh.count[z]) throw new Error(`zone ${z}: kept ${kept.count[z]} (${total} by block), fresh ${fresh.count[z]}`);
+    if (z > 0) zones += total;
   }
-  if (total !== kept.count || kept.count !== fresh.count) throw new Error(`kept ${kept.count} (${total} by block), fresh ${fresh.count}`);
+  if (zones !== kept.count[0]) throw new Error(`the zones count ${zones}, all of them together ${kept.count[0]}`);
 }
 
 /** How many front-cell keys wait to be looked at again, repeats included. For tests. */

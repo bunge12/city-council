@@ -20,6 +20,7 @@ import {
   type SimState,
   type SnapshotBuffer,
 } from "../src/index";
+import { FULL_DEMAND, holdDemand } from "./demand-helper";
 import { submit } from "./seen-ends";
 import { SEG_FIXED, isSegment, segmentIdLimit } from "../src/roads/network";
 
@@ -87,8 +88,11 @@ function drive(state: SimState, i: number): void {
   step(state);
 }
 
+/** Drives steps `from` to `to`, with every bar held at 100 so all five zones grow (M3-07). */
 function run(state: SimState, from: number, to: number): SimState {
-  for (let i = from; i < to; i++) drive(state, i);
+  holdDemand(FULL_DEMAND, () => {
+    for (let i = from; i < to; i++) drive(state, i);
+  });
   return state;
 }
 
@@ -139,6 +143,7 @@ describe("M2 review: save and resume", () => {
   });
 
   it("the log replays to the straight hash", () => {
-    expect(hashState(replay(SEED, straight.log, straight.tick))).toBe(want);
+    // With the bars held as the run held them.
+    expect(hashState(holdDemand(FULL_DEMAND, () => replay(SEED, straight.log, straight.tick)))).toBe(want);
   });
 });

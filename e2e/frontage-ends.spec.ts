@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { FULL_DEMAND, holdDemand } from "../packages/sim/test/demand-helper";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { TIME_BALANCE, buildingCount, createState, readBuilding, step, submit, type SimState } from "../packages/sim/src/index";
 import { finishConstruction } from "./building-fixtures";
@@ -51,7 +52,10 @@ function grownCity(): SimState {
     if (!result.ok) throw new Error(`zoning refused: ${result.reason}`);
     step(state);
   }
-  while (state.tick < 60 * TIME_BALANCE.ticksPerDay) step(state);
+  // An empty city wants no offices or shops (M3-07): hold their bars up for the 60 days.
+  holdDemand(FULL_DEMAND, () => {
+    while (state.tick < 60 * TIME_BALANCE.ticksPerDay) step(state);
+  });
   finishConstruction(state);
   // Saved paused, so nothing grows while the test looks.
   state.speed = 0;

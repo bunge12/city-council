@@ -23,6 +23,7 @@ import {
   type Occupancy,
   type SimState,
 } from "../src/index";
+import { FULL_DEMAND, holdDemand } from "./demand-helper";
 import { removeBuilding } from "../src/buildings/buildings";
 import { addPop, removePop, setPopProfile, setPopSize, setPopWork } from "../src/pops/pops";
 import { nextInt, seedRng } from "../src/rng";
@@ -48,7 +49,10 @@ function city(): SimState {
   ok(state, "BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" });
   ok(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4571 }, to: { x: 4390, z: 4571 }, width: 44 }] });
   ok(state, "ZoneCells", { zone: "commercial", density: 1, rects: [{ from: { x: 4202, z: 4629 }, to: { x: 4390, z: 4629 }, width: 44 }] });
-  for (let t = 0; t < 6000 && (homes(state).length < 4 || workplaces(state).length < 2); t++) step(state);
+  // Shops need commercial demand, which a city with no residents lacks (M3-07).
+  holdDemand(FULL_DEMAND, () => {
+    for (let t = 0; t < 6000 && (homes(state).length < 4 || workplaces(state).length < 2); t++) step(state);
+  });
   expect(homes(state).length).toBeGreaterThanOrEqual(4);
   return state;
 }
@@ -157,11 +161,11 @@ describe("people deltas", () => {
 });
 
 describe("protocol version 17", () => {
-  it("refuses a client on version 16, before the demand bars, with the usual message", () => {
-    expect(PROTOCOL_VERSION).toBe(17);
-    expect(parseToSimMessage({ v: 16, type: "requestSnapshot" })).toBe("protocol version 16 is not supported, expected 17");
-    expect(parseToSimMessage({ v: 16, type: "command", command: { seq: 1, playerId: "p", type: "NoOp", payload: {} } })).toBe(
-      "protocol version 16 is not supported, expected 17",
+  it("refuses a client on version 17, before the grower's plan left the deltas, with the usual message", () => {
+    expect(PROTOCOL_VERSION).toBe(18);
+    expect(parseToSimMessage({ v: 17, type: "requestSnapshot" })).toBe("protocol version 17 is not supported, expected 18");
+    expect(parseToSimMessage({ v: 17, type: "command", command: { seq: 1, playerId: "p", type: "NoOp", payload: {} } })).toBe(
+      "protocol version 17 is not supported, expected 18",
     );
   });
 });

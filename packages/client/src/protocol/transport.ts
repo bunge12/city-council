@@ -98,12 +98,13 @@ export interface WorkerChannels {
  * still saved. It travels in the worker's name, so the worker has it before
  * any message arrives. With `loadsFile` the worker instead waits for the
  * page to send it a city file to open (`LoadFileMessage`). `autosave`
- * travels the same way, off only under the test switch (issue #226).
+ * travels the same way, off only under the test switch (issue #226), and
+ * so does `heldDemand`, the value a test holds every demand bar at (M3-07).
  */
-export function createWorkerTransport(cityId: string | null = null, loadsFile = false, autosave = true): WorkerChannels {
+export function createWorkerTransport(cityId: string | null = null, loadsFile = false, autosave = true, heldDemand: number | null = null): WorkerChannels {
   const worker = new Worker(new URL("./worker.ts", import.meta.url), {
     type: "module",
-    name: workerName(cityId, loadsFile, autosave),
+    name: workerName(cityId, loadsFile, autosave, heldDemand),
   });
   return {
     sim: portTransport<ToSimMessage, FromSimMessage>(worker, isSimMessage),

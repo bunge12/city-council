@@ -16,6 +16,7 @@ import {
   type BuildingSeen,
   type SimState,
 } from "../src/index";
+import { FULL_DEMAND, holdDemand } from "./demand-helper";
 import { submit } from "./seen-ends";
 import { SEG_FIXED, isSegment, segmentIdLimit } from "../src/roads/network";
 import { loadScaleCity, scaleCityMeta } from "./scale-fixture";
@@ -104,7 +105,9 @@ describe("save and resume with zoning and growth on the scale city (issue M2-17)
     return state;
   };
 
-  it("a session saved and reloaded half way ends on the same hash as one that ran straight through", () => {
+  // Every bar held at 100 so all five zones grow (M3-07): at those rates the
+  // zones together add about 50 buildings a game day.
+  it("a session saved and reloaded half way ends on the same hash as one that ran straight through", () => holdDemand(FULL_DEMAND, () => {
     const straight = settledCity();
     const start = straight.tick;
     const seqA = { n: 100_000 };
@@ -126,7 +129,7 @@ describe("save and resume with zoning and growth on the scale city (issue M2-17)
     for (const type of ["ZoneCells", "BulldozeBuilding", "BuildRoad", "BulldozeRoad", "Undo"]) {
       expect(sessionEntries.filter((e) => e.type === type).length, type).toBeGreaterThan(5);
     }
-    expect(mostBuildings).toBeGreaterThan(500);
+    expect(mostBuildings).toBeGreaterThan(300);
     expect(resumed.tick).toBe(straight.tick);
     expect(buildingCount(resumed.buildings)).toBe(buildingCount(straight.buildings));
     expect(hashState(resumed)).toBe(hashState(straight));
@@ -135,5 +138,5 @@ describe("save and resume with zoning and growth on the scale city (issue M2-17)
     // Both runs above start from the saved snapshot, so this replay is the one run here built from
     // the first road with every piece of derived data kept current. Keep it.
     expect(hashState(replay(SCALE_SEED, [...straight.log], straight.tick))).toBe(hashState(straight));
-  }, 300_000);
+  }), 300_000);
 });

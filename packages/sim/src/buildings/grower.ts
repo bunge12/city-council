@@ -1,34 +1,27 @@
-// The grower (M2-10, PRD "M2 Zoning and buildings"): buildings appear on
-// zoned cells at a fixed rate. M2 has no demand, so every zone, mixed
-// included, grows as if its demand were positive; M3 puts the demand bars
-// in front of this.
+// The grower (M2-10, PRD "M2 Zoning and buildings"; M3-07, PRD "Four
+// demand bars"): buildings appear on zoned cells where demand asks for
+// them and nowhere else.
 //
-// The pace scales with the free frontage (issue 135), so any amount of
-// zoning fills in about `fillDays` from the last of it. On the first settled tick of each game
-// day the grower counts the free zoned front cells, F, and plans the day
-// (`planDay`). The plan also keeps `used`, the front cells the grower
-// itself built on since the last plan, so the cells that came since are
-// F - (the last plan's F - used): new zoning, or a building gone. When some
-// came, they get a full `fillDays` and the cells already planned keep
-// their deadline: the new deadline is the two weighted by their cells,
-// rounded up, so zoning a street every few days does not hold back the
-// ones before it. When none came and the deadline has come, it moves to
-// tomorrow while the grower built anything since the last plan, so the
-// last few cells fill at once rather than at the floor; once it built
-// nothing, what is left is cells no lot fits, and it moves `fillDays` on,
-// so they cost few draws. The day's quota is then F over `frontCellsPerBuilding`
-// times the days left to the deadline, rounded up and held between
-// `growthPerDayMin` and `growthPerDayMax`. The plan is in state
-// (growth.ts), since F changes during the day. Tick t of the day adds
-// floor((t + 1) r / T) - floor(t r / T) buildings, for r the quota and T
-// ticks a day, so when they land follows from state and the tick alone. A
-// tick that falls while a change of roads is still settling adds none
-// (`cellsSettled`), and a day that settles late is planned then; those
-// buildings are not made up later.
+// Each zone builds only while its demand bar is above zero, and mixed only
+// while the residential and commercial bars both are. Its pace follows the
+// bar: a zone whose bar reads b builds ceil(b / 100 x its
+// `buildingsPerDayAtFullDemand`) buildings a game day (demand.json), so a
+// bar barely above zero still builds one a day. Mixed reads the lower of
+// its two bars. The zones take their quotas in zone order, and together
+// they are held to `growthPerDayMax` (buildings.json), which keeps a tick
+// inside its share of the budget. The bars move only on a day's first tick
+// (demand.ts), and the grower runs after them, so the day's quotas follow
+// from state alone and need no plan of their own: a city loaded mid-day
+// lands the same buildings as one that never stopped. Tick t of the day
+// adds floor((t + 1) r / T) - floor(t r / T) buildings of a zone, for r its
+// quota and T ticks a day. A tick that falls while a change of roads is
+// still settling (`cellsSettled`) adds none, and those buildings are not
+// made up later. Density is whatever the cell is zoned for: an R3 cell
+// gets an R3 building as soon as residential demand is above zero.
 //
-// For each building the grower draws a free zoned cell by the road from
-// the generator in state (candidates.ts; M3 replaces the draw with land
-// value). It builds at an end of the free frontage that cell lies on, not
+// For each building the grower draws a free zoned cell by the road of the
+// building's zone from the generator in state (candidates.ts; M3-25
+// replaces the draw with land value). It builds at an end of the free frontage that cell lies on, not
 // at the cell (issue 194): it asks the lot finder what fits at the nearer
 // end (`freeFrontage`, lots.ts), then at the farther, and only if neither
 // fits, at the cell drawn. A lot holding an end cell runs from it, so the
@@ -60,14 +53,16 @@
 // reads to pick a model and a tint, is drawn from 0 to 255.
 
 import { TIME_BALANCE } from "../calendar";
+import { DEMAND_BALANCE } from "../demand/balance";
+import type { DemandState } from "../demand/demand";
 import { nextInt } from "../rng";
 import type { SimState } from "../state";
 import type { CellRef } from "../zoning/cells";
 import type { System } from "../step";
+import { ZONING_BALANCE } from "../zoning/balance";
 import { cellSlotIn, cellsSettled, nextColumn, syncCells, type Column } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE, BUILDING_TYPES, typesFor, type BuildingType } from "./balance";
 import { addBuilding } from "./buildings";
-import type { GrowthState } from "./growth";
 import { candidateAt, candidateCount } from "./candidates";
 import { freeFrontage, lotOptions, type Lot, type LotOptions } from "./lots";
 import { segmentBuildings } from "./where";
@@ -90,24 +85,42 @@ export function dayOf(tick: number): number {
   return Math.floor(tick / TIME_BALANCE.ticksPerDay);
 }
 
-/** Plans day `day` from `free`, the free zoned front cells counted at its start, as the header says. */
-export function planDay(growth: GrowthState, day: number, free: number): void {
-  const b = BUILDINGS_BALANCE;
-  const planned = Math.max(0, growth.free - growth.used);
-  const came = free - planned;
-  if (came > 0) {
-    const left = Math.max(1, growth.deadline - day);
-    const days = planned * left + came * b.fillDays;
-    growth.deadline = day + Math.floor((days + free - 1) / free);
-  } else if (day >= growth.deadline) {
-    growth.deadline = growth.used > 0 ? day + 1 : day + b.fillDays;
+/** Which bar each zone reads, by zone id. Mixed has no bar: it reads the lower of residential and commercial. */
+const ZONE_BARS: Readonly<Record<string, readonly (keyof DemandState)[]>> = {
+  residential: ["residential"],
+  commercial: ["commercial"],
+  office: ["office"],
+  industrial: ["industrial"],
+  mixed: ["residential", "commercial"],
+};
+
+/** The bar zone `id` grows by: its own, or for mixed the lower of its two. */
+export function zoneBar(demand: DemandState, id: string): number {
+  const bars = ZONE_BARS[id] ?? [];
+  let least = bars.length > 0 ? Infinity : 0;
+  for (const bar of bars) least = Math.min(least, demand[bar].value);
+  return least;
+}
+
+/**
+ * The buildings each zone adds today, by zone number, with index 0 unused,
+ * as the header says: none while its bar is at or below zero, else its
+ * full-demand rate times the bar over 100, rounded up, the zones together
+ * held to `growthPerDayMax` in zone order.
+ */
+export function dayQuotas(demand: DemandState): number[] {
+  const quotas = [0];
+  let left = BUILDINGS_BALANCE.growthPerDayMax;
+  for (const zone of ZONING_BALANCE.zones) {
+    const bar = zoneBar(demand, zone.id);
+    const rate = DEMAND_BALANCE.buildingsPerDayAtFullDemand[zone.id] ?? 0;
+    // ceil(rate x bar / 100) as -floor(-x), so it uses only floor (CLAUDE.md rule 6).
+    const want = bar > 0 ? -Math.floor(-(rate * bar) / 100) : 0;
+    const quota = Math.min(want, left);
+    quotas.push(quota);
+    left -= quota;
   }
-  const per = b.frontCellsPerBuilding * (growth.deadline - day);
-  const want = Math.floor((free + per - 1) / per);
-  growth.quota = Math.min(b.growthPerDayMax, Math.max(b.growthPerDayMin, want));
-  growth.day = day;
-  growth.free = free;
-  growth.used = 0;
+  return quotas;
 }
 
 /** Residents for a `type` building on a `width` x `depth` lot. Draws from `rng` only for a type with `drawResidents`. */
@@ -201,14 +214,18 @@ function optionsFromEnd(state: SimState, ref: CellRef): { options: LotOptions; l
   return { options: isEnd && last ? last : lotOptions(state, ref, false), leaving: asIs };
 }
 
-/** Adds one building where the draw lands, or none after `growthTries` cells with no lot. Returns the id or -1. */
-export function growOne(state: SimState): number {
+/**
+ * Adds one building where the draw lands among the free cells of zone
+ * number `zone`, or of every zone for 0, the default; or none after
+ * `growthTries` cells with no lot. Returns the id or -1.
+ */
+export function growOne(state: SimState, zone = 0): number {
   for (let tries = 0; tries < BUILDINGS_BALANCE.growthTries; tries++) {
     const index = syncCells(state);
     const onCell = () => segmentBuildings(state);
-    const count = candidateCount(state, index, onCell);
+    const count = candidateCount(state, index, onCell, zone);
     if (count === 0) return -1;
-    const ref = candidateAt(state, index, onCell, nextInt(state.rng, count));
+    const ref = candidateAt(state, index, onCell, nextInt(state.rng, count), zone);
     const { options, leaving } = optionsFromEnd(state, ref);
     if (!options.ok) continue;
     const lot = chooseLot(state.rng, options.lots, options.free, leaving);
@@ -220,22 +237,19 @@ export function growOne(state: SimState): number {
   return -1;
 }
 
-/** The free zoned front cells: the grower's candidates. */
-export function freeFrontCells(state: SimState): number {
-  return candidateCount(state, syncCells(state), () => segmentBuildings(state));
+/** The free zoned front cells of zone number `zone`, or of every zone for 0, the default: the grower's candidates. */
+export function freeFrontCells(state: SimState, zone = 0): number {
+  return candidateCount(state, syncCells(state), () => segmentBuildings(state), zone);
 }
 
 /** The grower's work for one tick. */
 export function grow(state: SimState): void {
   if (!cellsSettled(state)) return;
-  const day = dayOf(state.tick);
-  if (state.growth.day !== day) planDay(state.growth, day, freeFrontCells(state));
-  // Held to the cap here too, so a save that says more cannot stall a tick.
-  const due = growthOnTick(state.tick, Math.min(state.growth.quota, BUILDINGS_BALANCE.growthPerDayMax));
-  if (due === 0) return;
-  const before = freeFrontCells(state);
-  for (let i = 0; i < due; i++) if (growOne(state) < 0) break;
-  state.growth.used += before - freeFrontCells(state);
+  const quotas = dayQuotas(state.demand);
+  for (let zone = 1; zone < quotas.length; zone++) {
+    const due = growthOnTick(state.tick, quotas[zone] ?? 0);
+    for (let i = 0; i < due; i++) if (growOne(state, zone) < 0) break;
+  }
 }
 
 export const GROWER: System = { name: GROWER_SYSTEM, run: grow };

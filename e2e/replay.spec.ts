@@ -11,12 +11,14 @@ interface Fixture {
   untilTick: number;
   log: unknown[];
   hash: string;
+  /** Every demand bar held at this through the replay, as the Node replay holds them (M3-07). */
+  heldDemand?: number;
 }
 
 // The hook packages/client/src/main.ts puts on the page. The tooling
 // tsconfig has no DOM types, so the part used here is declared.
 declare const window: {
-  cityCouncil: { replayCheck(seed: number, log: unknown[], untilTick: number): { hash: string; logLength: number } };
+  cityCouncil: { replayCheck(seed: number, log: unknown[], untilTick: number, heldDemand: number | null): { hash: string; logLength: number } };
 };
 
 const dir = new URL("../packages/sim/test/fixtures/replay/", import.meta.url);
@@ -34,8 +36,8 @@ for (const { name, fixture } of fixtures) {
     await page.goto("/");
     await page.waitForFunction(() => "cityCouncil" in globalThis);
     const result = await page.evaluate(
-      ([seed, log, untilTick]) => window.cityCouncil.replayCheck(seed, log, untilTick),
-      [fixture.seed, fixture.log, fixture.untilTick] as const,
+      ([seed, log, untilTick, held]) => window.cityCouncil.replayCheck(seed, log, untilTick, held),
+      [fixture.seed, fixture.log, fixture.untilTick, fixture.heldDemand ?? null] as const,
     );
     expect(result.logLength).toBe(fixture.log.length);
     expect(result.hash).toBe(fixture.hash);

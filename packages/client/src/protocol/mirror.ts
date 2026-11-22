@@ -457,7 +457,6 @@ export class SimMirror {
     state.demand = copyDemand(delta.demand);
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
-    state.growth = { ...delta.growth };
     state.centre = { ...delta.centre };
     const statTotals = applyStatsDelta(state.stats, delta.stats);
     for (const entry of delta.log) state.log.push(entry);

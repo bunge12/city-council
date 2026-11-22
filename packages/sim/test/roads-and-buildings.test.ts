@@ -36,6 +36,7 @@ import {
   recordRoadChanges,
   replay,
 } from "../src/index";
+import { holdEach } from "./hold-each";
 import { submit, withEnds } from "./seen-ends";
 import { enqueue } from "../src/commands";
 import fixtureJson from "./fixtures/replay/roads-and-buildings.json";
@@ -337,6 +338,8 @@ describe("an upgrade", () => {
 });
 
 describe("rezoning built land", () => {
+  // The cleared lot grows shops, which need commercial demand (M3-07).
+  holdEach();
   it("leaves the building standing; cleared, the lot grows under the new zoning", () => {
     const state = street();
     zone(state, "residential", 1, 0, 2, 4);
@@ -509,6 +512,8 @@ describe("a big change of roads", () => {
 });
 
 describe("the building index across changes of roads", () => {
+  // Random zones of every kind, grown to 40 buildings: hold every bar up (M3-07).
+  holdEach();
   it("kept current agrees with one built afresh, through random roads, bulldozes, undos, upgrades and growth", () => {
     const state = createState(SEED);
     for (const z of [4500, 4600, 4700]) ok(state, road([4150, z], [4650, z]));
@@ -551,13 +556,14 @@ describe("the building index across changes of roads", () => {
  * The commands behind fixtures/replay/roads-and-buildings.json, stepped
  * live, picking what to clear from the city as it is then, as a player
  * would. On seed 2026: p1 builds a street, zones R1 four deep along its
- * north side and p2 C1 three deep along its south side. Twelve days of
+ * north side and p2 R1 three deep along its south side. Twelve days of
  * growth, then p2 runs a street south from x 4336, which splits the first
- * one under the houses across it and clears the shops in its way. p1 clears
- * its lowest-numbered house with BulldozeBuilding, then runs a street north
- * from x 4280 through its houses. p2 bulldozes its street. Six days on
- * its undo is refused, since shops grew on the ground meanwhile; p2 clears
- * them and undoes. Twenty-four days.
+ * one under the houses across it and clears the houses in its way. p1
+ * clears its lowest-numbered house on the north side with BulldozeBuilding,
+ * then runs a street north from x 4280 through its houses. p2 bulldozes its
+ * street. Six days on its undo is refused, since houses grew on the ground
+ * meanwhile; p2 clears them and undoes. Twenty-four days. Until M3-07 the
+ * south side was C1; a city with no residents now wants no shops.
  */
 function playSession(): SimState {
   const state = createState(SEED);
@@ -571,7 +577,7 @@ function playSession(): SimState {
   send("BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" });
   until(1);
   send("ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4579 }, to: { x: 4390, z: 4579 }, width: 28 }] });
-  send("ZoneCells", { zone: "commercial", density: 1, rects: [{ from: { x: 4202, z: 4617 }, to: { x: 4390, z: 4617 }, width: 20 }] }, "p2");
+  send("ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4617 }, to: { x: 4390, z: 4617 }, width: 20 }] }, "p2");
   until(12 * DAY);
   send("BuildRoad", { from: { x: 4336, z: 4600 }, to: { x: 4336, z: 4700 }, type: "street" }, "p2");
   until(13 * DAY);
@@ -593,7 +599,7 @@ function playSession(): SimState {
   until(16 * DAY);
   send("BulldozeRoad", withEnds(state.roads, { segments: [cellAt(state, 4343, 4680)?.segment as number] }), "p2");
   until(22 * DAY);
-  // Shops grew on p1's cells where the street was, so the undo would clear
+  // Houses grew on the cells where the street was, so the undo would clear
   // them, and it is refused (M2 review, #147). p2 clears them and undoes.
   expect(submit(state, { seq: ++n, playerId: "p2", type: "Undo", payload: {} }).ok).toBe(false);
   const half = halfWidth("street");
@@ -628,20 +634,21 @@ describe("replay fixture roads-and-buildings", () => {
   it("builds, grows and clears along the way", () => {
     const at = (tick: number) => replay(fixture.seed, fixture.log, tick);
     const count = (s: SimState) => live(s).length;
-    const byZone = (s: SimState, zone: number) => live(s).filter((id) => s.buildings.zone[id] === zone).length;
+    // Side 0 is the north side of the first street, side 1 the south.
+    const bySide = (s: SimState, side: number) => live(s).filter((id) => s.buildings.firstSide[id] === side).length;
     // Grown on both sides by day 12.
     const grown = at(1200);
-    expect(byZone(grown, 1)).toBeGreaterThan(0);
-    expect(byZone(grown, 2)).toBeGreaterThan(0);
-    // The street south clears shops, and the houses across the split stand.
+    expect(bySide(grown, 0)).toBeGreaterThan(0);
+    expect(bySide(grown, 1)).toBeGreaterThan(0);
+    // The street south clears houses on its side, and the houses across the split stand.
     const split = at(1201);
-    expect(byZone(split, 2)).toBeLessThan(byZone(grown, 2));
-    expect(byZone(split, 1)).toBe(byZone(grown, 1));
+    expect(bySide(split, 1)).toBeLessThan(bySide(grown, 1));
+    expect(bySide(split, 0)).toBe(bySide(grown, 0));
     // BulldozeBuilding clears one house.
     expect(count(at(1301))).toBe(count(at(1300)) - 1);
     // The street north clears houses.
-    expect(byZone(at(1401), 1)).toBeLessThan(byZone(at(1400), 1));
-    // The undo of the bulldoze waits for the shops on its ground to be cleared (M2 review, #147).
+    expect(bySide(at(1401), 0)).toBeLessThan(bySide(at(1400), 0));
+    // The undo of the bulldoze waits for the houses on its ground to be cleared (M2 review, #147).
     expect(count(at(2201))).toBeLessThan(count(at(2200)));
     expect(fixture.log.filter((e) => e.type === "Undo").map((e) => e.tick)).toEqual([2201]);
   });

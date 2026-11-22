@@ -2,6 +2,7 @@
 // the tick to replay to, plus the state hash that replay must produce.
 import { expect } from "vitest";
 import { BALANCE_STAMP, hashState, replay, type LogEntry, type SimState } from "../src/index";
+import { holdDemand } from "./demand-helper";
 
 export interface ReplayFixture {
   description: string;
@@ -12,11 +13,25 @@ export interface ReplayFixture {
   balance: string;
   /** Expected `hashState` of the replayed state. */
   hash: string;
+  /**
+   * When set, every demand bar is held at this value through the replay
+   * (M3-07), so a fixture can record shops, offices, factories and mixed
+   * ground growing on a city with no residents. The browser's replay check
+   * holds them the same way.
+   */
+  heldDemand?: number;
+}
+
+/** Replays `fixture` to `untilTick`, or to its end, with its bars held if it says so. */
+export function replayFixture(fixture: ReplayFixture, untilTick = fixture.untilTick): SimState {
+  const run = () => replay(fixture.seed, fixture.log, untilTick);
+  const v = fixture.heldDemand;
+  return v === undefined ? run() : holdDemand({ residential: v, commercial: v, office: v, industrial: v }, run);
 }
 
 /** Replays a fixture and returns the final state and its hash. */
 export function runFixture(fixture: ReplayFixture): { state: SimState; hash: string } {
-  const state = replay(fixture.seed, fixture.log, fixture.untilTick);
+  const state = replayFixture(fixture);
   return { state, hash: hashState(state) };
 }
 

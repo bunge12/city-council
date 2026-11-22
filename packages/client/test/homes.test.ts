@@ -16,6 +16,7 @@ import {
   type SimState,
 } from "@city-council/sim";
 import { countHomes, homesBefore } from "../src/protocol/homes";
+import { holdDemandBars } from "../src/protocol/held-demand";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror } from "../src/protocol/mirror";
 import { memoryTransportPair } from "../src/protocol/transport";
@@ -40,7 +41,13 @@ function city(): SimState {
   run(state, "BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" }, seq);
   run(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4571 }, to: { x: 4390, z: 4571 }, width: 44 }] }, seq);
   run(state, "ZoneCells", { zone: "commercial", density: 1, rects: [{ from: { x: 4202, z: 4629 }, to: { x: 4390, z: 4629 }, width: 44 }] }, seq);
-  for (let t = 0; t < 6000 && buildingCount(state.buildings) < 6; t++) step(state);
+  // Shops need commercial demand, which a city with no residents lacks (M3-07).
+  const release = holdDemandBars(100);
+  try {
+    for (let t = 0; t < 6000 && buildingCount(state.buildings) < 6; t++) step(state);
+  } finally {
+    release();
+  }
   if (buildingCount(state.buildings) < 6) throw new Error("the buildings did not grow");
   return state;
 }

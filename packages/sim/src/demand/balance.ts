@@ -1,9 +1,11 @@
 // Demand numbers from `balance/demand.json`, checked when the module loads
 // (M3-01, PRD "Four demand bars" and "Pacing"). The bars (demand.ts, M3-06)
-// read all but `arrivalsPerYearAtFullDemand`, which arrivals read (M3-08).
+// read all but `arrivalsPerYearAtFullDemand`, which arrivals read (M3-08),
+// and `buildingsPerDayAtFullDemand`, which the grower reads (M3-07).
 
 import balance from "../../balance/demand.json" with { type: "json" };
 import { EDUCATION_LEVELS, type EducationLevel } from "../buildings/balance";
+import { ZONING_BALANCE } from "../zoning/balance";
 import { isRecord, numberProblem, numberProblems, unknownKeys, type NumberRule } from "../balance-fields";
 
 /** The demand balance file. Bar weights are bar points per whole unit of their input. */
@@ -26,6 +28,8 @@ export interface DemandBalance {
   outsidePull: { bar: number; untilResidents: number };
   /** Residents a game year with the residential bar at 100. */
   arrivalsPerYearAtFullDemand: number;
+  /** By zone id: buildings the grower adds a game day with the zone's bar at 100 (M3-07). */
+  buildingsPerDayAtFullDemand: Record<string, number>;
 }
 
 const RAISES: NumberRule = { min: 0, max: 1000 };
@@ -55,7 +59,7 @@ const TOP: Readonly<Record<string, NumberRule>> = {
 export function checkDemandBalance(data: unknown): string[] {
   if (!isRecord(data)) return ["the demand balance is not an object"];
   const errors: string[] = [];
-  const others = ["spendingByWealth", "outsidePull"];
+  const others = ["spendingByWealth", "outsidePull", "buildingsPerDayAtFullDemand"];
   for (const key of [...Object.keys(BARS), ...others]) if (!(key in data)) errors.push(`${key} is missing`);
   for (const [key, rule] of Object.entries(TOP)) {
     const problem = numberProblem(data, key, rule, "");
@@ -69,6 +73,10 @@ export function checkDemandBalance(data: unknown): string[] {
   }
   if ("outsidePull" in data) {
     errors.push(...numberProblems(data["outsidePull"], { bar: { min: 0, max: 100 }, untilResidents: { min: 0, whole: true } }, "outsidePull"));
+  }
+  if ("buildingsPerDayAtFullDemand" in data) {
+    const rules = Object.fromEntries(ZONING_BALANCE.zones.map((zone) => [zone.id, { min: 0, whole: true }]));
+    errors.push(...numberProblems(data["buildingsPerDayAtFullDemand"], rules, "buildingsPerDayAtFullDemand"));
   }
   return errors;
 }

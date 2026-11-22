@@ -4,7 +4,6 @@
 // PROTOCOL_VERSION on any change to a shape.
 
 import type { BuildingDelta } from "./buildings/delta";
-import type { GrowthState } from "./buildings/growth";
 import type { Command, CommandResult, DroppedCommand } from "./commands";
 import type { CentreState } from "./landvalue/centre";
 import type { DemandState } from "./demand/demand";
@@ -17,7 +16,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 
 // ---- Client to sim ----
 
@@ -113,12 +112,6 @@ export interface DeltaMessage {
    */
   rng: Uint32Array;
   /**
-   * The grower's plan for the day after the last step, a copy (issue 135).
-   * Always sent, like `rng`: the grower plans each day, and a copy whose
-   * plan fell behind would hash differently from the sim.
-   */
-  growth: GrowthState;
-  /**
    * `cellReads` after the last step, always sent, like `rng`: a copy
    * without it would hash differently from the sim (M2 review, #147,
    * protocol version 12).
@@ -126,7 +119,7 @@ export interface DeltaMessage {
   cellReads: number;
   /**
    * The city centre after the last step, a copy (M3-13, protocol version
-   * 13). Always sent, like `growth`: land value measures from it, and a copy
+   * 13). Always sent, like `rng`: land value measures from it, and a copy
    * whose centre fell behind would hash differently from the sim.
    */
   centre: CentreState;

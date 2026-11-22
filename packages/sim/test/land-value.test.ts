@@ -37,6 +37,7 @@ import { buildingInfo, forPlacedBuildings, middleSums, pollutionSets } from "../
 import { terrainOf } from "../src/terrain/cache";
 import { waterDistanceAt } from "../src/landvalue/water";
 import { nextInt, seedRng } from "../src/rng";
+import { holdEach } from "./hold-each";
 import { submit } from "./seen-ends";
 
 // M3-13: land value.
@@ -306,6 +307,8 @@ describe("the city centre", () => {
 });
 
 describe("land value over time", () => {
+  // Factories need industrial demand, which a city with no residents lacks (M3-07).
+  holdEach();
   /** A street with R1 on the north side and I3 to the south, grown for `days`. */
   function town(days: number): SimState {
     const state = createState(SEED);

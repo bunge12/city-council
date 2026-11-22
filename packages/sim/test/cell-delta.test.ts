@@ -60,8 +60,6 @@ function pair() {
     copy.tick = sim.tick;
     copy.log = sim.log.slice();
     copy.undo = sim.undo;
-    // The grower's plan travels in every delta, as the generator does.
-    copy.growth = { ...sim.growth };
     copy.centre = { ...sim.centre };
     // So do the statistics.
     expect(applyStatsDelta(copy.stats, encodeStatsDelta(sim.stats, copy.stats.next))).not.toBeTypeOf("string");

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { syncCells } from "../src/zoning/cell-index";
 import {
-  createGrowth,
   createDemand,
   LEVEL_BRIDGE,
   ROAD_TYPES,
@@ -94,7 +93,6 @@ function cityHash(state: SimState): string {
     logOffset: 0,
     undo: [],
     cellsReadyAt: 0,
-    growth: createGrowth(),
     centre: { ...state.centre, due: 0 },
     stats: { ...state.stats, history: {}, next: 0 },
     travelReadyAt: 0,
