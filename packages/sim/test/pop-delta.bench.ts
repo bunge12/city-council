@@ -22,7 +22,7 @@ import {
   buildingPeople,
   encodeStatsDelta,
   isPop,
-  jobsFilled,
+  openJobsFor,
   popCount,
   popIdLimit,
   popWorkers,
@@ -71,7 +71,8 @@ test("a day's people and statistics deltas with 150,000 pops under turnover", as
     if (popWorkers(state.pops, pop) === 0) return;
     for (let tries = 0; tries < 8; tries++) {
       const work = workplaces[nextInt(rng, workplaces.length)] ?? 0;
-      if (jobsFilled(state, work) + popWorkers(state.pops, pop) > buildingJobs(b, work)) continue;
+      // Its education must allow the jobs (M3-09).
+      if (popWorkers(state.pops, pop) > openJobsFor(state, work, state.pops.education[pop] ?? 0)) continue;
       setPopWork(state, pop, work);
       return;
     }
