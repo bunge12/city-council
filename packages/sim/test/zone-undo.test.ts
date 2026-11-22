@@ -108,7 +108,7 @@ function zonedCount(state: SimState): number {
 
 /** The state hash leaving out the log, the undo history, the tick and what goes with it. */
 function cityHash(state: SimState): string {
-  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0, growth: createGrowth() });
+  return hashState({ ...state, tick: 0, log: [], logOffset: 0, undo: [], cellsReadyAt: 0, growth: createGrowth(), travelReadyAt: 0 });
 }
 
 function liveBuildings(state: SimState): number[] {

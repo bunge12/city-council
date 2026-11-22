@@ -95,6 +95,12 @@ describe("edge costs", () => {
     expect(checkRoutingBalance({ networkSpeedKmh: { rail: { speedKmh: 0, source: "x" }, path: { speedKmh: 5 } } })).toEqual([
       "networkSpeedKmh.rail.speedKmh must be a positive number",
       "networkSpeedKmh.path.source is missing",
+      "travelTimes is missing",
+    ]);
+    const speeds = entry.ROUTING_BALANCE.networkSpeedKmh;
+    expect(checkRoutingBalance({ networkSpeedKmh: speeds, travelTimes: { sameZoneSeconds: 0.5, rebuildSettlesPerTick: 0 } })).toEqual([
+      "travelTimes.sameZoneSeconds must be a whole number of seconds from 1 to 65534",
+      "travelTimes.rebuildSettlesPerTick must be a positive whole number",
     ]);
   });
 });

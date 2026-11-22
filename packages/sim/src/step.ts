@@ -6,6 +6,7 @@ import { LAND_VALUE } from "./landvalue/land-value";
 import { applyPending, type DroppedCommand } from "./commands";
 import { catchUpDerived } from "./derived";
 import type { SimState } from "./state";
+import { stepTravel } from "./travel-times";
 import { settleCells } from "./zoning/cell-index";
 
 /** One part of the per-tick update. Systems run in array order. */
@@ -49,6 +50,12 @@ function timed(timer: SystemTimer | undefined, name: string, run: () => void): v
   timer?.end(name);
 }
 
+/**
+ * Name the timer hook reports for rebuilding the travel times between zones
+ * after a change of roads (travel-times.ts).
+ */
+export const TRAVEL_SYSTEM = "travel";
+
 /** Name the timer hook reports for removing buildings whose cells a change of roads blocked. */
 export const BUILDINGS_SYSTEM = "buildings";
 
@@ -56,7 +63,8 @@ export const BUILDINGS_SYSTEM = "buildings";
  * Removes any buildings a settled change of roads left on blocked cells
  * (buildings/upkeep.ts), applies queued commands, walks a slice of any
  * zoning cells still settling and brings derived data up to date with the
- * step's changes, then, unless the game is paused, runs every
+ * step's changes, rebuilds a slice of the travel times after a change of
+ * roads, then, unless the game is paused, runs every
  * system and advances exactly one tick.
  *
  * Returns the queued commands it dropped, with why, for the host to pass
@@ -77,6 +85,8 @@ export function step(state: SimState, timer?: SystemTimer): DroppedCommand[] {
     settleCells(state);
     catchUpDerived(state);
   });
+  // Paused or not, like the cells: a change made while paused still rebuilds.
+  timed(timer, TRAVEL_SYSTEM, () => stepTravel(state));
   if (state.speed === 0) return dropped;
   for (const system of SYSTEMS) {
     timed(timer, system.name, () => system.run(state));

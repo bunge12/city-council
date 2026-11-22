@@ -64,6 +64,8 @@ function pair() {
     copy.centre = { ...sim.centre };
     // So do the statistics.
     expect(applyStatsDelta(copy.stats, encodeStatsDelta(sim.stats, copy.stats.next))).toBeNull();
+    // So does the tick the travel times are rebuilt by (issue #177).
+    copy.travelReadyAt = sim.travelReadyAt;
     return cells;
   };
   return { sim, copy, run, send };

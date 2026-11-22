@@ -15,7 +15,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 
 // ---- Client to sim ----
 
@@ -127,6 +127,12 @@ export interface DeltaMessage {
    * or history fell behind would hash differently from the sim.
    */
   stats: StatsDelta;
+  /**
+   * `travelReadyAt` after the last step, always sent, like `cellReads`: a
+   * copy without it would hash differently from the sim (issue #177,
+   * protocol version 15).
+   */
+  travelReadyAt: number;
   /**
    * The commands still queued, the ones waiting for the cells to settle,
    * when the queue changed since the last delta. Left out otherwise: a

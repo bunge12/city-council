@@ -786,6 +786,14 @@ export function forPlacedBuildings(state: SimState, visit: (id: number, x: numbe
   }
 }
 
+/** The 500 m chunk building `id`'s lot centre is in, or NO_BUILDING for no such building. */
+export function buildingChunk(state: SimState, id: number): number {
+  const b = state.buildings;
+  if (!Number.isInteger(id) || id < 0 || id >= b.flags.length || !isLive(b, id)) return NO_BUILDING;
+  // Filing needs only the shapes, so a change of cells still settling is not walked for it.
+  return indexOf(state, false).bi.chunk[id] ?? NO_BUILDING;
+}
+
 /** The ids of the buildings whose lot's centre is in 500 m chunk `chunk`, ascending. */
 export function buildingsInChunk(state: SimState, chunk: number): number[] {
   const { bi } = indexOf(state);

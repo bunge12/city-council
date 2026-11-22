@@ -57,6 +57,13 @@ export type EdgeCost = (net: RoadNetwork, seg: number, forward: boolean) => numb
 /** Speeds for the networks that have no types yet, from `balance/routing.json`. */
 export interface RoutingBalance {
   networkSpeedKmh: Record<"rail" | "path", { speedKmh: number; source: string; placeholder?: boolean }>;
+  /** The table of travel times between zones (travel-times.ts). */
+  travelTimes: {
+    /** Seconds between two buildings in the same zone. */
+    sameZoneSeconds: number;
+    /** Road nodes a rebuild of the table may settle in a tick, which sets the tick it is ready by. */
+    rebuildSettlesPerTick: number;
+  };
 }
 
 /** Every problem with a routing balance file, or none. */
@@ -72,6 +79,12 @@ export function checkRoutingBalance(data: unknown): string[] {
     }
     if (typeof entry?.["source"] !== "string" || entry["source"] === "") errors.push(`networkSpeedKmh.${network}.source is missing`);
   }
+  const travel = (data as { travelTimes?: unknown }).travelTimes as Record<string, unknown> | undefined;
+  if (typeof travel !== "object" || travel === null) return [...errors, "travelTimes is missing"];
+  const same = travel["sameZoneSeconds"];
+  if (!Number.isInteger(same) || (same as number) < 1 || (same as number) > 0xfffe) errors.push("travelTimes.sameZoneSeconds must be a whole number of seconds from 1 to 65534");
+  const settles = travel["rebuildSettlesPerTick"];
+  if (!Number.isSafeInteger(settles) || (settles as number) < 1) errors.push("travelTimes.rebuildSettlesPerTick must be a positive whole number");
   return errors;
 }
 

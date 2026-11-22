@@ -89,6 +89,10 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // yearly counts at 0 and the history empty. Its first sample is taken on
   // the next month's first tick.
   17: (old) => ({ ...old, version: 18, stats: statsFor(old as unknown as SimState) }),
+  // Version 19 adds `travelReadyAt`, the tick from which the travel times
+  // between zones may be read (issue #177). A city saved before it has no
+  // rebuild under way: its table is built from its roads at load.
+  18: (old) => ({ ...old, version: 19, travelReadyAt: 0 }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */

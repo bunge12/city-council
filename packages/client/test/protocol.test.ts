@@ -187,7 +187,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["cellReads", "centre", "growth", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "timings", "type", "v"].sort(),
+      ["cellReads", "centre", "growth", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "timings", "travelReadyAt", "type", "v"].sort(),
     );
     // No month began since the last delta, so it carries no sample.
     expect(delta?.type === "delta" && delta.stats.samples.length).toBe(0);
@@ -196,7 +196,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "stats", "pops", "landValue", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "pops", "landValue", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -270,6 +270,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       stats: encodeStatsDelta(createStats(), 0),
       cellReads: 0,
       centre: { x: 0, z: 0, weight: 0, due: 0 },
+      travelReadyAt: 0,
       pending: [],
       steps: 1,
       timings: [],
