@@ -9,6 +9,10 @@
 // - `autosave`: the worker's autosave on its 30 s interval. Off, the city is
 //   saved only when the page asks, so a save does not land in the middle of
 //   a frame or memory measurement.
+// - `heldDemand`: a value from -100 to 100 the worker holds every demand bar
+//   at, or null for none (M3-07). The M2 walkthrough zones shops, offices
+//   and factories on an empty city, which wants houses only. A held city
+//   replays to its own hash only with the bars held the same way.
 
 /** The localStorage key that holds the switch, as JSON. */
 export const TEST_SWITCH_KEY = "city-council:test";
@@ -16,10 +20,11 @@ export const TEST_SWITCH_KEY = "city-council:test";
 export interface TestSwitch {
   cheapFrames: boolean;
   autosave: boolean;
+  heldDemand: number | null;
 }
 
-/** What a player gets: every frame drawn at the real settings, and autosave on. */
-export const PLAYER_SETTINGS: TestSwitch = { cheapFrames: false, autosave: true };
+/** What a player gets: every frame drawn at the real settings, autosave on, and the bars as the city has them. */
+export const PLAYER_SETTINGS: TestSwitch = { cheapFrames: false, autosave: true, heldDemand: null };
 
 /** The switch stored in `storage`, with each missing or unreadable field as a player has it. */
 export function readTestSwitch(storage: Pick<Storage, "getItem"> | null): TestSwitch {
@@ -41,5 +46,6 @@ export function readTestSwitch(storage: Pick<Storage, "getItem"> | null): TestSw
   return {
     cheapFrames: typeof value.cheapFrames === "boolean" ? value.cheapFrames : PLAYER_SETTINGS.cheapFrames,
     autosave: typeof value.autosave === "boolean" ? value.autosave : PLAYER_SETTINGS.autosave,
+    heldDemand: typeof value.heldDemand === "number" && value.heldDemand >= -100 && value.heldDemand <= 100 ? value.heldDemand : PLAYER_SETTINGS.heldDemand,
   };
 }

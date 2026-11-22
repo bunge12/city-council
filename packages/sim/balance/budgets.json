@@ -99,7 +99,7 @@
       "source": "M0 tick budget, issue #231"
     },
     "grower.share": {
-      "name": "a grower tick at growthPerDayMax, its quarter of the tick",
+      "name": "a grower tick with every demand bar at 100, or at growthPerDayMax, its quarter of the tick",
       "unit": "ms",
       "statistic": "mean",
       "budget": 5,

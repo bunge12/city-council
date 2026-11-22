@@ -97,6 +97,14 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 20 adds the demand bars (M3-06), all at 0. They take their first
   // step toward what the city's totals say on the next day's first tick.
   19: (old) => ({ ...old, version: 20, demand: createDemand() }),
+  // Version 21 drops the grower's plan for the day (M3-07). The grower's
+  // pace now follows the demand bars, which are already in state, so it
+  // keeps no plan of its own. The buildings stay as they are.
+  20: (old) => {
+    const { growth, ...rest } = old;
+    void growth;
+    return { ...rest, version: 21 };
+  },
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */

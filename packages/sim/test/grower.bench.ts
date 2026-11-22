@@ -20,9 +20,10 @@
 //   buildings stand. The building index (where.ts) files again only the
 //   buildings near the segments the street laid out again (M2-11), so this
 //   is held to the budget like the rest;
-// - a tick at `growthPerDayMax` (issue 135), the busiest a day's quota can
-//   make one, on the mixed zoning and on C3 throughout, its mean held to
-//   the grower's share of the budget;
+// - the busiest tick of a day with every demand bar at 100 (M3-07), on the
+//   mixed zoning and on C3 throughout, and of a day at `growthPerDayMax`,
+//   the most the zones' quotas can add up to, with the balance's rates
+//   raised to reach it, its mean held to the grower's share of the budget;
 // - the buildings' upkeep after a grid at the cap over the grown city, as a
 //   command pays it (buildings/upkeep.ts).
 
@@ -31,9 +32,10 @@ import { collect, hold } from "./budget";
 import { budgetFigure } from "../src/budgets";
 import {
   BUILDINGS_BALANCE,
+  DEMAND_BALANCE,
   TIME_BALANCE,
   ZONING_BALANCE,
-  dayOf,
+  dayQuotas,
   growthOnTick,
   planRoad,
   planRoadGrid,
@@ -51,6 +53,7 @@ import { buildRoadGrid, checkRoadGrid } from "../src/roads/grid";
 import { endJournal, reverseOps, startJournal, type NetworkOp } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 import { syncCells } from "../src/zoning/cell-index";
+import { setBars, type HeldBars } from "./demand-helper";
 
 // The grower's share of the tick at `growthPerDayMax` (`grower.share` in
 // balance/budgets.json) is a quarter, as `settleCellsPerTick` takes, so it,
@@ -133,15 +136,44 @@ function zoneEverything(front: (zone: number, density: number) => [number, numbe
   forgetCandidates(state);
 }
 
-// The day's quota the grower is given: 1 for the cases that time one
-// building, the cap for the cases that time the busiest tick it can have.
-let quota = 1;
-/** A tick of day 1 on which the grower adds the most buildings `quota` gives a tick. */
+// The bars the grower reads: the residential bar barely above zero, so
+// the day's quotas are one house, for the cases that time one building;
+// every bar at 100 for the busiest tick demand can ask for.
+const ONE_HOUSE: HeldBars = { residential: 0.01, commercial: -1, office: -1, industrial: -1 };
+const ONE_SHOP: HeldBars = { residential: -1, commercial: 0.01, office: -1, industrial: -1 };
+const EVERY_BAR_AT_100: HeldBars = { residential: 100, commercial: 100, office: 100, industrial: 100 };
+let bars = ONE_HOUSE;
+/** A tick of day 1 on which the grower adds the most buildings the bars give a tick, every zone together. */
 function busiestTick(): number {
+  setBars(state, bars);
+  const quotas = dayQuotas(state.demand);
+  const on = (t: number) => quotas.reduce((sum, q) => sum + growthOnTick(t, q), 0);
   const T = TIME_BALANCE.ticksPerDay;
   let best = T;
-  for (let t = T; t < 2 * T; t++) if (growthOnTick(t, quota) > growthOnTick(best, quota)) best = t;
+  for (let t = T; t < 2 * T; t++) if (on(t) > on(best)) best = t;
   return best;
+}
+/** How many buildings `busiestTick` asks for. */
+function busiest(): number {
+  const tick = busiestTick();
+  const quotas = dayQuotas(state.demand);
+  return quotas.reduce((sum, q) => sum + growthOnTick(tick, q), 0);
+}
+
+/**
+ * Runs `body` with every zone's full-demand rate set so the zones together
+ * ask for `growthPerDayMax`, the cap: in zone order, the first takes it all,
+ * so `first` names the zone that should.
+ */
+function atTheCap<T>(first: string, body: () => T): T {
+  const rates = DEMAND_BALANCE.buildingsPerDayAtFullDemand;
+  const was = { ...rates };
+  for (const id of Object.keys(rates)) rates[id] = id === first ? BUILDINGS_BALANCE.growthPerDayMax : 0;
+  try {
+    return body();
+  } finally {
+    Object.assign(rates, was);
+  }
 }
 
 /** Buildings standing before a case, so `takeBack` removes only what it added. */
@@ -152,15 +184,10 @@ function liveIds(): Set<number> {
   return ids;
 }
 
-/** Whether the case leaves the day unplanned, so the tick plans it. */
-let planning = false;
 function growOnce(): void {
-  const tick = planning ? 2 * TIME_BALANCE.ticksPerDay - 1 : busiestTick();
-  state.tick = tick;
+  state.tick = busiestTick();
   state.cellsReadyAt = 0;
-  state.growth = planning
-    ? { quota: 0, day: dayOf(tick) - 1, deadline: dayOf(tick), free: 0, used: 0 }
-    : { quota, day: dayOf(tick), deadline: dayOf(tick) + 1, free: 0, used: 0 };
+  setBars(state, bars);
   grow(state);
 }
 
@@ -196,21 +223,10 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
     afterEach: takeBack,
   });
   await time("a grower tick with its candidates kept current", { afterEach: takeBack });
-  quota = BUILDINGS_BALANCE.growthPerDayMax;
-  await time(`a grower tick at growthPerDayMax, ${growthOnTick(busiestTick(), quota)} buildings`, { afterEach: takeBack });
-  quota = 1;
-  // The first tick of a day, which counts the free cells and plans the day
-  // before it grows. Every cell zoned asks for more than the cap, so the
-  // plan is the cap, and the tick, the day's last, its busiest.
-  await time("a grower tick that plans its day, at growthPerDayMax", {
-    beforeEach: () => {
-      planning = true;
-    },
-    afterEach: () => {
-      planning = false;
-      takeBack();
-    },
-  });
+  bars = EVERY_BAR_AT_100;
+  await time(`a grower tick with every bar at 100, ${busiest()} buildings`, { afterEach: takeBack });
+  await atTheCap("residential", () => time(`a grower tick at growthPerDayMax, ${busiest()} buildings`, { afterEach: takeBack }));
+  bars = ONE_HOUSE;
   const street = streetAcross();
   await time("the first grower tick after a street across a grid", {
     beforeEach: () => buildStreet(street),
@@ -249,10 +265,12 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   state.cells.zone.fill(c3);
   state.cells.density.fill(3);
   forgetCandidates(state);
+  bars = ONE_SHOP;
   await time("a grower tick on a city zoned C3 throughout, each draw looking for a through-lot", { afterEach: takeBack });
-  quota = BUILDINGS_BALANCE.growthPerDayMax;
-  await time(`a grower tick at growthPerDayMax on a city zoned C3 throughout, ${growthOnTick(busiestTick(), quota)} buildings`, { afterEach: takeBack });
-  quota = 1;
+  bars = EVERY_BAR_AT_100;
+  await time(`a grower tick with every bar at 100 on a city zoned C3 throughout, ${busiest()} buildings`, { afterEach: takeBack });
+  await atTheCap("commercial", () => time(`a grower tick at growthPerDayMax on a city zoned C3 throughout, ${busiest()} buildings`, { afterEach: takeBack }));
+  bars = ONE_SHOP;
   expect(buildingCount(state.buildings)).toBe(0);
 
   // The same with the back row of every strip C2, so every front strip is
@@ -264,6 +282,7 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   expect(buildingCount(state.buildings)).toBe(0);
 
   // Grown out: the zoning of the first cases again, with buildings on it.
+  bars = ONE_HOUSE;
   zoneEverything((z, d) => [z, d]);
   for (let i = 0; i < 40_000; i++) growOne(state);
   const standing = buildingCount(state.buildings);
@@ -313,6 +332,6 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   for (const [name, r] of Object.entries(results)) {
     if (name.includes("from scratch")) continue;
     hold("grower.tick", `${name}, median`, r);
-    if (name.includes("growthPerDayMax")) hold("grower.share", `${name}, mean`, r);
+    if (name.includes("growthPerDayMax") || name.includes("every bar at 100")) hold("grower.share", `${name}, mean`, r);
   }
 }, 600_000);

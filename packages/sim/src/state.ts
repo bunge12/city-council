@@ -1,6 +1,5 @@
 import { BALANCE_STAMP } from "./balance-stamp";
 import { createBuildings, type BuildingState } from "./buildings/buildings";
-import { createGrowth, type GrowthState } from "./buildings/growth";
 import type { Command } from "./commands";
 import { createCentre, type CentreState } from "./landvalue/centre";
 import { createDemand, type DemandState } from "./demand/demand";
@@ -18,7 +17,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 20;
+export const SNAPSHOT_VERSION = 21;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -95,11 +94,6 @@ export interface SimState {
    */
   buildings: BuildingState;
   /**
-   * The grower's plan for the day: its quota and the deadline it builds the
-   * free frontage out by (buildings/grower.ts, issue 135).
-   */
-  growth: GrowthState;
-  /**
    * Every pop, in flat arrays by id, and the daily sweep's cursor
    * (pops/pops.ts, M3-03). Who lives and works where is derived
    * (pops/where.ts).
@@ -167,7 +161,6 @@ export function createBareState(seed: number): SimState {
     cells: unzonedCells(roads),
     cellsReadyAt: 0,
     buildings: createBuildings(),
-    growth: createGrowth(),
     // Last, where the version 15 migration puts it: the key order is the order a snapshot writes and the hash reads.
     cellReads: 0,
     // After it, where the version 16 migration puts it.

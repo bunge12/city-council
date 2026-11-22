@@ -32,7 +32,7 @@ function state(testSwitch: TestSwitch | null) {
 export const PLAYER_STATE = state(null);
 
 /** The chromium project's default: cheap frames, and saves only when a test asks. */
-export const TEST_STATE = state({ cheapFrames: true, autosave: false });
+export const TEST_STATE = state({ cheapFrames: true, autosave: false, heldDemand: null });
 
 /**
  * For the perf and evidence projects, and a chromium spec that times the
@@ -40,7 +40,17 @@ export const TEST_STATE = state({ cheapFrames: true, autosave: false });
  * figures compare with earlier runs and pictures look as a player sees them.
  * Autosave stays off, so a save does not land in a measurement.
  */
-export const MEASURE_STATE = state({ cheapFrames: false, autosave: false });
+export const MEASURE_STATE = state({ cheapFrames: false, autosave: false, heldDemand: null });
 
 /** For a spec about saving: cheap frames, and the worker's autosave on as a player has it. */
-export const SAVING_STATE = state({ cheapFrames: true, autosave: true });
+export const SAVING_STATE = state({ cheapFrames: true, autosave: true, heldDemand: null });
+
+/** The bar the M2 walkthrough holds every demand bar at (M3-07). */
+export const WALKTHROUGH_DEMAND = 25;
+
+/**
+ * For the M2 walkthrough (M3-07): the page as a player has it, but with
+ * every demand bar held at `WALKTHROUGH_DEMAND`, so all five zones grow on
+ * an empty city, houses slowly enough to be seen coming one by one.
+ */
+export const HELD_DEMAND_STATE = state({ cheapFrames: false, autosave: true, heldDemand: WALKTHROUGH_DEMAND });

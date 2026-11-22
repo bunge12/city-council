@@ -38,8 +38,10 @@ import { enqueue } from "../src/commands";
 import { cellsSettled, syncCells } from "../src/zoning/cell-index";
 import { localIndex } from "../src/zoning/cells";
 import buildingsJson from "../balance/buildings.json";
+import { FULL_DEMAND, holdDemand } from "./demand-helper";
+import { holdEach } from "./hold-each";
 import fixtureJson from "./fixtures/replay/through-lots.json";
-import { expectReplay, runFixture, type ReplayFixture } from "./replay-helper";
+import { expectReplay, replayFixture, type ReplayFixture } from "./replay-helper";
 import { submit, withEnds } from "./seen-ends";
 
 // M2-14: through-lots for large commercial and industrial buildings.
@@ -252,6 +254,8 @@ describe("the lot finder", () => {
 });
 
 describe("the grower", () => {
+  // Low enough that each zone builds one a day.
+  holdEach({ commercial: 5, industrial: 5 });
   it("puts one building across both strips of a C3 block", () => {
     const state = createState(SEED);
     const south = block(state, 12 * CELL);
@@ -431,6 +435,7 @@ describe("rows and balance", () => {
 });
 
 describe("a client's copy", () => {
+  holdEach();
   it("files a through-lot on both strips from its row, and draws it with the same corners", () => {
     const state = createState(SEED);
     const south = block(state, 12 * CELL);
@@ -505,22 +510,28 @@ function playSession(): SimState {
 }
 
 const fixture = fixtureJson as ReplayFixture;
+/** The bars as the fixture holds them (M3-07): a city with no residents wants no shops. */
+const HELD = FULL_DEMAND;
 
 describe("replay fixture through-lots", () => {
+  it("is recorded with every bar held at 100", () => {
+    expect(fixture.heldDemand).toBe(100);
+  });
+
   it("replays to its recorded hash", () => {
     const state = expectReplay(fixture);
     expect(state.log).toEqual(fixture.log);
-    expectSound(state);
+    holdDemand(HELD, () => expectSound(state));
   });
 
   it("matches the same commands stepped live", () => {
-    const state = playSession();
+    const state = holdDemand(HELD, playSession);
     expect(state.log).toEqual(fixture.log);
     expect(hashState(state)).toBe(fixture.hash);
   });
 
   it("builds a through-lot, loses it with its back road, and grows again after the undo", () => {
-    const at = (tick: number) => replay(fixture.seed, fixture.log, tick);
+    const at = (tick: number) => replayFixture(fixture, tick);
     const grown = at(2 * DAY);
     expect(throughIds(grown).length).toBeGreaterThan(0);
     // The split outside the block leaves them standing.
@@ -535,23 +546,30 @@ describe("replay fixture through-lots", () => {
     const undone = at(6 * DAY + 1);
     expect(undone.cells.zone.filter((z) => z !== 0).length).toBe(beforeBulldoze.cells.zone.filter((z) => z !== 0).length);
     expect(live(undone).length).toBeLessThanOrEqual(live(at(6 * DAY)).length);
-    const end = runFixture(fixture).state;
+    const end = at(fixture.untilTick);
     expect(live(end).length).toBeGreaterThan(live(undone).length);
     expect(live(end).filter((id) => (end.buildings.backDepth[id] ?? 0) === 0).length).toBeGreaterThan(0);
   });
 
-  /** Replays the fixture, saving and loading the city at `at` and stepping on from the copy. */
+  it("builds nothing without the bars held: an empty city wants no shops", () => {
+    const state = replay(fixture.seed, fixture.log, fixture.untilTick);
+    expect(live(state)).toEqual([]);
+  });
+
+  /** Replays the fixture with its bars held, saving and loading the city at `at` and stepping on from the copy. */
   function replaySavedAt(at: number): SimState {
     let state = createState(fixture.seed);
     let next = 0;
-    while (state.tick < fixture.untilTick) {
-      if (state.tick === at && state.log.length === next) {
-        state = deserialize(serialize(state)).state;
-        at = -1;
+    holdDemand(HELD, () => {
+      while (state.tick < fixture.untilTick) {
+        if (state.tick === at && state.log.length === next) {
+          state = deserialize(serialize(state)).state;
+          at = -1;
+        }
+        for (let e = fixture.log[next]; e && e.tick <= state.tick; e = fixture.log[++next]) enqueue(state, e);
+        step(state);
       }
-      for (let e = fixture.log[next]; e && e.tick <= state.tick; e = fixture.log[++next]) enqueue(state, e);
-      step(state);
-    }
+    });
     return state;
   }
 

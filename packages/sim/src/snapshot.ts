@@ -731,14 +731,6 @@ function checkPendingCommand(command: unknown, where: string): void {
   }
 }
 
-/** Whether `value` is a `GrowthState`: five whole numbers, the day at least -1 and the rest at least 0. */
-function isGrowth(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  const { quota, day, deadline, free, used } = value;
-  const whole = (v: unknown, least: number) => Number.isSafeInteger(v) && (v as number) >= least;
-  return Object.keys(value).length === 5 && whole(quota, 0) && whole(day, -1) && whole(deadline, 0) && whole(free, 0) && whole(used, 0);
-}
-
 /** Whether `value` is a `CentreState`: four finite numbers, a weight of at least 0 and a due tick that is a whole number of at least 0. */
 function isCentre(value: unknown): boolean {
   if (!isRecord(value)) return false;
@@ -749,7 +741,7 @@ function isCentre(value: unknown): boolean {
 
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
-  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, cellReads, buildings, growth, pops, centre, stats, travelReadyAt, demand } = state;
+  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, cellReads, buildings, pops, centre, stats, travelReadyAt, demand } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");
   if (!isUint32(seed)) throw corrupt("its seed is not a 32-bit integer");
   if (tick !== header.tick || seed !== header.seed) throw corrupt("its header does not match its contents");
@@ -776,7 +768,6 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   if (!Number.isSafeInteger(cellReads) || (cellReads as number) < 0) throw corrupt("its count of cell commands this tick is not a whole number");
   const buildingProblem = checkBuildings(buildings, roads as RoadNetwork, tick as number);
   if (buildingProblem !== null) throw corrupt(`its buildings are malformed: ${buildingProblem}`);
-  if (!isGrowth(growth)) throw corrupt("the grower's plan for the day is malformed");
   const popProblem = checkPops(pops, buildings as BuildingState);
   if (popProblem !== null) throw corrupt(`its pops are malformed: ${popProblem}`);
   if (!isCentre(centre)) throw corrupt("its city centre is malformed");

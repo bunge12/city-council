@@ -8,6 +8,7 @@ import { claimCity, startFromWorkerName } from "../save/lock";
 import { Saver } from "../save/saver";
 import { CityStore } from "../save/store";
 import { serveClock, isClockMessage, type FromClock } from "./clock";
+import { holdDemandBars } from "./held-demand";
 import { PUMP_INTERVAL_MS, SimHost } from "./host";
 import { LOCAL_PLAYER_ID } from "./player";
 import { bufferUntilListening, isSimMessage, portTransport, type MessagePortLike } from "./transport";
@@ -22,6 +23,8 @@ const clockTransport = bufferUntilListening(portTransport<FromClock, unknown>(po
 
 /** What the page put in this worker's name. */
 const asked = startFromWorkerName(self.name);
+// Before the city loads, so the bars are held from its first step.
+if (asked.heldDemand !== null) holdDemandBars(asked.heldDemand);
 
 /**
  * The city file the page fetched from its `?load=` address, when the page

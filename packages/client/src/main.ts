@@ -24,6 +24,7 @@ import { SimMirror, type MirrorUpdate } from "./protocol/mirror";
 import { LOCAL_PLAYER_ID } from "./protocol/player";
 import { ClockClient } from "./protocol/clock";
 import { createWorkerTransport } from "./protocol/transport";
+import { holdDemandBars } from "./protocol/held-demand";
 import { readTestSwitch } from "./test-switch";
 import { Ambience, type AmbienceReport } from "./sound/ambience";
 import { CommandCues } from "./sound/command-cues";
@@ -96,7 +97,9 @@ if (load.address !== null) history.replaceState(history.state, "", `${location.p
 
 // Playwright's chromium project turns this on (test-switch.ts, issue #226). A player's page never reads a key it has.
 const testSwitch = readTestSwitch(localStore());
-const worker = createWorkerTransport(tabCity(), load.address !== null, testSwitch.autosave);
+// Under the test switch only, the worker may hold every demand bar at one
+// value, so any zoning grows without a working economy (M3-07).
+const worker = createWorkerTransport(tabCity(), load.address !== null, testSwitch.autosave, testSwitch.heldDemand);
 if (load.address !== null) {
   // The worker waits for this message before it opens any city, so one is sent whatever happens.
   const address = load.address;
@@ -1295,9 +1298,15 @@ function terrainCheck(seed: number): TerrainCheck {
  * thread and hashes the result, so Playwright can check a replay fixture
  * gives the same hash here as in Node.
  */
-function replayCheck(seed: number, log: LogEntry[], untilTick: number): { hash: string; logLength: number } {
-  const state = replay(seed, log, untilTick);
-  return { hash: hashState(state), logLength: state.log.length };
+function replayCheck(seed: number, log: LogEntry[], untilTick: number, heldDemand: number | null = null): { hash: string; logLength: number } {
+  // A fixture recorded with every bar held (M3-07) replays with them held the same way.
+  const release = heldDemand === null ? null : holdDemandBars(heldDemand);
+  try {
+    const state = replay(seed, log, untilTick);
+    return { hash: hashState(state), logLength: state.log.length };
+  } finally {
+    release?.();
+  }
 }
 
 /**

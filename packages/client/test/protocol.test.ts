@@ -181,7 +181,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     });
   });
 
-  it("sends deltas only when something changed, carrying only tick, speed, the generator, the grower's plan, the cell count, the city centre, the statistics and new log", async () => {
+  it("sends deltas only when something changed, carrying only tick, speed, the generator, the cell count, the city centre, the statistics and new log", async () => {
     const { mirror, run, received } = setup();
     await mirror.sendCommand("SetSpeed", { speed: 0 });
     run(100);
@@ -190,7 +190,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["cellReads", "centre", "growth", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "demand", "timings", "travelReadyAt", "type", "v"].sort(),
+      ["cellReads", "centre", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "demand", "timings", "travelReadyAt", "type", "v"].sort(),
     );
     // No month began since the last delta, so it carries no sample.
     expect(delta?.type === "delta" && delta.stats.samples.length).toBe(0);
@@ -269,7 +269,6 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       logFrom: 99,
       log: [],
       rng: new Uint32Array(4),
-      growth: { quota: 0, day: -1, deadline: 0, free: 0, used: 0 },
       stats: encodeStatsDelta(createStats(), 0),
       cellReads: 0,
       centre: { x: 0, z: 0, weight: 0, due: 0 },

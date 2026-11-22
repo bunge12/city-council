@@ -1,5 +1,5 @@
 {
-  "description": "Growth on seed 2026. p1 builds a street and zones R1 along its north side; p2 zones a shallow R2 strip and a C2 strip along its south side. At day 4, while paused, p1 rezones the eastern half of the R1 strip, part of it built, to M1, then unpauses. Fifteen game days, one building a day.",
+  "description": "Growth on seed 2026. p1 builds a street and zones R1 along its north side; p2 zones a shallow R2 strip and a C2 strip along its south side. At day 4, while paused, p1 rezones the eastern half of the R1 strip, part of it built, to M1, then unpauses. Fifteen game days. Since M3-07 the grower follows demand: the residential bar climbs to the pull from outside and houses grow at its pace, while the C2 strip and the M1 rezone wait for commercial demand, which a city with no residents does not have.",
   "seed": 2026,
   "untilTick": 1500,
   "log": [
@@ -131,6 +131,6 @@
       }
     }
   ],
-  "balance": "0ef336e5d5886479",
-  "hash": "89986201960ff4a1"
+  "balance": "8f43a4e4c054be82",
+  "hash": "bb9bc81d085201ad"
 }

@@ -246,10 +246,11 @@ describe("the demand system", () => {
   });
 
   it("gives the same bars on the same ticks in a replay, and in a city saved and loaded mid-day", () => {
-    // The growth fixture builds homes and shops, so its jobs are open and its bars move.
+    // The growth fixture builds homes, and its residential bar climbs to the pull from outside.
+    // Its C2 strip waits for commercial demand (M3-07), so no jobs open yet.
     const byDay: DemandState[] = [];
     for (let tick = DAY; tick <= growth.untilTick; tick += DAY) byDay.push(copyDemand(replay(growth.seed, growth.log, tick).demand));
-    expect(byDay.at(-1)?.residential.parts["openJobs"]).toBeGreaterThan(0);
+    expect(byDay.at(-1)?.residential.parts["outsidePull"]).toBeGreaterThan(0);
     expect(new Set(byDay.map((d) => d.residential.value)).size).toBeGreaterThan(5);
     const again = replay(growth.seed, growth.log, growth.untilTick);
     expect(again.demand).toEqual(byDay.at(-1));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILDINGS_BALANCE, BUILDING_TYPES, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, travelTimesReady, type SimState } from "../src/index";
+import { BUILDING_TYPES, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, travelTimesReady, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
@@ -19,7 +19,8 @@ import { withEnds } from "./seen-ends";
  * every version before 16 the pops, every version before 17 the city
  * centre, every version before 18 the statistics, every version before 19
  * the tick the travel times are ready by and every version before 20 the
- * demand bars.
+ * demand bars. Versions 13 to 20 held the grower's plan, which version 21
+ * dropped: they get a new city's, with nothing planned.
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
@@ -41,6 +42,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
       return rest;
     });
   }
+  if (version >= 13 && version < 21) kept["growth"] = { quota: 0, day: -1, deadline: 0, free: 0, used: 0 };
   return { ...kept, version };
 }
 
@@ -55,13 +57,11 @@ function withoutZones(undo: SimState["undo"]): SimState["undo"] {
     });
 }
 
-/** `state` with the grower's plan a version 12 save of it migrates to: one building on the day it was saved on. */
+/** `state` as a version 12 save of it migrates to. */
 function asMigrated(state: SimState): SimState {
-  const day = Math.floor(state.tick / TIME_BALANCE.ticksPerDay);
   return {
     ...state,
     undo: withoutZones(state.undo),
-    growth: { quota: 1, day, deadline: day + 1, free: 0, used: 0 },
     centre: { x: 0, z: 0, weight: 0, due: state.tick },
     stats: statsFor(state),
     demand: createDemand(),
@@ -96,7 +96,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(20);
+    expect(SNAPSHOT_VERSION).toBe(21);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -110,7 +110,6 @@ describe("migrateState", () => {
       cells: fresh.cells,
       cellsReadyAt: 0,
       buildings: fresh.buildings,
-      growth: asMigrated(fresh).growth,
       cellReads: 0,
       pops: fresh.pops,
       centre: { x: 0, z: 0, weight: 0, due: 42 },
@@ -135,7 +134,6 @@ describe("migrateState", () => {
       cells: fresh.cells,
       cellsReadyAt: 0,
       buildings: fresh.buildings,
-      growth: asMigrated(fresh).growth,
       cellReads: 0,
       pops: fresh.pops,
       centre: { x: 0, z: 0, weight: 0, due: 0 },
@@ -297,7 +295,7 @@ describe("migrateState", () => {
     expect(hashState(migrated)).toBe(hashState(asMigrated(state)));
   });
 
-  it("upgrades a version 12 state mid-day by keeping that day's one building, then planning from its free cells", () => {
+  it("upgrades a version 12 state mid-day, and grows on as a city that never had a plan", () => {
     const state = createState(SEED_WITH_FLAT_GROUND);
     expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
     step(state);
@@ -307,19 +305,16 @@ describe("migrateState", () => {
     while (state.tick < 2 * day + 40) step(state);
     const migrated = migrateState(older(state, 12));
     expect(migrated.version).toBe(SNAPSHOT_VERSION);
-    expect(migrated.growth).toEqual({ quota: 1, day: 2, deadline: 3, free: 0, used: 0 });
+    expect("growth" in migrated).toBe(false);
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(hashState(migrated)).toBe(hashState(asMigrated(state)));
+    // Its bars start again from 0 (version 20), and the pull from outside
+    // brings them back above it within the day, so the street keeps growing.
     const count = () => Array.from(migrated.buildings.flags).filter(Boolean).length;
     const before = count();
-    // The rest of day 2 grows what a version 12 city grew: one building, on its last tick.
-    while (migrated.tick < 3 * day) step(migrated);
-    expect(count()).toBe(before + 1);
-    // Day 3 plans afresh, and its free cells, counted as new, get a full fillDays.
-    step(migrated);
-    expect(migrated.growth.day).toBe(3);
-    expect(migrated.growth.deadline).toBe(3 + BUILDINGS_BALANCE.fillDays);
-    expect(migrated.growth.free).toBeGreaterThan(0);
-    expect(() => hashState(migrated)).not.toThrow();
+    while (migrated.tick < 4 * day) step(migrated);
+    expect(migrated.demand.residential.value).toBeGreaterThan(0);
+    expect(count()).toBeGreaterThan(before);
   });
 
   it("upgrades a version 13 state by giving every undo record an empty list of zone journals", () => {
@@ -373,6 +368,28 @@ describe("migrateState", () => {
     expect(migrated.demand.residential.value).toBeLessThan(state.demand.residential.value + 1e-9);
   });
 
+  it("upgrades a version 20 city by dropping the grower's plan, and grows on as one that never had it", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    while (state.tick < 250) step(state);
+    const v20 = older(state, 20);
+    v20["growth"] = { quota: 40, day: 2, deadline: 30, free: 48, used: 3 };
+    const migrated = migrateState(v20);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect("growth" in migrated).toBe(false);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(hashState(migrated)).toBe(hashState(state));
+    // Whatever the plan said, the grower follows the bars from here.
+    while (state.tick < 600) {
+      step(state);
+      step(migrated);
+    }
+    expect(hashState(migrated)).toBe(hashState(state));
+  });
+
   it("upgrades a version 15 state by adding the pops, none of them, and changes nothing else", () => {
     const state = createState(SEED_WITH_FLAT_GROUND);
     expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
@@ -397,7 +414,9 @@ describe("migrateState", () => {
     state.tick = 1234;
     const v16 = older(state, 16);
     const migrated = migrateState(v16);
-    expect(migrated).toEqual({ ...v16, version: SNAPSHOT_VERSION, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand() });
+    const { growth, ...kept } = v16;
+    void growth;
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand() });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 

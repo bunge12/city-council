@@ -33,6 +33,7 @@ import {
   type FromSimMessage,
   type SimState,
 } from "@city-council/sim";
+import { holdDemandBars } from "../src/protocol/held-demand";
 import { SimHost } from "../src/protocol/host";
 import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
 import { memoryTransportPair, type ClientTransport } from "../src/protocol/transport";
@@ -52,7 +53,13 @@ function city(): SimState {
   run(state, "BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" }, seq);
   run(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4571 }, to: { x: 4390, z: 4571 }, width: 44 }] }, seq);
   run(state, "ZoneCells", { zone: "commercial", density: 1, rects: [{ from: { x: 4202, z: 4629 }, to: { x: 4390, z: 4629 }, width: 44 }] }, seq);
-  for (let t = 0; t < 6000 && (homes(state).length < 4 || workplaces(state).length < 2); t++) step(state);
+  // Shops need commercial demand, which a city with no residents lacks (M3-07).
+  const release = holdDemandBars(100);
+  try {
+    for (let t = 0; t < 6000 && (homes(state).length < 4 || workplaces(state).length < 2); t++) step(state);
+  } finally {
+    release();
+  }
   if (homes(state).length < 4 || workplaces(state).length < 2) throw new Error("the buildings did not grow");
   return state;
 }
@@ -168,6 +175,16 @@ describe("people and statistics in deltas", () => {
 
   it("names the buildings and totals a delta changed, and sends only the totals that changed", () => {
     const state = city();
+    // Every bar below zero from here, so no building grows and only the pops move the totals.
+    const release = holdDemandBars(-100);
+    try {
+      namesWhatChanged(state);
+    } finally {
+      release();
+    }
+  });
+
+  function namesWhatChanged(state: SimState): void {
     const { host, mirror, received, updates } = setup(state);
     const [home] = homes(state);
     const [shop] = workplaces(state);
@@ -206,7 +223,7 @@ describe("people and statistics in deltas", () => {
     delta = received.at(-1);
     expect(delta?.type === "delta" && delta.people).toBeUndefined();
     expect(delta?.type === "delta" && delta.stats.totals).toEqual({});
-  });
+  }
 
   it("asks for a snapshot when a delta goes missing, and comes back equal, people and all", () => {
     const state = city();

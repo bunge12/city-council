@@ -406,7 +406,6 @@ export class SimHost {
       ...(undo ? { undo } : {}),
       ...(dropped.length > 0 ? { dropped } : {}),
       rng: this.state.rng.slice(),
-      growth: { ...this.state.growth },
       cellReads: this.state.cellReads,
       centre: { ...this.state.centre },
       stats,
