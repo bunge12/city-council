@@ -105,8 +105,15 @@ interface Matcher {
   running: Float64Array;
 }
 
-/** How many jobs a pop's draw may pass over before it weighs every zone in turn instead. */
-const DRAW_TRIES = 64;
+/**
+ * How many jobs a pop's draw may pass over before it weighs every zone in
+ * turn instead. Any number gives the same chances, since a kept job and
+ * the scan each draw from them; this one only sets the cost. On the scale
+ * town's first tick at 64, two thirds of the tries were made by the 5% of
+ * pops that went on to the scan anyway; 16 takes about a sixth off the
+ * tick (jobs.bench.ts, issue #293).
+ */
+const DRAW_TRIES = 16;
 
 /** The weight of a job in zone `zone` for a pop at home zone `home`, 0 for no route. */
 function weightBetween(m: Matcher, home: number, zone: number): number {
