@@ -101,8 +101,9 @@ jobs:
     # at three times its plan (--global-timeout below), so a run that hangs
     # still ends with its report. scripts/check-e2e-timeouts.mjs, in `pnpm
     # lint`, reads this limit and fails on a test allowed more than a third
-    # of it (issue #228).
-    timeout-minutes: 45
+    # of it (issue #228). 54, so cells-scale.spec.ts can have 18 on an AMD
+    # EPYC 7763 (issue #294).
+    timeout-minutes: 54
     strategy:
       fail-fast: false
       matrix:

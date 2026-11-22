@@ -57,12 +57,15 @@ async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<v
 }
 
 test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band", async ({ page }, testInfo: TestInfo) => {
-  // Fifteen minutes, a third of the perf job's 45 (issue #228). Since issue
+  // Eighteen minutes, a third of the perf job's 54 (issue #228). Since issue
   // #225 it runs headed in the perf project, at every frame's real cost
-  // (#226): 5.6 to 7.4 minutes on CI's faster runners. It used to wait for
+  // (#226): 4.2 to 7 minutes on CI's faster runners. It used to wait for
   // the whole fill at a chunk a frame, and on slower runners that ran past
-  // fifteen minutes (issue #259); see the pan below.
-  test.setTimeout(900_000);
+  // fifteen minutes (issue #259); see the pan below. Since sidewalks and
+  // street lights (#279, #264) a street-band frame takes 3.5 s on an AMD
+  // EPYC 7763 and the test 14.3 to 15.1 minutes there, past the old 15
+  // (issue #294).
+  test.setTimeout(1_080_000);
   const query = "?webgl";
   const scaleGround = groundAt(6000, 6000);
   const poses: { band: string; position: Vec3; target: Vec3 }[] = [
