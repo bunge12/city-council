@@ -8,13 +8,14 @@ import type { GrowthState } from "./buildings/growth";
 import type { Command, CommandResult, DroppedCommand } from "./commands";
 import type { CentreState } from "./landvalue/centre";
 import type { LogEntry } from "./log";
+import type { StatsDelta } from "./stats/stats";
 import type { RoadDelta } from "./roads/delta";
 import type { SimState, Speed } from "./state";
 import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 
 // ---- Client to sim ----
 
@@ -120,9 +121,16 @@ export interface DeltaMessage {
    */
   centre: CentreState;
   /**
+   * The city statistics after the last step (M3-04, protocol version 14):
+   * the totals and yearly counts, copies, and any monthly samples taken
+   * since the last delta. Always sent, like `centre`: a copy whose totals
+   * or history fell behind would hash differently from the sim.
+   */
+  stats: StatsDelta;
+  /**
    * `travelReadyAt` after the last step, always sent, like `cellReads`: a
    * copy without it would hash differently from the sim (issue #177,
-   * protocol version 14).
+   * protocol version 15).
    */
   travelReadyAt: number;
   /**

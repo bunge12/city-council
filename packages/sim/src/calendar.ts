@@ -35,3 +35,25 @@ export function gameDate(tick: number, time: TimeBalance = TIME_BALANCE): GameDa
   }
   return { year, month, day: rest + 1, dayNumber };
 }
+
+/** Days in a game year. */
+export function yearDays(time: TimeBalance = TIME_BALANCE): number {
+  return time.monthDays.reduce((sum, days) => sum + days, 0);
+}
+
+/** Whether `tick` is the first tick of a game month. */
+export function isMonthStart(tick: number, time: TimeBalance = TIME_BALANCE): boolean {
+  if (tick % time.ticksPerDay !== 0) return false;
+  let rest = (tick / time.ticksPerDay) % yearDays(time);
+  for (const days of time.monthDays) {
+    if (rest === 0) return true;
+    rest -= days;
+    if (rest < 0) return false;
+  }
+  return false;
+}
+
+/** Whether `tick` is the first tick of a game year, 1 January. */
+export function isYearStart(tick: number, time: TimeBalance = TIME_BALANCE): boolean {
+  return tick % (time.ticksPerDay * yearDays(time)) === 0;
+}

@@ -28,7 +28,7 @@ export type { System, SystemTimer } from "./step";
 export { RNG_WORDS, nextFloat, nextInt, nextU32, seedRng } from "./rng";
 export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, isLogEntry, logLength, readLog } from "./log";
 export type { LogEntry } from "./log";
-export { TIME_BALANCE, gameDate } from "./calendar";
+export { TIME_BALANCE, gameDate, isMonthStart, isYearStart, yearDays } from "./calendar";
 export type { GameDate, TimeBalance } from "./calendar";
 export { fnv1a64, hashState } from "./hash";
 export { replay } from "./replay";
@@ -131,6 +131,23 @@ export { createGrowth, type GrowthState } from "./buildings/growth";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";
+export {
+  HISTORY_LENGTH,
+  STATS_SYSTEM,
+  STAT_TOTALS,
+  YEAR_COUNTS,
+  applyStatsDelta,
+  createStats,
+  encodeStatsDelta,
+  historyOf,
+  recountTotals,
+  sampleCount,
+  type StatTotals,
+  type StatsDelta,
+  type StatsState,
+  type YearCount,
+  type YearCounts,
+} from "./stats/stats";
 export { LAND_VALUE_SYSTEM, falloff, findCentre, landValueAt, landValueAtPoint, nextMonth, type LandValue } from "./landvalue/land-value";
 export { NO_BUILDING, buildingInfo, buildingOnSlot, buildingsInChunk, buildingsOnSlots, cellBuildings } from "./buildings/where";
 export type { BuildingInfo } from "./buildings/where";

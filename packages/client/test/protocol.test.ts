@@ -9,6 +9,11 @@ import {
   PROTOCOL_VERSION,
   createBareState,
   createState,
+  STAT_TOTALS,
+  TIME_BALANCE,
+  createStats,
+  encodeStatsDelta,
+  sampleCount,
   deserialize,
   hashState,
   nextFloat,
@@ -173,7 +178,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     });
   });
 
-  it("sends deltas only when something changed, carrying only tick, speed, the generator, the grower's plan, the cell count, the city centre and new log", async () => {
+  it("sends deltas only when something changed, carrying only tick, speed, the generator, the grower's plan, the cell count, the city centre, the statistics and new log", async () => {
     const { mirror, run, received } = setup();
     await mirror.sendCommand("SetSpeed", { speed: 0 });
     run(100);
@@ -182,14 +187,16 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["cellReads", "centre", "growth", "log", "logFrom", "rng", "seq", "speed", "steps", "tick", "timings", "travelReadyAt", "type", "v"].sort(),
+      ["cellReads", "centre", "growth", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "timings", "travelReadyAt", "type", "v"].sort(),
     );
+    // No month began since the last delta, so it carries no sample.
+    expect(delta?.type === "delta" && delta.stats.samples.length).toBe(0);
   });
 
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "pops", "landValue", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "pops", "landValue", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -205,6 +212,23 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     const snap = received.at(-1);
     expect(snap?.type).toBe("snapshot");
     expect(snap?.type === "snapshot" && hashState(snap.state)).toBe(mirrored);
+  });
+
+  it("keeps the mirror's statistics and their monthly history equal to the host's across month starts", async () => {
+    const { mirror, run, received } = setup();
+    await mirror.sendCommand("SetSpeed", { speed: 4 });
+    // January and February at 4x: samples on 1 January, 1 February and 1 March.
+    const ticks = (31 + 28) * TIME_BALANCE.ticksPerDay + 1;
+    run((ticks * 100) / 4 + 1000);
+    const state = mirror.state;
+    if (!state) throw new Error("no state");
+    expect(state.tick).toBeGreaterThanOrEqual(ticks);
+    expect(sampleCount(state.stats)).toBe(3);
+    const mirrored = hashState(state);
+    mirror.requestSnapshot();
+    const snap = received.at(-1);
+    expect(snap?.type === "snapshot" && hashState(snap.state)).toBe(mirrored);
+    expect(snap?.type === "snapshot" && snap.state.stats.history).toEqual(state.stats.history);
   });
 
   it("keeps the host's full log after live state pages entries out", () => {
@@ -243,6 +267,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       log: [],
       rng: new Uint32Array(4),
       growth: { quota: 0, day: -1, deadline: 0, free: 0, used: 0 },
+      stats: encodeStatsDelta(createStats(), 0),
       cellReads: 0,
       centre: { x: 0, z: 0, weight: 0, due: 0 },
       travelReadyAt: 0,
@@ -639,9 +664,20 @@ describe("snapshot transfer", () => {
     const buildingBuffers = Object.values(state.buildings).map((value) => value.buffer);
     // Every pop field but the sweep's limit, which is a number.
     const popBuffers = Object.values(state.pops).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
-    expect(typedArrayBuffers(state)).toEqual([state.rng.buffer, ...roadBuffers, state.connections.buffer, ...cellBuffers, ...buildingBuffers, ...popBuffers]);
+    // One history series a total.
+    const statBuffers = Object.values(state.stats.history).map((value) => value.buffer);
+    expect(typedArrayBuffers(state)).toEqual([
+      state.rng.buffer,
+      ...roadBuffers,
+      state.connections.buffer,
+      ...cellBuffers,
+      ...buildingBuffers,
+      ...popBuffers,
+      ...statBuffers,
+    ]);
     expect(buildingBuffers).toHaveLength(19);
     expect(popBuffers).toHaveLength(9);
+    expect(statBuffers).toHaveLength(STAT_TOTALS.length);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });
 });

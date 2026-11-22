@@ -32,6 +32,7 @@ import { noteColumns } from "./candidates";
 import { noteBuildingChanged } from "./changes";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { removeBuildingPops } from "../pops/pops";
+import { countBuilding } from "../stats/stats";
 import { fileBuilding, lotColumns, lotProblem, lotShapeOf, unfileBuildings } from "./where";
 
 /** Set in `flags` for a live building. */
@@ -273,6 +274,7 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   b.residents[id] = spec.residents;
   b.variant[id] = spec.variant;
   b.builtAt[id] = state.tick;
+  countBuilding(state, id, 1);
   noteBuildingChanged(b, id);
   fileBuilding(state, id);
   noteLotFronts(state, shape.first, spec.width);
@@ -337,7 +339,10 @@ export function removeBuildings(state: SimState, ids: readonly number[]): void {
   // The columns each was filed on, which a lot a change of roads took may
   // no longer walk to from its row.
   unfileBuildings(state, ids);
-  for (const id of ids) clearRow(b, id);
+  for (const id of ids) {
+    countBuilding(state, id, -1);
+    clearRow(b, id);
+  }
   const free = resized(b.free, b.free.length + ids.length);
   free.set(ids, b.free.length);
   b.free = free;

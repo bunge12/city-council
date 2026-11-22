@@ -1,6 +1,7 @@
 import { createBuildings } from "./buildings/buildings";
 import { TIME_BALANCE } from "./calendar";
 import { createPops } from "./pops/pops";
+import { statsFor } from "./stats/stats";
 import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -83,10 +84,15 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // older city has none yet and is due one on the tick it was saved on, so
   // the first settled step after loading works it out from its buildings.
   16: (old) => ({ ...old, version: 17, centre: { x: 0, z: 0, weight: 0, due: old["tick"] as number } }),
-  // Version 18 adds `travelReadyAt`, the tick from which the travel times
+  // Version 18 adds the city statistics (M3-04): the running totals counted
+  // from the city's buildings and pops, the highest population today's, the
+  // yearly counts at 0 and the history empty. Its first sample is taken on
+  // the next month's first tick.
+  17: (old) => ({ ...old, version: 18, stats: statsFor(old as unknown as SimState) }),
+  // Version 19 adds `travelReadyAt`, the tick from which the travel times
   // between zones may be read (issue #177). A city saved before it has no
   // rebuild under way: its table is built from its roads at load.
-  17: (old) => ({ ...old, version: 18, travelReadyAt: 0 }),
+  18: (old) => ({ ...old, version: 19, travelReadyAt: 0 }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */
