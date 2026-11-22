@@ -45,8 +45,12 @@ export const MEASURE_STATE = state({ cheapFrames: false, autosave: false, heldDe
 /** For a spec about saving: cheap frames, and the worker's autosave on as a player has it. */
 export const SAVING_STATE = state({ cheapFrames: true, autosave: true, heldDemand: null });
 
+/** The bar the M2 walkthrough holds every demand bar at (M3-07). */
+export const WALKTHROUGH_DEMAND = 25;
+
 /**
  * For the M2 walkthrough (M3-07): the page as a player has it, but with
- * every demand bar held at 100, so all five zones grow on an empty city.
+ * every demand bar held at `WALKTHROUGH_DEMAND`, so all five zones grow on
+ * an empty city, houses slowly enough to be seen coming one by one.
  */
-export const FULL_DEMAND_STATE = state({ cheapFrames: false, autosave: true, heldDemand: 100 });
+export const HELD_DEMAND_STATE = state({ cheapFrames: false, autosave: true, heldDemand: WALKTHROUGH_DEMAND });

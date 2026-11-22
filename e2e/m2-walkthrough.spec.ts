@@ -5,9 +5,9 @@ import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PE
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
-import { FULL_DEMAND_STATE } from "./browser-state";
+import { HELD_DEMAND_STATE, WALKTHROUGH_DEMAND } from "./browser-state";
 import { cityLoaded, cityReady, frames, hideNotes, openCity, settle } from "./helpers";
-import { FULL_DEMAND, holdDemand } from "../packages/sim/test/demand-helper";
+import { holdDemand } from "../packages/sim/test/demand-helper";
 
 // The M2 exit test from docs/milestones/M2.md (issue M2-17), as one
 // walkthrough a player could do by hand, run once on WebGPU (when the
@@ -37,8 +37,8 @@ import { FULL_DEMAND, holdDemand } from "../packages/sim/test/demand-helper";
 //
 // Since M3-07 the grower follows the demand bars, and a city with no
 // residents wants houses only. M2's exit test is about zoning and buildings,
-// not demand, so the page starts with the test switch's `heldDemand` at 100
-// (FULL_DEMAND_STATE in e2e/browser-state.ts), which holds every bar at 100
+// not demand, so the page starts with the test switch's `heldDemand` at 25
+// (HELD_DEMAND_STATE in e2e/browser-state.ts), which holds every bar there
 // in the worker (packages/client/src/protocol/held-demand.ts), and step 15
 // replays the log in Node with the bars held the same way. Against a public
 // BASE_URL the switch is not in the browser's storage, so step 4 waits in vain.
@@ -116,7 +116,7 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 declare const navigator: { gpu?: { requestAdapter(): Promise<unknown> } };
 
 const VIEWPORT = { width: 1280, height: 800 };
-test.use({ viewport: VIEWPORT, storageState: FULL_DEMAND_STATE });
+test.use({ viewport: VIEWPORT, storageState: HELD_DEMAND_STATE });
 // Several page loads, game months of growth at 4x and many redraws, on a
 // machine that may have no GPU. On software WebGPU it took 9 to 14.5
 // minutes on CI. 20 is a third of the walkthrough-m2 job's 60 minutes, so
@@ -1207,8 +1207,9 @@ for (const variant of [
       expect(fullLog.map((e) => e.type)).toEqual(saved.log.map((e) => e.type));
       for (const e of fullLog) expect(["fixture", "local"]).toContain(e.playerId);
       for (const type of ["ZoneCells", "BuildRoad", "BulldozeBuilding", "BulldozeRoad", "Undo", "SetSpeed"]) expect(fullLog.map((e) => e.type)).toContain(type);
-      // The page held every bar at 100, so the replay does too.
-      const rebuilt = holdDemand(FULL_DEMAND, () => replay(header.seed, fullLog, header.tick));
+      // The page held every bar, so the replay does too.
+      const v = WALKTHROUGH_DEMAND;
+      const rebuilt = holdDemand({ residential: v, commercial: v, office: v, industrial: v }, () => replay(header.seed, fullLog, header.tick));
       const hash = hashState(rebuilt);
       expect(hash).toBe(hashState(state));
       info.annotations.push({ type: "replay", description: `seed ${header.seed}, ${fullLog.length} commands, tick ${header.tick}, ${state.buildings.flags.filter((f) => f !== 0).length} buildings, hash ${hash}` });
