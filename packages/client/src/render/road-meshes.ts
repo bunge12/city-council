@@ -41,6 +41,8 @@ import {
   RoadChunks,
   buildRoadChunk,
   buildStreetChunk,
+  propsWithin,
+  tileMesh,
   junctionAt,
   neighbourhood,
   roadMask,
@@ -98,10 +100,23 @@ interface ChunkMeshes {
   yields: number;
 }
 
+/** One tile of a chunk's sidewalks, and its square on the ground. */
+interface SidewalkTile {
+  mesh: Mesh;
+  x0: number;
+  z0: number;
+}
+
 /** A chunk's sidewalks and street lights. */
 interface StreetMeshes {
-  sidewalks: Mesh | null;
+  /** In tiles of `ROADS.sidewalks.tile` metres, each shown only near the camera. */
+  sidewalks: SidewalkTile[];
+  /** Holds every light in the chunk; only those near the camera are written in, `count` of them. */
   lamps: InstancedMesh | null;
+  /** Every light in the chunk, `PROP_STRIDE` numbers apiece. */
+  lampData: Float32Array;
+  /** Where the camera was when the lights shown were chosen, or null before the first choice. */
+  lampsAt: { x: number; z: number } | null;
 }
 
 /** Distance from the camera, in metres. Model matrices are the identity, so local is world. */
@@ -281,6 +296,23 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
   propMaterial.name = "road props";
   const propGeometries = { signals: signalGeometry(), yields: yieldGeometry(), lamps: lampGeometry() };
 
+  /** Stands the first `count` instances of `mesh` at the first `count` props in `data`. */
+  function place(mesh: InstancedMesh, data: Float32Array, count: number): void {
+    const m = mesh.instanceMatrix.array;
+    for (let k = 0; k < count; k++) {
+      const o = k * PROP_STRIDE;
+      const yaw = data[o + 3] ?? 0;
+      const c = Math.cos(yaw);
+      const s = Math.sin(yaw);
+      m.set([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, data[o] ?? 0, data[o + 1] ?? 0, data[o + 2] ?? 0, 1], k * 16);
+    }
+    mesh.count = count;
+    // Only the rows written: a chunk's lights are chosen again as the camera moves (issue 264).
+    mesh.instanceMatrix.clearUpdateRanges();
+    mesh.instanceMatrix.addUpdateRange(0, count * 16);
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+
   /** One instanced mesh of `kind` standing at each prop in `data`, or null when there are none. */
   function instanced(kind: keyof typeof propGeometries, data: Float32Array): InstancedMesh | null {
     const count = data.length / PROP_STRIDE;
@@ -293,15 +325,7 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
     mesh.receiveShadow = true;
     // A turn about y and a move, written straight into the matrix: a street
     // light per 17 m of road makes this the most instances a chunk sets.
-    const m = mesh.instanceMatrix.array;
-    for (let k = 0; k < count; k++) {
-      const o = k * PROP_STRIDE;
-      const yaw = data[o + 3] ?? 0;
-      const c = Math.cos(yaw);
-      const s = Math.sin(yaw);
-      m.set([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, data[o] ?? 0, data[o + 1] ?? 0, data[o + 2] ?? 0, 1], k * 16);
-    }
-    mesh.instanceMatrix.needsUpdate = true;
+    place(mesh, data, count);
     mesh.computeBoundingSphere();
     mesh.matrixAutoUpdate = false;
     return mesh;
@@ -340,9 +364,9 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
   function clearStreet(c: number): void {
     const old = street[c];
     if (!old) return;
-    if (old.sidewalks) {
-      old.sidewalks.removeFromParent();
-      old.sidewalks.geometry.dispose();
+    for (const t of old.sidewalks) {
+      t.mesh.removeFromParent();
+      t.mesh.geometry.dispose();
     }
     if (old.lamps) {
       old.lamps.removeFromParent();
@@ -356,15 +380,20 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
     if (!net) return;
     const g = buildStreetChunk(net, terrain, c, index.chunkSegs[c] ?? [], index.chunkNodes[c] ?? [], current);
     const name = `${c % CHUNKS_PER_SIDE},${Math.floor(c / CHUNKS_PER_SIDE)}`;
-    const geometry = geometryOf(g.sidewalks);
-    let sidewalks: Mesh | null = null;
-    if (geometry) {
-      sidewalks = new Mesh(geometry, materials.sidewalks);
-      sidewalks.name = `sidewalks ${name}`;
-      sidewalks.matrixAutoUpdate = false;
-      sidewalks.renderOrder = 2;
-      sidewalks.receiveShadow = true;
-      roots.sidewalks.add(sidewalks);
+    const size = ROADS.sidewalks.tile;
+    const x0 = (c % CHUNKS_PER_SIDE) * CHUNK_SIZE;
+    const z0 = Math.floor(c / CHUNKS_PER_SIDE) * CHUNK_SIZE;
+    const sidewalks: SidewalkTile[] = [];
+    for (const tile of tileMesh(g.sidewalks, x0, z0, size, Math.ceil(CHUNK_SIZE / size))) {
+      const geometry = geometryOf(tile.arrays);
+      if (!geometry) continue;
+      const mesh = new Mesh(geometry, materials.sidewalks);
+      mesh.name = `sidewalks ${name} ${tile.col},${tile.row}`;
+      mesh.matrixAutoUpdate = false;
+      mesh.renderOrder = 2;
+      mesh.receiveShadow = true;
+      roots.sidewalks.add(mesh);
+      sidewalks.push({ mesh, x0: x0 + tile.col * size, z0: z0 + tile.row * size });
     }
     const lamps = instanced("lamps", g.lamps);
     if (lamps) {
@@ -372,7 +401,39 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
       roots.props.add(lamps);
     }
     // An empty entry still marks the chunk built, so it is not tried again each frame.
-    street[c] = { sidewalks, lamps };
+    const built: StreetMeshes = { sidewalks, lamps, lampData: g.lamps, lampsAt: null };
+    street[c] = built;
+    showNear(built);
+  }
+
+  /** How far the camera moves before a chunk's street lights are chosen again, in metres. */
+  const LAMPS_EVERY = 10;
+  /** Scratch for the street lights shown in a chunk. */
+  let nearLamps = new Float32Array(0);
+
+  /**
+   * Shows only the parts of `s` within `ROADS.sidewalks.drawWithin` of the
+   * camera across the ground: the sidewalk tiles with any of their square
+   * that near, and the street lights standing that near (issue 264). A
+   * software renderer pays for every vertex it is given, drawn or not.
+   */
+  function showNear(s: StreetMeshes): void {
+    if (!eye) return;
+    const r = ROADS.sidewalks.drawWithin;
+    const size = ROADS.sidewalks.tile;
+    for (const t of s.sidewalks) {
+      const dx = Math.max(0, t.x0 - eye.x, eye.x - (t.x0 + size));
+      const dz = Math.max(0, t.z0 - eye.z, eye.z - (t.z0 + size));
+      t.mesh.visible = dx * dx + dz * dz <= r * r;
+    }
+    if (!s.lamps) return;
+    if (s.lampsAt && Math.hypot(s.lampsAt.x - eye.x, s.lampsAt.z - eye.z) < LAMPS_EVERY) return;
+    if (nearLamps.length < s.lampData.length) nearLamps = new Float32Array(s.lampData.length);
+    const n = propsWithin(s.lampData, eye.x, eye.z, r, nearLamps);
+    const all = s.lampData.length / PROP_STRIDE;
+    // None then and none now, or all then and all now: the same lights, so nothing to send.
+    if (!(s.lampsAt && n === s.lamps.count && (n === 0 || n === all))) place(s.lamps, nearLamps, n);
+    s.lampsAt = { x: eye.x, z: eye.z };
   }
 
   function clear(c: number): void {
@@ -457,7 +518,7 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
     for (const c of street) {
       if (!c) continue;
       n++;
-      lamps += c.lamps?.count ?? 0;
+      lamps += c.lampData.length / PROP_STRIDE;
     }
     return { streetChunks: n, lamps };
   }
@@ -510,6 +571,7 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
       eye = { x, z };
       const keep = ROADS.sidewalks.keepWithin * ROADS.sidewalks.keepWithin;
       for (let c = 0; c < street.length; c++) if (street[c] && reach(c) > keep) clearStreet(c);
+      for (const s of street) if (s) showNear(s);
       const todo = wanted();
       if (todo.length === 0) return;
       const start = performance.now();
