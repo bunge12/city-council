@@ -9,6 +9,8 @@ import {
   nodeReachesOutside,
   segmentReachesOutside,
   segmentsReachingOutside,
+  applyRoadDelta,
+  encodeRoadDelta,
   step,
   submit,
   type Command,
@@ -173,5 +175,31 @@ describe("which pieces of road reach outside", () => {
     const s = addSegment(state.roads, a, b, { type: 0 });
     expect(segmentReachesOutside(state, s)).toBe(false);
     expect(segmentsReachingOutside(state)).toBe(0);
+  });
+});
+
+describe("the outside answer and changes past the observers", () => {
+  it("follows a new list of connections put on the state", () => {
+    const state = createState(2026);
+    const kept = state.connections;
+    const edge = kept[0] ?? NONE;
+    expect(nodeReachesOutside(state, edge)).toBe(true);
+    state.connections = new Int32Array(0);
+    expect(nodeReachesOutside(state, edge)).toBe(false);
+    state.connections = kept;
+    expect(nodeReachesOutside(state, edge)).toBe(true);
+  });
+
+  it("is worked out again on a client's copy after a road delta", () => {
+    const sim = createState(2026);
+    const copy = cloneState(sim);
+    expect(segmentsReachingOutside(copy)).toBe(0);
+    const from = sim.roads.segFlags.length;
+    expect(command(sim, "BuildRoad", { ...fromStub(sim, 0, 300), type: "street" }).ok).toBe(true);
+    const ids = (limit: number, start: number) => Array.from({ length: limit - start }, (_, i) => start + i);
+    const delta = encodeRoadDelta(sim.roads, { nodes: ids(nodeIdLimit(sim.roads), 0), segs: ids(segmentIdLimit(sim.roads), from), nodeFree: true, segFree: true });
+    expect(Array.isArray(applyRoadDelta(copy.roads, delta))).toBe(true);
+    expect(segmentsReachingOutside(copy)).toBe(segmentsReachingOutside(sim));
+    expect(segmentsReachingOutside(copy)).toBe(1);
   });
 });

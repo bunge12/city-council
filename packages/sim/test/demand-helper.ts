@@ -30,7 +30,9 @@ export function holdDemand<T>(bars: HeldBars, run: () => T): T {
     setBars(state, bars);
   };
   try {
-    return run();
+    const result = run();
+    if (typeof (result as { then?: unknown } | null)?.then === "function") throw new TypeError("holdDemand holds the bars through a synchronous run only");
+    return result;
   } finally {
     DEMAND.run = original;
   }

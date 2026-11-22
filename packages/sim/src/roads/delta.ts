@@ -45,6 +45,7 @@ import {
   unindexSegment,
 } from "./spatial";
 import { addBlockSegment, existingBlockIndex, removeBlockSegment } from "./blocks";
+import { markOutsideStale } from "./outside";
 import { NO_EDGE, existingRoutingGraph, refreshRoutingSegment } from "./routing";
 
 type NodeKey = (typeof NODE_ARRAYS)[number];
@@ -295,6 +296,8 @@ export function applyRoadDelta(net: RoadNetwork, delta: RoadDelta): number[] | s
     for (const seg of delta.segIds) refreshRoutingSegment(graph, seg);
     for (let e = 2 * segmentIdLimit(net); e < graph.edgeTime.length; e++) graph.edgeTime[e] = NO_EDGE;
   }
+  // Which pieces reach outside is worked out afresh on the next read.
+  markOutsideStale(net);
   touchedChunks(net, delta.nodeIds, delta.segIds, chunks);
   return [...chunks].sort((a, b) => a - b);
 }
