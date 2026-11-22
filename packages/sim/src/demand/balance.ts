@@ -1,6 +1,6 @@
 // Demand numbers from `balance/demand.json`, checked when the module loads
-// (M3-01, PRD "Four demand bars" and "Pacing"). Nothing reads them yet: the
-// bars arrive in M3-06 and arrivals in M3-08.
+// (M3-01, PRD "Four demand bars" and "Pacing"). The bars (demand.ts, M3-06)
+// read all but `arrivalsPerYearAtFullDemand`, which arrivals read (M3-08).
 
 import balance from "../../balance/demand.json" with { type: "json" };
 import { EDUCATION_LEVELS, type EducationLevel } from "../buildings/balance";
@@ -16,6 +16,12 @@ export interface DemandBalance {
   industrial: { unemployedWorkers: number; goodsNeeded: number; openOfficeJobs: number };
   /** What one resident at each wealth level counts for in spending power. Weights of 0 or more, not shares: they need not add to 1. */
   spendingByWealth: Record<EducationLevel, number>;
+  /** Shop jobs one unit of spending power keeps busy. */
+  shopJobsPerSpending: number;
+  /** Office jobs each resident, and each shop or factory job, buys the services of. */
+  officeJobsPerBuyer: number;
+  /** Factory jobs each shop job needs the goods of. */
+  factoryJobsPerShopJob: number;
   /** The least the residential bar reads while the city is small. */
   outsidePull: { bar: number; untilResidents: number };
   /** Residents a game year with the residential bar at 100. */
@@ -36,6 +42,9 @@ const BARS: Readonly<Record<string, Readonly<Record<string, NumberRule>>>> = {
 const TOP: Readonly<Record<string, NumberRule>> = {
   dailyShare: { min: 0, max: 1, aboveMin: true },
   arrivalsPerYearAtFullDemand: { min: 0 },
+  shopJobsPerSpending: { min: 0, max: 10 },
+  officeJobsPerBuyer: { min: 0, max: 10 },
+  factoryJobsPerShopJob: { min: 0, max: 10 },
 };
 
 /**

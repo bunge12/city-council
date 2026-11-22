@@ -2,6 +2,7 @@ import { createBuildings } from "./buildings/buildings";
 import { TIME_BALANCE } from "./calendar";
 import { createPops } from "./pops/pops";
 import { statsFor } from "./stats/stats";
+import { createDemand } from "./demand/demand";
 import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -93,6 +94,9 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // between zones may be read (issue #177). A city saved before it has no
   // rebuild under way: its table is built from its roads at load.
   18: (old) => ({ ...old, version: 19, travelReadyAt: 0 }),
+  // Version 20 adds the demand bars (M3-06), all at 0. They take their first
+  // step toward what the city's totals say on the next day's first tick.
+  19: (old) => ({ ...old, version: 20, demand: createDemand() }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */

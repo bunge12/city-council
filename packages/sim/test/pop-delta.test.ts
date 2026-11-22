@@ -156,12 +156,12 @@ describe("people deltas", () => {
   });
 });
 
-describe("protocol version 16", () => {
-  it("refuses a client on version 15 with the usual message", () => {
-    expect(PROTOCOL_VERSION).toBe(16);
-    expect(parseToSimMessage({ v: 15, type: "requestSnapshot" })).toBe("protocol version 15 is not supported, expected 16");
-    expect(parseToSimMessage({ v: 15, type: "command", command: { seq: 1, playerId: "p", type: "NoOp", payload: {} } })).toBe(
-      "protocol version 15 is not supported, expected 16",
+describe("protocol version 17", () => {
+  it("refuses a client on version 16, before the demand bars, with the usual message", () => {
+    expect(PROTOCOL_VERSION).toBe(17);
+    expect(parseToSimMessage({ v: 16, type: "requestSnapshot" })).toBe("protocol version 16 is not supported, expected 17");
+    expect(parseToSimMessage({ v: 16, type: "command", command: { seq: 1, playerId: "p", type: "NoOp", payload: {} } })).toBe(
+      "protocol version 16 is not supported, expected 17",
     );
   });
 });

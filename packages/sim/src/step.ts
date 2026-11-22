@@ -1,6 +1,7 @@
 import { GROWER } from "./buildings/grower";
 import { POPS } from "./pops/sweep";
 import { STATS } from "./stats/stats";
+import { DEMAND } from "./demand/demand";
 import { keepBuildings } from "./buildings/upkeep";
 import { LAND_VALUE } from "./landvalue/land-value";
 import { applyPending, type DroppedCommand } from "./commands";
@@ -18,12 +19,13 @@ export interface System {
 /**
  * The systems `step` runs each tick, in this fixed order. The statistics
  * come first, so the yearly counts roll over before anything adds to the
- * new year, and a month's sample is the city as the month opens. The pops'
- * sweep comes next, so every system after it reads the day's slice. Land value
+ * new year, and a month's sample is the city as the month opens. Demand
+ * comes next, so every system that acts on the bars reads the day's. The pops'
+ * sweep comes after it, so every system after it reads the day's slice. Land value
  * keeps the city centre before the grower builds, so a building grown on
  * the first tick of a month sees the month's centre.
  */
-export const SYSTEMS: readonly System[] = [STATS, POPS, LAND_VALUE, GROWER];
+export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, LAND_VALUE, GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";

@@ -36,6 +36,8 @@ import {
   type Occupancy,
   type SimState,
   type SystemTiming,
+  checkDemand,
+  copyDemand,
 } from "@city-council/sim";
 import { adjustHomes, countHomes, homesAfter, homesBefore, type Homes } from "./homes";
 import type { ClientTransport } from "./transport";
@@ -391,6 +393,11 @@ export class SimMirror {
       this.outOfStep();
       return;
     }
+    // And the demand bars, which must have the shape this build keeps.
+    if (checkDemand(delta.demand) !== null) {
+      this.outOfStep();
+      return;
+    }
     // Roads first: a delta whose rows do not fit the copy changes nothing.
     let roadChunks: readonly number[] = [];
     let roadNodes: readonly number[] = [];
@@ -447,6 +454,7 @@ export class SimMirror {
     if (delta.pending) state.pending = delta.pending.map((c) => ({ ...c }));
     state.cellReads = delta.cellReads;
     state.travelReadyAt = delta.travelReadyAt;
+    state.demand = copyDemand(delta.demand);
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
     state.growth = { ...delta.growth };
