@@ -25,7 +25,7 @@ import { NONE, addNode, addSegment, isNode, isSegment, nodeIdLimit, removeSegmen
 import { ROUTING_BALANCE, findRoute, findRouteBetween, routingGraphOf } from "../src/roads/routing";
 import { nextFloat, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
-import { markRoadsChanged, prepareTravelTimes, travelZoneSources } from "../src/travel-times";
+import { markRoadsChanged, prepareTravelTimes, travelRebuildSize, travelZoneSources } from "../src/travel-times";
 import { chunkAt } from "../src/zoning/cell-index";
 import { runFixture } from "./replay-helper";
 import { submit } from "./seen-ends";
@@ -246,6 +246,9 @@ describe("keeping the table current", () => {
       stepUntilReady(state);
       expect(multiTick).toBeGreaterThan(3);
       const fresh = cloneState(state);
+      // The size kept from the network's events, which sets the ready tick, is a fresh city's.
+      expect(travelRebuildSize(state)).toEqual(travelRebuildSize(fresh));
+      expect(travelRebuildSize(fresh).zones).toBeGreaterThan(10);
       expect(allAnswers(state)).toEqual(allAnswers(fresh));
       expect(travelZoneSources(state)).toEqual(travelZoneSources(fresh));
     });

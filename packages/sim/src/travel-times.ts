@@ -91,10 +91,22 @@ interface TravelTimes {
   rebuild: Rebuild | null;
   /**
    * A rebuild due to start on the next step: the step that applied the
-   * change spent its time on it. With the sources and road node count
-   * found then, for the roads, which no step changes without restarting it.
+   * change spent its time on it. The roads stay as they were: a change
+   * before then starts it again.
    */
-  waiting: { sources: Int32Array } | null;
+  waiting: boolean;
+  /**
+   * How many live road segments end at each node, kept from the network's
+   * events, so the step that applies a change of roads knows the size of
+   * the rebuild without a pass over the network. A node's place never
+   * changes while it has segments.
+   */
+  roadDegree: Int32Array;
+  /** How many nodes in each zone a road reaches. */
+  zoneRoadNodes: Int32Array;
+  /** Nodes a road reaches, and zones with at least one: the rebuild's size. */
+  roadNodes: number;
+  roadZones: number;
   // Buffers kept between rebuilds, so a rebuild makes no garbage: the road
   // node marks, the compacted graph and the searches' scratch.
   mark: Uint8Array;
@@ -122,7 +134,11 @@ function watched(net: RoadNetwork): TravelTimes {
       table: null,
       sources: null,
       rebuild: null,
-      waiting: null,
+      waiting: false,
+      roadDegree: new Int32Array(0),
+      zoneRoadNodes: new Int32Array(TRAVEL_ZONES),
+      roadNodes: 0,
+      roadZones: 0,
       mark: new Uint8Array(0),
       index: new Int32Array(0),
       first: new Int32Array(0),
@@ -134,12 +150,49 @@ function watched(net: RoadNetwork): TravelTimes {
       heapTime: new Float64Array(64),
       heapNode: new Int32Array(64),
     };
-    const touch = () => void (made.touched = true);
-    observeNetwork(net, { nodeAdded: () => undefined, nodeRemoving: () => undefined, segmentAdded: touch, segmentRemoving: touch });
+    observeNetwork(net, {
+      nodeAdded: () => undefined,
+      nodeRemoving: () => undefined,
+      segmentAdded: (seg) => {
+        made.touched = true;
+        countSegment(made, seg, 1);
+      },
+      segmentRemoving: (seg) => {
+        made.touched = true;
+        countSegment(made, seg, -1);
+      },
+    });
+    const { segFlags } = net;
+    for (let seg = 0; seg < segFlags.length; seg++) if (((segFlags[seg] ?? 0) & SEG_ALIVE) !== 0) countSegment(made, seg, 1);
     live.set(net, made);
     tt = made;
   }
   return tt;
+}
+
+/**
+ * Counts live segment `seg` in or out of the rebuild's size: each end a
+ * road reaches, and each zone that has one.
+ */
+function countSegment(tt: TravelTimes, seg: number, by: 1 | -1): void {
+  const net = tt.net;
+  if (net.segNetwork[seg] !== NETWORK_ROAD) return;
+  for (const node of [net.segA[seg] ?? 0, net.segB[seg] ?? 0]) {
+    if (node >= tt.roadDegree.length) {
+      const grown = new Int32Array(Math.max(64, 2 * node + 2));
+      grown.set(tt.roadDegree);
+      tt.roadDegree = grown;
+    }
+    const before = tt.roadDegree[node] ?? 0;
+    tt.roadDegree[node] = before + by;
+    // A node joins the count with its first road segment and leaves it with its last.
+    if (by === 1 ? before !== 0 : before !== 1) continue;
+    tt.roadNodes += by;
+    const zone = zoneAt(net.nodeX[node] ?? 0, net.nodeZ[node] ?? 0);
+    const inZone = tt.zoneRoadNodes[zone] ?? 0;
+    tt.zoneRoadNodes[zone] = inZone + by;
+    if (by === 1 ? inZone === 0 : inZone === 1) tt.roadZones += by;
+  }
 }
 
 /** `a` if it holds `n`, or a bigger one of the same kind. What it held is not kept. */
@@ -206,12 +259,14 @@ function findSources(tt: TravelTimes): { sources: Int32Array; nodes: number } {
   return { sources, nodes };
 }
 
-/** How many ticks of rows rebuilding the table for these roads is given, at least 1. From the roads alone, so every machine agrees. */
-function rebuildTicks(sources: Int32Array, nodes: number): number {
-  let rows = 0;
-  for (const s of sources) if (s !== NONE) rows++;
+/**
+ * How many ticks of rows rebuilding the table for the roads as they are is
+ * given, at least 1: zones a road reaches times nodes it reaches, over the
+ * settles a tick. From the roads alone, so every machine agrees.
+ */
+function rebuildTicks(tt: TravelTimes): number {
   const per = ROUTING_BALANCE.travelTimes.rebuildSettlesPerTick;
-  const ticks = Math.floor((rows * nodes + per - 1) / per);
+  const ticks = Math.floor((tt.roadZones * tt.roadNodes + per - 1) / per);
   return ticks < 1 ? 1 : ticks;
 }
 
@@ -394,7 +449,7 @@ function advance(tt: TravelTimes, count: number): void {
 function rebuildNow(tt: TravelTimes): void {
   const { sources } = findSources(tt);
   tt.changed = false;
-  tt.waiting = null;
+  tt.waiting = false;
   startRebuild(tt, sources);
   advance(tt, Infinity);
 }
@@ -441,10 +496,9 @@ export function stepTravel(state: SimState): void {
   const kept = tt.table !== null;
   if (tt.changed) {
     tt.changed = false;
-    const { sources, nodes } = findSources(tt);
-    const ticks = rebuildTicks(sources, nodes);
+    const ticks = rebuildTicks(tt);
     tt.rebuild = null;
-    tt.waiting = null;
+    tt.waiting = false;
     if (ticks <= 1) {
       // Rebuilt in this step, so readable now, even while an earlier rebuild
       // was due later. Set outright, from the roads as they end the step
@@ -452,7 +506,7 @@ export function stepTravel(state: SimState): void {
       // may have applied them over several paused steps.
       state.travelReadyAt = state.tick;
       if (kept) {
-        startRebuild(tt, sources);
+        startRebuild(tt, findSources(tt).sources);
         advance(tt, Infinity);
       }
       return;
@@ -460,13 +514,13 @@ export function stepTravel(state: SimState): void {
     // This step and the next, which compacts the graph, build no rows, so
     // the rows get `ticks` steps of their own after them.
     state.travelReadyAt = state.tick + ticks + 2;
-    if (kept) tt.waiting = { sources };
+    tt.waiting = kept;
     return;
   }
   const ticksLeft = state.travelReadyAt - state.tick;
   if (tt.waiting) {
-    startRebuild(tt, tt.waiting.sources);
-    tt.waiting = null;
+    startRebuild(tt, findSources(tt).sources);
+    tt.waiting = false;
     // Compacting the graph is this step's share, unless it is the last.
     if (ticksLeft > 1) return;
   }
@@ -546,6 +600,12 @@ export function buildingTravelTime(state: SimState, from: number, to: number): n
 /** Each zone's source node, NONE for a zone with none. For tests and the debug view. */
 export function travelZoneSources(state: SimState): Int32Array {
   return tableOf(state).sources.slice();
+}
+
+/** The rebuild's size as kept from the network's events: nodes and zones a road reaches. For tests. */
+export function travelRebuildSize(state: SimState): { nodes: number; zones: number } {
+  const tt = watched(state.roads);
+  return { nodes: tt.roadNodes, zones: tt.roadZones };
 }
 
 /** Bytes the table holds, and the buffers kept for rebuilding it. For the bench. */
