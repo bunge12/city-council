@@ -159,6 +159,13 @@ export const ROADS = {
     arrowSpacing: 36,
     arrowShaft: { length: 3, width: 0.35 },
     arrowHead: { length: 2.2, width: 1.5 },
+    /**
+     * Merge arrows, in each lane that ends where a road narrows into a
+     * taper, for the traffic driving into it on the right. Metres: the tip
+     * stands `before` short of the taper; the shaft runs `straight` along the
+     * lane, then `bend` more turned `turn` radians toward the lane that goes on.
+     */
+    mergeArrow: { before: 8, straight: 3.5, bend: 1.5, turn: 0.3 },
   },
   /**
    * The city band draws only these types, as lines of a fixed screen
@@ -218,7 +225,9 @@ export const ROADS = {
   /**
    * Where a road of one width runs on into a road of another, bent by at
    * most `maxBend` radians, the narrow road widens into the wide one over
-   * `ratio` metres for each metre of difference in half-width (issue 87).
+   * `ratio` metres for each metre of difference in half-width (issue 87),
+   * along an S-curve on the narrow road's own centre line, with its lane
+   * lines carried through and its surface colour fading into the wide road's.
    */
   taper: { ratio: 5, maxBend: 0.8 },
   /**

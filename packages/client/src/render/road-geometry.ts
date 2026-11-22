@@ -419,6 +419,12 @@ export interface Junction {
    * polygon. The sidewalk round the corner runs inside it.
    */
   kerbs: number[][];
+  /**
+   * Where a narrow road runs on into a wide one: the narrow road's index in
+   * `segs`. Over `trims[taper]` metres back from the node its kerbs widen
+   * out to the wide road's, along its own centre line, by `taperShape`.
+   */
+  taper?: number;
 }
 
 interface Arm {
@@ -525,9 +531,7 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
   const at = (a: Arm, t: number) =>
     a.path.curved ? armKerb(a, t, 1) : { x: x + a.dx * t + a.nx * a.half, z: z + a.dz * t + a.nz * a.half };
 
-  // First the corners under 180 degrees, which set how far each road is cut
-  // back. Where a narrow road meets a wide one nearly head on, the kerbs
-  // meet behind the wide road's node, and the narrow road tapers into it.
+  // First the corners under 180 degrees, which set how far each road is cut back.
   const corners: ({ x: number; z: number } | "bevel" | null)[] = arms.map(() => null);
   // Corners whose kerbs turn through an arc rather than meet at a point,
   // and how far along each kerb the arc's ends lie: before the cut, when
@@ -536,6 +540,7 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
   const arcFrom = arms.map(() => 0);
   const arcTo = arms.map(() => 0);
   const taper = taperArms(arms, gaps);
+  if (taper) return taperJunction(net, node, x, z, arms, taper.narrow);
   for (let i = 0; i < k; i++) {
     const meet = meets[i];
     const gap = gaps[i] ?? 0;
@@ -545,7 +550,7 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
     const b = arms[(i + 1) % k] as Arm;
     // Room for the arc: each kerb gives up the arc's tangent length past the sharp corner.
     let cut = 0;
-    if (!taper && meet.ti >= 0 && meet.tj >= 0) {
+    if (meet.ti >= 0 && meet.tj >= 0) {
       const radius = Math.min(cornerRadius(a.type), cornerRadius(b.type));
       cut = Math.min(ROADS.corners.maxCut, radius / Math.tan(gap / 2));
       rounded[i] = cut > 1e-3;
@@ -555,13 +560,6 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
     trims[i] = Math.max(trims[i] ?? 0, meet.ti + cut);
     trims[(i + 1) % k] = Math.max(trims[(i + 1) % k] ?? 0, meet.tj + cut);
     corners[i] = at(a, meet.ti);
-  }
-  // A narrow road running on into a wide one widens over a stretch of its own length.
-  if (taper) {
-    const narrow = taper.narrow;
-    const n = arms[narrow] as Arm;
-    const w = arms[1 - narrow] as Arm;
-    trims[narrow] = Math.max(trims[narrow] ?? 0, Math.min(ROADS.maxTrim, (w.half - n.half) * ROADS.taper.ratio));
   }
   // A short road cannot give more than half its length to each end, or all
   // of it when the far end is a dead end. Where that leaves a corner short
@@ -582,8 +580,7 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
   // the outer corner without covering road the strips already draw.
   for (let i = 0; i < k; i++) {
     const gap = gaps[i] ?? 0;
-    // Round the outside of a taper the kerbs run straight from the narrow road's cut to the wide one's.
-    if (gap <= Math.PI + STRAIGHT || taper) continue;
+    if (gap <= Math.PI + STRAIGHT) continue;
     const a = arms[i] as Arm;
     const b = arms[(i + 1) % k] as Arm;
     const meet = meets[i];
@@ -771,6 +768,159 @@ function taperArms(arms: readonly Arm[], gaps: readonly number[]): { narrow: num
   const bend = Math.abs((gaps[0] ?? Math.PI) - Math.PI);
   if (bend > ROADS.taper.maxBend) return null;
   return { narrow: a.half < b.half ? 0 : 1 };
+}
+
+/**
+ * How far a taper has widened, 0 at the narrow road's cut and 1 at the
+ * node, from `u`, the share of the taper's length covered from the cut. It
+ * leaves both roads' kerbs along them, so neither end has a kink.
+ */
+export function taperShape(u: number): number {
+  const v = u <= 0 ? 0 : u >= 1 ? 1 : u;
+  return v * v * (3 - 2 * v);
+}
+
+/**
+ * A road at `s` metres from its node, as an arm leaving it: the point
+ * `offset` metres to the left of its centre line there, looking away from
+ * the node (right when negative), curved or straight.
+ */
+export function taperPoint(path: SegPath, fromA: boolean, s: number, offset: number): { x: number; z: number } {
+  const f = path.frame(fromA ? s : path.length - s);
+  const side = fromA ? 1 : -1;
+  return { x: f.x + f.nx * offset * side, z: f.z + f.nz * offset * side };
+}
+
+/** Metres between the stations a taper is drawn through. */
+export const TAPER_STEP = 2;
+
+/**
+ * The narrow road of a taper, from its node to its cut `length` metres
+ * along it. Each station lies on the narrow road's centre line, and is
+ * drawn square to a normal that turns from the wide road's at the node to
+ * the narrow road's own at the cut, so a bent taper meets the wide road's
+ * cut edge exactly. Offsets are to the left looking away from the node.
+ */
+export class Taper {
+  /** Turn of the normal at the node, radians, from the narrow road's own to the wide road's. */
+  private readonly turn: number;
+
+  constructor(
+    readonly path: SegPath,
+    readonly fromA: boolean,
+    readonly length: number,
+    readonly narrowHalf: number,
+    readonly wideHalf: number,
+    /** The wide road's unit direction away from the node. */
+    wideDx: number,
+    wideDz: number,
+  ) {
+    const f = this.raw(0);
+    // Seen from the narrow road, the wide road runs back toward the node, so its left is the wide road's right.
+    const tx = wideDz;
+    const tz = -wideDx;
+    this.turn = Math.atan2(f.nx * tz - f.nz * tx, f.nx * tx + f.nz * tz);
+  }
+
+  private raw(s: number): { x: number; z: number; nx: number; nz: number } {
+    const f = this.path.frame(this.fromA ? s : this.path.length - s);
+    const side = this.fromA ? 1 : -1;
+    return { x: f.x, z: f.z, nx: f.nx * side, nz: f.nz * side };
+  }
+
+  /** The centre line and turned normal at `s` metres from the node. */
+  frame(s: number): { x: number; z: number; nx: number; nz: number } {
+    const f = this.raw(s);
+    const a = this.length > 0 ? this.turn * (1 - s / this.length) : this.turn;
+    if (a === 0) return f;
+    const c = Math.cos(a);
+    const n = Math.sin(a);
+    return { x: f.x, z: f.z, nx: f.nx * c - f.nz * n, nz: f.nx * n + f.nz * c };
+  }
+
+  /** How far the kerbs have widened at `s`, 0 at the cut and 1 at the node. */
+  widened(s: number): number {
+    return taperShape(this.length > 0 ? 1 - s / this.length : 1);
+  }
+
+  /** Centre line to kerb at `s`. */
+  half(s: number): number {
+    return this.narrowHalf + (this.wideHalf - this.narrowHalf) * this.widened(s);
+  }
+
+  /** The point `offset` metres to the left of the centre line at `s`. */
+  point(s: number, offset: number): { x: number; z: number } {
+    const f = this.frame(s);
+    return { x: f.x + f.nx * offset, z: f.z + f.nz * offset };
+  }
+
+  /** Distances from the node it is drawn through, from 0 to its length, about `TAPER_STEP` apart. */
+  stations(): number[] {
+    const steps = Math.max(1, Math.ceil(this.length / TAPER_STEP));
+    const out: number[] = [];
+    for (let k = 0; k <= steps; k++) out.push((this.length * k) / steps);
+    return out;
+  }
+}
+
+/** The taper of junction `j`, or null when it has none. */
+export function taperOf(net: RoadNet, j: Junction): Taper | null {
+  if (j.taper === undefined) return null;
+  const seg = j.segs[j.taper] ?? 0;
+  const wide = j.segs[1 - j.taper] ?? 0;
+  const wPath = segPath(net, wide);
+  const { dx, dz } = wPath.leaving(net.segA[wide] === j.node);
+  return new Taper(segPath(net, seg), net.segA[seg] === j.node, j.trims[j.taper] ?? 0, segPath(net, seg).half, wPath.half, dx, dz);
+}
+
+/**
+ * The junction where narrow road `arms[narrow]` runs on into a wide one.
+ * The wide road runs to the node. The narrow road is cut back by its
+ * taper's length, and its kerbs widen from there to the wide road's, so a
+ * curved road tapers along its curve. The surface is drawn from the
+ * taper's stations, not as a fan; `ring` is its outline.
+ */
+function taperJunction(net: RoadNet, node: number, x: number, z: number, arms: readonly Arm[], narrow: number): Junction {
+  const n = arms[narrow] as Arm;
+  const w = arms[1 - narrow] as Arm;
+  const trims = [0, 0];
+  const share = roadSegmentsAt(net, n.far).length > 1 ? n.length / 2 : n.length;
+  const length = Math.min(ROADS.maxTrim, (w.half - n.half) * ROADS.taper.ratio, share);
+  trims[narrow] = length;
+  const taper = new Taper(n.path, n.fromA, length, n.half, w.half, w.dx, w.dz);
+  const st = taper.stations();
+  const ring: number[] = [];
+  const cuts = [
+    [0, 0],
+    [0, 0],
+  ];
+  for (let i = 0; i < 2; i++) {
+    const c = cuts[i] as number[];
+    if (i === narrow) {
+      // The right kerb from the wide road's left corner, which is its first point, out to the cut and back on the left.
+      for (let k = 1; k < st.length - 1; k++) {
+        const p = taper.point(st[k] ?? 0, -taper.half(st[k] ?? 0));
+        ring.push(p.x, p.z);
+      }
+      const r = taper.point(length, -n.half);
+      const l = taper.point(length, n.half);
+      c[0] = ring.length / 2;
+      ring.push(r.x, r.z);
+      c[1] = ring.length / 2;
+      ring.push(l.x, l.z);
+      for (let k = st.length - 2; k >= 1; k--) {
+        const p = taper.point(st[k] ?? 0, taper.half(st[k] ?? 0));
+        ring.push(p.x, p.z);
+      }
+    } else {
+      c[0] = ring.length / 2;
+      ring.push(x - w.nx * w.half, z - w.nz * w.half);
+      c[1] = ring.length / 2;
+      ring.push(x + w.nx * w.half, z + w.nz * w.half);
+    }
+  }
+  const kerbs = [0, 1].map((i) => ringSlice(ring, (cuts[i] as number[])[1] ?? 0, (cuts[1 - i] as number[])[0] ?? 0));
+  return { node, x, z, segs: arms.map((a) => a.seg), trims, ring, type: w.type, kerbs, taper: narrow };
 }
 
 /**
@@ -1102,6 +1252,203 @@ export function paintFor(type: RoadType): Paint[] {
   return out;
 }
 
+/**
+ * Draws taper `t` of junction `j` onto `surface` as quads between its
+ * stations, its colour fading from the narrow road's at the cut to the
+ * wide road's at the node, then its lines onto `markings`. `at` makes a
+ * surface vertex.
+ */
+function drawTaper(
+  surface: Mesh,
+  markings: Mesh,
+  t: Taper,
+  j: Junction,
+  at: (x: number, z: number, rgb: readonly number[]) => number,
+): void {
+  const st = t.stations();
+  const from = surfaceColour(t.path.type);
+  const to = surfaceColour(j.type);
+  const hr: number[] = [];
+  const hl: number[] = [];
+  let prev: [number, number] | null = null;
+  for (const s of st) {
+    const w = t.widened(s);
+    const rgb = [0, 1, 2].map((c) => (from[c] ?? 0) + ((to[c] ?? 0) - (from[c] ?? 0)) * w);
+    const h = t.half(s);
+    const r = t.point(s, -h);
+    const l = t.point(s, h);
+    const vr = at(r.x, r.z, rgb);
+    const vl = at(l.x, l.z, rgb);
+    hr.push(surface.positions[vr * 3 + 1] ?? 0);
+    hl.push(surface.positions[vl * 3 + 1] ?? 0);
+    if (prev) surface.quad(prev[0], vr, vl, prev[1]);
+    prev = [vr, vl];
+  }
+  /** The surface's height at `s` from the node and `o` left of the centre line, on the plane across each station. */
+  const y = (s: number, o: number): number => {
+    const steps = st.length - 1;
+    const f = t.length > 0 ? Math.min(steps, Math.max(0, (s / t.length) * steps)) : 0;
+    const k = Math.min(steps - 1, Math.floor(f));
+    const across = (i: number) => {
+      const h = t.half(st[i] ?? 0);
+      return (hr[i] ?? 0) + ((hl[i] ?? 0) - (hr[i] ?? 0)) * ((o + h) / (2 * h));
+    };
+    if (steps < 1) return across(0);
+    return across(k) + (across(k + 1) - across(k)) * (f - k);
+  };
+  if (!t.path.type.oneWay && !j.type.oneWay) taperMarkings(markings, t, j.type, y);
+}
+
+/** The lines of a two-way road, from the centre out: the centre line's paints, the lane lines' offsets on one side, and the edge line's, if any. */
+function lineRoles(type: RoadType): { centre: Paint[]; lanes: number[]; edge: number | null } {
+  const centre: Paint[] = [];
+  const lanes: number[] = [];
+  let edge: number | null = null;
+  for (const p of paintFor(type)) {
+    if (Math.abs(p.offset) < 0.5) centre.push(p);
+    else if (p.offset < 0) continue;
+    else if (p.dashed) lanes.push(p.offset);
+    else edge = p.offset;
+  }
+  lanes.sort((a, b) => a - b);
+  return { centre, lanes, edge };
+}
+
+/**
+ * The lane lines over taper `t` into a road of type `wide`, carried from
+ * where the narrow road's stop at its cut to where the wide road's start
+ * at the node, widening as the kerbs do. Each lane line meets the wide
+ * road's line as many lanes from the centre; the line of a lane only the
+ * wide road has runs the third of the taper by the wide road, bending
+ * toward the narrow road's edge line, and the wide road's own edge line
+ * starts from that line too when the narrow road has none. Dashes keep the narrow road's
+ * spacing. Where the two roads' centre lines differ, each is drawn over its
+ * own half. `y` is the surface's height at a distance from the node and an
+ * offset.
+ */
+function taperMarkings(mesh: Mesh, t: Taper, wide: RoadType, y: (s: number, o: number) => number): void {
+  const length = t.length;
+  if (length < 1) return;
+  const path = t.path;
+  const m = ROADS.markings;
+  const white = linearRgb(m.white);
+  const n = lineRoles(path.type);
+  const w = lineRoles(wide);
+  // A line that is not there starts or ends where the edge line would be.
+  const nEdge = n.edge ?? carriageHalf(path.type) - m.edgeInset;
+  const wEdge = w.edge ?? carriageHalf(wide) - m.edgeInset;
+  /** Lines as offsets at the cut and at the node, for one side; the other side mirrors them. */
+  const lines: { from: number; to: number; rgb: readonly number[]; dashed: boolean; mirror: boolean; span?: [number, number] }[] = [];
+  for (let k = 0; k < Math.max(n.lanes.length, w.lanes.length); k++) {
+    // A lane the narrow road has no line for ends: its line stops a third of the way in, as the merge starts.
+    const ends: [number, number] | undefined = k < n.lanes.length ? undefined : [0, length / 3];
+    lines.push({ from: n.lanes[k] ?? nEdge, to: w.lanes[k] ?? wEdge, rgb: white, dashed: true, mirror: true, ...(ends ? { span: ends } : {}) });
+  }
+  if (n.edge !== null || w.edge !== null) lines.push({ from: nEdge, to: wEdge, rgb: white, dashed: false, mirror: true });
+  const same = n.centre.length === w.centre.length && n.centre.every((p, i) => p.dashed === w.centre[i]?.dashed && p.rgb === w.centre[i]?.rgb);
+  if (same) {
+    n.centre.forEach((p, i) => lines.push({ from: p.offset, to: w.centre[i]?.offset ?? p.offset, rgb: p.rgb, dashed: p.dashed, mirror: false }));
+  } else {
+    for (const p of n.centre) lines.push({ from: p.offset, to: p.offset, rgb: p.rgb, dashed: p.dashed, mirror: false, span: [length / 2, length] });
+    for (const p of w.centre) lines.push({ from: p.offset, to: p.offset, rgb: p.rgb, dashed: p.dashed, mirror: false, span: [0, length / 2] });
+  }
+  const st = t.stations();
+  const period = m.dash + m.gap;
+  const lift = ROADS.markingLift;
+  /** Paints one line from `s0` to `s1` metres from the node, with `at` giving its offset there. */
+  const stroke = (s0: number, s1: number, at: (s: number) => number, rgb: readonly number[]) => {
+    const pts = [s0, ...st.filter((s) => s > s0 + 1e-3 && s < s1 - 1e-3), s1];
+    const edge = (s: number): [number, number] => {
+      const o = at(s);
+      const a = t.point(s, o - m.width / 2);
+      const b = t.point(s, o + m.width / 2);
+      return [mesh.vertex(a.x, y(s, o - m.width / 2) + lift, a.z, rgb), mesh.vertex(b.x, y(s, o + m.width / 2) + lift, b.z, rgb)];
+    };
+    let prev = edge(s0);
+    for (let k = 1; k < pts.length; k++) {
+      const next = edge(pts[k] ?? 0);
+      mesh.quad(prev[0], next[0], next[1], prev[1]);
+      prev = next;
+    }
+  };
+  for (const line of lines) {
+    for (const side of line.mirror ? [1, -1] : [1]) {
+      const at = (s: number) => side * (line.from + (line.to - line.from) * t.widened(s));
+      const [lo, hi] = line.span ?? [0, length];
+      if (!line.dashed) {
+        stroke(lo, hi, at, line.rgb);
+        continue;
+      }
+      // Dashes at the narrow road's places along its own length, so they run on from its strip.
+      const toPath = (s: number) => (t.fromA ? s : path.length - s);
+      const p0 = Math.min(toPath(lo), toPath(hi));
+      const p1 = Math.max(toPath(lo), toPath(hi));
+      for (let start = Math.floor(p0 / period) * period; start < p1; start += period) {
+        const a = Math.max(p0, start);
+        const b = Math.min(p1, start + m.dash);
+        if (b - a <= 1e-3) continue;
+        const sa = t.fromA ? a : path.length - b;
+        const sb = t.fromA ? b : path.length - a;
+        stroke(sa, sb, at, line.rgb);
+      }
+    }
+  }
+}
+
+/**
+ * Merge arrows on the wide road of taper junction `j`, in each lane that
+ * ends where it narrows into the taper, for traffic driving toward it on
+ * the right. Each runs along its lane and bends toward the lane that goes
+ * on, tip `mergeArrow.before` metres short of the node. None on a bridge,
+ * where a one-way meets, or on a wide road too short to hold one.
+ */
+function mergeArrows(mesh: Mesh, net: RoadNet, terrain: Terrain, j: Junction): void {
+  if (j.taper === undefined) return;
+  const wideSeg = j.segs[1 - j.taper] ?? 0;
+  const narrowType = roadTypeOf(net, j.segs[j.taper] ?? 0);
+  if (net.segLevelA[wideSeg] === LEVEL_BRIDGE || narrowType.oneWay || j.type.oneWay) return;
+  const path = segPath(net, wideSeg);
+  const fromA = net.segA[wideSeg] === j.node;
+  const raised = isRaised(net, wideSeg);
+  const m = ROADS.markings;
+  const a = m.mergeArrow;
+  const keep = Math.max(1, Math.floor(narrowType.lanes / 2));
+  const lanes = Math.floor(path.type.lanes / 2);
+  if (lanes <= keep) return;
+  const lane = carriageHalf(path.type) / lanes;
+  // Along the lane toward the taper, then turned toward the centre line.
+  const tx = Math.cos(a.turn);
+  const tz = Math.sin(a.turn);
+  const tail = a.before + a.straight + (a.bend + m.arrowHead.length) * tx;
+  if (tail > path.length / 2) return;
+  const white = linearRgb(m.white);
+  const lift = ROADS.markingLift;
+  for (let k = keep; k < lanes; k++) {
+    // Traffic driving toward the node keeps to the negative side of the road's normal there.
+    const centre = (k + 0.5) * lane;
+    /** A point `along` metres from the tail toward the taper and `inward` toward the centre line, on the strip's surface. */
+    const at = (along: number, inward: number): number => {
+      const s = tail - along;
+      const p = taperPoint(path, fromA, s, inward - centre);
+      const t = fromA ? s : path.length - s;
+      let h = heightAt(terrain, p.x, p.z);
+      if (raised) {
+        const c = path.point(t);
+        h = heightAt(terrain, c.x, c.z) + levelLift(net, wideSeg, t, path.length);
+      }
+      return mesh.vertex(p.x, h + lift, p.z, white);
+    };
+    const sw = m.arrowShaft.width / 2;
+    // The straight part, then the bent part, square to their own directions.
+    const bx = a.straight + a.bend * tx;
+    const bz = a.bend * tz;
+    mesh.quad(at(0, -sw), at(a.straight, -sw), at(a.straight, sw), at(0, sw));
+    mesh.quad(at(a.straight + sw * tz, -sw * tx), at(bx + sw * tz, bz - sw * tx), at(bx - sw * tz, bz + sw * tx), at(a.straight - sw * tz, sw * tx));
+    const hw = m.arrowHead.width / 2;
+    mesh.triangle(at(bx + hw * tz, bz - hw * tx), at(bx + m.arrowHead.length * tx, bz + m.arrowHead.length * tz), at(bx - hw * tz, bz + hw * tx));
+  }
+}
+
 /** Heights of one piece of a strip: right and left kerb at its start and end. */
 interface Piece {
   t0: number;
@@ -1283,18 +1630,24 @@ export function buildRoadChunk(
     if (!j || j.ring.length < 6) continue;
     const rgb = surfaceColour(j.type);
     const lift = nodeLift(net, node);
-    const atJunction = (x: number, z: number): number => {
-      if (lift === 0) return ground(surface, x, z, rgb);
+    const atJunction = (x: number, z: number, c: readonly number[] = rgb): number => {
+      if (lift === 0) return ground(surface, x, z, c);
       // Level with the decks that meet here, which take the ground under their centre lines.
-      const v = surface.vertex(x, heightAt(terrain, j.x, j.z) + lift, z, rgb);
+      const v = surface.vertex(x, heightAt(terrain, j.x, j.z) + lift, z, c);
       surface.normals.push(0, 1, 0);
       return v;
     };
-    const centre = atJunction(j.x, j.z);
-    const ring: number[] = [];
-    for (let k = 0; k < j.ring.length; k += 2) ring.push(atJunction(j.ring[k] ?? 0, j.ring[k + 1] ?? 0));
     const before = surface.indices.length;
-    for (let k = 0; k < ring.length; k++) surface.triangle(centre, ring[k] ?? 0, ring[(k + 1) % ring.length] ?? 0);
+    const taper = taperOf(net, j);
+    if (taper) {
+      drawTaper(surface, markings, taper, j, atJunction);
+      mergeArrows(markings, net, terrain, j);
+    } else {
+      const centre = atJunction(j.x, j.z);
+      const ring: number[] = [];
+      for (let k = 0; k < j.ring.length; k += 2) ring.push(atJunction(j.ring[k] ?? 0, j.ring[k + 1] ?? 0));
+      for (let k = 0; k < ring.length; k++) surface.triangle(centre, ring[k] ?? 0, ring[(k + 1) % ring.length] ?? 0);
+    }
     if (surface.indices.length > before) junctionCount++;
   }
 
