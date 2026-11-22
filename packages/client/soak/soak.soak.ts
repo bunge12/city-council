@@ -85,6 +85,7 @@ import {
   type FromSimMessage,
 } from "@city-council/sim";
 import { beforeAll, describe, expect, test } from "vitest";
+import { holdDemandBars } from "../src/protocol/held-demand";
 import { PUMP_INTERVAL_MS, SimHost, type PendingSave } from "../src/protocol/host";
 import { build } from "vite";
 import { countHomes } from "../src/protocol/homes";
@@ -306,6 +307,12 @@ async function soakHour(): Promise<SoakRun> {
     return offset + (performance.now() - pumpStart);
   };
   const { transport, inject, ask, received } = page;
+  // Every demand bar held at 100 (M3-07): the scale city has no residents,
+  // so with its own bars only houses would grow, at the pull from outside,
+  // and the soak would measure an idle grower. Held, every zone grows at
+  // its full rate, the busiest demand can ask for. The replay at the end
+  // runs in this thread, so it is held the same way.
+  holdDemandBars(100);
   const scale = buildScaleCity();
   // The generator lays its grids faster than any player, and leaves a walk
   // of about 4,200 ticks of zoning cells behind. The hour starts once that
@@ -755,7 +762,10 @@ describe("soak: one hour of game time at 4x", () => {
     expect(b.settleSteps, "steps that walked a slice of zoning cells").toBeGreaterThan(20);
     for (const [type, applied] of Object.entries(b.applied)) expect(applied, `${type} applied`).toBeGreaterThan(20);
     // The grower built a town on the zoning, and the clearing took some of it away again.
-    expect(b.mostBuildings, "buildings grown").toBeGreaterThan(10_000);
+    // Since M3-07 its pace follows demand: with every bar at 100 the zones add
+    // about 50 buildings a game day together, against up to 1,000 at the M2
+    // pace, and the hour's 360 game days grew about 2,800 (10,000 before).
+    expect(b.mostBuildings, "buildings grown").toBeGreaterThan(2_000);
     // The tick budget is an exit number. A part of an autosave runs in the
     // worker between two steps, so it holds up the next one and gets the
     // same budget as a step (issue #83).
