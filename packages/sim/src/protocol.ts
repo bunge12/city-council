@@ -7,6 +7,7 @@ import type { BuildingDelta } from "./buildings/delta";
 import type { GrowthState } from "./buildings/growth";
 import type { Command, CommandResult, DroppedCommand } from "./commands";
 import type { CentreState } from "./landvalue/centre";
+import type { DemandState } from "./demand/demand";
 import type { LogEntry } from "./log";
 import type { PopDelta } from "./pops/delta";
 import type { StatsDelta } from "./stats/stats";
@@ -16,7 +17,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 
 // ---- Client to sim ----
 
@@ -143,6 +144,13 @@ export interface DeltaMessage {
    * protocol version 15).
    */
   travelReadyAt: number;
+  /**
+   * The four demand bars and their parts after the last step, a copy (M3-06,
+   * protocol version 17). Always sent, like `centre`: the bars move once a
+   * day, the client shows what pushes them, and a copy whose bars fell
+   * behind would hash differently from the sim.
+   */
+  demand: DemandState;
   /**
    * The commands still queued, the ones waiting for the cells to settle,
    * when the queue changed since the last delta. Left out otherwise: a

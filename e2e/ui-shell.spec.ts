@@ -12,7 +12,7 @@ interface SaveStatus {
 declare const window: {
   cityCouncil: {
     saves: { status: SaveStatus | null };
-    mirror: { state: { tick: number; seed: number } | null };
+    mirror: { state: { tick: number; seed: number; demand: Record<string, { value: number; parts: Record<string, number> }> } | null };
     camera: Promise<unknown>;
     holdClock(): Promise<number>;
     advance(steps: number): Promise<number>;
@@ -127,6 +127,8 @@ test("the debug panel shows the tick rate, tick time against the budget and wher
   await expect(debug).toBeVisible();
   await expect.poll(async () => Number(await page.locator("#sim-tps").textContent()), { timeout: 10_000 }).toBeGreaterThan(5);
   await expect(page.locator("#sim-timings")).toContainText("commands");
+  // The demand bars have a system of their own (M3-06).
+  await expect(page.locator("#sim-timings")).toContainText("demand");
   await expect(page.locator("#sim-budget")).toHaveText(/^[\d.]+ of 20 ms \([\d.]+%\)$/);
   await expect(page.locator("#render-backend")).toHaveText(/^(WebGPU|WebGL 2)$/);
   await expect(page.locator("#render-frame")).toHaveText(/ms \(\d+ fps\)$/);
@@ -140,6 +142,18 @@ test("the debug panel shows the tick rate, tick time against the budget and wher
   await page.mouse.click(VIEWPORT.width / 2, VIEWPORT.height / 2);
   await expect(page.locator("#pick-world")).toHaveText(/^[\d.]+, [\d.]+, [\d.]+ m$/);
   await testInfo.attach("debug panel after a click on the ground", { body: await page.screenshot(), contentType: "image/png" });
+});
+
+test("the demand bars reach the page with their parts, and their system shows in the debug panel (M3-06)", async ({ page }, testInfo) => {
+  await open(page, "/?debug");
+  await expect(page.locator("#sim-timings")).toContainText("demand");
+  // A new city's first tick takes the residential bar a day's share toward the pull from outside.
+  const demand = await page.evaluate(() => window.cityCouncil.mirror.state?.demand);
+  expect(Object.keys(demand ?? {})).toEqual(["residential", "commercial", "office", "industrial"]);
+  expect(demand?.["residential"]?.value).toBeGreaterThan(0);
+  expect(demand?.["residential"]?.parts["outsidePull"]).toBeGreaterThan(0);
+  expect(demand?.["industrial"]?.value).toBe(0);
+  await testInfo.attach("debug panel with the demand system's tick time", { body: await page.locator("#debug-panel").screenshot(), contentType: "image/png" });
 });
 
 test("the Send NoOp button lands a command in the activity log with its tick and player", async ({ page }, testInfo) => {

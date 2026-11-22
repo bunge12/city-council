@@ -278,7 +278,12 @@ function insideRect(u: Node<"float">, v: Node<"float">, r: Node<"vec4">) {
  */
 function kept(fade: Node<"float">) {
   const d = dither();
-  return select(fade.lessThan(1.5), step(d, fade.sub(1e-4)), step(fade.sub(2), d));
+  // Fading in keeps d < t and fading out d >= t, so each pixel is drawn by
+  // exactly one of the two. A form drawn whole keeps every pixel, also when
+  // its fade reaches the fragment a hair under 1: a pixel dropped there
+  // shows the lot's grass through the wall.
+  const coming = max(step(0.9999, fade), step(fade, d).oneMinus());
+  return select(fade.lessThan(1.5), coming, step(fade.sub(2), d));
 }
 
 /** The pixel's dither value in [0, 1), fixed to the pixel. */
@@ -363,9 +368,10 @@ function glassColours(theme: Theme): GlassColours {
 
 /**
  * A wall's colour with its pattern drawn on, and the light its glass
- * reflects: `kind` is the vertex's `FACADE`, `along` where it is along the
- * wall in windows with the lot's stretch taken out, `up` how high in
- * floors, and `look` the building's look (building-tint.ts, `lookFor`).
+ * reflects: `kind` is the vertex's `FACADE`, `bay` where it is along its
+ * face in window bays from one end, a whole number of them to the other
+ * end so no window is cut at a corner, `up` how high in floors, and `look`
+ * the building's look (building-tint.ts, `lookFor`).
  * Loading and garage doors are a darker shade of the wall; every other
  * opening is glass.
  *
@@ -375,13 +381,12 @@ function glassColours(theme: Theme): GlassColours {
  * the sky, and a few panes with a blind part way down. The reflection is
  * emitted, not lit, so windows on a wall in shadow still show.
  */
-function patterned(colour: Node<"vec3">, glass: GlassColours, kind: Node<"float">, along: Node<"float">, up: Node<"float">, look: Node<"float">) {
+function patterned(colour: Node<"vec3">, glass: GlassColours, kind: Node<"float">, bay: Node<"float">, up: Node<"float">, look: Node<"float">) {
   // Whole numbers first: the look reaches the fragment a hair either side
   // of its value, and a floor on it then flips from pixel to pixel.
   const whole = floor(look.add(0.5));
   const seed = floor(whole.add(0.5).div(STYLES));
   const style = whole.sub(seed.mul(STYLES));
-  const bay = along.add(0.5);
   // Paired windows are the window bay folded in two.
   const u = fract(select(kind.lessThan(1.5).and(style.greaterThan(2.5)), bay.mul(2), bay));
   const v = fract(up);
@@ -446,9 +451,11 @@ function buildingMaterial(theme: Theme, tick: Node<"float">): MeshLambertNodeMat
   const roof = varying(unpack(tint.y));
   const trim = varying(unpack(tint.z));
   const colour = select(surface.lessThan(0.5), wall, select(surface.lessThan(1.5), roof, select(surface.lessThan(2.5), trim, select(surface.lessThan(3.5), glass, pave))));
-  // Windows along the wall, in the lot's metres: the stretch of this instance along the wall's axis is taken out.
-  const along = facade.x.mul(select(facade.z.lessThan(0.5), stretch.x, stretch.y));
-  const pattern = patterned(colour, glassColours(theme), facade.w, along, facade.y, tint.w);
+  // A whole number of window bays along the face, on the lot as this
+  // instance stretches it along the face's axis (theme/model.ts, `baysOn`).
+  const span = facade.z.abs().mul(select(facade.z.lessThan(0), stretch.y, stretch.x));
+  const bay = facade.x.mul(floor(span.add(0.5)));
+  const pattern = patterned(colour, glassColours(theme), facade.w, bay, facade.y, tint.w);
   m.colorNode = pattern.colour;
   m.emissiveNode = pattern.emissive;
   // After the instance's matrix, which turns about y only, so down is down.

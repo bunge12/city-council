@@ -8,7 +8,7 @@ import { placeLot } from "../src/render/building-place";
 import { hashId, tintFor } from "../src/render/building-tint";
 import { MASK_GRASS, MASK_SIDE, MASK_TREES } from "../src/render/road-geometry";
 import { BUILDINGS, CELLS, CONSTRUCTION, ROADS } from "../src/render/config";
-import { FACADE, SURFACE } from "../src/theme/model";
+import { FACADE, ModelBuilder, SURFACE, baysOn } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
 import { BASE_DEPTH } from "../src/theme/north-american/generators";
 
@@ -83,6 +83,37 @@ describe("the North American theme", () => {
       kinds.add(kind);
     }
     expect(kinds.has(FACADE.windows)).toBe(true);
+  });
+
+  it("lays a whole number of windows on every wall, so none is cut at a corner", () => {
+    for (const t of BUILDING_TYPES) {
+      for (let model = 0; model < theme.modelCount(t.id); model++) {
+        const m = theme.model(t.id, model, t.width[0], theme.modelDepth(t.id));
+        // Every face runs from 0 at one end to 1 at the other, and keeps one length in windows.
+        for (let k = 0; k + 2 < m.indices.length; k += 3) {
+          const first = m.indices[k] ?? 0;
+          const vs = [first, m.indices[k + 1] ?? 0, m.indices[k + 2] ?? 0];
+          const kind = m.facades[first * 4 + 3] ?? 0;
+          if (kind === FACADE.none) continue;
+          for (const v of vs) {
+            expect(m.facades[v * 4 + 2], `${t.id} model ${model}`).toBe(m.facades[first * 4 + 2]);
+            const along = m.facades[v * 4] ?? -1;
+            expect(along >= 0 && along <= 1, `${t.id} model ${model}`).toBe(true);
+          }
+        }
+      }
+    }
+    // A wall 10 m long with windows every 3 m takes three, each a little wider; stretched by half again, five.
+    const b = new ModelBuilder();
+    b.box(-5, 5, 0, 3, -2, 2, SURFACE.wall, null, { kind: FACADE.windows, spacing: 3, floor: 3 });
+    const m = b.build();
+    expect(baysOn(m, 0, 1, 1)).toBe(3);
+    expect(baysOn(m, 0, 1.5, 1)).toBe(5);
+    // Its ends, 4 m and stretched no wider, take one window each.
+    const side = [...m.normals].findIndex((n, i) => i % 3 === 0 && Math.abs(n) > 0.5) / 3;
+    expect(baysOn(m, side, 1.5, 1)).toBe(1);
+    // An end under half a window wide takes none.
+    expect(baysOn(m, side, 1, 0.3)).toBe(0);
   });
 
   it("has a palette with wall, roof and trim colours for every type", () => {

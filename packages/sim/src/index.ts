@@ -128,6 +128,23 @@ export type { NewPop } from "./pops/pops";
 export { POPS_SYSTEM, popSlice } from "./pops/sweep";
 export { DEMAND_BALANCE, checkDemandBalance } from "./demand/balance";
 export type { DemandBalance } from "./demand/balance";
+export {
+  DEMAND,
+  DEMAND_BARS,
+  DEMAND_PARTS,
+  DEMAND_SYSTEM,
+  checkDemand,
+  copyDemand,
+  createDemand,
+  demandTargets,
+  moveDemand,
+  type BarState,
+  type DemandBar,
+  type DemandInputs,
+  type DemandState,
+  type DemandTargets,
+} from "./demand/demand";
+export { nodeReachesOutside, prepareOutside, segmentReachesOutside, segmentsReachingOutside } from "./roads/outside";
 export { BUILDING_ALIVE, buildingCount, buildingIdLimit, isBuilding, readBuilding } from "./buildings/buildings";
 export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
