@@ -126,11 +126,14 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
   };
 
   // Commercial: the spending no shop serves yet, and workers to staff new
-  // shops, against shop jobs beyond what the spending keeps busy.
+  // shops, against shop jobs beyond what the spending keeps busy. The
+  // spending keeps at most one shop job busy per worker, so a city with
+  // more shop jobs than workers does not want shops.
   const c = balance.commercial;
   const w = balance.spendingByWealth;
   const spending = at(t, "residentsWealthLow") * w.low + at(t, "residentsWealthMedium") * w.medium + at(t, "residentsWealthHigh") * w.high;
-  const servedJobs = spending * balance.shopJobsPerSpending;
+  // Shops cannot staff more jobs than the city has workers.
+  const servedJobs = Math.min(spending * balance.shopJobsPerSpending, workers);
   const commercial: Record<string, number> = {
     spendingPower: c.spendingPower * per(positive(servedJobs - shopJobs), servedJobs),
     availableWorkers: c.availableWorkers * per(unemployed, workers),
@@ -195,7 +198,9 @@ export function moveDemand(demand: DemandState, targets: DemandTargets, share: n
       state.parts[name] = part;
       sum += part;
     }
-    state.value = sum > 100 ? 100 : sum < -100 ? -100 : sum;
+    // A sum that is not a number, from a save that loaded parts near the
+    // largest double, reads as 0 rather than poisoning every later day.
+    state.value = sum > 100 ? 100 : sum < -100 ? -100 : Number.isNaN(sum) ? 0 : sum;
   }
 }
 
@@ -245,6 +250,9 @@ export function checkDemand(value: unknown): string | null {
     if (have.length !== names.length || names.some((name, i) => have[i] !== name || !finite(parts[name]))) {
       return `the ${bar} bar's parts are not the parts this build keeps`;
     }
+    // Parts can be large and cancel out, but four near the largest double
+    // would add up to no number at all. The sim never writes one this large.
+    if (names.some((name) => Math.abs(parts[name] as number) > 1e300)) return `the ${bar} bar has a part far off the bar`;
   }
   return null;
 }

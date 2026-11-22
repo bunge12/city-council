@@ -35,7 +35,7 @@ import {
 /** The answer for one network. Derived data: not state. */
 interface OutsideIndex {
   readonly net: RoadNetwork;
-  readonly connections: Int32Array;
+  connections: Int32Array;
   /** Set by any change of segments; cleared by a rebuild. */
   stale: boolean;
   /** By node: 1 if its piece reaches outside. 0 for a node with no road, or a removed one. */
@@ -116,8 +116,23 @@ function indexOf(net: RoadNetwork, connections: Int32Array): OutsideIndex {
     live.set(net, made);
     index = made;
   }
+  // A city's connections never change in play, but a test or a load may
+  // put a new list on the state the answer was built for.
+  if (index.connections !== connections) {
+    index.connections = connections;
+    index.stale = true;
+  }
   if (index.stale) rebuild(index);
   return index;
+}
+
+/**
+ * Marks the answer for `net` stale, for a change made past the network's
+ * observers: `applyRoadDelta` copies a client's rows in place.
+ */
+export function markOutsideStale(net: RoadNetwork): void {
+  const index = live.get(net);
+  if (index) index.stale = true;
 }
 
 /** Builds the answer for `state`'s roads if it is not built, or brings it up to date. */

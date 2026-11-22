@@ -288,3 +288,31 @@ describe("the test helper that holds the bars", () => {
     expect(() => setBars(createState(1), { commercial: 120 })).toThrow(RangeError);
   });
 });
+
+describe("review cases", () => {
+  it("does not want shops with more shop jobs than workers, however rich the residents", () => {
+    // 1,000 high wealth residents could keep 300 shop jobs busy, but only 200 work.
+    const set = { population: 1000, residentsWealthHigh: 1000, residentsEducationMedium: 1000, workersEmployed: 200, jobsCommercial: 250, filledCommercial: 200 };
+    expect(bars(set).commercial).toBeLessThan(0);
+  });
+
+  it("reads a bar whose parts sum to no number as 0, and refuses to load parts far off the bar", () => {
+    const demand = createDemand();
+    const parts = demand.industrial.parts;
+    parts["unemployedWorkers"] = 1e308;
+    parts["goodsNeeded"] = 1e308;
+    parts["openOfficeJobs"] = -1e308;
+    parts["outsideRoute"] = -1e308;
+    expect(checkDemand(demand)).toMatch(/far off the bar/);
+    moveDemand(demand, demandTargets({ totals: zeroTotals(), segmentsOutside: 0 }), 0.2);
+    expect(demand.industrial.value).toBe(0);
+  });
+
+  it("refuses to hold the bars through a run that returns a promise", () => {
+    expect(() => holdDemand({ residential: 10 }, () => Promise.resolve())).toThrow(TypeError);
+    // And lets go: the system works the bars out again.
+    const state = createState(2026);
+    step(state);
+    expect(state.demand.residential.value).not.toBe(10);
+  });
+});

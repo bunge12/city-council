@@ -842,7 +842,7 @@ How the bars are worked out (M3-06). The DEMAND system runs on the first tick of
 | Residential | `openJobs` | open jobs per worker |
 | | `unemployment` | unemployed workers per worker |
 | | `outsidePull` | what lifts the target to `outsidePull.bar` while the city has fewer than `outsidePull.untilResidents` residents. Never more than that, and 0 from then on |
-| Commercial | `spendingPower` | shop jobs the spending keeps busy, less the shop jobs there are, per shop job it keeps busy. Spending is residents weighted by `spendingByWealth`, and a unit of it keeps `shopJobsPerSpending` shop jobs busy |
+| Commercial | `spendingPower` | shop jobs the spending keeps busy, less the shop jobs there are, per shop job it keeps busy. Spending is residents weighted by `spendingByWealth`, and a unit of it keeps `shopJobsPerSpending` shop jobs busy, at most one per worker |
 | | `availableWorkers` | unemployed workers per worker |
 | | `shopSurplus` | shop jobs beyond what the spending keeps busy, per shop job |
 | Office | `educatedWorkers` | medium and high education workers less office jobs filled, per worker |
