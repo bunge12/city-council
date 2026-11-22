@@ -1,0 +1,72 @@
+{
+  "description": "Leaving for lack of work on seed 2026 (M3-10). p1 builds a street from the first outside connection and zones R2 along its north side, p2 along its south side, and nothing else: a city with no jobs. Newcomers arrive on the pull from outside and find no work; each pop's score falls a little each day, and from about day 30 those that have stayed low for long enough move out while others keep arriving. Forty-five game days.",
+  "seed": 2026,
+  "untilTick": 4500,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 200,
+          "z": 3608
+        },
+        "to": {
+          "x": 392,
+          "z": 3608
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 2,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3637
+            },
+            "to": {
+              "x": 390,
+              "z": 3637
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 3,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 2,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3579
+            },
+            "to": {
+              "x": 390,
+              "z": 3579
+            },
+            "width": 44
+          }
+        ]
+      }
+    }
+  ],
+  "balance": "4672c4929d82c237",
+  "hash": "167ac7adb8f15608"
+}

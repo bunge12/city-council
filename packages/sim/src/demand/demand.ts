@@ -11,7 +11,9 @@
 // what pushes it up and what holds it down. A part is an input times its
 // weight in `balance/demand.json`. Every input is a ratio of totals from 0
 // up, each over a total that is at least 1, so an empty city divides by 1
-// and reads 0. When the parts add up to more than 100 either way they are
+// and reads 0. The one exception is the residents' average satisfaction,
+// which is measured from `satisfactionNeutral`, so unhappy residents lower
+// the residential bar and happy ones raise it. When the parts add up to more than 100 either way they are
 // scaled down together until they add up to 100, so the parts still say
 // what pushes the bar and by how much of it.
 //
@@ -47,7 +49,7 @@ export type DemandBar = (typeof DEMAND_BARS)[number];
  * are not weights.
  */
 export const DEMAND_PARTS = {
-  residential: ["openJobs", "unemployment", "outsidePull"],
+  residential: ["openJobs", "unemployment", "satisfaction", "outsidePull"],
   commercial: ["spendingPower", "availableWorkers", "shopSurplus"],
   office: ["educatedWorkers", "serviceBuyers"],
   industrial: ["unemployedWorkers", "goodsNeeded", "openOfficeJobs", "outsideRoute"],
@@ -113,16 +115,22 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
   const medium = at(t, "residentsEducationMedium");
   const high = at(t, "residentsEducationHigh");
 
-  // Residential: open jobs bring people, unemployment sends them away.
+  // Residential: open jobs bring people, unemployment sends them away, and
+  // residents happier than `satisfactionNeutral` on average bring more
+  // (M3-10). The average is weighted by pop size, and a city with nobody
+  // in it reads 0 rather than the neutral score's distance from 0.
   const r = balance.residential;
   const jobsPart = r.openJobs * per(openJobs, workers);
   const unemploymentPart = r.unemployment * per(unemployed, workers);
+  const satisfactionPart = residents > 0 ? (r.satisfaction * (at(t, "residentSatisfaction") / residents - balance.satisfactionNeutral)) / 100 : 0;
   const pull = balance.outsidePull;
-  const pulled = residents < pull.untilResidents && jobsPart + unemploymentPart < pull.bar;
+  const others = jobsPart + unemploymentPart + satisfactionPart;
+  const pulled = residents < pull.untilResidents && others < pull.bar;
   const residential: Record<string, number> = {
     openJobs: jobsPart,
     unemployment: unemploymentPart,
-    outsidePull: pulled ? pull.bar - (jobsPart + unemploymentPart) : 0,
+    satisfaction: satisfactionPart,
+    outsidePull: pulled ? pull.bar - others : 0,
   };
 
   // Commercial: the spending no shop serves yet, and workers to staff new

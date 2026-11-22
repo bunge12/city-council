@@ -29,7 +29,7 @@
 // A pop with more workers than the building it drew has open jobs is split
 // (PRD "Job matching"): the largest part whose workers fit takes the jobs,
 // and the rest becomes a pop of its own, in the same home with the same
-// profile, which looks again when the sweep next reaches it. A household
+// profile, satisfaction and days low, which looks again when the sweep next reaches it. A household
 // home, the single family home, holds one household and is not split: its
 // pop waits for the next day's draw. A part with nobody who works is never
 // made the one that takes the jobs.
@@ -222,7 +222,8 @@ function takeJob(m: Matcher, id: number, work: number): void {
     const part = partThatFits(size, children, open);
     if (part === 0) return;
     setPopSize(state, id, part);
-    addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0 });
+    // The rest keeps the household's score and its days low (M3-10), so a split never resets the time to leaving.
+    addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0 });
   }
   setPopWork(state, id, work);
   refileOpening(state, openings, work, m.reach, m.chunks, m.filled);

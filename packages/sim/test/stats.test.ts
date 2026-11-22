@@ -31,6 +31,9 @@ import {
 import { addBuilding, removeBuilding } from "../src/buildings/buildings";
 import { addPop, removePop, setPopProfile, setPopSatisfaction, setPopSize, setPopWork, type NewPop } from "../src/pops/pops";
 import { nextInt, seedRng } from "../src/rng";
+import { DAYS_LOW_LIMIT, POPS_BALANCE } from "../src/pops/balance";
+import { holdDemand } from "./demand-helper";
+import { withValue } from "./with-value";
 import { STATS, createStats, noteYear, takeSample } from "../src/stats/stats";
 
 // M3-04: city statistics.
@@ -283,25 +286,30 @@ describe("the monthly history", () => {
     setPopWork(state, 0, mixed);
     noteYear(state, "arrivals", 400);
     state.speed = 1;
-    // 15 January, partway through a day.
-    while (state.tick < 14 * PER_DAY + 37) step(state);
-    expect(sampleCount(state.stats)).toBe(1);
-    const loaded = deserialize(serialize(state)).state;
-    expect(hashState(loaded)).toBe(hashState(state));
-    const february = 31 * PER_DAY;
-    while (state.tick < february) {
-      step(state);
-      step(loaded);
-      expect(sampleCount(loaded.stats)).toBe(sampleCount(state.stats));
-    }
-    expect(sampleCount(state.stats)).toBe(1);
-    step(state);
-    step(loaded);
-    expect(sampleCount(state.stats)).toBe(2);
-    expect(sampleCount(loaded.stats)).toBe(2);
-    // Nobody lived there on 1 January.
-    expect(historyOf(loaded.stats, "population")).toEqual([0, 400]);
-    expect(hashState(loaded)).toBe(hashState(state));
+    // Nobody leaves in the month (M3-10): the residential bar held at 0, and jobless pops never out of patience.
+    withValue(POPS_BALANCE.satisfaction, "leaveAfterDays", DAYS_LOW_LIMIT, () =>
+      holdDemand({ residential: 0 }, () => {
+        // 15 January, partway through a day.
+        while (state.tick < 14 * PER_DAY + 37) step(state);
+        expect(sampleCount(state.stats)).toBe(1);
+        const loaded = deserialize(serialize(state)).state;
+        expect(hashState(loaded)).toBe(hashState(state));
+        const february = 31 * PER_DAY;
+        while (state.tick < february) {
+          step(state);
+          step(loaded);
+          expect(sampleCount(loaded.stats)).toBe(sampleCount(state.stats));
+        }
+        expect(sampleCount(state.stats)).toBe(1);
+        step(state);
+        step(loaded);
+        expect(sampleCount(state.stats)).toBe(2);
+        expect(sampleCount(loaded.stats)).toBe(2);
+        // Nobody lived there on 1 January.
+        expect(historyOf(loaded.stats, "population")).toEqual([0, 400]);
+        expect(hashState(loaded)).toBe(hashState(state));
+      }),
+    );
   });
 });
 

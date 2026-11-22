@@ -16,7 +16,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 18;
+export const PROTOCOL_VERSION = 19;
 
 // ---- Client to sim ----
 
@@ -139,7 +139,8 @@ export interface DeltaMessage {
   travelReadyAt: number;
   /**
    * The four demand bars and their parts after the last step, a copy (M3-06,
-   * protocol version 17). Always sent, like `centre`: the bars move once a
+   * protocol version 17; the residential bar's satisfaction part, M3-10,
+   * version 19). Always sent, like `centre`: the bars move once a
    * day, the client shows what pushes them, and a copy whose bars fell
    * behind would hash differently from the sim.
    */

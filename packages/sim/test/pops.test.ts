@@ -180,9 +180,9 @@ describe("the rules a pop row follows", () => {
     expect(checkPopsBalance(popsJson)).toEqual([]);
   });
 
-  it("keeps a pop row at 14 bytes", () => {
-    expect(POP_ARRAYS).toEqual(["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction"]);
-    expect(POP_ROW_BYTES).toBe(14);
+  it("keeps a pop row at 15 bytes", () => {
+    expect(POP_ARRAYS).toEqual(["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow"]);
+    expect(POP_ROW_BYTES).toBe(15);
   });
 });
 
@@ -250,7 +250,7 @@ describe("pops in state", () => {
     expect(jobsFilled(state, mall)).toBe(36);
     expect(() => setPopSatisfaction(state, id, -1)).toThrow(/satisfaction/);
     setPopSatisfaction(state, id, 100);
-    expect(readPop(state.pops, id)).toEqual({ id, home: tower, work: mall, size: 90, education: 2, wealth: 0, children: 1, satisfaction: 100 });
+    expect(readPop(state.pops, id)).toEqual({ id, home: tower, work: mall, size: 90, education: 2, wealth: 0, children: 1, satisfaction: 100, daysLow: 0 });
     expectConsistent(state);
   });
 

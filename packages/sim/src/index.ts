@@ -107,6 +107,7 @@ export {
   POP_LEVELS,
   POP_ROW_BYTES,
   SATISFACTION_MAX,
+  NO_LEAVING,
   cutPeople,
   isPop,
   popCount,
@@ -123,12 +124,13 @@ export type { Occupancy, PopDelta } from "./pops/delta";
 // The changes the systems that move people make. Exported for a host's
 // tests, which play turnover before M3-11 builds it. UI code may not
 // import them (eslint.config.js).
-export { addPop, removePop, setPopProfile, setPopSize, setPopWork } from "./pops/pops";
+export { addPop, removePop, setPopDaysLow, setPopProfile, setPopSatisfaction, setPopSize, setPopWork } from "./pops/pops";
 export type { NewPop } from "./pops/pops";
 export { POPS_SYSTEM, popSlice } from "./pops/sweep";
 export { ARRIVALS, ARRIVALS_SYSTEM, dayArrivals, drawSize } from "./pops/arrivals";
 export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homesWithRoom, reachableRoom, whyNoNewcomers } from "./pops/room";
 export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/matching";
+export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
 export { jobsUpToLevel, openJobsFor, workplacesHeld, zoneJobs } from "./pops/open-jobs";
 export type { ZoneJobs } from "./pops/open-jobs";
 export type { ReachableRoom } from "./pops/room";

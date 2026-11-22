@@ -49,6 +49,8 @@ function city(residents: number, workers: number, unemployed: number, education:
     residentsEducationMedium: residents * education[1],
     residentsEducationHigh: residents * education[2],
     residentsWealthMedium: residents,
+    // At the neutral score, so satisfaction neither raises nor lowers the residential bar (M3-10).
+    residentSatisfaction: residents * DEMAND_BALANCE.satisfactionNeutral,
     workersEmployed: workers - unemployed,
     workersUnemployed: unemployed,
   };
@@ -185,7 +187,7 @@ describe("the bars' range and parts", () => {
 
   it("scales a bar's parts together when they add up past 100, so each keeps its share", () => {
     // No workers at all, and open jobs: per worker, the open jobs are counted over 1.
-    const t = demandTargets({ totals: totals({ jobsCommercial: 5000, population: 1000 }), segmentsOutside: 1 });
+    const t = demandTargets({ totals: totals({ jobsCommercial: 5000, population: 1000, residentSatisfaction: 1000 * DEMAND_BALANCE.satisfactionNeutral }), segmentsOutside: 1 });
     expect(target(t, "residential")).toBeCloseTo(100, 9);
     expect(t.residential["openJobs"]).toBeCloseTo(100, 9);
   });

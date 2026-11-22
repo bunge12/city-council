@@ -2,6 +2,7 @@ import { GROWER } from "./buildings/grower";
 import { POPS } from "./pops/sweep";
 import { ARRIVALS } from "./pops/arrivals";
 import { JOBS } from "./pops/matching";
+import { SATISFACTION } from "./pops/satisfaction";
 import { STATS } from "./stats/stats";
 import { DEMAND } from "./demand/demand";
 import { keepBuildings } from "./buildings/upkeep";
@@ -27,11 +28,14 @@ export interface System {
  * Arrivals come after the sweep, so a pop that arrives waits for the next
  * day's, and before the grower, which holds new homes back while there is
  * room in standing ones. Job matching comes after arrivals and before the
- * grower, which holds new workplaces back while open jobs stand. Land value
+ * grower, which holds new workplaces back while open jobs stand.
+ * Satisfaction comes after job matching, so a pop that finds work today is
+ * scored with it, and before the grower, which then sees the room the
+ * day's departures freed. Land value
  * keeps the city centre before the grower builds, so a building grown on
  * the first tick of a month sees the month's centre.
  */
-export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, ARRIVALS, JOBS, LAND_VALUE, GROWER];
+export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, ARRIVALS, JOBS, SATISFACTION, LAND_VALUE, GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";
