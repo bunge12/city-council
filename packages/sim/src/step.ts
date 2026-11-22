@@ -1,5 +1,6 @@
 import { GROWER } from "./buildings/grower";
 import { POPS } from "./pops/sweep";
+import { ARRIVALS } from "./pops/arrivals";
 import { STATS } from "./stats/stats";
 import { DEMAND } from "./demand/demand";
 import { keepBuildings } from "./buildings/upkeep";
@@ -21,11 +22,14 @@ export interface System {
  * come first, so the yearly counts roll over before anything adds to the
  * new year, and a month's sample is the city as the month opens. Demand
  * comes next, so every system that acts on the bars reads the day's. The pops'
- * sweep comes after it, so every system after it reads the day's slice. Land value
+ * sweep comes after it, so every system after it reads the day's slice.
+ * Arrivals come after the sweep, so a pop that arrives waits for the next
+ * day's, and before the grower, which holds new homes back while there is
+ * room in standing ones. Land value
  * keeps the city centre before the grower builds, so a building grown on
  * the first tick of a month sees the month's centre.
  */
-export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, LAND_VALUE, GROWER];
+export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, ARRIVALS, LAND_VALUE, GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";

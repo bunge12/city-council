@@ -43,6 +43,12 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
     });
   }
   if (version >= 13 && version < 21) kept["growth"] = { quota: 0, day: -1, deadline: 0, free: 0, used: 0 };
+  // Before version 22 the pops had no plan of arrivals.
+  if (version < 22 && typeof kept["pops"] === "object" && kept["pops"] !== null) {
+    const { owed, ...pops } = kept["pops"] as Record<string, unknown>;
+    void owed;
+    kept["pops"] = pops;
+  }
   return { ...kept, version };
 }
 
@@ -96,7 +102,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(21);
+    expect(SNAPSHOT_VERSION).toBe(22);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -390,6 +396,19 @@ describe("migrateState", () => {
     expect(hashState(migrated)).toBe(hashState(state));
   });
 
+  it("upgrades a version 21 city by giving its pops a plan of arrivals at 0, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    while (state.tick < 150) step(state);
+    const v21 = older(state, 21);
+    expect("owed" in (v21["pops"] as object)).toBe(false);
+    const migrated = migrateState(v21);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(migrated.pops.owed).toBe(0);
+    expect(Object.keys(migrated.pops)).toEqual(Object.keys(state.pops));
+    expect(hashState(migrated)).toBe(hashState(state));
+  });
+
   it("upgrades a version 15 state by adding the pops, none of them, and changes nothing else", () => {
     const state = createState(SEED_WITH_FLAT_GROUND);
     expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
@@ -416,7 +435,7 @@ describe("migrateState", () => {
     const migrated = migrateState(v16);
     const { growth, ...kept } = v16;
     void growth;
-    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand() });
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand() });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 

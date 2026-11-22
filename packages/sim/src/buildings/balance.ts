@@ -24,8 +24,11 @@ export interface BuildingTypeBalance {
   jobsPerCell: number;
   /** True for a starting value from M2-09 with nothing behind it yet. */
   proposal?: boolean;
-  /** True to draw residents per building between low and high; otherwise they scale with lot area (M2-10). */
-  drawResidents?: boolean;
+  /**
+   * True for a home one household lives in, however few people it holds
+   * (M3-08): newcomers move in only while nobody lives there.
+   */
+  oneHousehold?: boolean;
   /** True for a type that stands on a through-lot, two back-to-back strips joined (M2-14). Its depth is more than the zoning depth. */
   throughLot?: boolean;
 }
@@ -69,7 +72,7 @@ export interface BuildingType extends BuildingTypeBalance {
 }
 
 const FIELDS = ["id", "name", "zone", "density", "width", "depth", "residents", "jobsPerCell"] as const;
-const KNOWN = new Set<string>([...FIELDS, "proposal", "drawResidents", "throughLot"]);
+const KNOWN = new Set<string>([...FIELDS, "proposal", "oneHousehold", "throughLot"]);
 
 function isText(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
@@ -179,7 +182,7 @@ export function checkBuildingsBalance(data: unknown): string[] {
     }
     for (const field of FIELDS) if (!(field in type)) errors.push(`${where}.${field} is missing`);
     for (const key of Object.keys(type)) if (!KNOWN.has(key) && !key.startsWith("_")) errors.push(`${where} has an unknown field "${key}"`);
-    const { id, name, zone, density, width, depth, residents, jobsPerCell, proposal, drawResidents, throughLot } = type;
+    const { id, name, zone, density, width, depth, residents, jobsPerCell, proposal, oneHousehold, throughLot } = type;
     if (!isText(id)) errors.push(`${where}.id must be text`);
     else if (ids.has(id)) errors.push(`${where}.id "${id}" appears twice`);
     else ids.add(id);
@@ -213,7 +216,7 @@ export function checkBuildingsBalance(data: unknown): string[] {
       }
     }
     if (proposal !== undefined && typeof proposal !== "boolean") errors.push(`${where}.proposal must be true or false`);
-    if (drawResidents !== undefined && typeof drawResidents !== "boolean") errors.push(`${where}.drawResidents must be true or false`);
+    if (oneHousehold !== undefined && typeof oneHousehold !== "boolean") errors.push(`${where}.oneHousehold must be true or false`);
     if (!zoneOk || !densityOk || !widthRange || !depthRange) return;
     for (let w = width[0]; w <= width[1]; w++) {
       for (let d = depth[0]; d <= depth[1]; d++) {

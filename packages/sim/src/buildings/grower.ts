@@ -19,6 +19,17 @@
 // made up later. Density is whatever the cell is zoned for: an R3 cell
 // gets an R3 building as soon as residential demand is above zero.
 //
+// Free room in standing homes fills before more is built (M3-08, PRD
+// "Turnover"): the grower adds no building to a zone people live in,
+// residential or mixed, while the room empty in homes newcomers can reach
+// is more than `emptyRoomShareMax` of those homes' room (demand.json,
+// pops/room.ts). It works the room out once on a tick it adds such a
+// building, after the tick's arrivals, and adds each home it builds to it,
+// so it asks again before each and a home that fills mid-day lets the next
+// one come. Homes newcomers cannot reach, on a street
+// joined to nothing, are left out of both: their room never fills, and
+// should not hold the rest of the city back.
+//
 // For each building the grower draws a free zoned cell by the road of the
 // building's zone from the generator in state (candidates.ts; M3-25
 // replaces the draw with land value). It builds at an end of the free frontage that cell lies on, not
@@ -48,8 +59,7 @@
 // up to `growthTries` cells, then gives that building up.
 //
 // Residents scale with lot area between the type's low and high figure,
-// rounded half up, or for a type with `drawResidents`, the single family
-// home, are drawn per building. The variant number, which the client
+// rounded half up. The variant number, which the client
 // reads to pick a model and a tint, is drawn from 0 to 255.
 
 import { TIME_BALANCE } from "../calendar";
@@ -66,6 +76,7 @@ import { addBuilding } from "./buildings";
 import { candidateAt, candidateCount } from "./candidates";
 import { freeFrontage, lotOptions, type Lot, type LotOptions } from "./lots";
 import { segmentBuildings } from "./where";
+import { homeReachesOutside, reachableRoom, type ReachableRoom } from "../pops/room";
 
 /** Name the timer hook reports for the grower. */
 export const GROWER_SYSTEM = "grower";
@@ -123,11 +134,10 @@ export function dayQuotas(demand: DemandState): number[] {
   return quotas;
 }
 
-/** Residents for a `type` building on a `width` x `depth` lot. Draws from `rng` only for a type with `drawResidents`. */
-export function residentsFor(rng: Uint32Array, type: BuildingType, width: number, depth: number): number {
+/** Residents for a `type` building on a `width` x `depth` lot. */
+export function residentsFor(type: BuildingType, width: number, depth: number): number {
   const [low, high] = type.residents;
   if (high === low) return low;
-  if (type.drawResidents) return low + nextInt(rng, high - low + 1);
   const least = type.width[0] * type.depth[0];
   const span = type.width[1] * type.depth[1] - least;
   if (span === 0) return low + Math.floor((high - low) / 2);
@@ -230,7 +240,7 @@ export function growOne(state: SimState, zone = 0): number {
     if (!options.ok) continue;
     const lot = chooseLot(state.rng, options.lots, options.free, leaving);
     const type = BUILDING_TYPES[lot.type] as BuildingType;
-    const residents = residentsFor(state.rng, type, lot.width, lot.depth);
+    const residents = residentsFor(type, lot.width, lot.depth);
     const variant = nextInt(state.rng, VARIANTS);
     return addBuilding(state, { ...lot, residents, variant });
   }
@@ -242,13 +252,42 @@ export function freeFrontCells(state: SimState, zone = 0): number {
   return candidateCount(state, syncCells(state), () => segmentBuildings(state), zone);
 }
 
+/** Zone numbers with a type people live in: residential and mixed. */
+const HOME_ZONES: ReadonlySet<number> = new Set(BUILDING_TYPES.filter((t) => t.residents[1] > 0).map((t) => t.zoneNumber));
+
+/** Whether `room` holds new homes back: its empty room is more than `emptyRoomShareMax` of its capacity. */
+function holds(room: ReachableRoom): boolean {
+  return room.empty > DEMAND_BALANCE.emptyRoomShareMax * room.capacity;
+}
+
+/** Whether the grower holds new homes back: the room empty in homes newcomers can reach is more than `emptyRoomShareMax` of their room. */
+export function homesHeld(state: SimState): boolean {
+  return holds(reachableRoom(state));
+}
+
 /** The grower's work for one tick. */
 export function grow(state: SimState): void {
   if (!cellsSettled(state)) return;
   const quotas = dayQuotas(state.demand);
+  // Worked out on the first home the tick may add, then kept as it adds them.
+  let room: ReachableRoom | null = null;
   for (let zone = 1; zone < quotas.length; zone++) {
     const due = growthOnTick(state.tick, quotas[zone] ?? 0);
-    for (let i = 0; i < due; i++) if (growOne(state, zone) < 0) break;
+    const homes = HOME_ZONES.has(zone);
+    for (let i = 0; i < due; i++) {
+      if (homes) {
+        room ??= reachableRoom(state);
+        if (holds(room)) break;
+      }
+      const id = growOne(state, zone);
+      if (id < 0) break;
+      // A new home is empty: all its room is room left.
+      if (room && homeReachesOutside(state, id)) {
+        const residents = state.buildings.residents[id] ?? 0;
+        room.capacity += residents;
+        room.empty += residents;
+      }
+    }
   }
 }
 

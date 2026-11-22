@@ -14,9 +14,10 @@
 // jobs filled at the workplaces it touches out of them before the change
 // and puts them back after. They refuse a change that would
 // put a home over the people it holds room for, or a workplace over its
-// jobs. Nothing creates pops in play yet: newcomers arrive in M3-08.
+// jobs. Newcomers arrive through `addPop` (arrivals.ts, M3-08).
 //
-// `sweep` is the cursor the daily systems share (sweep.ts).
+// `sweep` is the cursor the daily systems share (sweep.ts), and `owed` the
+// day's plan of arrivals (arrivals.ts).
 
 import { BUILDING_TYPES } from "../buildings/balance";
 import { isBuilding, type BuildingState } from "../buildings/buildings";
@@ -66,6 +67,13 @@ export interface PopState {
    * every machine visits the same pops on the same tick.
    */
   sweep: number;
+  /**
+   * The day's plan of arrivals: 0, or below 0 by the people a household
+   * larger than the ticks' share brought early, which later ticks pay back
+   * before anyone else arrives (arrivals.ts, M3-08). State, so a city saved
+   * mid-day lands the same pops.
+   */
+  owed: number;
 }
 
 /** The per-pop arrays, in the order a new state has them. */
@@ -101,6 +109,7 @@ export function createPops(): PopState {
     satisfaction: new Uint8Array(0),
     free: new Int32Array(0),
     sweep: 0,
+    owed: 0,
   };
 }
 
@@ -434,8 +443,9 @@ export function removeBuildingPops(state: SimState, ids: readonly number[]): voi
  * it is. For loading a save: every id live or free, never both, a free
  * id's row all zeros, every live pop in a live home with at least one
  * person and its fields in range, working nowhere or at a live building
- * with jobs, no home holding more people than its stored room, and the
- * sweep's limit within the ids handed out.
+ * with jobs, no home holding more people than its stored room, the
+ * sweep's limit within the ids handed out, and the plan of arrivals a whole
+ * number of 0 or below.
  *
  * What depends on the balance files is not checked: the size cap, a
  * building's jobs and the share of a pop who work. A save made before they
@@ -449,12 +459,13 @@ export function checkPops(value: unknown, buildings: BuildingState): string | nu
   for (const [key, Type] of Object.entries(ARRAY_TYPES)) {
     if (!(raw[key] instanceof Type)) return `${key} is not a ${Type.name}`;
   }
-  const extra = Object.keys(raw).find((key) => !(key in ARRAY_TYPES) && key !== "sweep");
+  const extra = Object.keys(raw).find((key) => !(key in ARRAY_TYPES) && key !== "sweep" && key !== "owed");
   if (extra !== undefined) return `it has an unknown field "${extra}"`;
   const p = raw as unknown as PopState;
   const limit = p.flags.length;
   if (POP_ARRAYS.some((key) => p[key].length !== limit)) return "its arrays differ in length";
   if (!Number.isSafeInteger(p.sweep) || p.sweep < 0 || p.sweep > limit) return "its sweep is not a pop id limit";
+  if (!Number.isSafeInteger(p.owed) || p.owed > 0) return "its plan of arrivals is not a whole number of 0 or below";
   const seen = new Uint8Array(limit);
   for (const id of p.free) {
     if (id < 0 || id >= limit || seen[id] || isPop(p, id)) return "its free list is malformed";

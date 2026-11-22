@@ -129,6 +129,8 @@ test("the debug panel shows the tick rate, tick time against the budget and wher
   await expect(page.locator("#sim-timings")).toContainText("commands");
   // The demand bars have a system of their own (M3-06).
   await expect(page.locator("#sim-timings")).toContainText("demand");
+  // So do arrivals (M3-08).
+  await expect(page.locator("#sim-timings")).toContainText("arrivals");
   await expect(page.locator("#sim-budget")).toHaveText(/^[\d.]+ of 20 ms \([\d.]+%\)$/);
   await expect(page.locator("#render-backend")).toHaveText(/^(WebGPU|WebGL 2)$/);
   await expect(page.locator("#render-frame")).toHaveText(/ms \(\d+ fps\)$/);

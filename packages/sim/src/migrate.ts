@@ -105,6 +105,9 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
     void growth;
     return { ...rest, version: 21 };
   },
+  // Version 22 adds the day's plan of arrivals to the pops (M3-08). Nobody
+  // could arrive before it, so nobody is owed.
+  21: (old) => ({ ...old, version: 22, pops: { ...(old["pops"] as Record<string, unknown>), owed: 0 } }),
 };
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */

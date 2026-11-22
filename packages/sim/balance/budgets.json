@@ -130,6 +130,14 @@
       "mode": "blocks",
       "source": "M3-06"
     },
+    "arrivals.tick": {
+      "name": "the arrivals system's worst tick on the scale town: people due at the cap, every home empty, so its pass over the buildings finds them all; a tenth of the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 2,
+      "mode": "blocks",
+      "source": "M3-08"
+    },
     "demand.outside": {
       "name": "working out which of the scale town's 30,000 segments reach outside again, in the step after a change of roads",
       "unit": "ms",
