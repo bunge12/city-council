@@ -16,10 +16,28 @@ import { BUILDING_ALIVE, isBuilding } from "../buildings/buildings";
 import { NETWORK_ROAD } from "../roads/network";
 import { outsideReachByNode } from "../roads/outside";
 import type { SimState } from "../state";
+import { POPS_BALANCE } from "./balance";
 import { popIndexOf } from "./where";
 
 /** By type index: 1 for a type one household lives in. */
 const ONE_HOUSEHOLD = Uint8Array.from(BUILDING_TYPES, (t) => (t.oneHousehold ? 1 : 0));
+
+/**
+ * By density, 1 to 3: the fewest people a newcomer household holds there,
+ * the least of `newcomer.size` in pops.json. A home takes newcomers only
+ * while its room left fits that many (M3-11): a place freed by a death in a
+ * tower waits for others beside it rather than taking a pop of one, so pops
+ * do not wear down to single people as turnover runs.
+ */
+export function leastNewcomers(density: number): number {
+  const sizes = POPS_BALANCE.newcomer.size;
+  return sizes[Math.min(sizes.length, Math.max(1, density)) - 1]?.[0] ?? 1;
+}
+
+/** `left`, the room a home of `density` has left, as newcomers can use it: 0 when it is below the least household there. */
+function usableRoom(left: number, density: number): number {
+  return left >= leastNewcomers(density) ? left : 0;
+}
 
 /** Whether live building `id`'s road reaches an outside connection, read from `reach` (`outsideReachByNode`). */
 function roadReaches(state: SimState, reach: Uint8Array, id: number): boolean {
@@ -53,11 +71,16 @@ export function homeRoomLeft(state: SimState, id: number): number {
   return roomFor(state, id, popIndexOf(state).people[id] ?? 0);
 }
 
+/** The room building `id` has left for a newcomer household: `homeRoomLeft`, or 0 when that is below the least household for its density. */
+export function newcomerRoomLeft(state: SimState, id: number): number {
+  return usableRoom(homeRoomLeft(state, id), state.buildings.density[id] ?? 1);
+}
+
 /** The homes newcomers can reach: their room, and how much of it is empty. */
 export interface ReachableRoom {
   /** The people they hold room for. */
   capacity: number;
-  /** The people they may still take. A household home with anyone in it has none. */
+  /** The people they may still take. A household home with anyone in it has none, and nor does a home with less room left than the least newcomer household there. */
   empty: number;
 }
 
@@ -72,7 +95,7 @@ function eachReachableHome(state: SimState, visit: (id: number, room: number, le
   const net = state.roads;
   const people = popIndexOf(state).people;
   const reach = outsideReachByNode(state);
-  const { flags, residents, firstSeg, type } = b;
+  const { flags, residents, firstSeg, type, density } = b;
   const { segNetwork, segA } = net;
   // Imported constants as locals: under the test runner each import is a
   // property read on a module object (roads/outside.ts).
@@ -87,7 +110,7 @@ function eachReachableHome(state: SimState, visit: (id: number, room: number, le
     if (segNetwork[seg] !== road || reach[segA[seg] as number] !== 1) continue;
     const living = people[id] ?? 0;
     const left = living > 0 && oneHousehold[type[id] as number] === 1 ? 0 : room - living;
-    visit(id, room, left > 0 ? left : 0);
+    visit(id, room, left > 0 ? usableRoom(left, density[id] as number) : 0);
   }
 }
 
@@ -104,7 +127,8 @@ export function reachableRoom(state: SimState): ReachableRoom {
 
 /**
  * The homes newcomers can move into now, ascending by id: each with room
- * left, on a road that reaches outside. One pass over the buildings.
+ * left for at least the least newcomer household there, on a road that
+ * reaches outside. One pass over the buildings.
  */
 export function homesWithRoom(state: SimState): number[] {
   const out: number[] = [];

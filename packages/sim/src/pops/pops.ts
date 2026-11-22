@@ -399,6 +399,37 @@ export function setPopSize(state: SimState, id: number, size: number): void {
   recount(state, id, work, NO_WORK);
 }
 
+/**
+ * Sets pop `id`'s size and children at once, for a birth or a child who
+ * leaves (turnover.ts, M3-11): one check of its home and its workplace for
+ * the pair, where setting them one after the other could pass through a
+ * row its workplace has no jobs for. Throws, changing nothing, if the new
+ * size is past the cap for its home's density, its home has no room for
+ * it, children is not 0 or 1, or its workplace has too few jobs for the
+ * workers it then has. A pop left with nobody who works loses its job.
+ */
+export function setPopHousehold(state: SimState, id: number, size: number, children: number): void {
+  const index = livePop(state, id);
+  const p = state.pops;
+  const education = p.education[id] ?? 0;
+  checkProfile({ education, wealth: p.wealth[id] ?? 0, children });
+  const home = p.home[id] ?? 0;
+  const old = p.size[id] ?? 0;
+  checkHomeRoom(state, home, size, (index.people[home] ?? 0) - old);
+  const work = p.work[id] ?? NO_WORK;
+  if (work !== NO_WORK) checkJobs(state, work, education, workersFor(size, children), education, popWorkers(p, id));
+  uncount(state, id, work, NO_WORK);
+  unlinkWork(index, p, id);
+  index.people[home] = (index.people[home] ?? 0) - old + size;
+  moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, size - old);
+  notePopBuilding(p, home);
+  p.size[id] = size;
+  p.children[id] = children;
+  keepJobIfWorking(p, id);
+  linkWork(index, p, id);
+  recount(state, id, work, NO_WORK);
+}
+
 /** Takes the job of pop `id`, unlinked from its workplace, if it no longer has anyone who works. */
 function keepJobIfWorking(p: PopState, id: number): void {
   if (popWorkers(p, id) === 0) p.work[id] = NO_WORK;
