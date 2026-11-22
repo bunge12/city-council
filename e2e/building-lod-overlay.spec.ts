@@ -22,8 +22,8 @@ declare const window: { cityCouncil: { renderStatus(): { backend: string } | nul
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: MEASURE_VIEWPORT });
-// About 4 minutes on a fast CI runner and up to 8 on a slow one (issue #217). 15 is a third of the perf job's
-// 45 minutes (issue #228, scripts/check-e2e-timeouts.mjs), and the perf project does not retry.
+// About 4 minutes on a fast CI runner and up to 8 on a slow one (issue #217). 15 is under a third of the perf job's
+// 54 minutes (issue #228, scripts/check-e2e-timeouts.mjs), and the perf project does not retry.
 test.setTimeout(900_000);
 
 test("the zoning overlay over the whole town in the city band", async ({ page }, testInfo) => {
