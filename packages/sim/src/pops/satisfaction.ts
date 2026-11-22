@@ -13,8 +13,10 @@
 // leave the next morning.
 //
 // A pop whose score has stayed below `leaveBelow` for `leaveAfterDays` game
-// days in a row moves out: its home's room and its job are freed and its
-// people go on the year's departures. That is the only way unemployment
+// days in a row, while its target was below it too, moves out: its home's
+// room and its job are freed and its people go on the year's departures. A
+// pop that finds work starts its count again, even while its score is
+// still climbing back, so a job found late in the wait is kept. That is the only way unemployment
 // makes a pop leave, as the PRD asks.
 //
 // The one other rule is the residential bar below zero. A bar of b below
@@ -25,12 +27,17 @@
 // at or below it reach the day's number, and `leaveAtScore` the people at
 // that score still to go once all those below it have. Each pop below
 // `leaveScore` then leaves as the sweep reaches it, and pops at it leave
-// while `leaveAtScore` is above 0. A pop larger than what is left may take
-// it past 0, as a household does in arrivals; it then stops at 0. Both are
-// state (pops.ts), so a city saved mid-day sends the same pops away.
+// while `leaveAtScore` is above 0. A pop larger than what is left takes it
+// below 0, as a household does in arrivals, and the next day's plan pays
+// that back before anyone else is due, so a city of towers still loses
+// people at the bar's rate on average. While the bar is at or above zero
+// the debt is dropped. Both are state (pops.ts), so a city saved mid-day
+// sends the same pops away.
 //
 // Each pop is judged on its score as the day opened, then given the day's
-// step, so the plan and the pops it reaches agree.
+// step. The plan is close rather than exact: the part of a pop split by job
+// matching that lands on a freed id the sweep has passed waits for the next
+// day, so its people, counted in the plan with the pop's, do not leave today.
 //
 // Arithmetic is add, subtract, multiply, divide and floor (CLAUDE.md rule
 // 6), and nothing here draws from the generator.
@@ -87,10 +94,13 @@ export function dayDepartures(bar: number): number {
 /** On a game day's first tick, the day's plan of departures from the residential bar and the people at each score, as the header says. */
 function planDepartures(state: SimState): void {
   const p = state.pops;
-  const due = dayDepartures(state.demand.residential.value);
+  const today = dayDepartures(state.demand.residential.value);
+  // What earlier days sent away past their plan, 0 or below, paid back first.
+  const debt = today > 0 && p.leaveAtScore < 0 ? p.leaveAtScore : 0;
+  const due = today + debt;
   p.leaveScore = NO_LEAVING;
-  p.leaveAtScore = 0;
-  if (due === 0) return;
+  p.leaveAtScore = due < 0 ? due : 0;
+  if (due <= 0) return;
   const byScore = popIndexOf(state).peopleBySatisfaction;
   let below = 0;
   for (let score = 0; score <= SATISFACTION_MAX; score++) {
@@ -115,7 +125,7 @@ function sentAway(state: SimState, id: number, score: number): boolean {
   const p = state.pops;
   if (score < p.leaveScore) return true;
   if (score !== p.leaveScore || p.leaveAtScore <= 0) return false;
-  p.leaveAtScore = Math.max(0, p.leaveAtScore - (p.size[id] ?? 0));
+  p.leaveAtScore -= p.size[id] ?? 0;
   return true;
 }
 
@@ -132,9 +142,10 @@ export function updateSatisfaction(state: SimState): void {
       leave(state, id);
       continue;
     }
-    const next = stepScore(score, satisfactionTarget(state, id));
+    const target = satisfactionTarget(state, id);
+    const next = stepScore(score, target);
     setPopSatisfaction(state, id, next);
-    const days = next < leaveBelow ? Math.min(leaveAfterDays, (p.daysLow[id] ?? 0) + 1) : 0;
+    const days = next < leaveBelow && target < leaveBelow ? Math.min(leaveAfterDays, (p.daysLow[id] ?? 0) + 1) : 0;
     if (days >= leaveAfterDays) leave(state, id);
     else if (days !== p.daysLow[id]) setPopDaysLow(state, id, days);
   }

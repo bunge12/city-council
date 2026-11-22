@@ -784,7 +784,7 @@ describe("committed snapshots", () => {
       (p) => (p["leaveScore"] = -2),
       (p) => (p["leaveScore"] = 101),
       (p) => (p["leaveScore"] = 0.5),
-      (p) => (p["leaveAtScore"] = -1),
+      (p) => (p["leaveAtScore"] = 0.5),
       (p) => delete p["daysLow"],
     ];
     for (const breakIt of breaks) {

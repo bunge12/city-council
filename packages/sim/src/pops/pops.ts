@@ -85,7 +85,9 @@ export interface PopState {
    * (satisfaction.ts, M3-10): a pop whose satisfaction is below
    * `leaveScore` leaves when the day's sweep reaches it, and one at
    * `leaveScore` leaves while `leaveAtScore` people at that score are still
-   * due to go. `leaveScore` is NO_LEAVING on a day nobody is due to go.
+   * due to go. Below 0, `leaveAtScore` is the people sent away past the
+   * plan, which the next day's plan pays back. `leaveScore` is NO_LEAVING on
+   * a day nobody is due to go.
    * State, so a city saved mid-day sends the same pops away.
    */
   leaveScore: number;
@@ -511,7 +513,7 @@ export function removeBuildingPops(state: SimState, ids: readonly number[]): voi
  * with jobs, no home holding more people than its stored room, the
  * sweep's limit within the ids handed out, the plan of arrivals a whole
  * number of 0 or below, and the plan of departures a score to leave at, or
- * NO_LEAVING, and a whole number of people of 0 or more.
+ * NO_LEAVING, and a whole number of people.
  *
  * What depends on the balance files is not checked: the size cap, a
  * building's jobs and the share of a pop who work. A save made before they
@@ -534,7 +536,7 @@ export function checkPops(value: unknown, buildings: BuildingState): string | nu
   if (!Number.isSafeInteger(p.sweep) || p.sweep < 0 || p.sweep > limit) return "its sweep is not a pop id limit";
   if (!Number.isSafeInteger(p.owed) || p.owed > 0) return "its plan of arrivals is not a whole number of 0 or below";
   if (!Number.isSafeInteger(p.leaveScore) || p.leaveScore < NO_LEAVING || p.leaveScore > SATISFACTION_MAX) return "its plan of departures has no score to leave at";
-  if (!Number.isSafeInteger(p.leaveAtScore) || p.leaveAtScore < 0) return "its plan of departures is not a whole number of people of 0 or more";
+  if (!Number.isSafeInteger(p.leaveAtScore)) return "its plan of departures is not a whole number of people";
   const seen = new Uint8Array(limit);
   for (const id of p.free) {
     if (id < 0 || id >= limit || seen[id] || isPop(p, id)) return "its free list is malformed";

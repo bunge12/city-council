@@ -20,6 +20,7 @@ import {
   deserialize,
   hashState,
   jobFits,
+  matchJobs,
   popWorkers,
   readPop,
   recountTotals,
@@ -317,9 +318,26 @@ describe("leaving for lack of work", () => {
     expectRecount(state);
   });
 
+  it("lets a pop that finds work late in its wait keep it, though its score is still low", () => {
+    const state = workingCity();
+    const worker = livePops(state).find((id) => state.pops.work[id] !== NO_WORK && popWorkers(state.pops, id) > 0);
+    expect(worker).toBeDefined();
+    const id = worker as number;
+    // A day from leaving, at the bottom, but with a job: its target is above the threshold.
+    setPopSatisfaction(state, id, 0);
+    state.pops.daysLow[id] = SAT.leaveAfterDays - 1;
+    expect(satisfactionTarget(state, id)).toBeGreaterThanOrEqual(SAT.leaveBelow);
+    holdDemand({ residential: 0, commercial: 0 }, () => runDays(state, 10));
+    expect(state.pops.flags[id]).toBe(1);
+    expect(state.pops.daysLow[id]).toBe(0);
+    expect(state.pops.satisfaction[id]).toBeGreaterThan(0);
+    expectRecount(state);
+  });
+
   it("frees a leaving pop's home and puts its people on the year's departures", () => {
     const { state } = homesOnly();
     holdDemand({ residential: 50 }, () => runDays(state, 5));
+    // Only pops with someone who works: one with nobody heads for a score above the threshold, so its days low start again.
     const ids = livePops(state).filter((id) => popWorkers(state.pops, id) > 0);
     expect(ids.length).toBeGreaterThan(0);
     const before = population(state);
@@ -371,6 +389,37 @@ describe("leaving while the residential bar is below zero", () => {
     expect(left).toBeLessThan(due + 100);
     expect(state.stats.year.departures).toBe(left);
     expectRecount(state);
+  });
+
+  it("pays back what a large pop took past the plan on later days, so a city of towers loses people at the bar's rate", () => {
+    const state = createState(SEED);
+    const s = street(state, 24);
+    zone(state, s, "residential", 3, 0, 8, 4, 1);
+    zone(state, s, "residential", 3, 10, 8, 4, 1);
+    toDayStart(state);
+    holdDemand({ residential: 100 }, () => runDays(state, 20));
+    const before = population(state);
+    expect(before).toBeGreaterThan(400);
+    const days = 20;
+    // A bar of -5 sends a few people a day, far fewer than one tower pop holds.
+    const due = dayDepartures(-5);
+    expect(due).toBeLessThan(POPS_BALANCE.newcomer.size[2]?.[0] ?? 0);
+    withValue(SAT, "leaveAfterDays", DAYS_LOW_LIMIT, () => holdDemand({ residential: -5 }, () => runDays(state, days)));
+    const left = before - population(state);
+    expect(left).toBeGreaterThan(0);
+    // The days' people, give or take one tower household, and not a household a day.
+    expect(left).toBeLessThanOrEqual(due * days + (POPS_BALANCE.popSizeCap[2] ?? 100));
+    expect(state.pops.leaveAtScore).toBeLessThanOrEqual(0);
+    expectRecount(state);
+  });
+
+  it("drops what was taken past the plan once the bar is back at or above zero", () => {
+    const { state } = homesOnly();
+    holdDemand({ residential: 100 }, () => runDays(state, 5));
+    state.pops.leaveAtScore = -30;
+    holdDemand({ residential: 0 }, () => runDays(state, 1));
+    expect(state.pops.leaveAtScore).toBe(0);
+    expect(state.pops.leaveScore).toBe(NO_LEAVING);
   });
 
   it("sends nobody away while the bar is at or above zero", () => {
@@ -471,6 +520,38 @@ describe("a new pop's days low", () => {
     expect(() => addPop(state, { home: tower, size: 1, education: 0, wealth: 0, children: 0, satisfaction: 20, daysLow: DAYS_LOW_LIMIT + 1 })).toThrow(/days low/);
     expect(readPop(state.pops, addPop(state, { home: tower, size: 1, education: 0, wealth: 0, children: 0, satisfaction: 20 })).daysLow).toBe(0);
     expectRecount(state);
+  });
+
+  it("keeps a household's days low in both parts when job matching splits it", () => {
+    const state = createState(SEED);
+    const s = street(state, 30);
+    zone(state, s, "residential", 3, 4, 4, 4, 1);
+    zone(state, s, "commercial", 1, 12, 6, 2, -1);
+    toDayStart(state);
+    holdDemand({ residential: 0, commercial: 100 }, () => withValue(DEMAND_BALANCE, "openJobsShareMax", 1, () => runDays(state, 4)));
+    const shops = workplaces(state);
+    expect(shops.length).toBeGreaterThan(0);
+    const tower = (() => {
+      for (let id = 0; id < state.buildings.flags.length; id++) if (state.buildings.flags[id] && BUILDING_TYPES[state.buildings.type[id] ?? 0]?.density === 3) return id;
+      return -1;
+    })();
+    expect(tower).toBeGreaterThanOrEqual(0);
+    // Larger than any shop's jobs, so it must split to work.
+    const big = Math.min(POPS_BALANCE.popSizeCap[2] ?? 100, state.buildings.residents[tower] ?? 0);
+    const id = addPop(state, { home: tower, size: big, education: 0, wealth: 1, children: 0, satisfaction: 12, daysLow: 7 });
+    expect(Math.max(...shops.map((w) => buildingJobs(state.buildings, w)))).toBeLessThan(workersFor(big, 0));
+    // A day of matching alone, so nothing else moves the days low.
+    const start = state.tick;
+    state.pops.sweep = state.pops.flags.length;
+    for (let k = 0; k < DAY; k++) {
+      state.tick = start + k;
+      matchJobs(state);
+    }
+    const parts = livePops(state).filter((p) => state.pops.home[p] === tower && state.pops.wealth[p] === 1 && state.pops.satisfaction[p] === 12);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts).toContain(id);
+    for (const p of parts) expect(state.pops.daysLow[p]).toBe(7);
+    expect(parts.reduce((sum, p) => sum + (state.pops.size[p] ?? 0), 0)).toBe(big);
   });
 });
 
