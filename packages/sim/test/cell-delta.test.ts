@@ -18,6 +18,7 @@ import {
   type SimState,
   applyStatsDelta,
   encodeStatsDelta,
+  copyDemand,
 } from "../src/index";
 import { submit } from "./seen-ends";
 import { cloneState } from "../src/state";
@@ -66,6 +67,8 @@ function pair() {
     expect(applyStatsDelta(copy.stats, encodeStatsDelta(sim.stats, copy.stats.next))).not.toBeTypeOf("string");
     // So does the tick the travel times are rebuilt by (issue #177).
     copy.travelReadyAt = sim.travelReadyAt;
+    // And the demand bars (M3-06).
+    copy.demand = copyDemand(sim.demand);
     return cells;
   };
   return { sim, copy, run, send };

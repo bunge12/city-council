@@ -4,6 +4,7 @@ import { checkConnections, chooseConnectionSites } from "../src/roads/connection
 import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 import { checkUndoHistory } from "../src/undo";
+import { createDemand } from "../src/demand/demand";
 import { STAT_TOTALS, createStats, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
 import { addBuilding } from "../src/buildings/buildings";
 import { addPop, setPopWork } from "../src/pops/pops";
@@ -16,7 +17,9 @@ import { withEnds } from "./seen-ends";
  * before 13 the grower's plan, every version before 14 the zoning in its
  * undo history, every version before 15 the count of cell commands,
  * every version before 16 the pops, every version before 17 the city
- * centre and every version before 18 the statistics.
+ * centre, every version before 18 the statistics, every version before 19
+ * the tick the travel times are ready by and every version before 20 the
+ * demand bars.
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
@@ -28,6 +31,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 17) gone.push("centre");
   if (version < 18) gone.push("stats");
   if (version < 19) gone.push("travelReadyAt");
+  if (version < 20) gone.push("demand");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
   // Before version 14 a ZoneCells left no undo record and no record held zoning.
   if (version < 14 && Array.isArray(kept["undo"])) {
@@ -60,6 +64,7 @@ function asMigrated(state: SimState): SimState {
     growth: { quota: 1, day, deadline: day + 1, free: 0, used: 0 },
     centre: { x: 0, z: 0, weight: 0, due: state.tick },
     stats: statsFor(state),
+    demand: createDemand(),
   };
 }
 
@@ -91,7 +96,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(19);
+    expect(SNAPSHOT_VERSION).toBe(20);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -111,6 +116,7 @@ describe("migrateState", () => {
       centre: { x: 0, z: 0, weight: 0, due: 42 },
       stats: createStats(),
       travelReadyAt: 0,
+      demand: createDemand(),
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -135,6 +141,7 @@ describe("migrateState", () => {
       centre: { x: 0, z: 0, weight: 0, due: 0 },
       stats: createStats(),
       travelReadyAt: 0,
+      demand: createDemand(),
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -346,7 +353,24 @@ describe("migrateState", () => {
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
     expect(migrated.travelReadyAt).toBe(0);
     expect(travelTimesReady(migrated)).toBe(true);
-    expect(hashState(migrated)).toBe(hashState({ ...state, travelReadyAt: 0 }));
+    expect(hashState(migrated)).toBe(hashState({ ...state, travelReadyAt: 0, demand: createDemand() }));
+  });
+
+  it("upgrades a version 19 city by adding the demand bars at 0, which take their first step on the next day's first tick", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    while (state.tick < 150) step(state);
+    // The bars a city of this age has: the pull from outside, a day's share in.
+    expect(state.demand.residential.value).toBeGreaterThan(0);
+    const migrated = migrateState(older(state, 19));
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(migrated.demand).toEqual(createDemand());
+    expect(hashState(migrated)).toBe(hashState({ ...state, demand: createDemand() }));
+    while (migrated.tick <= 200) step(migrated);
+    // On day 2 the migrated city takes its first step and the other its second.
+    expect(migrated.demand.residential.value).toBeGreaterThan(0);
+    expect(migrated.demand.residential.value).toBeLessThan(state.demand.residential.value + 1e-9);
   });
 
   it("upgrades a version 15 state by adding the pops, none of them, and changes nothing else", () => {
@@ -358,7 +382,8 @@ describe("migrateState", () => {
     const migrated = migrateState(v15);
     // The version 17 migration then adds a city centre, due on the tick it
     // was saved on, and the version 18 one statistics with no history yet.
-    const expected = { ...state, centre: { x: 0, z: 0, weight: 0, due: state.tick }, stats: createStats() };
+    // The version 20 one adds the bars at 0.
+    const expected = { ...state, centre: { x: 0, z: 0, weight: 0, due: state.tick }, stats: createStats(), demand: createDemand() };
     expect(migrated).toEqual(expected);
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
     expect(migrated.pops.flags).toHaveLength(0);
@@ -372,7 +397,7 @@ describe("migrateState", () => {
     state.tick = 1234;
     const v16 = older(state, 16);
     const migrated = migrateState(v16);
-    expect(migrated).toEqual({ ...v16, version: SNAPSHOT_VERSION, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0 });
+    expect(migrated).toEqual({ ...v16, version: SNAPSHOT_VERSION, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand() });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 

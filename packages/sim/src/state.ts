@@ -3,6 +3,7 @@ import { createBuildings, type BuildingState } from "./buildings/buildings";
 import { createGrowth, type GrowthState } from "./buildings/growth";
 import type { Command } from "./commands";
 import { createCentre, type CentreState } from "./landvalue/centre";
+import { createDemand, type DemandState } from "./demand/demand";
 import type { LogEntry } from "./log";
 import { createPops, type PopState } from "./pops/pops";
 import { createStats, type StatsState } from "./stats/stats";
@@ -17,7 +18,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 19;
+export const SNAPSHOT_VERSION = 20;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -121,6 +122,11 @@ export interface SimState {
    * in (travel-times.ts). At or below `tick` when nothing is being rebuilt.
    */
   travelReadyAt: number;
+  /**
+   * The four demand bars and their parts (demand/demand.ts, M3-06),
+   * recomputed from the running totals on each game day's first tick.
+   */
+  demand: DemandState;
 }
 
 /**
@@ -172,6 +178,8 @@ export function createBareState(seed: number): SimState {
     stats: createStats(),
     // After the statistics, where the version 19 migration puts it.
     travelReadyAt: 0,
+    // After it, where the version 20 migration puts it.
+    demand: createDemand(),
   };
 }
 

@@ -1,8 +1,8 @@
 // Derived data: structures rebuilt from state that are never saved or
 // hashed: the terrain, the road spatial index, the routing graph, the
 // blocks, where the zoning cells are, which building stands on each, the
-// grower's candidates, who lives and works in each building, and the
-// travel times between zones. See "Derived data" in the PRD.
+// grower's candidates, who lives and works in each building, the
+// travel times between zones, and which pieces of road reach outside. See "Derived data" in the PRD.
 //
 // The terrain is cached by seed (terrain/cache.ts). Each other one is cached
 // by the state object it comes from and built from its
@@ -13,6 +13,7 @@ import { candidateCount, candidatesBuilt, prepareCandidates } from "./buildings/
 import { pollutionGrid, prepareBuildingIndex, segmentBuildings } from "./buildings/where";
 import { blockIndexOf, existingBlockIndex, listBlocks, settleBlocks } from "./roads/blocks";
 import { popIndexOf } from "./pops/where";
+import { catchUpOutside, prepareOutside } from "./roads/outside";
 import { routingGraphOf } from "./roads/routing";
 import { roadIndexOf } from "./roads/spatial";
 import type { SimState } from "./state";
@@ -31,6 +32,7 @@ export function prepareDerived(state: SimState): void {
   terrainOf(state.seed);
   roadIndexOf(state.roads);
   routingGraphOf(state.roads);
+  prepareOutside(state);
   listBlocks(blockIndexOf(state.roads));
   const index = syncCells(state);
   prepareBuildingIndex(state);
@@ -64,5 +66,6 @@ export function prepareDerived(state: SimState): void {
 export function catchUpDerived(state: SimState): void {
   const blocks = existingBlockIndex(state.roads);
   if (blocks) settleBlocks(blocks);
+  catchUpOutside(state.roads);
   if (candidatesBuilt(state) && cellsLaidOut(state)) candidateCount(state, syncCells(state), () => segmentBuildings(state));
 }

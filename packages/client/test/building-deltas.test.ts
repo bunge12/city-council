@@ -15,6 +15,7 @@ import {
   type BuildingDelta,
   type FromSimMessage,
   encodeStatsDelta,
+  copyDemand,
 } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
@@ -88,6 +89,7 @@ describe("building deltas in the mirror", () => {
         centre: { ...state.centre },
         stats: encodeStatsDelta(state.stats, state.stats.next),
         travelReadyAt: state.travelReadyAt,
+        demand: copyDemand(state.demand),
         pending: [],
         steps: 0,
         timings: [],

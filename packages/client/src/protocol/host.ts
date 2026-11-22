@@ -39,6 +39,7 @@ import {
   type ToSimMessage,
   type UndoDelta,
   type UndoRecord,
+  copyDemand,
 } from "@city-council/sim";
 import type { HostTransport } from "./transport";
 
@@ -410,6 +411,7 @@ export class SimHost {
       centre: { ...this.state.centre },
       stats,
       travelReadyAt: this.state.travelReadyAt,
+      demand: copyDemand(this.state.demand),
       ...(queue !== this.sentQueue ? { pending: this.state.pending.map((c) => ({ ...c })) } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
