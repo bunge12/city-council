@@ -134,6 +134,19 @@ function xRange(state: SimState, id: number): [number, number] {
  * names a cell its segment has, and the building index kept current agrees
  * with one built afresh. What every test here ends on.
  */
+/**
+ * The pollution grids kept and built afresh hold the same points. A plain
+ * loop with the first square that differs, not toEqual: the grid has
+ * 140,625 squares, and a deep compare of it on every soundness check took
+ * the random road test past 5 s on CI.
+ */
+function expectSameGrid(kept: Int32Array, fresh: Int32Array): void {
+  expect(kept.length).toBe(fresh.length);
+  let at = 0;
+  while (at < kept.length && kept[at] === fresh[at]) at++;
+  if (at < kept.length) expect({ square: at, points: kept[at] }).toEqual({ square: at, points: fresh[at] });
+}
+
 function expectSound(state: SimState): void {
   expect(checkBuildings(state.buildings, state.roads, state.tick)).toBeNull();
   if (cellsSettled(state)) for (const id of live(state)) expect(lotStands(state, id), `building ${id} stands`).toBe(true);
@@ -143,7 +156,7 @@ function expectSound(state: SimState): void {
   const candidates = candidateSets(state, syncCells(state), () => segmentBuildings(state));
   expect(candidates.kept).toEqual(candidates.fresh);
   // The land value grid and the sums the city centre reads (M3-13).
-  expect(kept.pollution).toEqual(fresh.pollution);
+  expectSameGrid(kept.pollution, fresh.pollution);
   expect(kept.sums).toEqual(fresh.sums);
   expect(hashState(deserialize(serialize(state)).state)).toBe(hashState(state));
 }
@@ -695,7 +708,7 @@ describe("a client's copy", () => {
       expect(Array.from(kept.cells)).toEqual(Array.from(buildingIndexSets(state).kept.cells));
       expect(kept.sums).toEqual(fresh.sums);
       expect(kept.sums).toEqual(buildingIndexSets(state).kept.sums);
-      expect(kept.pollution).toEqual(fresh.pollution);
+      expectSameGrid(kept.pollution, fresh.pollution);
     };
     ok(state, command("UpgradeRoad", { segments: [cellAt(state, 4350, 4591)?.segment as number], type: "oneWay" }));
     check();

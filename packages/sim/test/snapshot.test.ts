@@ -266,12 +266,22 @@ describe("a snapshot written without its paged log", () => {
   });
 
   it("notices any one byte of the body changing", () => {
+    // One expect at the end, not one per byte: the body is about 17,000
+    // bytes, and an expect for each took the test past 5 s on CI.
     const bytes = serializeDetached(busyState());
+    const missed: string[] = [];
     for (let at = 40; at < bytes.byteLength; at++) {
-      const damaged = bytes.slice();
-      damaged[at] = (damaged[at] ?? 0) ^ (1 << (at % 8));
-      expect(() => readSnapshotHeader(damaged), `byte ${at}`).toThrow(/checksum does not match/);
+      const bit = 1 << (at % 8);
+      bytes[at] = (bytes[at] ?? 0) ^ bit;
+      try {
+        readSnapshotHeader(bytes);
+        missed.push(`byte ${at}: read`);
+      } catch (e) {
+        if (!/checksum does not match/.test((e as Error).message)) missed.push(`byte ${at}: ${(e as Error).message}`);
+      }
+      bytes[at] = (bytes[at] ?? 0) ^ bit;
     }
+    expect(missed).toEqual([]);
   });
 
   it("reads a save that does not start on a word boundary of its buffer", () => {
