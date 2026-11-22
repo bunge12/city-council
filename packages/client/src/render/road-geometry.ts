@@ -47,6 +47,7 @@ import {
   CHUNK_SIZE,
   LEVEL_BRIDGE,
   LEVEL_GROUND,
+  LEVEL_TUNNEL,
   NETWORK_ROAD,
   NODE_ALIVE,
   NONE,
@@ -411,6 +412,13 @@ export interface Junction {
   ring: number[];
   /** The widest road type at the node, which colours the polygon. */
   type: RoadType;
+  /**
+   * The outer edge of the corner between each road in `segs` and the next,
+   * as x and z pairs from the first road's left edge at its cut to the next
+   * road's right edge at its cut, along `ring`. Empty when there is no
+   * polygon. The sidewalk round the corner runs inside it.
+   */
+  kerbs: number[][];
 }
 
 interface Arm {
@@ -616,6 +624,9 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
     return -1;
   };
 
+  // Where each road's right and left edge at its cut went into the ring, by vertex.
+  const rightCut = arms.map(() => 0);
+  const leftCut = arms.map(() => 0);
   const makeRing = (): number[] => {
     const ring: number[] = [];
     for (let i = 0; i < k; i++) {
@@ -629,11 +640,15 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
         // The strip's cut edge, on the curve: the same points the strip ends on.
         const f = a.path.frame(a.fromA ? t : a.path.length - t);
         const side = a.fromA ? 1 : -1;
+        rightCut[i] = ring.length / 2;
         ring.push(f.x - f.nx * a.half * side, f.z - f.nz * a.half * side);
+        leftCut[i] = ring.length / 2;
         ring.push(f.x + f.nx * a.half * side, f.z + f.nz * a.half * side);
         kerbRun(ring, a, t, kerbStart(corners[i], rounded[i] ? Math.min(arcFrom[i] ?? 0, t) : undefined, meets[i]?.ti), 1);
       } else {
+        rightCut[i] = ring.length / 2;
         ring.push(x + a.dx * t - a.nx * a.half, z + a.dz * t - a.nz * a.half);
+        leftCut[i] = ring.length / 2;
         ring.push(x + a.dx * t + a.nx * a.half, z + a.dz * t + a.nz * a.half);
       }
       const c = corners[i];
@@ -673,12 +688,27 @@ export function junctionAt(net: RoadNet, node: number): Junction | null {
     if (!changed) break;
     ring = makeRing();
   }
+  // Each corner's outer edge, before the polygon takes in the kerb corners
+  // below, which lie on no corner of their own.
+  const kerbs = arms.map((_, i) => ringSlice(ring, leftCut[i] ?? 0, rightCut[(i + 1) % k] ?? 0));
   // Take in each of those kerb corners that lies outside the polygon so
   // far, so no road is left uncovered.
   for (const [px, pz] of kerbCorners) widen(ring, px, pz, x, z);
   let widest = arms[0] as Arm;
   for (const a of arms) if (a.half > widest.half) widest = a;
-  return { node, x, z, segs: arms.map((a) => a.seg), trims, ring, type: widest.type };
+  return { node, x, z, segs: arms.map((a) => a.seg), trims, ring, type: widest.type, kerbs };
+}
+
+/** Vertices `from` to `to` of `ring`, both included, wrapping past its end, as x and z pairs. */
+function ringSlice(ring: readonly number[], from: number, to: number): number[] {
+  const n = ring.length / 2;
+  const out: number[] = [];
+  if (n === 0) return out;
+  for (let v = from, steps = 0; steps <= n; v = (v + 1) % n, steps++) {
+    out.push(ring[v * 2] ?? 0, ring[v * 2 + 1] ?? 0);
+    if (v === to) break;
+  }
+  return out;
 }
 
 /** A kerb of arm `a` at distance `t` from the node at (x, z): left with `side` 1, right with -1. */
@@ -889,7 +919,7 @@ export interface RoadChunkGeometry {
   yields: Float32Array;
 }
 
-/** Numbers per prop in `RoadChunkGeometry.signals` and `yields`: x, y, z and turn about y. */
+/** Numbers per prop in `RoadChunkGeometry.signals`, `yields` and `lamps`: x, y, z and turn about y. */
 export const PROP_STRIDE = 4;
 
 /** Whether `type` gets zebra crossings. */
@@ -929,6 +959,16 @@ export function crossingsOf(
 
 const surfaceColour = (type: RoadType) => linearRgb(ROADS.surface[type.id] ?? ROADS.surfaceDefault);
 
+/** Metres of a road of `type`'s width each sidewalk takes, 0 for none. */
+export function sidewalkWidth(type: RoadType): number {
+  return ROADS.sidewalks.width[type.id] ?? 0;
+}
+
+/** Half the width of a road of `type`'s carriageway, between its kerbs: its width less the sidewalks. */
+export function carriageHalf(type: RoadType): number {
+  return type.width / 2 - sidewalkWidth(type);
+}
+
 /** A painted line along a road: offset from the centre (left positive), colour, dashed or solid. */
 interface Paint {
   offset: number;
@@ -941,9 +981,9 @@ export function paintFor(type: RoadType): Paint[] {
   const m = ROADS.markings;
   const white = linearRgb(m.white);
   const yellow = linearRgb(m.yellow);
-  const half = type.width / 2;
+  const half = carriageHalf(type);
   const lanes = Math.max(1, type.lanes);
-  const lane = type.width / lanes;
+  const lane = (2 * half) / lanes;
   const out: Paint[] = [];
   if (type.oneWay) {
     for (let k = 1; k < lanes; k++) out.push({ offset: -half + k * lane, rgb: white, dashed: true });
@@ -1011,30 +1051,8 @@ export function buildRoadChunk(
   const sorted = [...segs].sort((a, b) => a - b);
   for (const seg of sorted) {
     if (!liveRoadSegment(net, seg)) continue;
-    const f = segPath(net, seg);
-    const a = net.segA[seg] ?? 0;
-    const b = net.segB[seg] ?? 0;
-    const t0 = trimAt(junctions(a), seg);
-    const t1 = f.length - trimAt(junctions(b), seg);
-    const isBridge = net.segLevelA[seg] === LEVEL_BRIDGE;
-    const raised = isRaised(net, seg);
-    // Drawn as a deck rather than draped on the ground.
-    const bridge = isBridge || raised;
-    const hA = net.nodeHeight[a] ?? 0;
-    const hB = net.nodeHeight[b] ?? 0;
-    /** The deck's height at distance `t` along a bridge, or along a raised road over the ground under its centre line. */
-    const deckAt = (t: number): number => {
-      if (isBridge) return bridgeDeckHeight(hA, hB, f.length, t, deck, f.type.maxSlope);
-      const p = f.point(t);
-      return heightAt(terrain, p.x, p.z) + levelLift(net, seg, t, f.length);
-    };
-    let st = f.stations(0, f.length, ROADS.sampleStep);
-    if (isBridge) {
-      // A station where each ramp meets the level deck, so the kink is drawn where it is.
-      const ramps = bridgeRamps(hA, hB, f.length, deck, f.type.maxSlope);
-      st = [...st, ramps.a, f.length - ramps.b].filter((t) => t > 1e-3 && t < f.length - 1e-3);
-      st = [0, ...st, f.length].sort((p, q) => p - q).filter((t, i, all) => i === 0 || t - (all[i - 1] ?? 0) > 1e-3);
-    }
+    const { f, t0, t1, isBridge, raised, bridge, deckAt, body, cross } = segmentDraw(net, terrain, seg, deck, junctions);
+    const st = body;
     /** A surface vertex: on the ground, or on a bridge's deck facing straight up. */
     const onRoad = (x: number, z: number, t: number): number => {
       if (!bridge) return ground(surface, x, z, rgb);
@@ -1050,7 +1068,6 @@ export function buildRoadChunk(
     const lineRgb = lineColour === undefined ? null : linearRgb(lineColour);
     const rgb = surfaceColour(f.type);
     const paints = paintFor(f.type);
-    const cross = crossingsOf(net, seg, f, t0, t1, junctions);
     // Lane lines and arrows stop short of a crossing.
     const paintFrom = cross.a ? cross.a[1] + m.width + ROADS.crossings.gap : t0;
     const paintTo = cross.b ? cross.b[0] - m.width - ROADS.crossings.gap : t1;
@@ -1192,6 +1209,313 @@ export function buildRoadChunk(
   };
 }
 
+/** What every pass that draws along a segment needs to know of it, worked out once and the same way for each. */
+interface SegmentDraw {
+  f: SegPath;
+  /** The cuts at node A and B, as distances from A. */
+  t0: number;
+  t1: number;
+  isBridge: boolean;
+  raised: boolean;
+  /** Drawn as a deck rather than draped on the ground. */
+  bridge: boolean;
+  /** The deck's height at distance `t` along a bridge, or along a raised road over the ground under its centre line. */
+  deckAt: (t: number) => number;
+  /** Where the road is cut into pieces, from 0 to its length. */
+  body: number[];
+  cross: { a: [number, number] | null; b: [number, number] | null };
+}
+
+function segmentDraw(net: RoadNet, terrain: Terrain, seg: number, deck: number, junctions: (node: number) => Junction | null): SegmentDraw {
+  const f = segPath(net, seg);
+  const a = net.segA[seg] ?? 0;
+  const b = net.segB[seg] ?? 0;
+  const t0 = trimAt(junctions(a), seg);
+  const t1 = f.length - trimAt(junctions(b), seg);
+  const isBridge = net.segLevelA[seg] === LEVEL_BRIDGE;
+  const raised = isRaised(net, seg);
+  const hA = net.nodeHeight[a] ?? 0;
+  const hB = net.nodeHeight[b] ?? 0;
+  const deckAt = (t: number): number => {
+    if (isBridge) return bridgeDeckHeight(hA, hB, f.length, t, deck, f.type.maxSlope);
+    const p = f.point(t);
+    return heightAt(terrain, p.x, p.z) + levelLift(net, seg, t, f.length);
+  };
+  let body = f.stations(0, f.length, ROADS.sampleStep);
+  if (isBridge) {
+    // A station where each ramp meets the level deck, so the kink is drawn where it is.
+    const ramps = bridgeRamps(hA, hB, f.length, deck, f.type.maxSlope);
+    body = [...body, ramps.a, f.length - ramps.b].filter((t) => t > 1e-3 && t < f.length - 1e-3);
+    body = [0, ...body, f.length].sort((p, q) => p - q).filter((t, i, all) => i === 0 || t - (all[i - 1] ?? 0) > 1e-3);
+  }
+  const cross = crossingsOf(net, seg, f, t0, t1, junctions);
+  return { f, t0, t1, isBridge, raised, bridge: isBridge || raised, deckAt, body, cross };
+}
+
+/** A chunk's street furniture: built apart from its roads, and only near the camera. */
+export interface StreetChunkGeometry {
+  /** Sidewalks and their kerbs, over the road surface. */
+  sidewalks: MeshArrays;
+  /** Street lights: x, y, z and turn about y for each, `PROP_STRIDE` numbers apiece, each turned so its arm reaches over the road. */
+  lamps: Float32Array;
+}
+
+/**
+ * Builds the sidewalks and street lights of chunk `chunk` (issue 151), from
+ * the same segments and nodes as its roads. A sidewalk's vertices lie on
+ * the plane the road's surface draws, with the surface's own normals, so
+ * the two meet exactly however the ground lies.
+ */
+export function buildStreetChunk(
+  net: RoadNet,
+  terrain: Terrain,
+  chunk: number,
+  segs: Iterable<number>,
+  nodes: Iterable<number>,
+  junctions: (node: number) => Junction | null = (node) => junctionAt(net, node),
+): StreetChunkGeometry {
+  const sidewalks = new Mesh();
+  const lamps: number[] = [];
+  const normal = new Float32Array(3);
+  const upright: readonly [number, number, number] = [0, 1, 0];
+  /** The terrain's normal at (x, z), as the road surface draped there takes it. */
+  const groundNormal = (x: number, z: number): readonly [number, number, number] => {
+    normalAt(terrain, x, z, normal, 0);
+    return [normal[0] ?? 0, normal[1] ?? 1, normal[2] ?? 0];
+  };
+  const deck = bridgeDeckLevel(terrain.waterLevel);
+  for (const seg of [...segs].sort((a, b) => a - b)) {
+    if (!liveRoadSegment(net, seg)) continue;
+    const { f, t0, t1, bridge, deckAt, body: st, cross } = segmentDraw(net, terrain, seg, deck, junctions);
+    const inChunk = (mid: number) => {
+      const p = f.point(mid);
+      return chunkAt(p.x, p.z) === chunk;
+    };
+    const w = sidewalkWidth(f.type);
+    if (w > 0 && t1 - t0 > 1e-3) {
+      const body = [t0, ...st.filter((t) => t > t0 + 1e-6 && t < t1 - 1e-6), t1];
+      /** The sidewalks across the road at `t`, on the surface's plane there, from its height at each edge. */
+      const across = (t: number): WalkEnd => {
+        const c = f.frame(t);
+        const rx = c.x - c.nx * f.half;
+        const rz = c.z - c.nz * f.half;
+        const lx = c.x + c.nx * f.half;
+        const lz = c.z + c.nz * f.half;
+        const hr = bridge ? deckAt(t) : heightAt(terrain, rx, rz);
+        const hl = bridge ? deckAt(t) : heightAt(terrain, lx, lz);
+        // One normal for both sides: the ground hardly turns across a road, and the lookup is the dearest part.
+        const n = bridge ? upright : groundNormal(c.x, c.z);
+        return walkAcross(sidewalks, f, c, w, hr, hl, n, n);
+      };
+      let prev: WalkEnd | null = null;
+      for (let k = 0; k + 1 < body.length; k++) {
+        const s0 = body[k] ?? 0;
+        const s1 = body[k + 1] ?? 0;
+        const mid = (s0 + s1) / 2;
+        if (!inChunk(mid)) {
+          prev = null;
+          continue;
+        }
+        const start = prev ?? across(s0);
+        const end = across(s1);
+        walkPiece(sidewalks, start, end, f.frame(mid));
+        prev = end;
+      }
+    }
+    // No lights in a tunnel.
+    if (net.segLevelA[seg] === LEVEL_TUNNEL || net.segLevelB[seg] === LEVEL_TUNNEL) continue;
+    const from = (cross.a ? cross.a[1] : t0) + ROADS.lamps.clear;
+    const to = (cross.b ? cross.b[0] : t1) - ROADS.lamps.clear;
+    for (const lamp of lampStations(f, from, to)) {
+      const c = f.frame(lamp.t);
+      if (chunkAt(c.x, c.z) !== chunk) continue;
+      // Onto the sidewalk from the kerb; with none, off the edge on the ground and just inside it on a deck.
+      const o = w > 0 ? carriageHalf(f.type) + ROADS.lamps.inset : bridge ? f.half - ROADS.lamps.inset : f.half + ROADS.lamps.shoulder;
+      const x = c.x + c.nx * o * lamp.side;
+      const z = c.z + c.nz * o * lamp.side;
+      // The arm, +x in the light's own frame, reaches back over the road toward its centre line.
+      lamps.push(x, bridge ? deckAt(lamp.t) : heightAt(terrain, x, z), z, Math.atan2(c.nz * lamp.side, -c.nx * lamp.side));
+    }
+  }
+  for (const node of [...nodes].sort((p, q) => p - q)) {
+    if (!liveNode(net, node) || chunkAt(net.nodeX[node] ?? 0, net.nodeZ[node] ?? 0) !== chunk) continue;
+    const j = junctions(node);
+    if (!j) continue;
+    const lift = nodeLift(net, node);
+    const flat = lift === 0 ? null : heightAt(terrain, j.x, j.z) + lift;
+    for (let i = 0; i < j.kerbs.length; i++) {
+      const from = sidewalkWidth(roadTypeOf(net, j.segs[i] ?? 0));
+      const to = sidewalkWidth(roadTypeOf(net, j.segs[(i + 1) % j.segs.length] ?? 0));
+      if (from <= 0 && to <= 0) continue;
+      cornerSidewalk(sidewalks, j.kerbs[i] ?? [], from, to, (x, z) => flat ?? heightAt(terrain, x, z), flat === null ? groundNormal : () => upright);
+    }
+  }
+  return { sidewalks: sidewalks.done(), lamps: Float32Array.from(lamps) };
+}
+
+/**
+ * Where street lights stand along `f`, between distances `from` and `to`
+ * from node A: every `ROADS.lamps.spacing` metres for its type, at places
+ * fixed from node A, on both sides for a `bothSides` type and on
+ * alternate sides for the rest, starting on the right. `side` is 1 for the
+ * left and -1 for the right. Each place on the first half of the road
+ * checks only `from`, and on the second half only `to`, so what one end's
+ * junction does moves no light on the other end's half.
+ */
+export function lampStations(f: SegPath, from: number, to: number): { t: number; side: number }[] {
+  const spacing = ROADS.lamps.spacing[f.type.id];
+  if (spacing === undefined || spacing <= 0) return [];
+  const both = ROADS.lamps.bothSides.includes(f.type.id);
+  const out: { t: number; side: number }[] = [];
+  for (let k = 0, t = spacing / 2; t < f.length; k++, t += spacing) {
+    if (t <= f.length / 2 ? t < from : t > to) continue;
+    if (both) out.push({ t, side: -1 }, { t, side: 1 });
+    else out.push({ t, side: k % 2 === 0 ? -1 : 1 });
+  }
+  return out;
+}
+
+/** A sidewalk's vertices across a road at one station, left side then right: the top's outer edge, its inner edge at the kerb, and the kerb's foot. */
+type WalkEnd = { outer: number; inner: number; foot: number }[];
+
+/**
+ * The sidewalks' vertices across road `f` at frame `c`, `w` metres wide: a
+ * top `kerbHeight` over the surface, from the road's edge in to the kerb,
+ * and the kerb's foot on the carriageway. The top's inner edge serves the
+ * top and the kerb's face, so the kerb reads as a bevel: three vertices a
+ * side. `hr` and `hl` are the surface's heights at its right and left
+ * edges here, and `nr` and `nl` its normals there, which the top takes.
+ */
+function walkAcross(
+  mesh: Mesh,
+  f: SegPath,
+  c: PathFrame,
+  w: number,
+  hr: number,
+  hl: number,
+  nr: readonly [number, number, number],
+  nl: readonly [number, number, number],
+): WalkEnd {
+  const { top, kerb } = walkColours();
+  const h = ROADS.sidewalks.kerbHeight;
+  const half = f.half;
+  const inner = half - w;
+  // The surface is a plane across the road, from its right edge to its left.
+  const slope = (hl - hr) / (2 * half);
+  const out: WalkEnd = [];
+  for (let side = 1; side >= -1; side -= 2) {
+    const n = side > 0 ? nl : nr;
+    const sx = c.nx * side;
+    const sz = c.nz * side;
+    const yo = hr + slope * (half * side + half);
+    const yi = hr + slope * (inner * side + half);
+    out.push({
+      outer: lit(mesh, c.x + sx * half, yo + h, c.z + sz * half, top, n),
+      inner: lit(mesh, c.x + sx * inner, yi + h, c.z + sz * inner, kerb, n),
+      // The kerb faces the carriageway.
+      foot: lit(mesh, c.x + sx * inner, yi, c.z + sz * inner, kerb, [-sx, 0, -sz]),
+    });
+  }
+  return out;
+}
+
+/** The sidewalk's colours in linear RGB, worked out once. */
+let walkRgb: { top: readonly number[]; kerb: readonly number[] } | null = null;
+function walkColours(): { top: readonly number[]; kerb: readonly number[] } {
+  walkRgb ??= { top: linearRgb(ROADS.sidewalks.top), kerb: linearRgb(ROADS.sidewalks.kerb) };
+  return walkRgb;
+}
+
+/** The sidewalks' tops and kerb faces between stations `a` and `b`; `c` is the frame between them. */
+function walkPiece(mesh: Mesh, a: WalkEnd, b: WalkEnd, c: PathFrame): void {
+  for (let k = 0; k < 2; k++) {
+    const side = k === 0 ? 1 : -1;
+    const u = a[k] as WalkEnd[number];
+    const v = b[k] as WalkEnd[number];
+    face(mesh, u.inner, v.inner, v.outer, u.outer, upright3);
+    face(mesh, u.foot, v.foot, v.inner, u.inner, [-c.nx * side, 0, -c.nz * side]);
+  }
+}
+
+const upright3: readonly [number, number, number] = [0, 1, 0];
+
+/**
+ * The sidewalk round one corner of a junction, inside `edge`: the corner's
+ * outer edge as x and z pairs, running round the junction the way its ring
+ * does, so the junction lies on its left. Its width runs from `from` metres
+ * at the first point to `to` at the last, by distance along the edge, and
+ * it stands `kerbHeight` over the ground `height` gives, with a kerb face
+ * on its inner edge as along a road.
+ */
+function cornerSidewalk(
+  mesh: Mesh,
+  edge: readonly number[],
+  from: number,
+  to: number,
+  height: (x: number, z: number) => number,
+  up: (x: number, z: number) => readonly [number, number, number],
+): void {
+  // Drop points that repeat the one before, so every step has a direction.
+  const pts: number[] = [];
+  for (let k = 0; k < edge.length; k += 2) {
+    const x = edge[k] ?? 0;
+    const z = edge[k + 1] ?? 0;
+    const n = pts.length;
+    if (n > 0 && Math.hypot(x - (pts[n - 2] ?? 0), z - (pts[n - 1] ?? 0)) < 1e-3) continue;
+    pts.push(x, z);
+  }
+  const n = pts.length / 2;
+  if (n < 2) return;
+  const along = [0];
+  for (let k = 1; k < n; k++) along.push((along[k - 1] ?? 0) + Math.hypot((pts[k * 2] ?? 0) - (pts[k * 2 - 2] ?? 0), (pts[k * 2 + 1] ?? 0) - (pts[k * 2 - 1] ?? 0)));
+  const total = along[n - 1] ?? 0;
+  if (total < 1e-2) return;
+  const S = ROADS.sidewalks;
+  const { top, kerb } = walkColours();
+  /** The unit step from point k to k + 1, and its left normal, toward the junction. */
+  const left = (k: number) => {
+    const ex = (pts[k * 2 + 2] ?? 0) - (pts[k * 2] ?? 0);
+    const ez = (pts[k * 2 + 3] ?? 0) - (pts[k * 2 + 1] ?? 0);
+    const len = Math.hypot(ex, ez) || 1;
+    return { x: -ez / len, z: ex / len };
+  };
+  let prev: { outer: number; inner: number; foot: number } | null = null;
+  for (let k = 0; k < n; k++) {
+    const a = left(Math.max(0, k - 1));
+    const b = left(Math.min(n - 2, k));
+    let mx = a.x + b.x;
+    let mz = a.z + b.z;
+    const ml = Math.hypot(mx, mz);
+    if (ml < 1e-6) {
+      mx = b.x;
+      mz = b.z;
+    } else {
+      mx /= ml;
+      mz /= ml;
+    }
+    // A mitre keeps the width across the bend, up to twice it at a sharp one.
+    const cos = mx * b.x + mz * b.z;
+    const w = (from + ((to - from) * (along[k] ?? 0)) / total) / Math.max(0.5, cos);
+    const x = pts[k * 2] ?? 0;
+    const z = pts[k * 2 + 1] ?? 0;
+    const ix = x + mx * w;
+    const iz = z + mz * w;
+    const ground = height(ix, iz);
+    // One normal serves both edges of the top, a few metres apart.
+    const normal = up(x, z);
+    const v = {
+      outer: lit(mesh, x, height(x, z) + S.kerbHeight, z, top, normal),
+      inner: lit(mesh, ix, ground + S.kerbHeight, iz, kerb, normal),
+      foot: lit(mesh, ix, ground, iz, kerb, [mx, 0, mz]),
+    };
+    if (prev) {
+      face(mesh, prev.inner, v.inner, v.outer, prev.outer, upright3);
+      face(mesh, prev.foot, v.foot, v.inner, prev.inner, [mx, 0, mz]);
+    }
+    prev = v;
+  }
+}
+
 /**
  * The traffic lights or yield signs at junction `j`, pushed onto `signals`
  * or `yields`. A junction of three or more roads on the ground gets lights
@@ -1238,7 +1562,7 @@ function props(
     const dz = a.fromA ? fr.dz : -fr.dz;
     // Incoming traffic runs toward the node, along (-dx, -dz). Its right,
     // forward cross up in this right-handed frame with y up, is (dz, -dx).
-    const out = a.f.half + P.kerbGap;
+    const out = carriageHalf(a.f.type) + P.kerbGap;
     const x = fr.x + dz * out;
     const z = fr.z - dx * out;
     const clear = arms.every((b, k) => {
@@ -1404,7 +1728,7 @@ function zebra(mesh: Mesh, f: SegPath, p: Piece, span: readonly [number, number]
   if (hi - lo <= 1e-3) return;
   const c = ROADS.crossings;
   const white = linearRgb(ROADS.markings.white);
-  const usable = 2 * f.half - 2 * c.margin;
+  const usable = 2 * carriageHalf(f.type) - 2 * c.margin;
   const count = Math.max(1, Math.floor((usable + c.space) / (c.bar + c.space)));
   const total = count * c.bar + (count - 1) * c.space;
   for (let k = 0; k < count; k++) {
@@ -1425,7 +1749,8 @@ function arrows(mesh: Mesh, f: SegPath, p: Piece, t0: number, t1: number): void 
   if (usable < 2) return;
   const white = linearRgb(m.white);
   const lanes = Math.max(1, f.type.lanes);
-  const lane = f.type.width / lanes;
+  const half = carriageHalf(f.type);
+  const lane = (2 * half) / lanes;
   const lift = ROADS.markingLift;
   // Arrows sit at fixed places along the usable stretch, centred in it when only one fits.
   const count = Math.max(1, Math.floor(usable / m.arrowSpacing) + 1);
@@ -1434,7 +1759,7 @@ function arrows(mesh: Mesh, f: SegPath, p: Piece, t0: number, t1: number): void 
     const tail = first + n * m.arrowSpacing;
     if (tail < p.t0 || tail >= p.t1) continue;
     for (let k = 0; k < lanes; k++) {
-      const o = -f.half + (k + 0.5) * lane;
+      const o = -half + (k + 0.5) * lane;
       const neck = tail + m.arrowShaft.length;
       const tip = neck + m.arrowHead.length;
       const sw = m.arrowShaft.width / 2;
@@ -1458,7 +1783,11 @@ function arrows(mesh: Mesh, f: SegPath, p: Piece, t0: number, t1: number): void 
  * crossing and the lane lines that stop short of it.
  */
 const JUNCTION_REACH =
-  ROADS.maxTrim + ROADS.corners.maxCut + 3 * ROADS.crossings.gap + ROADS.crossings.length + ROADS.markings.width;
+  ROADS.maxTrim +
+  ROADS.corners.maxCut +
+  3 * ROADS.crossings.gap +
+  ROADS.crossings.length +
+  Math.max(ROADS.markings.width, ROADS.lamps.clear);
 
 /**
  * Which chunks each road segment and node draws in, kept current from the

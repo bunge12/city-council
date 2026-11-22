@@ -252,6 +252,57 @@ export const ROADS = {
     signal: { poleHeight: 6.2, mast: 5.5, pole: 0x5d6168, head: 0x2b2d30, housing: 0xd2a72a, red: 0xe03a2c, amber: 0xf2a33a, green: 0x39c46a },
     yield: { poleHeight: 2.1, size: 0.9, pole: 0x8d9198, red: 0xc8262b, white: 0xf2f2ee, back: 0x9da1a6 },
   },
+  /**
+   * Sidewalks (issue 151), on every type in `width` and none on the others,
+   * so highways have none. A road's width is its whole right of way, so a
+   * sidewalk takes `width` metres of it on each side and the carriageway,
+   * its lanes and its crossings get what is left. The sidewalk stands
+   * `kerbHeight` metres over the carriageway, follows the kerb round every
+   * corner of a junction, and narrows from one road's width to the next's
+   * round a corner between two types. Drawn in the street band, and the
+   * district band below `markingsBelow`, over the road surface.
+   *
+   * Sidewalks and street lights are built only for chunks whose nearest
+   * point is within `buildWithin` metres of the camera across the ground,
+   * nearest first, for up to `buildBudgetMs` of a frame, and freed past
+   * `keepWithin`, so a chunk on the line does not build and free by turns.
+   * Further out a sidewalk is under a pixel wide.
+   */
+  sidewalks: {
+    width: { street: 1.8, avenue: 2.5, oneWay: 1.5 } as Readonly<Record<string, number>>,
+    buildWithin: 1000,
+    keepWithin: 1250,
+    buildBudgetMs: 4,
+    kerbHeight: 0.15,
+    top: 0xb3b0a8,
+    kerb: 0xd6d3ca,
+  },
+  /**
+   * Street lights (issue 151), on every road type on the ground and on
+   * bridges, none in tunnels. A light stands every `spacing` metres along a
+   * segment by type id, at places fixed from node A so a change at one end
+   * moves none at the other. Types in `bothSides` get one on each side at
+   * every place; the others alternate sides. A light stands `inset` metres
+   * onto the sidewalk from the kerb, or `shoulder` metres outside the edge
+   * of a road with no sidewalk, with its arm over the road. None stand
+   * within `clear` metres of a junction's cut or its crossing. Built with
+   * the sidewalks, in the chunks near the camera, and drawn in the street
+   * band only. They cast no shadows, to keep the shadow pass as it was.
+   * Decoration only: the screen is in daylight in v1, so the lamps are not
+   * lit.
+   */
+  lamps: {
+    spacing: { street: 34, avenue: 30, oneWay: 34, highway: 50 } as Readonly<Record<string, number>>,
+    bothSides: ["avenue", "highway"] as readonly string[],
+    inset: 0.45,
+    shoulder: 1.2,
+    clear: 5,
+    poleHeight: 7.5,
+    arm: 1.8,
+    pole: 0x6a6e75,
+    head: 0x3d4045,
+    lens: 0xf3efd9,
+  },
 } as const;
 
 /**

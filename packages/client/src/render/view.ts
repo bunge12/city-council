@@ -22,7 +22,7 @@ import {
   WebGPURenderer,
 } from "three/webgpu";
 import { heightAt, mapSize, type Terrain } from "@city-council/sim";
-import { BUILDINGS, CELLS, FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, TERRAIN_LODS } from "./config";
+import { BUILDINGS, CELLS, FRAME_TIME_WINDOW, LOD_HYSTERESIS, MAX_PIXEL_RATIO, PRESET_BENCHMARK, ROADS, TERRAIN_LODS } from "./config";
 import type { Ray } from "../camera/pick";
 import type { ZoomBand } from "../camera/zoom-band";
 import { createBuildingLayer, type BuildingLayer, type BuildingSource, type BuildingStats } from "./building-meshes";
@@ -364,6 +364,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
     // After the refresh, so a chunk whose lots or roads changed this frame is built again before it is drawn (issue 141).
     terrainRoot?.decor.update(camera.position, flush ? Infinity : undefined);
     terrainRoot?.cells?.update(camera.position, flush ? Infinity : CELLS.buildBudgetMs);
+    terrainRoot?.roads.update(camera.position.x, camera.position.z, flush ? Infinity : ROADS.sidewalks.buildBudgetMs);
   }
 
   /** Whether every build queue is empty: buildings, their forms and fades, the decoration in range, and the overlay's cells while it is shown. */
@@ -372,6 +373,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
     if (!root) return false;
     if (root.buildings && !root.buildings.idle()) return false;
     if (root.decor.pending() > 0) return false;
+    if (root.roads.pending() > 0) return false;
     const cells = root.cells?.stats();
     return !cells?.visible || cells.pending === 0;
   }

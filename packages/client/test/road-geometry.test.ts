@@ -33,6 +33,7 @@ import {
   PROP_STRIDE,
   RoadChunks,
   buildRoadChunk,
+  buildStreetChunk,
   chunkAt,
   crossingsOf,
   isRaised,
@@ -48,9 +49,19 @@ import {
   trimAt,
   segPath,
   stations,
+  carriageHalf,
+  lampStations,
+  sidewalkWidth,
   type MeshArrays,
   type RoadNet,
 } from "../src/render/road-geometry";
+
+/** The road type with id `id`. */
+function roadType(id: string): (typeof ROAD_TYPES)[number] {
+  const t = ROAD_TYPES.find((r) => r.id === id);
+  if (!t) throw new Error(`no road type ${id}`);
+  return t;
+}
 
 // Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000),
 // across the chunk lines x = 4500 and z = 4500. The sim's tests use it too.
@@ -93,6 +104,20 @@ function allChunks(net: RoadNet): Map<number, ReturnType<typeof buildRoadChunk>>
     const nodes = index.chunkNodes[c] ?? new Set();
     if (segs.size === 0 && nodes.size === 0) continue;
     out.set(c, buildRoadChunk(net, terrain, c, segs, nodes));
+  }
+  return out;
+}
+
+/** Every chunk's sidewalks and street lights, built from scratch. */
+function allStreet(net: RoadNet): Map<number, ReturnType<typeof buildStreetChunk>> {
+  const index = new RoadChunks();
+  index.reset(net);
+  const out = new Map<number, ReturnType<typeof buildStreetChunk>>();
+  for (let c = 0; c < CHUNKS_PER_SIDE * CHUNKS_PER_SIDE; c++) {
+    const segs = index.chunkSegs[c] ?? new Set();
+    const nodes = index.chunkNodes[c] ?? new Set();
+    if (segs.size === 0 && nodes.size === 0) continue;
+    out.set(c, buildStreetChunk(net, terrain, c, segs, nodes));
   }
   return out;
 }
@@ -441,11 +466,13 @@ describe("chunks", () => {
     const index = new RoadChunks();
     index.reset(copy);
     const drawn = new Map<number, string>();
-    const key = (g: ReturnType<typeof buildRoadChunk>) =>
+    const key = (g: ReturnType<typeof buildRoadChunk>, w: ReturnType<typeof buildStreetChunk>) =>
       JSON.stringify([
         ...["surface", "markings", "lines"].map((k) => Array.from((g as unknown as Record<string, MeshArrays>)[k]?.positions ?? [])),
         Array.from(g.signals),
         Array.from(g.yields),
+        Array.from(w.sidewalks.positions),
+        Array.from(w.lamps),
       ]);
     const plan: [from: [number, number], to: [number, number], type: string, control?: [number, number]][] = [
       [[4150, 4450], [4650, 4450], "street"],
@@ -467,11 +494,17 @@ describe("chunks", () => {
       const dirty = index.apply(copy, delta.nodeIds, delta.segIds);
       for (const c of dirty) {
         const g = buildRoadChunk(copy, terrain, c, index.chunkSegs[c] ?? [], index.chunkNodes[c] ?? []);
-        drawn.set(c, key(g));
+        const w = buildStreetChunk(copy, terrain, c, index.chunkSegs[c] ?? [], index.chunkNodes[c] ?? []);
+        drawn.set(c, key(g, w));
       }
       // Every chunk that has roads now matches a build from scratch.
       const fresh = allChunks(copy);
-      for (const [c, g] of fresh) expect(drawn.get(c), `chunk ${c}`).toBe(key(g));
+      const freshStreet = allStreet(copy);
+      for (const [c, g] of fresh) {
+        const w = freshStreet.get(c);
+        if (!w) throw new Error(`no street geometry for chunk ${c}`);
+        expect(drawn.get(c), `chunk ${c}`).toBe(key(g, w));
+      }
       for (const [c, k] of drawn) if (!fresh.has(c)) expect(JSON.parse(k).flat()).toEqual([]);
     }
   });
@@ -610,8 +643,8 @@ describe("crossings and props (issue 87)", () => {
       // Nothing is painted in the gap before the crossing or after it, where the lane lines stop.
       if ((px > x + trim + 1e-3 && px < from - 1e-3) || (px > to + 1e-3 && px < to + c.gap + ROADS.markings.width - 1e-3)) gapPaint++;
     }
-    // Each bar's two corners at the crossing's near edge.
-    const count = Math.floor((10 - 2 * c.margin + c.space) / (c.bar + c.space));
+    // Each bar's two corners at the crossing's near edge. The bars span the carriageway, kerb to kerb.
+    const count = Math.floor((2 * carriageHalf(roadType("street")) - 2 * c.margin + c.space) / (c.bar + c.space));
     expect(bars).toBe(count * 2);
     expect(gapPaint).toBe(0);
   });
@@ -674,15 +707,16 @@ describe("crossings and props (issue 87)", () => {
       const ox = p.x - x;
       const oz = p.z - z;
       const out = Math.abs(ox) > Math.abs(oz) ? { dx: Math.sign(ox), dz: 0 } : { dx: 0, dz: Math.sign(oz) };
-      const half = out.dx !== 0 ? 5 : 9;
+      // Off the kerb, on the sidewalk: the carriageway's edge, inside the road's width.
+      const half = carriageHalf(out.dx !== 0 ? roadType("street") : roadType("avenue"));
       // Incoming traffic runs along -out; its right is (out.dz, -out.dx).
       const right = ox * out.dz - oz * out.dx;
-      expect(right, `prop at ${p.x}, ${p.z}`).toBeCloseTo(half + ROADS.props.kerbGap, 6);
+      expect(right, `prop at ${p.x}, ${p.z}`).toBeCloseTo(half + ROADS.props.kerbGap, 3);
       // Turned so its face, +z in its own frame, points out along the road at the traffic.
       expect(Math.sin(p.turn)).toBeCloseTo(out.dx, 6);
       expect(Math.cos(p.turn)).toBeCloseTo(out.dz, 6);
-      // Not on either road.
-      expect(Math.abs(p.x - x) > 9 && Math.abs(p.z - z) > 5).toBe(true);
+      // Not on either carriageway.
+      expect(Math.abs(p.x - x) > carriageHalf(roadType("avenue")) && Math.abs(p.z - z) > carriageHalf(roadType("street"))).toBe(true);
     }
   });
 
@@ -698,6 +732,141 @@ describe("crossings and props (issue 87)", () => {
       [[4250, 4550], [4250, 4450], "oneWay"],
     ]);
     expect(propsOf(into, "yields")).toHaveLength(3);
+  });
+});
+
+describe("sidewalks and street lights (issue 151)", () => {
+  /** Every sidewalk vertex of every chunk, as x, y, z. */
+  function walkVertices(net: RoadNet): [number, number, number][] {
+    const out: [number, number, number][] = [];
+    for (const g of allStreet(net).values()) {
+      const p = g.sidewalks.positions;
+      for (let v = 0; v < p.length / 3; v++) out.push([p[v * 3] ?? 0, p[v * 3 + 1] ?? 0, p[v * 3 + 2] ?? 0]);
+    }
+    return out;
+  }
+
+  function lampsOf(net: RoadNet): { x: number; z: number; turn: number }[] {
+    const out: { x: number; z: number; turn: number }[] = [];
+    for (const g of allStreet(net).values()) {
+      for (let k = 0; k < g.lamps.length; k += PROP_STRIDE) out.push({ x: g.lamps[k] ?? 0, z: g.lamps[k + 2] ?? 0, turn: g.lamps[k + 3] ?? 0 });
+    }
+    return out;
+  }
+
+  it("take each sidewalk out of the road's width, and give highways none", () => {
+    for (const id of ["street", "avenue", "oneWay"]) {
+      const t = roadType(id);
+      expect(sidewalkWidth(t)).toBeGreaterThan(0);
+      expect(carriageHalf(t)).toBeCloseTo(t.width / 2 - sidewalkWidth(t), 9);
+      // Room for every lane at 2.4 m or more.
+      expect((2 * carriageHalf(t)) / t.lanes).toBeGreaterThanOrEqual(2.4);
+    }
+    const highway = roadType("highway");
+    expect(sidewalkWidth(highway)).toBe(0);
+    expect(carriageHalf(highway)).toBe(highway.width / 2);
+  });
+
+  it("lay a sidewalk along each side of a street, from the kerb to the road's edge, over the surface", () => {
+    const z = 4450;
+    const net = city([[[4150, z], [4350, z]]]);
+    const t = roadType("street");
+    const verts = walkVertices(net);
+    expect(verts.length).toBeGreaterThan(0);
+    let left = 0;
+    let right = 0;
+    for (const [x, y, vz] of verts) {
+      const o = Math.abs(vz - z);
+      expect(o).toBeGreaterThanOrEqual(carriageHalf(t) - 1e-3);
+      expect(o).toBeLessThanOrEqual(t.width / 2 + 1e-3);
+      // Never below the ground the surface is draped on.
+      expect(y).toBeGreaterThanOrEqual(heightAt(terrain, x, vz) - 0.05);
+      if (vz > z) left++;
+      else right++;
+    }
+    expect(left).toBe(right);
+    // Lane paint stays on the carriageway.
+    for (const g of allChunks(net).values()) {
+      const p = g.markings.positions;
+      for (let v = 0; v < p.length / 3; v++) expect(Math.abs((p[v * 3 + 2] ?? 0) - z)).toBeLessThan(carriageHalf(t));
+    }
+  });
+
+  it("turn the sidewalk round every corner of a junction, off both carriageways", () => {
+    const x = 4250;
+    const z = 4450;
+    const net = city([
+      [[x - 100, z], [x + 100, z]],
+      [[x, z], [x, z + 100]],
+    ]);
+    const c = carriageHalf(roadType("street"));
+    const near = walkVertices(net).filter(([vx, , vz]) => Math.abs(vx - x) < 12 && Math.abs(vz - z) < 12);
+    // The two corners beside the stem, and the far side of the through road.
+    expect(near.some(([vx, , vz]) => vx > x + c && vz > z + c)).toBe(true);
+    expect(near.some(([vx, , vz]) => vx < x - c && vz > z + c)).toBe(true);
+    expect(near.some(([, , vz]) => vz < z - c)).toBe(true);
+    for (const [vx, , vz] of near) {
+      const onThrough = Math.abs(vz - z) < c - 1e-3;
+      const onStem = Math.abs(vx - x) < c - 1e-3 && vz > z;
+      expect(onThrough || onStem, `sidewalk at ${vx}, ${vz}`).toBe(false);
+    }
+  });
+
+  it("stand street lights on the sidewalk, on alternate sides of a street and both sides of an avenue, arms over the road", () => {
+    const z = 4450;
+    const street = city([[[4150, z], [4400, z], "street"]]);
+    const s = lampsOf(street);
+    const st = roadType("street");
+    const spacing = ROADS.lamps.spacing["street"] ?? 0;
+    expect(s.length).toBe(Math.floor((250 - spacing / 2) / spacing) + 1);
+    for (const l of s) {
+      expect(Math.abs(Math.abs(l.z - z) - (carriageHalf(st) + ROADS.lamps.inset))).toBeLessThan(1e-3);
+      // The arm, +x in its own frame, points back across the road.
+      const armZ = -Math.sin(l.turn);
+      expect(Math.sign(armZ)).toBe(Math.sign(z - l.z));
+    }
+    const sides = s.map((l) => Math.sign(l.z - z));
+    for (let k = 1; k < sides.length; k++) expect(sides[k]).toBe(-(sides[k - 1] ?? 0));
+    const avenue = lampsOf(city([[[4150, z], [4400, z], "avenue"]]));
+    expect(avenue.filter((l) => l.z > z).length).toBe(avenue.filter((l) => l.z < z).length);
+    expect(avenue.length).toBeGreaterThan(0);
+  });
+
+  it("keep street lights clear of a junction and its crossings, and leave the far half of a road alone", () => {
+    const x = 4250;
+    const z = 4450;
+    const along = city([[[x - 200, z], [x + 200, z]]]);
+    const tee = city([
+      [[x - 200, z], [x + 200, z]],
+      [[x, z], [x, z + 100]],
+    ]);
+    const node = [0, 1, 2, 3, 4].find((n) => tee.nodeX[n] === x && tee.nodeZ[n] === z) ?? -1;
+    const j = junctionAt(tee, node);
+    const reach = Math.max(...(j?.trims ?? [0])) + ROADS.crossings.gap + ROADS.crossings.length + ROADS.lamps.clear;
+    const lamps = lampsOf(tee);
+    for (const l of lamps) {
+      if (Math.abs(l.x - x) < 5) expect(l.z - z, `lamp on the stem at ${l.z}`).toBeGreaterThanOrEqual(reach - 1e-3);
+      else expect(Math.abs(l.x - x), `lamp at ${l.x}`).toBeGreaterThanOrEqual(reach - 1e-3);
+    }
+    // The stem splits the through road at the junction. The west piece keeps
+    // its node A, so its lights more than a reach from the junction stand
+    // where they did before the stem was built.
+    const key = (l: { x: number; z: number }) => `${l.x.toFixed(3)},${l.z.toFixed(3)}`;
+    const before = new Set(lampsOf(along).filter((l) => l.x < x - 110).map(key));
+    const after = new Set(lamps.filter((l) => l.x < x - 110).map(key));
+    expect(before.size).toBeGreaterThan(0);
+    expect(after).toEqual(before);
+  });
+
+  it("place lights from node A only, so each half of a road checks only its own end", () => {
+    const f = segPath(city([[[4150, 4450], [4400, 4450]]]), 0);
+    const all = lampStations(f, 0, f.length);
+    const trimmed = lampStations(f, 40, f.length);
+    // Only the first half lost lights; the second half is untouched by `from`.
+    expect(trimmed.filter((l) => l.t > f.length / 2)).toEqual(all.filter((l) => l.t > f.length / 2));
+    expect(trimmed.every((l) => l.t >= 40)).toBe(true);
+    // `from` past the middle takes nothing from the second half.
+    expect(lampStations(f, f.length, f.length).filter((l) => l.t > f.length / 2)).toEqual(all.filter((l) => l.t > f.length / 2));
   });
 });
 
