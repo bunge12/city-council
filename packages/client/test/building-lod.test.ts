@@ -6,7 +6,7 @@ import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "@city-council/sim";
 import { Matrix4, Quaternion, Vector3 } from "three";
 import { FLAT_GROUPS_PER_SIDE, FLAT_SLOTS, KINDS, chunkDistance, draws, fadeOf, flatGroupOf, flatSlotOf, flatSlots, formFor, isNear, mergeBoxes, mergeFlats, mergeModels, modelExtent, stepFade, type ChunkFade, type MergedItem } from "../src/render/building-lod";
 import { LOOKS } from "../src/render/building-tint";
-import { FACADE, ModelBuilder, SURFACE, simplify } from "../src/theme/model";
+import { FACADE, ModelBuilder, SURFACE, baysOn, simplify } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
 import { tower } from "../src/theme/north-american/generators";
 import { BUILDINGS } from "../src/render/config";
@@ -193,9 +193,10 @@ describe("merged geometry", () => {
       const s = model.surfaces[v];
       expect(colour(v)).toEqual(s === SURFACE.wall ? [0x11, 0x22, 0x33] : s === SURFACE.roof ? [0x44, 0x55, 0x66] : [0xaa, 0xbb, 0xcc]);
       expect(a.colours[v * 4 + 3]).toBe(model.facades[v * 4 + 3]);
-      // Windows along the wall in the lot's metres: the stretch along the wall's axis is taken out, as the full models' shader does.
-      const stretch = model.facades[v * 4 + 2] === 0 ? 1.5 : 0.8;
-      expect(a.facades?.[v * 2]).toBeCloseTo((model.facades[v * 4] ?? 0) * stretch, 5);
+      // Window bays from the start of the face, a whole number of them on the stretched lot, as the full models' shader works out.
+      const bays = baysOn(model, v, 1.5, 0.8);
+      expect(Number.isInteger(bays)).toBe(true);
+      expect(a.facades?.[v * 2]).toBeCloseTo((model.facades[v * 4] ?? 0) * bays, 5);
       expect(a.facades?.[v * 2 + 1]).toBeCloseTo(model.facades[v * 4 + 1] ?? 0, 5);
     }
     expect([...a.colours.slice(0, 4)]).toEqual([0x11, 0x22, 0x33, FACADE.windows]);

@@ -10,7 +10,9 @@
 // Each vertex says which surface it belongs to, so a building can tint its
 // walls, its roof and its trim on their own (PRD, "Art direction"), and
 // where it is on its facade, from which the shader draws a window pattern
-// (render/building-meshes.ts). Faces are flat shaded: a face has vertices
+// (render/building-meshes.ts). Each face lays out its own windows: a whole
+// number of bays from one end of the face to the other, so no window is
+// cut in two at a corner. Faces are flat shaded: a face has vertices
 // of its own, with the face's normal.
 
 /** The surfaces of a model. Wall, roof and trim take the building's tints; glass and paving are the theme's. */
@@ -45,10 +47,11 @@ export interface ModelArrays {
   /** The vertex's `SURFACE`. */
   surfaces: Float32Array;
   /**
-   * Per vertex: where it sits along its wall, in windows from the model's
-   * middle; how high, in floors from the bottom of its box; which axis the
-   * wall runs along, 0 for x and 1 for z, so the shader can undo a stretch
-   * of the lot (render/building-meshes.ts); and its `FACADE`.
+   * Per vertex: where it sits along its face, 0 at one end and 1 at the
+   * other; how high, in floors from the bottom of its box; how long the
+   * face is in windows, positive for a wall along x and negative for one
+   * along z, so the shader can take in a stretch of the lot along that axis
+   * (`baysOn`); and its `FACADE`.
    */
   facades: Float32Array;
   indices: Uint16Array | Uint32Array;
@@ -62,6 +65,18 @@ export interface ModelArrays {
 }
 
 type Vec3 = readonly [number, number, number];
+
+/**
+ * How many window bays vertex `v`'s face of `m` takes, on a lot stretched
+ * by `sx` along x and `sz` along z: its length in windows, rounded, so each
+ * bay is a little wider or narrower than the generator asked and every
+ * window is whole. A face under half a window long has none. The shader
+ * works the same out (render/building-meshes.ts).
+ */
+export function baysOn(m: Pick<ModelArrays, "facades">, v: number, sx: number, sz: number): number {
+  const span = m.facades[v * 4 + 2] ?? 0;
+  return Math.floor(Math.abs(span) * (span >= 0 ? sx : sz) + 0.5);
+}
 
 const NO_FACADE: Facade = { kind: FACADE.none, spacing: 1, floor: 1 };
 
@@ -129,13 +144,21 @@ export class ModelBuilder {
     }
     // A wall runs along x when it faces ±z, and along z when it faces ±x.
     const axis = Math.abs(nz) >= Math.abs(nx) ? 0 : 1;
+    let from = Infinity;
+    let to = -Infinity;
+    for (const p of pts) {
+      from = Math.min(from, axis === 0 ? p[0] : p[2]);
+      to = Math.max(to, axis === 0 ? p[0] : p[2]);
+    }
+    const length = to - from;
+    const span = length / facade.spacing;
     const start = this.positions.length / 3;
     for (const p of pts) {
       this.positions.push(p[0], p[1], p[2]);
       this.normals.push(nx, ny, nz);
       this.surfaces.push(surface);
-      const along = (axis === 0 ? p[0] : p[2]) / facade.spacing;
-      this.facades.push(along, (p[1] - base) / facade.floor, axis, facade.kind);
+      const along = length > 1e-9 ? ((axis === 0 ? p[0] : p[2]) - from) / length : 0;
+      this.facades.push(along, (p[1] - base) / facade.floor, axis === 0 ? span : -span, facade.kind);
     }
     for (let k = 1; k + 1 < pts.length; k++) this.indices.push(start, start + k, start + k + 1);
   }
