@@ -30,7 +30,7 @@
 
 import type { ZoomBand } from "../camera/zoom-band";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "@city-council/sim";
-import { SURFACE, type ModelArrays } from "../theme/model";
+import { baysOn, SURFACE, type ModelArrays } from "../theme/model";
 import { BUILDINGS } from "./config";
 
 export type BuildingForm = "full" | "simple" | "box" | "flat";
@@ -250,9 +250,10 @@ export const KINDS = 8;
 /**
  * A merged chunk's arrays. Colours are sRGB bytes, which the shader takes
  * to linear light; for the simple form the alpha byte is the vertex's
- * `FACADE` and its building's look, packed as `KINDS` says, and `facades` holds where it is on its facade, in windows along
- * the wall with the lot's stretch taken out and in floors up, as the full
- * models' shader works them out. Normals are signed bytes, x, y, z and a
+ * `FACADE` and its building's look, packed as `KINDS` says, and `facades`
+ * holds where it is on its facade, in window bays from the start of its
+ * face on the stretched lot and in floors up, as the full models' shader
+ * works them out (theme/model.ts, `baysOn`). Normals are signed bytes, x, y, z and a
  * zero. The flat form has neither, and alpha 255.
  */
 export interface MergedArrays {
@@ -350,8 +351,7 @@ export function mergeModels(items: readonly MergedItem[], fixed: FixedColours): 
       colours[(v + k) * 4 + 1] = colour[1];
       colours[(v + k) * 4 + 2] = colour[2];
       colours[(v + k) * 4 + 3] = (m.facades[k * 4 + 3] ?? 0) + KINDS * (item.look ?? 0);
-      const axis = m.facades[k * 4 + 2] ?? 0;
-      facades[(v + k) * 2] = (m.facades[k * 4] ?? 0) * (axis < 0.5 ? item.sx : item.sz);
+      facades[(v + k) * 2] = (m.facades[k * 4] ?? 0) * baysOn(m, k, item.sx, item.sz);
       facades[(v + k) * 2 + 1] = m.facades[k * 4 + 1] ?? 0;
     }
     for (let k = 0; k < m.indices.length; k++) indices[i + k] = v + (m.indices[k] ?? 0);
