@@ -1,5 +1,6 @@
 // Where the pops are (M3-03): which pops live in and work at each building,
-// and each building's people and jobs filled. Derived, never saved or
+// each building's people and jobs filled, and the city's people at each
+// satisfaction score, which the residential bar's departures read (M3-10). Derived, never saved or
 // hashed: it lives in a WeakMap keyed by the pops object, like the building
 // index, is built from the pop rows on first use and kept current by the
 // functions in pops.ts, which also note each building whose numbers they
@@ -16,7 +17,7 @@ import { buildingIdLimit } from "../buildings/buildings";
 import type { SimState } from "../state";
 import { notePopBuilding } from "./changes";
 import { noteOpening } from "./opening-changes";
-import { NO_WORK, POP_ALIVE, POP_LEVELS, popWorkers, type PopState } from "./pops";
+import { NO_WORK, POP_ALIVE, POP_LEVELS, SATISFACTION_MAX, popWorkers, type PopState } from "./pops";
 
 const NONE = -1;
 
@@ -39,6 +40,8 @@ export interface PopIndex {
    * level need no walk over its workers.
    */
   filledByEducation: Int32Array;
+  /** By satisfaction score, 0 to SATISFACTION_MAX: the people in pops at that score (M3-10). */
+  peopleBySatisfaction: Float64Array;
   /** By pop: the next and previous pop in its home's list. */
   homeNext: Int32Array;
   homePrev: Int32Array;
@@ -89,6 +92,7 @@ function buildIndex(state: SimState): PopIndex {
     people: empty,
     filled: empty,
     filledByEducation: empty,
+    peopleBySatisfaction: new Float64Array(SATISFACTION_MAX + 1),
     homeNext: empty,
     homePrev: empty,
     workNext: empty,
@@ -102,6 +106,7 @@ function buildIndex(state: SimState): PopIndex {
     const home = p.home[id] ?? 0;
     pushFront(index.homeHead, index.homeTail, index.homeNext, index.homePrev, home, id);
     index.people[home] = (index.people[home] ?? 0) + (p.size[id] ?? 0);
+    moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, p.size[id] ?? 0);
     const work = p.work[id] ?? NO_WORK;
     if (work === NO_WORK) continue;
     pushFront(index.workHead, index.workTail, index.workNext, index.workPrev, work, id);
@@ -179,6 +184,7 @@ export function linkHome(index: PopIndex, p: PopState, id: number): void {
   const home = p.home[id] ?? 0;
   insertSorted(index.homeHead, index.homeTail, index.homeNext, index.homePrev, home, id);
   index.people[home] = (index.people[home] ?? 0) + (p.size[id] ?? 0);
+  moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, p.size[id] ?? 0);
   notePopBuilding(p, home);
 }
 
@@ -187,7 +193,13 @@ export function unlinkHome(index: PopIndex, p: PopState, id: number): void {
   const home = p.home[id] ?? 0;
   unlink(index.homeHead, index.homeTail, index.homeNext, index.homePrev, home, id);
   index.people[home] = (index.people[home] ?? 0) - (p.size[id] ?? 0);
+  moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, -(p.size[id] ?? 0));
   notePopBuilding(p, home);
+}
+
+/** Adds `people` to the count at satisfaction `score`, or takes them away when negative. pops.ts calls it around every change of a pop's size or score. */
+export function moveSatisfactionPeople(index: PopIndex, score: number, people: number): void {
+  index.peopleBySatisfaction[score] = (index.peopleBySatisfaction[score] ?? 0) + people;
 }
 
 /** Files live pop `id` under its workplace, if it has one, and adds its workers to the jobs filled there. */

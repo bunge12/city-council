@@ -9,6 +9,7 @@ import { STAT_TOTALS, createStats, recountTotals, sampleCount, statsFor } from "
 import { addBuilding } from "../src/buildings/buildings";
 import { addPop, setPopWork } from "../src/pops/pops";
 import { withEnds } from "./seen-ends";
+import { withoutSatisfaction } from "./before-satisfaction";
 
 /**
  * `state` as an older version: its fields minus the ones that version did
@@ -49,6 +50,8 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
     void owed;
     kept["pops"] = pops;
   }
+  // Before version 23 nothing kept satisfaction but the pops' scores.
+  if (version < 23) return { ...withoutSatisfaction(kept), version };
   return { ...kept, version };
 }
 
@@ -102,7 +105,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(22);
+    expect(SNAPSHOT_VERSION).toBe(23);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -381,7 +384,7 @@ describe("migrateState", () => {
     const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
     expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
     while (state.tick < 250) step(state);
-    const v20 = older(state, 20);
+    const v20 = older(structuredClone(state), 20);
     v20["growth"] = { quota: 40, day: 2, deadline: 30, free: 48, used: 3 };
     const migrated = migrateState(v20);
     expect(migrated.version).toBe(SNAPSHOT_VERSION);
@@ -394,6 +397,39 @@ describe("migrateState", () => {
       step(migrated);
     }
     expect(hashState(migrated)).toBe(hashState(state));
+  });
+
+  it("upgrades a version 22 city with pops by giving them no days low, no plan of departures, the summed satisfaction counted and the bar's part at 0", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    while (state.tick < 250) step(state);
+    const homes: number[] = [];
+    for (let id = 0; id < state.buildings.flags.length; id++) if (state.buildings.flags[id] && (state.buildings.residents[id] ?? 0) > 0) homes.push(id);
+    expect(homes.length).toBeGreaterThan(0);
+    for (const [i, home] of homes.entries()) addPop(state, { home, size: 1, education: 0, wealth: 0, children: 0, satisfaction: 10 + i, daysLow: 3 });
+    const v22 = older(structuredClone(state), 22);
+    expect("daysLow" in (v22["pops"] as object)).toBe(false);
+    const migrated = migrateState(v22);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(Object.keys(migrated.pops)).toEqual(Object.keys(state.pops));
+    expect(Array.from(migrated.pops.daysLow).every((d) => d === 0)).toBe(true);
+    expect(migrated.pops.leaveScore).toBe(-1);
+    expect(migrated.pops.leaveAtScore).toBe(0);
+    expect(migrated.stats.totals).toEqual(recountTotals(migrated));
+    expect(migrated.stats.totals["residentSatisfaction"]).toBe(state.stats.totals["residentSatisfaction"]);
+    expect(Object.keys(migrated.stats.totals)).toEqual(STAT_TOTALS);
+    expect(Object.keys(migrated.stats.history)).toEqual(STAT_TOTALS);
+    expect(migrated.stats.history["residentSatisfaction"]?.length).toBe(sampleCount(migrated.stats));
+    expect(Object.keys(migrated.demand.residential.parts)).toEqual(Object.keys(state.demand.residential.parts));
+    expect(migrated.demand.residential.parts["satisfaction"]).toBe(0);
+    // Everything else is the city as it was.
+    expect(hashState(withoutSatisfaction(migrated))).toBe(hashState(withoutSatisfaction(state)));
+    // And it steps on.
+    while (migrated.tick < 600) step(migrated);
+    expect(migrated.stats.totals).toEqual(recountTotals(migrated));
   });
 
   it("upgrades a version 21 city by giving its pops a plan of arrivals at 0, and changes nothing else", () => {

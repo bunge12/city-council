@@ -1,11 +1,12 @@
 // Pop numbers from `balance/pops.json`, checked when the module loads
 // (M3-01, PRD "M3 Demand" and "Turnover"). Pops in state (M3-03) read the
-// size cap and the worker shares; newcomers read the newcomer mix in M3-08 and
-// turnover in M3-11.
+// size cap and the worker shares; newcomers read the newcomer mix in M3-08,
+// satisfaction reads `satisfaction` in M3-10 and turnover reads `turnover`
+// in M3-11.
 
 import balance from "../../balance/pops.json" with { type: "json" };
 import { EDUCATION_LEVELS, type EducationShares } from "../buildings/balance";
-import { isRecord, isShare, numberProblems, shareProblems, unknownKeys } from "../balance-fields";
+import { isRecord, isShare, numberProblem, numberProblems, shareProblems, unknownKeys } from "../balance-fields";
 import { ZONING_BALANCE } from "../zoning/balance";
 
 /** The pops balance file. */
@@ -27,6 +28,17 @@ export interface PopsBalance {
   };
   /** The share of a pop's people who work. */
   workerShare: { withoutChildren: number; withChildren: number };
+  /** How each pop's score is set once a game day, and when a pop moves out (M3-10). */
+  satisfaction: {
+    /** Where the score heads, from 0 to 100: with nobody who works, in a job at its own education, in a job below it, and with workers and no job. */
+    target: { noWorkers: number; fittingJob: number; otherJob: number; noJob: number };
+    /** How far the score moves toward its target a game day, from 0 to 1. */
+    dailyShare: number;
+    /** A score below this counts toward leaving. */
+    leaveBelow: number;
+    /** Game days in a row below `leaveBelow` before a pop moves out, from 1 to `DAYS_LOW_LIMIT`. */
+    leaveAfterDays: number;
+  };
   /** Yearly rates, applied a 365th a game day. */
   turnover: {
     /** Per person: a pop's daily chance is this times its size over 365. */
@@ -43,7 +55,10 @@ export interface PopsBalance {
 /** The most a size cap may be: a pop's size is a byte in state (pops.ts). */
 export const POP_SIZE_LIMIT = 255;
 
-const TOP = ["popSizeCap", "newcomer", "workerShare", "turnover"];
+/** The most `satisfaction.leaveAfterDays` may be: a pop's days below the threshold are a byte in state (pops.ts). */
+export const DAYS_LOW_LIMIT = 255;
+
+const TOP = ["popSizeCap", "newcomer", "workerShare", "satisfaction", "turnover"];
 
 /** Every problem with a pops balance file, or none. A missing field is a problem, and so is a share out of 0 to 1. */
 export function checkPopsBalance(data: unknown): string[] {
@@ -89,6 +104,22 @@ export function checkPopsBalance(data: unknown): string[] {
     errors.push(...wsErrors);
     if (wsErrors.length === 0 && isRecord(ws) && (ws["withChildren"] as number) > (ws["withoutChildren"] as number)) {
       errors.push("workerShare.withChildren must not be above workerShare.withoutChildren");
+    }
+  }
+
+  if ("satisfaction" in data) {
+    const sat = data["satisfaction"];
+    const score = { min: 0, max: 100, whole: true };
+    if (!isRecord(sat)) errors.push("satisfaction must be an object");
+    else {
+      const rules = { dailyShare: { min: 0, max: 1, aboveMin: true }, leaveBelow: score, leaveAfterDays: { min: 1, max: DAYS_LOW_LIMIT, whole: true } };
+      for (const [key, rule] of Object.entries(rules)) {
+        const problem = numberProblem(sat, key, rule, "satisfaction");
+        if (problem) errors.push(problem);
+      }
+      if (!("target" in sat)) errors.push("satisfaction.target is missing");
+      else errors.push(...numberProblems(sat["target"], { noWorkers: score, fittingJob: score, otherJob: score, noJob: score }, "satisfaction.target"));
+      errors.push(...unknownKeys(sat, [...Object.keys(rules), "target"], "satisfaction"));
     }
   }
 

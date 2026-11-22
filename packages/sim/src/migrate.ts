@@ -1,8 +1,8 @@
 import { createBuildings } from "./buildings/buildings";
 import { TIME_BALANCE } from "./calendar";
-import { createPops } from "./pops/pops";
-import { statsFor } from "./stats/stats";
-import { createDemand } from "./demand/demand";
+import { NO_LEAVING, createPops } from "./pops/pops";
+import { STAT_TOTALS, recountTotals, statsFor } from "./stats/stats";
+import { DEMAND_PARTS, createDemand } from "./demand/demand";
 import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -108,7 +108,46 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 22 adds the day's plan of arrivals to the pops (M3-08). Nobody
   // could arrive before it, so nobody is owed.
   21: (old) => ({ ...old, version: 22, pops: { ...(old["pops"] as Record<string, unknown>), owed: 0 } }),
+  // Version 23 (M3-10) gives every pop the game days its satisfaction has
+  // been low, none yet, and the pops the day's plan of departures, nobody.
+  // The statistics gain the residents' summed satisfaction, counted from
+  // the pops, with a history of zeros as long as the others, and the
+  // residential bar gains its satisfaction part at 0, which takes its
+  // first step on the next day's first tick.
+  22: (old) => ({ ...old, version: 23, pops: popsWithDaysLow(old["pops"]), stats: statsWithSatisfaction(old), demand: demandWithSatisfaction(old["demand"]) }),
 };
+
+/** A version 22 set of pops with the version 23 fields, in the order a new state has them: no days low, and no plan of departures. */
+function popsWithDaysLow(value: unknown): Record<string, unknown> {
+  const pops = value as Record<string, unknown> & { flags: Uint8Array };
+  const added: Record<string, unknown> = { daysLow: new Uint8Array(pops.flags.length), leaveScore: NO_LEAVING, leaveAtScore: 0 };
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(createPops())) out[key] = key in added ? added[key] : pops[key];
+  return out;
+}
+
+/** Version 22 statistics with the residents' summed satisfaction, counted from the pops, and its history all zeros. Totals and history keep `STAT_TOTALS` order. */
+function statsWithSatisfaction(old: Record<string, unknown>): Record<string, unknown> {
+  const stats = old["stats"] as Record<string, unknown> & { totals: Record<string, number>; history: Record<string, Int32Array> };
+  const counted = recountTotals({ pops: old["pops"], buildings: old["buildings"] } as unknown as SimState)["residentSatisfaction"] ?? 0;
+  const length = stats.history["population"]?.length ?? 0;
+  const totals: Record<string, number> = {};
+  const history: Record<string, Int32Array> = {};
+  for (const name of STAT_TOTALS) {
+    totals[name] = name in stats.totals ? (stats.totals[name] ?? 0) : counted;
+    history[name] = stats.history[name] ?? new Int32Array(length);
+  }
+  return { ...stats, totals, history };
+}
+
+/** Version 22 demand bars with the residential bar's satisfaction part, at 0, in `DEMAND_PARTS` order. */
+function demandWithSatisfaction(value: unknown): Record<string, unknown> {
+  const demand = value as Record<string, { value: number; parts: Record<string, number> }>;
+  const residential = demand["residential"] as { value: number; parts: Record<string, number> };
+  const parts: Record<string, number> = {};
+  for (const name of DEMAND_PARTS.residential) parts[name] = residential.parts[name] ?? 0;
+  return { ...demand, residential: { ...residential, parts } };
+}
 
 /** A version 11 set of buildings with the back-lot arrays version 12 adds, all 0, one per id. */
 function withBackLots(old: unknown): unknown {

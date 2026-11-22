@@ -3,7 +3,9 @@
 // read all but `arrivalsPerYearAtFullDemand`, which arrivals read, and
 // `emptyRoomShareMax`, which the grower reads for homes (M3-08),
 // `openJobsShareMax`, which it reads for workplaces, and `jobMatching`,
-// which job matching reads (M3-09),
+// which job matching reads (M3-09), `departuresPerYearAtFullDemand`, which
+// satisfaction reads to send people away while the residential bar is below
+// zero (M3-10),
 // and `buildingsPerDayAtFullDemand`, which the grower reads (M3-07).
 
 import balance from "../../balance/demand.json" with { type: "json" };
@@ -15,7 +17,7 @@ import { isRecord, numberProblem, numberProblems, unknownKeys, type NumberRule }
 export interface DemandBalance {
   /** How far each bar moves toward its new value a game day, from 0 to 1. */
   dailyShare: number;
-  residential: { openJobs: number; unemployment: number };
+  residential: { openJobs: number; unemployment: number; satisfaction: number };
   commercial: { spendingPower: number; availableWorkers: number; shopSurplus: number };
   office: { educatedWorkers: number; serviceBuyers: number };
   industrial: { unemployedWorkers: number; goodsNeeded: number; openOfficeJobs: number };
@@ -31,6 +33,10 @@ export interface DemandBalance {
   outsidePull: { bar: number; untilResidents: number };
   /** Residents a game year with the residential bar at 100 (M3-08). */
   arrivalsPerYearAtFullDemand: number;
+  /** Residents a game year who leave with the residential bar at -100, the least satisfied first (M3-10). */
+  departuresPerYearAtFullDemand: number;
+  /** The average satisfaction at which residents neither raise nor lower the residential bar (M3-10). */
+  satisfactionNeutral: number;
   /** New homes wait while the empty room in homes newcomers can reach is above this share of their room (M3-08). */
   emptyRoomShareMax: number;
   /** The grower adds no workplace to a zone while the open jobs in its buildings newcomers can reach are above this share of their jobs (M3-09). */
@@ -46,7 +52,7 @@ const LOWERS: NumberRule = { min: -1000, max: 0 };
 
 /** Each bar's inputs, and whether each raises the bar or lowers it (PRD, "Four demand bars"). */
 const BARS: Readonly<Record<string, Readonly<Record<string, NumberRule>>>> = {
-  residential: { openJobs: RAISES, unemployment: LOWERS },
+  residential: { openJobs: RAISES, unemployment: LOWERS, satisfaction: RAISES },
   commercial: { spendingPower: RAISES, availableWorkers: RAISES, shopSurplus: LOWERS },
   office: { educatedWorkers: RAISES, serviceBuyers: RAISES },
   industrial: { unemployedWorkers: RAISES, goodsNeeded: RAISES, openOfficeJobs: LOWERS },
@@ -55,6 +61,8 @@ const BARS: Readonly<Record<string, Readonly<Record<string, NumberRule>>>> = {
 const TOP: Readonly<Record<string, NumberRule>> = {
   dailyShare: { min: 0, max: 1, aboveMin: true },
   arrivalsPerYearAtFullDemand: { min: 0 },
+  departuresPerYearAtFullDemand: { min: 0 },
+  satisfactionNeutral: { min: 0, max: 100 },
   emptyRoomShareMax: { min: 0, max: 1 },
   openJobsShareMax: { min: 0, max: 1 },
   shopJobsPerSpending: { min: 0, max: 10 },

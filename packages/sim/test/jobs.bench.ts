@@ -87,9 +87,12 @@ function copyPops(p: PopState): PopState {
     wealth: p.wealth.slice(),
     children: p.children.slice(),
     satisfaction: p.satisfaction.slice(),
+    daysLow: p.daysLow.slice(),
     free: p.free.slice(),
     sweep: p.sweep,
     owed: p.owed,
+    leaveScore: p.leaveScore,
+    leaveAtScore: p.leaveAtScore,
   };
 }
 

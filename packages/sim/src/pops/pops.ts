@@ -3,9 +3,10 @@
 // A pop is a block of people who share a home building, a workplace and a
 // profile. One row per pop id in flat typed arrays, like the buildings: a
 // removed id's row is zeros and its id goes on the free list, the next one
-// to reuse last. A row is 14 bytes: the alive flag, the home and workplace
+// to reuse last. A row is 15 bytes: the alive flag, the home and workplace
 // as 32-bit building ids, and a byte each for size, education, wealth,
-// children and satisfaction.
+// children, satisfaction and the game days its satisfaction has been below
+// the threshold for leaving (M3-10).
 //
 // Only the functions here change a pop, and each keeps the derived index
 // (where.ts) current: which pops live in and work at each building, and
@@ -16,19 +17,21 @@
 // put a home over the people it holds room for, or a workplace over its
 // jobs. Newcomers arrive through `addPop` (arrivals.ts, M3-08).
 //
-// `sweep` is the cursor the daily systems share (sweep.ts), and `owed` the
-// day's plan of arrivals (arrivals.ts).
+// `sweep` is the cursor the daily systems share (sweep.ts), `owed` the
+// day's plan of arrivals (arrivals.ts), and `leaveScore` and `leaveAtScore`
+// the day's plan of departures while the residential bar is below zero
+// (satisfaction.ts).
 
 import { BUILDING_TYPES } from "../buildings/balance";
 import { isBuilding, type BuildingState } from "../buildings/buildings";
 import { buildingJobs } from "../buildings/jobs";
 import { resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
-import { countEmployment, countFilled, countPop } from "../stats/stats";
-import { POPS_BALANCE } from "./balance";
+import { countEmployment, countFilled, countPop, countSatisfaction } from "../stats/stats";
+import { DAYS_LOW_LIMIT, POPS_BALANCE } from "./balance";
 import { notePopBuilding } from "./changes";
 import { jobsProblem } from "./open-jobs";
-import { popIndexOf, linkHome, linkWork, unlinkHome, unlinkWork, type PopIndex } from "./where";
+import { popIndexOf, linkHome, linkWork, unlinkHome, unlinkWork, moveSatisfactionPeople, type PopIndex } from "./where";
 
 /** Set in `flags` for a live pop. */
 export const POP_ALIVE = 1;
@@ -60,6 +63,8 @@ export interface PopState {
   children: Uint8Array;
   /** 0 to SATISFACTION_MAX. */
   satisfaction: Uint8Array;
+  /** Game days in a row its satisfaction has been below `satisfaction.leaveBelow` in pops.json, up to DAYS_LOW_LIMIT (M3-10). */
+  daysLow: Uint8Array;
   /** Removed ids, the next one to reuse last. */
   free: Int32Array;
   /**
@@ -75,10 +80,25 @@ export interface PopState {
    * mid-day lands the same pops.
    */
   owed: number;
+  /**
+   * The day's plan of departures while the residential bar is below zero
+   * (satisfaction.ts, M3-10): a pop whose satisfaction is below
+   * `leaveScore` leaves when the day's sweep reaches it, and one at
+   * `leaveScore` leaves while `leaveAtScore` people at that score are still
+   * due to go. Below 0, `leaveAtScore` is the people sent away past the
+   * plan, which the next day's plan pays back. `leaveScore` is NO_LEAVING on
+   * a day nobody is due to go.
+   * State, so a city saved mid-day sends the same pops away.
+   */
+  leaveScore: number;
+  leaveAtScore: number;
 }
 
+/** `leaveScore` on a day nobody is sent away by the residential bar. */
+export const NO_LEAVING = -1;
+
 /** The per-pop arrays, in the order a new state has them. */
-export const POP_ARRAYS = ["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction"] as const;
+export const POP_ARRAYS = ["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow"] as const;
 
 type PopKey = (typeof POP_ARRAYS)[number];
 
@@ -91,6 +111,7 @@ const ARRAY_TYPES: Readonly<Record<PopKey | "free", new (n: number) => AnyTypedA
   wealth: Uint8Array,
   children: Uint8Array,
   satisfaction: Uint8Array,
+  daysLow: Uint8Array,
   free: Int32Array,
 };
 
@@ -108,9 +129,12 @@ export function createPops(): PopState {
     wealth: new Uint8Array(0),
     children: new Uint8Array(0),
     satisfaction: new Uint8Array(0),
+    daysLow: new Uint8Array(0),
     free: new Int32Array(0),
     sweep: 0,
     owed: 0,
+    leaveScore: NO_LEAVING,
+    leaveAtScore: 0,
   };
 }
 
@@ -143,6 +167,8 @@ export interface NewPop extends PopProfile {
   home: number;
   size: number;
   satisfaction: number;
+  /** Game days its satisfaction has already been low, for the part of a split pop (M3-10). 0 if left out. */
+  daysLow?: number;
 }
 
 /** One pop's row. */
@@ -150,6 +176,7 @@ export interface PopRow extends NewPop {
   id: number;
   /** The building it works in, or NO_WORK. */
   work: number;
+  daysLow: number;
 }
 
 /** The row of pop `id`. Throws if there is no such pop. */
@@ -164,6 +191,7 @@ export function readPop(p: PopState, id: number): PopRow {
     wealth: p.wealth[id] ?? 0,
     children: p.children[id] ?? 0,
     satisfaction: p.satisfaction[id] ?? 0,
+    daysLow: p.daysLow[id] ?? 0,
   };
 }
 
@@ -229,6 +257,10 @@ function checkSatisfaction(satisfaction: number): void {
   }
 }
 
+function checkDaysLow(days: number): void {
+  if (!Number.isInteger(days) || days < 0 || days > DAYS_LOW_LIMIT) throw new RangeError(`days low must be a whole number from 0 to ${DAYS_LOW_LIMIT}`);
+}
+
 /** Throws unless `size` people fit one pop in building `home`, beside the `others` people already there. */
 function checkHomeRoom(state: SimState, home: number, size: number, others: number): void {
   const b = state.buildings;
@@ -261,6 +293,7 @@ export function addPop(state: SimState, spec: NewPop): number {
   }
   checkProfile(spec);
   checkSatisfaction(spec.satisfaction);
+  checkDaysLow(spec.daysLow ?? 0);
   const index = popIndexOf(state);
   checkHomeRoom(state, spec.home, spec.size, index.people[spec.home] ?? 0);
   const p = state.pops;
@@ -281,6 +314,7 @@ export function addPop(state: SimState, spec: NewPop): number {
   p.wealth[id] = spec.wealth;
   p.children[id] = spec.children;
   p.satisfaction[id] = spec.satisfaction;
+  p.daysLow[id] = spec.daysLow ?? 0;
   linkHome(index, p, id);
   countPop(state, id, 1);
   return id;
@@ -311,6 +345,7 @@ function clearRow(p: PopState, id: number): void {
   p.wealth[id] = 0;
   p.children[id] = 0;
   p.satisfaction[id] = 0;
+  p.daysLow[id] = 0;
 }
 
 /**
@@ -356,6 +391,7 @@ export function setPopSize(state: SimState, id: number, size: number): void {
   uncount(state, id, work, NO_WORK);
   unlinkWork(index, p, id);
   index.people[home] = (index.people[home] ?? 0) - old + size;
+  moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, size - old);
   notePopBuilding(p, home);
   p.size[id] = size;
   keepJobIfWorking(p, id);
@@ -420,11 +456,29 @@ export function setPopProfile(state: SimState, id: number, profile: PopProfile):
   recount(state, id, work, NO_WORK);
 }
 
-/** Sets pop `id`'s satisfaction. Throws if it is not a whole number from 0 to SATISFACTION_MAX. */
+/**
+ * Sets pop `id`'s satisfaction, keeping the residents' summed satisfaction
+ * and the index's people by score current. Throws if it is not a whole
+ * number from 0 to SATISFACTION_MAX.
+ */
 export function setPopSatisfaction(state: SimState, id: number, satisfaction: number): void {
-  livePop(state, id);
+  const index = livePop(state, id);
   checkSatisfaction(satisfaction);
-  state.pops.satisfaction[id] = satisfaction;
+  const p = state.pops;
+  const old = p.satisfaction[id] ?? 0;
+  if (old === satisfaction) return;
+  const size = p.size[id] ?? 0;
+  moveSatisfactionPeople(index, old, -size);
+  moveSatisfactionPeople(index, satisfaction, size);
+  countSatisfaction(state, size * (satisfaction - old));
+  p.satisfaction[id] = satisfaction;
+}
+
+/** Sets the game days pop `id`'s satisfaction has been low. Throws if it is not a whole number from 0 to DAYS_LOW_LIMIT. */
+export function setPopDaysLow(state: SimState, id: number, days: number): void {
+  livePop(state, id);
+  checkDaysLow(days);
+  state.pops.daysLow[id] = days;
 }
 
 /**
@@ -457,8 +511,9 @@ export function removeBuildingPops(state: SimState, ids: readonly number[]): voi
  * id's row all zeros, every live pop in a live home with at least one
  * person and its fields in range, working nowhere or at a live building
  * with jobs, no home holding more people than its stored room, the
- * sweep's limit within the ids handed out, and the plan of arrivals a whole
- * number of 0 or below.
+ * sweep's limit within the ids handed out, the plan of arrivals a whole
+ * number of 0 or below, and the plan of departures a score to leave at, or
+ * NO_LEAVING, and a whole number of people.
  *
  * What depends on the balance files is not checked: the size cap, a
  * building's jobs and the share of a pop who work. A save made before they
@@ -472,13 +527,16 @@ export function checkPops(value: unknown, buildings: BuildingState): string | nu
   for (const [key, Type] of Object.entries(ARRAY_TYPES)) {
     if (!(raw[key] instanceof Type)) return `${key} is not a ${Type.name}`;
   }
-  const extra = Object.keys(raw).find((key) => !(key in ARRAY_TYPES) && key !== "sweep" && key !== "owed");
+  const numbers = ["sweep", "owed", "leaveScore", "leaveAtScore"];
+  const extra = Object.keys(raw).find((key) => !(key in ARRAY_TYPES) && !numbers.includes(key));
   if (extra !== undefined) return `it has an unknown field "${extra}"`;
   const p = raw as unknown as PopState;
   const limit = p.flags.length;
   if (POP_ARRAYS.some((key) => p[key].length !== limit)) return "its arrays differ in length";
   if (!Number.isSafeInteger(p.sweep) || p.sweep < 0 || p.sweep > limit) return "its sweep is not a pop id limit";
   if (!Number.isSafeInteger(p.owed) || p.owed > 0) return "its plan of arrivals is not a whole number of 0 or below";
+  if (!Number.isSafeInteger(p.leaveScore) || p.leaveScore < NO_LEAVING || p.leaveScore > SATISFACTION_MAX) return "its plan of departures has no score to leave at";
+  if (!Number.isSafeInteger(p.leaveAtScore)) return "its plan of departures is not a whole number of people";
   const seen = new Uint8Array(limit);
   for (const id of p.free) {
     if (id < 0 || id >= limit || seen[id] || isPop(p, id)) return "its free list is malformed";

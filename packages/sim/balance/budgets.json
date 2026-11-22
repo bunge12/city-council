@@ -146,6 +146,14 @@
       "mode": "blocks",
       "source": "M3-09"
     },
+    "satisfaction.tick": {
+      "name": "the satisfaction system's ticks on the scale town in an exodus: 150,000 pops, every pop in the day's slice of 1,500 moving out at once; a fifth of the tick, for a case a city meets only when every pop leaves together",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 4,
+      "mode": "blocks",
+      "source": "M3-10"
+    },
     "demand.outside": {
       "name": "working out which of the scale town's 30,000 segments reach outside again, in the step after a change of roads",
       "unit": "ms",

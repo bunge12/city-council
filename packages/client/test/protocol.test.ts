@@ -199,7 +199,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "demand", "pops", "arrivals", "jobs", "landValue", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "demand", "pops", "arrivals", "jobs", "satisfaction", "landValue", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -719,7 +719,7 @@ describe("snapshot transfer", () => {
       ...statBuffers,
     ]);
     expect(buildingBuffers).toHaveLength(19);
-    expect(popBuffers).toHaveLength(9);
+    expect(popBuffers).toHaveLength(10);
     expect(statBuffers).toHaveLength(STAT_TOTALS.length);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });

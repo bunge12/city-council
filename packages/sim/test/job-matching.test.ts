@@ -41,6 +41,7 @@ import { submit } from "./seen-ends";
 import { holdDemand, type HeldBars } from "./demand-helper";
 import { expectReplay, replayFixture, type ReplayFixture } from "./replay-helper";
 import fixtureJson from "./fixtures/replay/jobs.json" with { type: "json" };
+import { withValue } from "./with-value";
 
 // M3-09: job matching. Pops without work look for it a slice a tick, and
 // take open jobs their education allows, nearer ones likelier. The grower
@@ -104,16 +105,6 @@ function runDays(state: SimState, days: number, each?: () => void): void {
   }
 }
 
-/** Runs `body` with `key` of `record` set to `value`, and puts it back after. */
-function withValue<T extends object, K extends keyof T, R>(record: T, key: K, value: T[K], body: () => R): R {
-  const was = record[key];
-  record[key] = value;
-  try {
-    return body();
-  } finally {
-    record[key] = was;
-  }
-}
 
 function live(state: SimState, keep: (id: number) => boolean): number[] {
   const out: number[] = [];
@@ -341,7 +332,7 @@ describe("job matching", () => {
     for (const id of workers) expect(readPop(state.pops, id).work).toBe(NO_WORK);
     expectRecount(state);
     // The far podium has room for them: no shop grows back on the near lot while its jobs are open.
-    withValue(DEMAND_BALANCE, "openJobsShareMax", 0, () => holdDemand({ residential: -10, commercial: -10 }, () => runDays(state, 2, () => expectJobsWithinOffers(state))));
+    withValue(DEMAND_BALANCE, "openJobsShareMax", 0, () => holdDemand({ residential: 0, commercial: -10 }, () => runDays(state, 2, () => expectJobsWithinOffers(state))));
     // Each works at the far podium now, unless it has no open job left that the pop's education allows.
     let moved = 0;
     for (const id of workers) {

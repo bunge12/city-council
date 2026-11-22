@@ -56,7 +56,9 @@ const BUILDINGS_BY_ZONE = ZONING_BALANCE.zones.map((zone) => ZONING_BALANCE.dens
 /**
  * Every running total, in the order state holds them. Population and the
  * residents' breakdowns count people; `pops` and `popsWithChildren` count
- * pops. Workers are the people of a pop who work (`workersFor`), employed
+ * pops. `residentSatisfaction` is the sum over the pops of their people
+ * times their satisfaction, so over the population it is the residents'
+ * average satisfaction weighted by pop size (M3-10). Workers are the people of a pop who work (`workersFor`), employed
  * if the pop has a job. Jobs are split by kind with `jobsByKind`, offered
  * from a building's jobs and filled from its jobs filled, so a mixed
  * building counts commercial jobs, and office jobs too at density 3.
@@ -67,6 +69,7 @@ export const STAT_TOTALS: readonly string[] = [
   ...RESIDENTS_BY_DENSITY,
   ...RESIDENTS_BY_EDUCATION,
   ...RESIDENTS_BY_WEALTH,
+  "residentSatisfaction",
   "workersEmployed",
   "workersUnemployed",
   ...JOBS_BY_KIND,
@@ -146,6 +149,7 @@ function addPop(t: StatTotals, p: PopState, b: BuildingState, id: number, sign: 
   bump(t, RESIDENTS_BY_DENSITY[Math.min(DENSITIES, Math.max(1, density)) - 1], people);
   bump(t, RESIDENTS_BY_EDUCATION[Math.min(POP_LEVELS - 1, p.education[id] ?? 0)], people);
   bump(t, RESIDENTS_BY_WEALTH[Math.min(POP_LEVELS - 1, p.wealth[id] ?? 0)], people);
+  bump(t, "residentSatisfaction", people * (p.satisfaction[id] ?? 0));
   bump(t, (p.work[id] ?? NO_WORK) === NO_WORK ? "workersUnemployed" : "workersEmployed", sign * workers);
   if (children) bump(t, "popsWithChildren", sign);
 }
@@ -221,6 +225,11 @@ export function countEmployment(state: SimState, workers: number, sign: 1 | -1):
 /** Adds live building `id` and the jobs it offers to the running totals, or takes it out with `sign` -1, while its row still says what it is. */
 export function countBuilding(state: SimState, id: number, sign: 1 | -1): void {
   addBuilding(state.stats.totals, state.buildings, id, sign);
+}
+
+/** Adds `by` to the residents' summed satisfaction: a pop's people times the change in its score (M3-10). */
+export function countSatisfaction(state: SimState, by: number): void {
+  bump(state.stats.totals, "residentSatisfaction", by);
 }
 
 function keepHighest(stats: StatsState): void {

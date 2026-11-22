@@ -26,6 +26,7 @@ import {
   serialize,
   step,
   whyNoNewcomers,
+  workersFor,
   yearDays,
   type Command,
   type SimState,
@@ -183,7 +184,10 @@ describe("a street from an outside connection, zoned R1", () => {
     for (const id of pops(state)) {
       const pop = readPop(state.pops, id);
       expect(pop.work).toBe(-1);
-      expect(pop.satisfaction).toBe(POPS_BALANCE.newcomer.satisfaction);
+      // A newcomer starts at the newcomer's score, then each day moves toward its target (M3-10): down for one with workers and no job, up for one with nobody who works.
+      const start = POPS_BALANCE.newcomer.satisfaction;
+      if (workersFor(pop.size, pop.children) > 0) expect(pop.satisfaction).toBeLessThanOrEqual(start);
+      else expect(pop.satisfaction).toBeGreaterThanOrEqual(start);
       expect(pop.size).toBeLessThanOrEqual(popSizeCap(state.buildings.density[pop.home] ?? 1));
     }
   });

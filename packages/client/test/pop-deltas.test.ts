@@ -199,7 +199,7 @@ describe("people and statistics in deltas", () => {
     let update = updates.at(-1);
     expect(delta?.type === "delta" && [...(delta.people?.ids ?? [])]).toEqual([home]);
     expect(update?.kind === "delta" && update.peopleIds).toEqual([home]);
-    const moved = ["population", "pops", "residentsDensity1", "residentsEducationMedium", "residentsWealthHigh", "workersUnemployed"];
+    const moved = ["population", "pops", "residentsDensity1", "residentsEducationMedium", "residentsWealthHigh", "residentSatisfaction", "workersUnemployed"];
     expect(update?.kind === "delta" && [...update.statTotals].sort()).toEqual(moved.sort());
     expect(delta?.type === "delta" && Object.keys(delta.stats.totals).sort()).toEqual(moved.sort());
     expect(mirror.buildingPeople(home)).toBe(1);
