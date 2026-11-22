@@ -645,7 +645,7 @@ describe("building deltas", () => {
     expect(applyBuildingDelta(copy, delta)).toEqual([chunk]);
     expect(copy.buildings).toEqual(state.buildings);
     // The statistics travel beside the rows (M3-04).
-    expect(applyStatsDelta(copy.stats, encodeStatsDelta(state.stats, copy.stats.next))).toBeNull();
+    expect(applyStatsDelta(copy.stats, encodeStatsDelta(state.stats, copy.stats.next))).not.toBeTypeOf("string");
     expect(hashState(copy)).toBe(hashState(state));
     const slot = (cellAt(copy, ...north(0, 0)) as { index: number }).index;
     expect(buildingOnSlot(copy, slot)).toBe(NO_BUILDING);

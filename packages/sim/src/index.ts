@@ -21,7 +21,7 @@ export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, isLogEntry, logLength, readLog } from ".
 export type { LogEntry } from "./log";
 export { TIME_BALANCE, gameDate, isMonthStart, isYearStart, yearDays } from "./calendar";
 export type { GameDate, TimeBalance } from "./calendar";
-export { fnv1a64, hashState } from "./hash";
+export { fnv1a64, hashMirrored, hashState } from "./hash";
 export { replay } from "./replay";
 export { BALANCE_STAMP, replaysUnderThisBalance } from "./balance-stamp";
 export { BUDGETS, BUDGET_WARN_BELOW_HEADROOM, budgetFigure, judgeBudget } from "./budgets";
@@ -109,6 +109,13 @@ export {
 } from "./pops/pops";
 export type { PopProfile, PopRow, PopState } from "./pops/pops";
 export { buildingPeople, jobsFilled, popsAtHome, popsAtWork } from "./pops/where";
+export { applyPopDelta, countOccupancy, drainPopDelta, popDeltaProblem, recordPopChanges } from "./pops/delta";
+export type { Occupancy, PopDelta } from "./pops/delta";
+// The changes the systems that move people make. Exported for a host's
+// tests, which play turnover before M3-11 builds it. UI code may not
+// import them (eslint.config.js).
+export { addPop, removePop, setPopProfile, setPopSize, setPopWork } from "./pops/pops";
+export type { NewPop } from "./pops/pops";
 export { POPS_SYSTEM, popSlice } from "./pops/sweep";
 export { DEMAND_BALANCE, checkDemandBalance } from "./demand/balance";
 export type { DemandBalance } from "./demand/balance";
@@ -131,6 +138,7 @@ export {
   createStats,
   encodeStatsDelta,
   historyOf,
+  statsDeltaProblem,
   recountTotals,
   sampleCount,
   type StatTotals,

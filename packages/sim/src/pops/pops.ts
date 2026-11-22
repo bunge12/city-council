@@ -25,6 +25,7 @@ import { resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
 import { countFilled, countPop } from "../stats/stats";
 import { POPS_BALANCE } from "./balance";
+import { notePopBuilding } from "./changes";
 import { popIndexOf, linkHome, linkWork, unlinkHome, unlinkWork, type PopIndex } from "./where";
 
 /** Set in `flags` for a live pop. */
@@ -340,6 +341,7 @@ export function setPopSize(state: SimState, id: number, size: number): void {
   uncount(state, id, work, NO_WORK);
   unlinkWork(index, p, id);
   index.people[home] = (index.people[home] ?? 0) - old + size;
+  notePopBuilding(p, home);
   p.size[id] = size;
   keepJobIfWorking(p, id);
   linkWork(index, p, id);

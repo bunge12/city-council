@@ -34,6 +34,11 @@ const UI_WRITES_STATE = [
   "nextFloat",
   "buildScaleCity",
   "COMMANDS",
+  "addPop",
+  "removePop",
+  "setPopProfile",
+  "setPopSize",
+  "setPopWork",
 ];
 
 const INEXACT_MATH =

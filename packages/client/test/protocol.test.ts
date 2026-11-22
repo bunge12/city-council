@@ -15,6 +15,7 @@ import {
   encodeStatsDelta,
   sampleCount,
   deserialize,
+  hashMirrored,
   hashState,
   nextFloat,
   nextInt,
@@ -165,7 +166,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       expect(held.mirror.state?.tick).toBe(ticks);
       const [a, b] = [held.mirror.state, clocked.mirror.state];
       if (!a || !b) throw new Error("no state");
-      expect(hashState(a)).toBe(hashState(b));
+      expect(hashMirrored(a)).toBe(hashMirrored(b));
     });
 
     it("carries on from now when released, without catching up the held time", () => {
@@ -207,11 +208,11 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       await mirror.sendCommand("SetSpeed", { speed: ([1, 2, 4] as const)[i % 3] });
       run(300);
     }
-    const mirrored = hashState(mirror.state);
+    const mirrored = hashMirrored(mirror.state);
     mirror.requestSnapshot();
     const snap = received.at(-1);
     expect(snap?.type).toBe("snapshot");
-    expect(snap?.type === "snapshot" && hashState(snap.state)).toBe(mirrored);
+    expect(snap?.type === "snapshot" && hashMirrored(snap.state)).toBe(mirrored);
   });
 
   it("keeps the mirror's statistics and their monthly history equal to the host's across month starts", async () => {
@@ -224,10 +225,10 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     if (!state) throw new Error("no state");
     expect(state.tick).toBeGreaterThanOrEqual(ticks);
     expect(sampleCount(state.stats)).toBe(3);
-    const mirrored = hashState(state);
+    const mirrored = hashMirrored(state);
     mirror.requestSnapshot();
     const snap = received.at(-1);
-    expect(snap?.type === "snapshot" && hashState(snap.state)).toBe(mirrored);
+    expect(snap?.type === "snapshot" && hashMirrored(snap.state)).toBe(mirrored);
     expect(snap?.type === "snapshot" && snap.state.stats.history).toEqual(state.stats.history);
   });
 
@@ -388,9 +389,9 @@ describe("road deltas", () => {
     tick();
     mirror.requestSnapshot();
     expect(updates).toEqual([
-      { kind: "delta", roadChunks: [chunk(4200, 4510)], roadNodes: [0, 1], roadSegs: [0], cellChunks: [], buildingChunks: [], buildingIds: [], steps: 1 },
-      { kind: "delta", roadChunks: [], roadNodes: [], roadSegs: [], cellChunks: [], buildingChunks: [], buildingIds: [], steps: 1 },
-      { kind: "delta", roadChunks: [chunk(4300, 4450), chunk(4300, 4550)], roadNodes: [2, 3], roadSegs: [1], cellChunks: [], buildingChunks: [], buildingIds: [], steps: 1 },
+      { kind: "delta", roadChunks: [chunk(4200, 4510)], roadNodes: [0, 1], roadSegs: [0], cellChunks: [], buildingChunks: [], buildingIds: [], peopleIds: [], statTotals: [], statSamples: 1, steps: 1 },
+      { kind: "delta", roadChunks: [], roadNodes: [], roadSegs: [], cellChunks: [], buildingChunks: [], buildingIds: [], peopleIds: [], statTotals: [], statSamples: 0, steps: 1 },
+      { kind: "delta", roadChunks: [chunk(4300, 4450), chunk(4300, 4550)], roadNodes: [2, 3], roadSegs: [1], cellChunks: [], buildingChunks: [], buildingIds: [], peopleIds: [], statTotals: [], statSamples: 0, steps: 1 },
       { kind: "snapshot" },
     ]);
   });

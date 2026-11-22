@@ -170,6 +170,17 @@ export function hashState(value: unknown): string {
   return h.hex();
 }
 
+/**
+ * `hashState` of `state` with its pops left out: the pop table and the
+ * sweep's cursor. A client's copy holds pop rows only as of its last
+ * snapshot, since deltas carry each building's people and jobs filled and
+ * not the rows (M3-05), so this is what a copy must agree with the sim on
+ * after deltas. Straight after a snapshot the full `hashState` agrees too.
+ */
+export function hashMirrored(state: { readonly pops: unknown } | null): string {
+  return hashState({ ...state, pops: null });
+}
+
 /** 64-bit FNV-1a of raw bytes, as 16 hex digits. Exposed for tests. */
 export function fnv1a64(bytes: Uint8Array): string {
   const h = new Fnv64();
