@@ -177,24 +177,38 @@ function unfile(o: Openings, id: number): void {
  */
 function refile(state: SimState, o: Openings, id: number, reach: Uint8Array, chunks: readonly number[], filled: Int32Array): void {
   fit(o, id + 1);
-  unfile(o, id);
   const b = state.buildings;
-  if (id >= b.flags.length || ((b.flags[id] as number) & BUILDING_ALIVE) === 0) return;
+  if (id >= b.flags.length || ((b.flags[id] as number) & BUILDING_ALIVE) === 0) return unfile(o, id);
   const t = b.type[id] as number;
   const rate = JOBS_PER_CELL[t] ?? 0;
-  if (rate <= 0) return;
+  if (rate <= 0) return unfile(o, id);
   const seg = b.firstSeg[id] as number;
-  if (state.roads.segNetwork[seg] !== NETWORK_ROAD || reach[state.roads.segA[seg] as number] !== 1) return;
+  if (state.roads.segNetwork[seg] !== NETWORK_ROAD || reach[state.roads.segA[seg] as number] !== 1) return unfile(o, id);
   const zone = chunks[id] ?? NO_BUILDING;
-  if (zone === NO_BUILDING) return;
+  if (zone === NO_BUILDING) return unfile(o, id);
   // jobsForLot, written out.
   const jobs = Math.max(1, Math.floor(rate * ((b.width[id] as number) * (b.depth[id] as number)) + 0.5));
   const levels = jobsUpToLevel(t, jobs);
   const u = id * POP_LEVELS;
-  o.upTo.set(levels, u);
   // The open jobs for the highest level are the most any level has.
-  if (openJobsFrom(o.upTo, u, filled, u, 2) === 0) return;
+  if (openJobsFrom(levels, 0, filled, u, 2) === 0) return unfile(o, id);
   const at = zone * POP_LEVELS;
+  if (o.zoneOf[id] === zone) {
+    // Filed in this zone already and staying, as after most takes: its
+    // place in the zone's list holds, so only the sums move (issue #293).
+    o.upTo.set(levels, u);
+    for (let e = 0; e < POP_LEVELS; e++) {
+      const open = openJobsFrom(o.upTo, u, filled, u, e);
+      const by = open - (o.given[u + e] as number);
+      if (by === 0) continue;
+      o.given[u + e] = open;
+      o.open[at + e] = (o.open[at + e] as number) + by;
+      addToTree(o.trees[e] as Int32Array, zone, by);
+    }
+    return;
+  }
+  unfile(o, id);
+  o.upTo.set(levels, u);
   for (let e = 0; e < POP_LEVELS; e++) {
     const open = openJobsFrom(o.upTo, u, filled, u, e);
     o.given[u + e] = open;
