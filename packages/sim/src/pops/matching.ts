@@ -190,15 +190,22 @@ function drawByScan(m: Matcher, home: number, education: number): number {
 /**
  * The size of the part of a pop of `size` people, with `children`, that
  * fits `open` jobs: the largest below `size` with at least one worker and
- * no more workers than `open`. 0 if there is none.
+ * no more workers than `open`, 0 if there is none. Each part's workers are
+ * rounded on their own (`workersFor`), so a split can gain or lose one; the
+ * largest part that keeps the pop's workers is taken first, and only when
+ * no part does, the largest that fits.
  */
 export function partThatFits(size: number, children: number, open: number): number {
+  const workers = workersFor(size, children);
+  let fits = 0;
   for (let part = size - 1; part >= 1; part--) {
-    const workers = workersFor(part, children);
-    if (workers === 0) return 0;
-    if (workers <= open) return part;
+    const own = workersFor(part, children);
+    if (own === 0) break;
+    if (own > open) continue;
+    if (fits === 0) fits = part;
+    if (own + workersFor(size - part, children) === workers) return part;
   }
-  return 0;
+  return fits;
 }
 
 /** Gives pop `id` a job at `work`, splitting it when its workers do not all fit, as the header says. Keeps the openings current. */

@@ -14,8 +14,9 @@
 //   and buildings.ts each time a building comes or goes
 //   (opening-changes.ts). Each building noted is filed again from scratch.
 // - A change of roads can move any building's zone or reach, so the whole
-//   of it is built again. Every command that changes the roads sets
-//   `state.travelReadyAt`, so a change of that tick is the sign.
+//   of it is built again. It watches the network's nodes and segments, as
+//   the outside reach does (roads/outside.ts), and rebuilds on its next
+//   read after any of them comes or goes, paused or not.
 // - Job matching files its own takes again as it makes them.
 //
 // Built afresh or kept current, it gives the same answers: the sums are of
@@ -28,7 +29,7 @@
 import { BUILDING_TYPES } from "../buildings/balance";
 import { BUILDING_ALIVE } from "../buildings/buildings";
 import { NO_BUILDING, buildingChunks } from "../buildings/where";
-import { NETWORK_ROAD } from "../roads/network";
+import { NETWORK_ROAD, observeNetwork, type RoadNetwork } from "../roads/network";
 import { outsideReachByNode } from "../roads/outside";
 import type { SimState } from "../state";
 import { TRAVEL_ZONES } from "../travel-times";
@@ -41,8 +42,10 @@ import { popIndexOf } from "./where";
 const JOBS_PER_CELL = Float64Array.from(BUILDING_TYPES, (t) => (t.jobsPerCell > 0 ? t.jobsPerCell : 0));
 
 export interface Openings {
-  /** `state.travelReadyAt` when it was last built whole: a change of roads since moves it. */
-  readyAt: number;
+  /** The network's count of changes (`roadChanges`) when it was last built whole. */
+  roadsSeen: number;
+  /** The outside connections it was built for. A load or a test may put a new list on the state. */
+  connections: Int32Array;
   /** By zone times POP_LEVELS plus education: the open jobs a pop of that education may take there. */
   open: Float64Array;
   /**
@@ -64,6 +67,22 @@ export interface Openings {
 }
 
 const live = new WeakMap<PopState, Openings>();
+
+/** By network: how many nodes and segments have come or gone since anything here first watched it. */
+const roadCounts = new WeakMap<RoadNetwork, { changes: number }>();
+
+/** A count that moves with every change of `net`'s nodes or segments, from when it is first asked for. */
+function roadChanges(net: RoadNetwork): number {
+  let count = roadCounts.get(net);
+  if (!count) {
+    const made = { changes: 0 };
+    const bump = () => void (made.changes += 1);
+    observeNetwork(net, { nodeAdded: bump, nodeRemoving: bump, segmentAdded: bump, segmentRemoving: bump });
+    roadCounts.set(net, made);
+    count = made;
+  }
+  return count.changes;
+}
 
 function grownTo(array: Int32Array, length: number, fill: number): Int32Array {
   if (array.length >= length) return array;
@@ -192,7 +211,8 @@ function refile(state: SimState, o: Openings, id: number, reach: Uint8Array, chu
 function build(state: SimState): Openings {
   watchOpenings(state.pops);
   const o: Openings = {
-    readyAt: state.travelReadyAt,
+    roadsSeen: roadChanges(state.roads),
+    connections: state.connections,
     open: new Float64Array(TRAVEL_ZONES * POP_LEVELS),
     trees: Array.from({ length: POP_LEVELS }, () => new Int32Array(TRAVEL_ZONES + 1)),
     members: Array.from({ length: TRAVEL_ZONES }, () => []),
@@ -213,7 +233,7 @@ function build(state: SimState): Openings {
 /** The openings for `state`, built on first use or after a change of roads, and caught up with every building noted since. */
 export function openingsOf(state: SimState): Openings {
   let o = live.get(state.pops);
-  if (!o || o.readyAt !== state.travelReadyAt) {
+  if (!o || o.roadsSeen !== roadChanges(state.roads) || o.connections !== state.connections) {
     o = build(state);
     live.set(state.pops, o);
     return o;

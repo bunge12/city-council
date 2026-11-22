@@ -21,6 +21,7 @@ import {
   jobsUpToLevel,
   openJobsFor,
   partThatFits,
+  prepareDerived,
   popsAtWork,
   readPop,
   recountTotals,
@@ -34,7 +35,7 @@ import {
   type SimState,
 } from "../src/index";
 import { GROWER } from "../src/buildings/grower";
-import { openingsProblem } from "../src/pops/openings";
+import { openingsOf, openingsProblem } from "../src/pops/openings";
 import { enqueue } from "../src/commands";
 import { submit } from "./seen-ends";
 import { holdDemand, type HeldBars } from "./demand-helper";
@@ -231,13 +232,28 @@ describe("which jobs a pop may take", () => {
     expect(checkDemandBalance(JSON.parse(JSON.stringify(DEMAND_BALANCE)))).toEqual([]);
   });
 
-  it("splits a pop: the largest part with a worker that fits takes the jobs", () => {
+  it("splits a pop: the largest part with a worker that fits takes the jobs, keeping the pop's workers where a part can", () => {
     // Without children 60% work: 10 people are 6 workers, 5 are 3.
     expect(partThatFits(10, 0, 3)).toBe(5);
     expect(workersFor(5, 0)).toBe(3);
     expect(partThatFits(100, 0, 59)).toBe(99);
-    // A part of one with children has nobody who works.
+    // 8 people are 5 workers. 4 + 4 would be 2 + 2; 3 + 5 keeps all 5.
+    expect(workersFor(8, 0)).toBe(5);
+    expect(partThatFits(8, 0, 2)).toBe(3);
+    // 4 with children are 2 workers; 2 + 2 keeps both, where 3 + 1 would lose one.
+    expect(partThatFits(4, 1, 1)).toBe(2);
+    // No part fits no job.
     expect(partThatFits(4, 1, 0)).toBe(0);
+    for (let size = 2; size <= 100; size++) {
+      for (const children of [0, 1]) {
+        for (let open = 1; open < workersFor(size, children); open++) {
+          const part = partThatFits(size, children, open);
+          if (part === 0) continue;
+          expect(workersFor(part, children)).toBeGreaterThan(0);
+          expect(workersFor(part, children)).toBeLessThanOrEqual(open);
+        }
+      }
+    }
   });
 });
 
@@ -361,6 +377,31 @@ describe("job matching", () => {
     const works = new Set(inTower.map((id) => state.pops.work[id]).filter((w) => w !== NO_WORK));
     expect(works.size).toBeGreaterThan(1);
     expectRecount(state);
+  });
+
+  it("builds its openings again after a change of roads made while paused on a loaded city, whatever tick the travel times say", () => {
+    const { state } = nearAndFar();
+    const end = connectionEnd(state.roads, state.connections[0] ?? NONE);
+    const x = state.roads.nodeX[end] ?? 0;
+    const z = state.roads.nodeZ[end] ?? 0;
+    // Short streets off the main one: small changes, so the travel times are ready again on the tick they apply.
+    const side = (at: number): Command => ({ seq: ++seq, playerId: "p1", type: "BuildRoad", payload: { from: { x: x + CELL * at, z }, to: { x: x + CELL * at, z: z + 60 }, type: "street" } });
+    ok(state, "SetSpeed", { speed: 0 });
+    expect(submit(state, side(50))).toEqual({ ok: true });
+    step(state);
+    const tick = state.tick;
+    expect(state.travelReadyAt).toBe(tick);
+    // Saved paused, loaded, and the derived data built as a host builds it.
+    const loaded = deserialize(serialize(state)).state;
+    prepareDerived(loaded);
+    const before = openingsOf(loaded);
+    expect(submit(loaded, side(70))).toEqual({ ok: true });
+    step(loaded);
+    // The same tick and the same ready tick, yet the roads changed.
+    expect(loaded.tick).toBe(tick);
+    expect(loaded.travelReadyAt).toBe(tick);
+    expect(openingsOf(loaded)).not.toBe(before);
+    expect(openingsProblem(loaded)).toBeNull();
   });
 
   it("does nothing while the travel times are still being rebuilt", () => {
