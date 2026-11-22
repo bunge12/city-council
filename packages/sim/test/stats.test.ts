@@ -311,6 +311,7 @@ describe("statistics deltas", () => {
     const copy = createStats();
     const rng = seedRng(4);
     let sent = 0;
+    let sentTotals = { ...sim.totals };
     for (let round = 0; round < 600; round++) {
       // Up to five months between two deltas.
       const months = nextInt(rng, 6);
@@ -318,16 +319,27 @@ describe("statistics deltas", () => {
         for (const name of STAT_TOTALS) sim.totals[name] = nextInt(rng, 1000);
         takeSample(sim);
       }
+      // A few totals move after the last sample, and the rest stay.
+      for (const name of STAT_TOTALS) if (nextInt(rng, 4) === 0) sim.totals[name] = nextInt(rng, 1000);
       sim.highestPopulation = round;
       noteYearOn(sim, round);
-      const delta = encodeStatsDelta(sim, sent);
+      const delta = encodeStatsDelta(sim, sent, sentTotals);
       expect(delta.samples.length).toBe(months * STAT_TOTALS.length);
-      expect(applyStatsDelta(copy, delta)).toBeNull();
+      // Only the totals that changed travel (M3-05).
+      const moved = STAT_TOTALS.filter((name) => sim.totals[name] !== sentTotals[name]);
+      expect(Object.keys(delta.totals)).toEqual(moved);
+      expect(applyStatsDelta(copy, delta)).toEqual(moved);
       sent = sim.next;
+      sentTotals = { ...sim.totals };
       expect(copy).toEqual(sim);
+      expect(Object.keys(copy.totals)).toEqual(STAT_TOTALS);
     }
     expect(sampleCount(sim)).toBe(HISTORY_LENGTH);
     expect(applyStatsDelta(copy, { ...encodeStatsDelta(sim, sent), samples: new Int32Array(3) })).toMatch(/whole rows/);
+    expect(applyStatsDelta(copy, { ...encodeStatsDelta(sim, sent), totals: { wealth: 3 } })).toMatch(/unknown total/);
+    expect(applyStatsDelta(copy, { ...encodeStatsDelta(sim, sent), totals: { population: 0.5 } })).toMatch(/whole number/);
+    // Without the totals last sent, every one goes.
+    expect(Object.keys(encodeStatsDelta(sim, sent).totals)).toEqual(STAT_TOTALS);
   });
 });
 

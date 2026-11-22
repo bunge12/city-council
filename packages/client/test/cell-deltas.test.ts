@@ -14,6 +14,7 @@ import {
   cellStatuses,
   cellsInChunk,
   createBareState,
+  hashMirrored,
   hashState,
   nextFloat,
   nextInt,
@@ -128,7 +129,7 @@ describe("cell deltas", () => {
     expect(slotsOf(state(), cells)).toEqual(plan.ok ? [...plan.plan.cells] : []);
     expect([...cells.zone].every((z) => z === 1) && [...cells.density].every((d) => d === 1)).toBe(true);
     expect(zoned(state())).toBe(100);
-    expect(hashState(state())).toBe(hashState(hostSnapshot().state));
+    expect(hashMirrored(state())).toBe(hashMirrored(hostSnapshot().state));
   });
 
   it("adds no cell data to a delta on a tick where no cell changed", async () => {
@@ -155,7 +156,7 @@ describe("cell deltas", () => {
     const cells = deltas().at(-1)?.cells;
     expect(cells && [...cells.zone].every((z) => z === ZONE_NONE) && cells.local.length).toBe(13);
     expect(zoned(state())).toBe(87);
-    expect(hashState(state())).toBe(hashState(hostSnapshot().state));
+    expect(hashMirrored(state())).toBe(hashMirrored(hostSnapshot().state));
   });
 
   it("keeps the mirror equal to the sim when a road is built across zoned cells", async () => {
@@ -179,7 +180,7 @@ describe("cell deltas", () => {
     expect(cells.local.length).toBe(100);
     const snap = hostSnapshot().state;
     expect(zoned(snap)).toBe(100);
-    expect(hashState(state())).toBe(hashState(snap));
+    expect(hashMirrored(state())).toBe(hashMirrored(snap));
     // The mirror's own index, kept current by deltas, against one built from the snapshot.
     expect([...cellStatuses(state())]).toEqual([...cellStatuses(snap)]);
     const under = mirror.cellAt(4400, 4500 - HALF - 1);
@@ -224,13 +225,13 @@ describe("cell deltas", () => {
         else void mirror.sendCommand("Undo");
       }
       tick();
-      if (t % 50 === 49) expect(hashState(state()), `tick ${t}`).toBe(hashState(hostSnapshot().state));
+      if (t % 50 === 49) expect(hashMirrored(state()), `tick ${t}`).toBe(hashMirrored(hostSnapshot().state));
     }
     // A second mirror that connects now gets the snapshot and no history.
     const snap = hostSnapshot();
     const late = new SimMirror({ send: () => undefined, onMessage: (handler) => (handler(snap), () => undefined) }, "p2");
     const lateState = late.state as SimState;
-    expect(hashState(state())).toBe(hashState(lateState));
+    expect(hashMirrored(state())).toBe(hashMirrored(lateState));
     expect([...state().cells.offset]).toEqual([...lateState.cells.offset]);
     expect([...state().cells.zone]).toEqual([...lateState.cells.zone]);
     expect([...state().cells.density]).toEqual([...lateState.cells.density]);

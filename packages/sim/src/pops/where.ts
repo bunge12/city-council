@@ -2,7 +2,8 @@
 // and each building's people and jobs filled. Derived, never saved or
 // hashed: it lives in a WeakMap keyed by the pops object, like the building
 // index, is built from the pop rows on first use and kept current by the
-// functions in pops.ts. A city loaded from a save, cloned or replayed
+// functions in pops.ts, which also note each building whose numbers they
+// touch for the host's deltas (changes.ts). A city loaded from a save, cloned or replayed
 // builds its own.
 //
 // Each building has two lists, its residents and its workers, linked
@@ -12,6 +13,7 @@
 
 import { buildingIdLimit } from "../buildings/buildings";
 import type { SimState } from "../state";
+import { notePopBuilding } from "./changes";
 import { NO_WORK, POP_ALIVE, popWorkers, type PopState } from "./pops";
 
 const NONE = -1;
@@ -131,6 +133,7 @@ export function linkHome(index: PopIndex, p: PopState, id: number): void {
   const home = p.home[id] ?? 0;
   insertSorted(index.homeHead, index.homeNext, index.homePrev, home, id);
   index.people[home] = (index.people[home] ?? 0) + (p.size[id] ?? 0);
+  notePopBuilding(p, home);
 }
 
 /** Takes live pop `id` off its home's list and its people out of the count. */
@@ -138,6 +141,7 @@ export function unlinkHome(index: PopIndex, p: PopState, id: number): void {
   const home = p.home[id] ?? 0;
   unlink(index.homeHead, index.homeNext, index.homePrev, home, id);
   index.people[home] = (index.people[home] ?? 0) - (p.size[id] ?? 0);
+  notePopBuilding(p, home);
 }
 
 /** Files live pop `id` under its workplace, if it has one, and adds its workers to the jobs filled there. */
@@ -146,6 +150,7 @@ export function linkWork(index: PopIndex, p: PopState, id: number): void {
   if (work === NO_WORK) return;
   insertSorted(index.workHead, index.workNext, index.workPrev, work, id);
   index.filled[work] = (index.filled[work] ?? 0) + popWorkers(p, id);
+  notePopBuilding(p, work);
 }
 
 /** Takes live pop `id` off its workplace's list, if it has one, and its workers out of the jobs filled. */
@@ -154,6 +159,7 @@ export function unlinkWork(index: PopIndex, p: PopState, id: number): void {
   if (work === NO_WORK) return;
   unlink(index.workHead, index.workNext, index.workPrev, work, id);
   index.filled[work] = (index.filled[work] ?? 0) - popWorkers(p, id);
+  notePopBuilding(p, work);
 }
 
 // --- Queries -------------------------------------------------------------------

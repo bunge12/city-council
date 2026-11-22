@@ -3,7 +3,11 @@ import {
   LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
   applyBuildingDelta,
+  applyPopDelta,
   applyStatsDelta,
+  countOccupancy,
+  popDeltaProblem,
+  statsDeltaProblem,
   STAT_TOTALS,
   applyCellDelta,
   applyRoadDelta,
@@ -29,6 +33,7 @@ import {
   type ChunkCellShapes,
   type CommandResult,
   type FromSimMessage,
+  type Occupancy,
   type SimState,
   type SystemTiming,
 } from "@city-council/sim";
@@ -69,6 +74,10 @@ export interface HostStats {
  * a building that came in such a delta changed no cell, so its chunk may
  * be in neither list. `buildingIds` names every building the delta
  * carried a row for, ascending, whether or not anything asked.
+ * `peopleIds` names every building whose people or jobs filled the delta
+ * changed, ascending (M3-05), and `statTotals` the city totals it changed,
+ * in the sim's `STAT_TOTALS` order. `statSamples` is how many monthly
+ * history samples it added.
  * `steps` is how many sim steps the delta covers: after one or more, every
  * command the host had queued before it has been applied or dropped, or is
  * waiting for the cells to settle (the sim's `waitsForCells`).
@@ -85,6 +94,9 @@ export type MirrorUpdate =
       cellChunks: readonly number[];
       buildingChunks: readonly number[];
       buildingIds: readonly number[];
+      peopleIds: readonly number[];
+      statTotals: readonly string[];
+      statSamples: number;
       steps: number;
     };
 
@@ -115,6 +127,8 @@ export class SimMirror {
   private hostStats: HostStats = { timings: [] };
   private awaitingSnapshot = false;
   private homeTally: Homes | null = null;
+  /** Every building's people and jobs filled, counted from the last snapshot's pops and moved by each delta. */
+  private occupancy: Occupancy = { people: new Int32Array(0), filled: new Int32Array(0) };
 
   constructor(transport: ClientTransport, playerId: string) {
     this.transport = transport;
@@ -123,7 +137,14 @@ export class SimMirror {
     this.requestSnapshot();
   }
 
-  /** The latest state, or null until the first snapshot arrives. */
+  /**
+   * The latest state, or null until the first snapshot arrives.
+   *
+   * Its `pops` are as of the last snapshot: deltas carry each building's
+   * people and jobs filled, not pop rows (M3-05). Do not read them, or ask
+   * the sim's pop queries about this copy; use `buildingPeople`,
+   * `jobsFilled` and `state.stats` instead.
+   */
   get state(): ReadonlyDeep<SimState> | null {
     return this.current;
   }
@@ -140,6 +161,16 @@ export class SimMirror {
    */
   get homes(): Homes | null {
     return this.homeTally;
+  }
+
+  /** The people living in building `id`, as the sim's `buildingPeople` has them. 0 for an id that is not a building. */
+  buildingPeople(id: number): number {
+    return this.occupancy.people[id] ?? 0;
+  }
+
+  /** Building `id`'s jobs filled, as the sim's `jobsFilled` has them. 0 for an id that is not a building. */
+  jobsFilled(id: number): number {
+    return this.occupancy.filled[id] ?? 0;
   }
 
   /**
@@ -314,6 +345,7 @@ export class SimMirror {
         this.skipSeqs(message.state);
         this.current = message.state;
         this.homeTally = countHomes(message.state.buildings);
+        this.occupancy = countOccupancy(message.state);
         this.logFrom = message.logFrom;
         this.deltaSeq = message.deltaSeq;
         this.awaitingSnapshot = false;
@@ -353,8 +385,9 @@ export class SimMirror {
       this.outOfStep();
       return;
     }
-    // So are the statistics' samples, which must be whole rows of totals.
-    if (delta.stats.samples.length % STAT_TOTALS.length !== 0) {
+    // So are the statistics, whose samples must be whole rows of totals,
+    // and the people, so neither can fail once the rest has changed.
+    if (statsDeltaProblem(delta.stats) || (delta.people && popDeltaProblem(delta.people))) {
       this.outOfStep();
       return;
     }
@@ -396,6 +429,15 @@ export class SimMirror {
       const after = homesAfter(state.buildings, delta.buildings);
       if (homes && (before.count !== after.count || before.capacity !== after.capacity)) homes = adjustHomes(homes, before, after);
     }
+    if (delta.people) {
+      const occupancy = applyPopDelta(this.occupancy, delta.people, state.buildings.flags.length);
+      // Checked above, so this is a reason only if the check and the apply disagree.
+      if (typeof occupancy === "string") {
+        this.outOfStep();
+        return;
+      }
+      this.occupancy = occupancy;
+    }
     this.deltaSeq++;
     this.homeTally = homes;
     state.tick = delta.tick;
@@ -409,7 +451,7 @@ export class SimMirror {
     state.rng.set(delta.rng);
     state.growth = { ...delta.growth };
     state.centre = { ...delta.centre };
-    applyStatsDelta(state.stats, delta.stats);
+    const statTotals = applyStatsDelta(state.stats, delta.stats);
     for (const entry of delta.log) state.log.push(entry);
     this.logFrom += delta.log.length;
     // Same paging as live state, so the copy stays the same shape.
@@ -422,7 +464,20 @@ export class SimMirror {
     for (const entry of delta.log) if (entry.playerId === this.playerId) this.settle(entry.seq, { ok: true });
     this.settleDropped(delta);
     const buildingIds = delta.buildings ? [...delta.buildings.ids] : [];
-    this.notify({ kind: "delta", roadChunks, roadNodes, roadSegs, cellChunks, buildingChunks, buildingIds, steps: delta.steps });
+    const peopleIds = delta.people ? [...delta.people.ids] : [];
+    this.notify({
+      kind: "delta",
+      roadChunks,
+      roadNodes,
+      roadSegs,
+      cellChunks,
+      buildingChunks,
+      buildingIds,
+      peopleIds,
+      statTotals: typeof statTotals === "string" ? [] : statTotals,
+      statSamples: delta.stats.samples.length / STAT_TOTALS.length,
+      steps: delta.steps,
+    });
   }
 
   private settleDropped(delta: Extract<FromSimMessage, { type: "delta" }>): void {

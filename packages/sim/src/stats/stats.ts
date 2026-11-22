@@ -299,11 +299,13 @@ export const STATS: System = { name: STATS_SYSTEM, run: keepStats };
 
 /**
  * What a client's copy needs to bring its statistics level with the sim's:
- * the totals and counts as they stand, copies, and the samples taken since
- * the write position `sentNext` it last saw, oldest first, each a row of
- * `STAT_TOTALS.length` values. M3-05 trims this to the totals that changed.
+ * the totals that changed since the last delta, the highest population and
+ * the yearly counts as they stand, copies, and the samples taken since the
+ * write position `sentNext` it last saw, oldest first, each a row of
+ * `STAT_TOTALS.length` values (M3-05, protocol version 16).
  */
 export interface StatsDelta {
+  /** Only the totals that changed, by name. Empty when none did. */
   totals: StatTotals;
   highestPopulation: number;
   year: YearCounts;
@@ -313,12 +315,13 @@ export interface StatsDelta {
 }
 
 /**
- * The statistics delta since the write position was `sentNext`. Every
- * sample between it and today's is new: a host sends deltas far more often
- * than once in a hundred game years, so the ring has not gone all the way
- * round in between.
+ * The statistics delta since the write position was `sentNext` and the
+ * totals were `sentTotals`. Without `sentTotals` every total goes. Every
+ * sample between `sentNext` and today's write position is new: a host
+ * sends deltas far more often than once in a hundred game years, so the
+ * ring has not gone all the way round in between.
  */
-export function encodeStatsDelta(stats: StatsState, sentNext: number): StatsDelta {
+export function encodeStatsDelta(stats: StatsState, sentNext: number, sentTotals?: Readonly<StatTotals>): StatsDelta {
   const count = (stats.next - sentNext + HISTORY_LENGTH) % HISTORY_LENGTH;
   const samples = new Int32Array(count * STAT_TOTALS.length);
   const length = sampleCount(stats);
@@ -326,13 +329,45 @@ export function encodeStatsDelta(stats: StatsState, sentNext: number): StatsDelt
     const at = (sentNext + k) % HISTORY_LENGTH;
     STAT_TOTALS.forEach((name, i) => (samples[k * STAT_TOTALS.length + i] = at < length ? (stats.history[name]?.[at] ?? 0) : 0));
   }
-  return { totals: { ...stats.totals }, highestPopulation: stats.highestPopulation, year: { ...stats.year }, lastYear: { ...stats.lastYear }, samples };
+  const totals: StatTotals = {};
+  for (const name of STAT_TOTALS) {
+    const value = stats.totals[name] ?? 0;
+    if (!sentTotals || sentTotals[name] !== value) totals[name] = value;
+  }
+  return { totals, highestPopulation: stats.highestPopulation, year: { ...stats.year }, lastYear: { ...stats.lastYear }, samples };
 }
 
-/** Applies `delta` to a copy's statistics. Returns why not, changing nothing, if its samples are not whole rows. */
-export function applyStatsDelta(stats: StatsState, delta: StatsDelta): string | null {
-  if (delta.samples.length % STAT_TOTALS.length !== 0) return "the statistics delta's samples are not whole rows";
-  stats.totals = { ...delta.totals };
+const TOTAL_NAMES = new Set(STAT_TOTALS);
+
+/** Why `delta` cannot apply to any copy's statistics, or null if it can. Changes nothing. */
+export function statsDeltaProblem(delta: StatsDelta): string | null {
+  if (!(delta.samples instanceof Int32Array) || delta.samples.length % STAT_TOTALS.length !== 0) return "the statistics delta's samples are not whole rows";
+  if (!isRecord(delta.totals)) return "the statistics delta's totals are not an object";
+  for (const [name, value] of Object.entries(delta.totals)) {
+    if (!TOTAL_NAMES.has(name)) return `the statistics delta names an unknown total "${name}"`;
+    if (!Number.isSafeInteger(value)) return `the statistics delta's ${name} is not a whole number`;
+  }
+  return null;
+}
+
+/**
+ * Applies `delta` to a copy's statistics and returns the names of the
+ * totals it changed, in `STAT_TOTALS` order. Returns why not instead,
+ * changing nothing, if `statsDeltaProblem` finds one.
+ */
+export function applyStatsDelta(stats: StatsState, delta: StatsDelta): string[] | string {
+  const problem = statsDeltaProblem(delta);
+  if (problem) return problem;
+  const changed: string[] = [];
+  // A copy written in the order the copy already has, so its keys stay in `STAT_TOTALS` order.
+  const totals = { ...stats.totals };
+  for (const name of STAT_TOTALS) {
+    const value = delta.totals[name];
+    if (value === undefined || value === totals[name]) continue;
+    totals[name] = value;
+    changed.push(name);
+  }
+  stats.totals = totals;
   stats.highestPopulation = delta.highestPopulation;
   stats.year = { ...delta.year };
   stats.lastYear = { ...delta.lastYear };
@@ -342,7 +377,7 @@ export function applyStatsDelta(stats: StatsState, delta: StatsDelta): string | 
     STAT_TOTALS.forEach((name, i) => (sample[name] = delta.samples[k * STAT_TOTALS.length + i] ?? 0));
     writeSample(stats, sample);
   }
-  return null;
+  return changed;
 }
 
 // --- Loading ----------------------------------------------------------------------

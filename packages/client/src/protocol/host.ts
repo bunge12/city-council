@@ -4,6 +4,7 @@ import {
   TICK_MS,
   drainBuildingDelta,
   drainCellDelta,
+  drainPopDelta,
   drainRoadChanges,
   encodeRoadDelta,
   encodeStatsDelta,
@@ -14,6 +15,7 @@ import {
   readLog,
   recordBuildingChanges,
   recordCellChanges,
+  recordPopChanges,
   recordRoadChanges,
   captureState,
   createCaptureBuffers,
@@ -31,6 +33,7 @@ import {
   type SnapshotSteps,
   type RoadChanges,
   type SimState,
+  type StatTotals,
   type SystemTimer,
   type SystemTiming,
   type ToSimMessage,
@@ -102,6 +105,8 @@ export class SimHost {
   private sentLogFrom: number;
   /** The statistics' write position as the last delta or snapshot left it, so the next delta sends the samples taken since. */
   private sentStatsNext: number;
+  /** The running totals as the last delta or snapshot left them, so the next delta sends only those that changed. */
+  private sentStatTotals: StatTotals;
   private stepsSinceDelta = 0;
   /**
    * What an autosave copies the city into and writes it out to, kept from
@@ -146,6 +151,7 @@ export class SimHost {
     recordRoadChanges(state.roads);
     recordCellChanges(state);
     recordBuildingChanges(state);
+    recordPopChanges(state);
     this.fullLog = [...pagedLog, ...state.log];
     this.transport = transport;
     this.now = now;
@@ -156,6 +162,7 @@ export class SimHost {
     this.sentUndo = state.undo;
     this.sentQueue = queueKey(state.pending);
     this.sentStatsNext = state.stats.next;
+    this.sentStatTotals = { ...state.stats.totals };
     this.sentLogFrom = this.logCursor;
     this.lastPump = now();
     transport.onMessage((raw) => this.receive(raw));
@@ -353,12 +360,19 @@ export class SimHost {
     const cells = drainCellDelta(this.state);
     // Building rows too: one added and removed in between goes out once.
     const buildings = drainBuildingDelta(this.state);
+    // And each building's people and jobs filled, read now. Pop rows never
+    // go in a delta (M3-05): a client's copy has them as of its snapshot.
+    const people = drainPopDelta(this.state);
+    const stats = encodeStatsDelta(this.state.stats, this.sentStatsNext, this.sentStatTotals);
     const changed =
       this.unsent.length > 0 ||
       this.unsentDropped.length > 0 ||
       this.unsentRoads !== null ||
       cells !== null ||
       buildings !== null ||
+      people !== null ||
+      Object.keys(stats.totals).length > 0 ||
+      stats.samples.length > 0 ||
       this.state.tick !== this.sentTick ||
       this.state.speed !== this.sentSpeed ||
       this.state.undo !== this.sentUndo;
@@ -376,7 +390,6 @@ export class SimHost {
     // Rows are read now, after every step since the last delta, so an id
     // removed and reused in between goes out once, as what it is now.
     const roads = this.unsentRoads ? encodeRoadDelta(this.state.roads, this.unsentRoads) : undefined;
-    const stats = encodeStatsDelta(this.state.stats, this.sentStatsNext);
     const delta: FromSimMessage = {
       v: PROTOCOL_VERSION,
       type: "delta",
@@ -388,6 +401,7 @@ export class SimHost {
       ...(roads ? { roads } : {}),
       ...(cells ? { cells } : {}),
       ...(buildings ? { buildings } : {}),
+      ...(people ? { people } : {}),
       ...(undo ? { undo } : {}),
       ...(dropped.length > 0 ? { dropped } : {}),
       rng: this.state.rng.slice(),
@@ -400,8 +414,6 @@ export class SimHost {
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };
-    // The rows and the undo delta are fresh arrays, so a worker can move them.
-    this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings, undo, stats }));
     this.deltaSeq++;
     this.unsent = [];
     this.unsentDropped = [];
@@ -411,8 +423,14 @@ export class SimHost {
     this.sentUndo = this.state.undo;
     this.sentQueue = queue;
     this.sentStatsNext = this.state.stats.next;
+    this.sentStatTotals = { ...this.state.stats.totals };
     this.sentLogFrom += log.length;
     this.stepsSinceDelta = 0;
+    // Sent last, once the host has noted what it sent: over a transport
+    // that delivers at once, the client can ask for a snapshot from inside
+    // this call, and the snapshot must follow this delta, not repeat it.
+    // The rows and the undo delta are fresh arrays, so a worker can move them.
+    this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings, people, undo, stats }));
   }
 
   private sendSnapshot(): void {
