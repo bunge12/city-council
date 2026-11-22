@@ -138,6 +138,14 @@
       "mode": "blocks",
       "source": "M3-08"
     },
+    "jobs.tick": {
+      "name": "the job matching system's worst tick on the scale town: 150,000 pops looking and every job open, the day's first slice of 1,500; half the tick, for a case a city meets only when every pop looks at once",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 10,
+      "mode": "blocks",
+      "source": "M3-09"
+    },
     "demand.outside": {
       "name": "working out which of the scale town's 30,000 segments reach outside again, in the step after a change of roads",
       "unit": "ms",

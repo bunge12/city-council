@@ -21,7 +21,7 @@
 
 import { BUILDING_TYPES, JOB_KINDS, type JobKind } from "../buildings/balance";
 import { BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
-import { buildingJobs, jobsByKind } from "../buildings/jobs";
+import { buildingJobs, jobsByKind, type JobsByKind } from "../buildings/jobs";
 import { isMonthStart, isYearStart } from "../calendar";
 import { NO_WORK, POP_ALIVE, POP_LEVELS, workersFor, type PopState } from "../pops/pops";
 import { popIndexOf } from "../pops/where";
@@ -150,12 +150,27 @@ function addPop(t: StatTotals, p: PopState, b: BuildingState, id: number, sign: 
   if (children) bump(t, "popsWithChildren", sign);
 }
 
+/** By type, then by jobs: `jobsByKind`, which job matching asks for on every take (M3-09). A function of the balance alone; read only. */
+const kindCache: (JobsByKind | undefined)[][] = BUILDING_TYPES.map(() => []);
+
+/** `jobs` of a building of type index `type` split by kind, or null for no such type. */
+function kindsOf(type: number, jobs: number): JobsByKind | null {
+  const kind = BUILDING_TYPES[type];
+  const cache = kindCache[type];
+  if (!kind || !cache) return null;
+  let out = cache[jobs];
+  if (!out) {
+    out = jobsByKind(kind, jobs);
+    cache[jobs] = out;
+  }
+  return out;
+}
+
 /** Adds `sign` times `filled` jobs filled at building `id`, split by kind, to `t`. */
 function addFilled(t: StatTotals, b: BuildingState, id: number, filled: number, sign: number): void {
   if (filled === 0) return;
-  const type = BUILDING_TYPES[b.type[id] ?? 0];
-  if (!type) return;
-  const byKind = jobsByKind(type, filled);
+  const byKind = kindsOf(b.type[id] ?? 0, filled);
+  if (!byKind) return;
   JOB_KINDS.forEach((kind, i) => bump(t, FILLED_BY_KIND[i], sign * byKind[kind]));
 }
 
@@ -194,6 +209,13 @@ export function countPop(state: SimState, id: number, sign: 1 | -1): void {
  */
 export function countFilled(state: SimState, id: number, sign: 1 | -1): void {
   addFilled(state.stats.totals, state.buildings, id, popIndexOf(state).filled[id] ?? 0, sign);
+}
+
+/** Moves `workers` from unemployed to employed in the running totals, or back with `sign` -1, as a pop takes a job or loses one. */
+export function countEmployment(state: SimState, workers: number, sign: 1 | -1): void {
+  const t = state.stats.totals;
+  bump(t, "workersEmployed", sign * workers);
+  bump(t, "workersUnemployed", -sign * workers);
 }
 
 /** Adds live building `id` and the jobs it offers to the running totals, or takes it out with `sign` -1, while its row still says what it is. */

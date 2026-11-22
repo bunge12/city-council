@@ -2,6 +2,8 @@
 // (M3-01, PRD "Four demand bars" and "Pacing"). The bars (demand.ts, M3-06)
 // read all but `arrivalsPerYearAtFullDemand`, which arrivals read, and
 // `emptyRoomShareMax`, which the grower reads for homes (M3-08),
+// `openJobsShareMax`, which it reads for workplaces, and `jobMatching`,
+// which job matching reads (M3-09),
 // and `buildingsPerDayAtFullDemand`, which the grower reads (M3-07).
 
 import balance from "../../balance/demand.json" with { type: "json" };
@@ -31,6 +33,10 @@ export interface DemandBalance {
   arrivalsPerYearAtFullDemand: number;
   /** New homes wait while the empty room in homes newcomers can reach is above this share of their room (M3-08). */
   emptyRoomShareMax: number;
+  /** The grower adds no workplace to a zone while the open jobs in its buildings newcomers can reach are above this share of their jobs (M3-09). */
+  openJobsShareMax: number;
+  /** How a pop looking for work weights an open job t seconds from home: 1 / (1 + (t / halfWeightSeconds)^falloffPower) (M3-09). */
+  jobMatching: { halfWeightSeconds: number; falloffPower: number };
   /** By zone id: buildings the grower adds a game day with the zone's bar at 100 (M3-07). */
   buildingsPerDayAtFullDemand: Record<string, number>;
 }
@@ -50,6 +56,7 @@ const TOP: Readonly<Record<string, NumberRule>> = {
   dailyShare: { min: 0, max: 1, aboveMin: true },
   arrivalsPerYearAtFullDemand: { min: 0 },
   emptyRoomShareMax: { min: 0, max: 1 },
+  openJobsShareMax: { min: 0, max: 1 },
   shopJobsPerSpending: { min: 0, max: 10 },
   officeJobsPerBuyer: { min: 0, max: 10 },
   factoryJobsPerShopJob: { min: 0, max: 10 },
@@ -63,7 +70,7 @@ const TOP: Readonly<Record<string, NumberRule>> = {
 export function checkDemandBalance(data: unknown): string[] {
   if (!isRecord(data)) return ["the demand balance is not an object"];
   const errors: string[] = [];
-  const others = ["spendingByWealth", "outsidePull", "buildingsPerDayAtFullDemand"];
+  const others = ["spendingByWealth", "outsidePull", "jobMatching", "buildingsPerDayAtFullDemand"];
   for (const key of [...Object.keys(BARS), ...others]) if (!(key in data)) errors.push(`${key} is missing`);
   for (const [key, rule] of Object.entries(TOP)) {
     const problem = numberProblem(data, key, rule, "");
@@ -77,6 +84,10 @@ export function checkDemandBalance(data: unknown): string[] {
   }
   if ("outsidePull" in data) {
     errors.push(...numberProblems(data["outsidePull"], { bar: { min: 0, max: 100 }, untilResidents: { min: 0, whole: true } }, "outsidePull"));
+  }
+  if ("jobMatching" in data) {
+    const rules = { halfWeightSeconds: { min: 1, max: 36000 }, falloffPower: { min: 1, max: 8, whole: true } };
+    errors.push(...numberProblems(data["jobMatching"], rules, "jobMatching"));
   }
   if ("buildingsPerDayAtFullDemand" in data) {
     const rules = Object.fromEntries(ZONING_BALANCE.zones.map((zone) => [zone.id, { min: 0, whole: true }]));

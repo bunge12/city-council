@@ -127,7 +127,10 @@ export { addPop, removePop, setPopProfile, setPopSize, setPopWork } from "./pops
 export type { NewPop } from "./pops/pops";
 export { POPS_SYSTEM, popSlice } from "./pops/sweep";
 export { ARRIVALS, ARRIVALS_SYSTEM, dayArrivals, drawSize } from "./pops/arrivals";
-export { homeReachesOutside, homeRoomLeft, homesWithRoom, reachableRoom, whyNoNewcomers } from "./pops/room";
+export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homesWithRoom, reachableRoom, whyNoNewcomers } from "./pops/room";
+export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/matching";
+export { jobsUpToLevel, openJobsFor, workplacesHeld, zoneJobs } from "./pops/open-jobs";
+export type { ZoneJobs } from "./pops/open-jobs";
 export type { ReachableRoom } from "./pops/room";
 export { DEMAND_BALANCE, checkDemandBalance } from "./demand/balance";
 export type { DemandBalance } from "./demand/balance";

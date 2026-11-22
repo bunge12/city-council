@@ -24,9 +24,10 @@ import { isBuilding, type BuildingState } from "../buildings/buildings";
 import { buildingJobs } from "../buildings/jobs";
 import { resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
-import { countFilled, countPop } from "../stats/stats";
+import { countEmployment, countFilled, countPop } from "../stats/stats";
 import { POPS_BALANCE } from "./balance";
 import { notePopBuilding } from "./changes";
+import { jobsProblem } from "./open-jobs";
 import { popIndexOf, linkHome, linkWork, unlinkHome, unlinkWork, type PopIndex } from "./where";
 
 /** Set in `flags` for a live pop. */
@@ -237,10 +238,14 @@ function checkHomeRoom(state: SimState, home: number, size: number, others: numb
   if (others + size > room) throw new RangeError(`building ${home} has room for ${room} people, not ${others + size}`);
 }
 
-/** Throws unless `workers` more fit in building `work`'s jobs, beside the `others` already filled. */
-function checkJobs(state: SimState, work: number, workers: number, others: number): void {
-  const jobs = buildingJobs(state.buildings, work);
-  if (others + workers > jobs) throw new RangeError(`building ${work} offers ${jobs} jobs, not ${others + workers}`);
+/**
+ * Throws unless building `work` has jobs for `add` workers of education
+ * `addLevel` once `drop` of education `dropLevel` leave, every worker in a
+ * job its education allows (open-jobs.ts).
+ */
+function checkJobs(state: SimState, work: number, addLevel: number, add: number, dropLevel: number, drop: number): void {
+  const problem = jobsProblem(state, state.buildings, work, addLevel, add, dropLevel, drop);
+  if (problem) throw new RangeError(problem);
 }
 
 /**
@@ -346,7 +351,8 @@ export function setPopSize(state: SimState, id: number, size: number): void {
   checkHomeRoom(state, home, size, (index.people[home] ?? 0) - old);
   const work = p.work[id] ?? NO_WORK;
   const children = p.children[id] ?? 0;
-  if (work !== NO_WORK) checkJobs(state, work, workersFor(size, children), (index.filled[work] ?? 0) - workersFor(old, children));
+  const education = p.education[id] ?? 0;
+  if (work !== NO_WORK) checkJobs(state, work, education, workersFor(size, children), education, workersFor(old, children));
   uncount(state, id, work, NO_WORK);
   unlinkWork(index, p, id);
   index.people[home] = (index.people[home] ?? 0) - old + size;
@@ -373,15 +379,22 @@ export function setPopWork(state: SimState, id: number, work: number): void {
   if (work !== NO_WORK) {
     if (!isBuilding(state.buildings, work) || buildingJobs(state.buildings, work) <= 0) throw new RangeError(`building ${work} offers no jobs`);
     if (popWorkers(p, id) === 0) throw new RangeError(`pop ${id} has nobody who works`);
+    const education = p.education[id] ?? 0;
     const already = p.work[id] === work ? popWorkers(p, id) : 0;
-    checkJobs(state, work, popWorkers(p, id), (index.filled[work] ?? 0) - already);
+    checkJobs(state, work, education, popWorkers(p, id), education, already);
   }
   const before = p.work[id] ?? NO_WORK;
-  uncount(state, id, before, work);
+  // Only the jobs filled and whether the pop's workers are employed change,
+  // so only those totals move: job matching calls this for a slice of the
+  // pops every tick (M3-09).
+  if (before !== NO_WORK) countFilled(state, before, -1);
+  if (work !== NO_WORK && work !== before) countFilled(state, work, -1);
   unlinkWork(index, p, id);
   p.work[id] = work;
   linkWork(index, p, id);
-  recount(state, id, before, work);
+  if (before !== NO_WORK) countFilled(state, before, 1);
+  if (work !== NO_WORK && work !== before) countFilled(state, work, 1);
+  if ((before === NO_WORK) !== (work === NO_WORK)) countEmployment(state, popWorkers(p, id), work === NO_WORK ? -1 : 1);
 }
 
 /**
@@ -396,7 +409,7 @@ export function setPopProfile(state: SimState, id: number, profile: PopProfile):
   const p = state.pops;
   const work = p.work[id] ?? NO_WORK;
   const size = p.size[id] ?? 0;
-  if (work !== NO_WORK) checkJobs(state, work, workersFor(size, profile.children), (index.filled[work] ?? 0) - popWorkers(p, id));
+  if (work !== NO_WORK) checkJobs(state, work, profile.education, workersFor(size, profile.children), p.education[id] ?? 0, popWorkers(p, id));
   uncount(state, id, work, NO_WORK);
   unlinkWork(index, p, id);
   p.education[id] = profile.education;
