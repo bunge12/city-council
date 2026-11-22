@@ -266,12 +266,20 @@ export const ROADS = {
    * point is within `buildWithin` metres of the camera across the ground,
    * nearest first, for up to `buildBudgetMs` of a frame, and freed past
    * `keepWithin`, so a chunk on the line does not build and free by turns.
-   * Further out a sidewalk is under a pixel wide.
+   * Of a chunk built, only what is within `drawWithin` metres is drawn:
+   * the street lights standing that near, and the sidewalks in square
+   * tiles `tile` metres on a side with any of their square that near.
+   * Drawn out to 1.5 km, they made a software-drawn street-band frame in
+   * the 30,000 segment city about 60% slower (issue 264), and from the
+   * street band's height a sidewalk or a 7.5 m pole past 600 m is a pixel
+   * or two.
    */
   sidewalks: {
     width: { street: 1.8, avenue: 2.5, oneWay: 1.5 } as Readonly<Record<string, number>>,
-    buildWithin: 1500,
-    keepWithin: 1750,
+    buildWithin: 650,
+    keepWithin: 800,
+    drawWithin: 600,
+    tile: 100,
     buildBudgetMs: 4,
     kerbHeight: 0.15,
     top: 0xb3b0a8,

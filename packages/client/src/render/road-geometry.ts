@@ -922,6 +922,106 @@ export interface RoadChunkGeometry {
 /** Numbers per prop in `RoadChunkGeometry.signals`, `yields` and `lamps`: x, y, z and turn about y. */
 export const PROP_STRIDE = 4;
 
+/** A square tile of a chunk's mesh: its column and row in the chunk, and the triangles whose middle falls in it. */
+export interface MeshTile {
+  col: number;
+  row: number;
+  arrays: MeshArrays;
+}
+
+/**
+ * Splits `a` into square tiles `size` metres on a side, `perSide` to a side,
+ * starting at (x0, z0), so a renderer can draw only the tiles near the camera
+ * (issue 264). Each triangle goes whole to the tile its middle falls in, or
+ * the nearest edge tile, with copies of only the vertices it uses. Tiles with
+ * no triangles are left out. Triangle order within a tile is kept.
+ */
+export function tileMesh(a: MeshArrays, x0: number, z0: number, size: number, perSide: number): MeshTile[] {
+  const tris = a.indices.length / 3;
+  const pos = a.positions;
+  const tileOf = new Int32Array(tris);
+  const counts = new Int32Array(perSide * perSide);
+  const clamp = (v: number) => Math.min(perSide - 1, Math.max(0, Math.floor(v)));
+  for (let t = 0; t < tris; t++) {
+    let x = 0;
+    let z = 0;
+    for (let k = 0; k < 3; k++) {
+      const v = a.indices[t * 3 + k] ?? 0;
+      x += pos[v * 3] ?? 0;
+      z += pos[v * 3 + 2] ?? 0;
+    }
+    const tile = clamp((x / 3 - x0) / size) + perSide * clamp((z / 3 - z0) / size);
+    tileOf[t] = tile;
+    counts[tile] = (counts[tile] ?? 0) + 1;
+  }
+  // Triangles by tile, in their order within each (a counting sort).
+  const starts = new Int32Array(counts.length + 1);
+  for (let tile = 0; tile < counts.length; tile++) starts[tile + 1] = (starts[tile] ?? 0) + (counts[tile] ?? 0);
+  const order = new Int32Array(tris);
+  const fill = starts.slice(0, counts.length);
+  for (let t = 0; t < tris; t++) {
+    const tile = tileOf[t] ?? 0;
+    order[fill[tile] ?? 0] = t;
+    fill[tile] = (fill[tile] ?? 0) + 1;
+  }
+  const out: MeshTile[] = [];
+  const remap = new Int32Array(pos.length / 3).fill(-1);
+  for (let tile = 0; tile < counts.length; tile++) {
+    if ((counts[tile] ?? 0) === 0) continue;
+    const used: number[] = [];
+    const indices: number[] = [];
+    for (let i = starts[tile] ?? 0; i < (starts[tile + 1] ?? 0); i++) {
+      const t = order[i] ?? 0;
+      for (let k = 0; k < 3; k++) {
+        const v = a.indices[t * 3 + k] ?? 0;
+        if (remap[v] === -1) {
+          remap[v] = used.length;
+          used.push(v);
+        }
+        indices.push(remap[v] ?? 0);
+      }
+    }
+    const pick = (src: Float32Array, width: number): Float32Array => {
+      if (src.length === 0) return new Float32Array(0);
+      const dst = new Float32Array(used.length * width);
+      for (let i = 0; i < used.length; i++) dst.set(src.subarray((used[i] ?? 0) * width, ((used[i] ?? 0) + 1) * width), i * width);
+      return dst;
+    };
+    out.push({
+      col: tile % perSide,
+      row: Math.floor(tile / perSide),
+      arrays: {
+        positions: pick(a.positions, 3),
+        normals: pick(a.normals, 3),
+        colors: pick(a.colors, 3),
+        sides: pick(a.sides, 2),
+        halves: pick(a.halves, 1),
+        indices: used.length > 0xffff ? Uint32Array.from(indices) : Uint16Array.from(indices),
+      },
+    });
+    for (const v of used) remap[v] = -1;
+  }
+  return out;
+}
+
+/**
+ * Writes into `out` the props of `data` standing within `within` metres of
+ * (x, z) across the ground, in their order, and returns how many there are
+ * (issue 264). `out` must hold all of `data`.
+ */
+export function propsWithin(data: Float32Array, x: number, z: number, within: number, out: Float32Array): number {
+  const r2 = within * within;
+  let n = 0;
+  for (let o = 0; o < data.length; o += PROP_STRIDE) {
+    const dx = (data[o] ?? 0) - x;
+    const dz = (data[o + 2] ?? 0) - z;
+    if (dx * dx + dz * dz > r2) continue;
+    out.set(data.subarray(o, o + PROP_STRIDE), n * PROP_STRIDE);
+    n++;
+  }
+  return n;
+}
+
 /** Whether `type` gets zebra crossings. */
 function crosses(type: RoadType): boolean {
   return ROADS.crossings.types.includes(type.id);

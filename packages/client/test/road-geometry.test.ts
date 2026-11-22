@@ -43,11 +43,13 @@ import {
   masked,
   paintFor,
   pierStations,
+  propsWithin,
   ringDistance,
   roadMask,
   roadSegmentsAt,
   trimAt,
   segPath,
+  tileMesh,
   stations,
   carriageHalf,
   lampStations,
@@ -1038,5 +1040,82 @@ describe("a road on another level", () => {
     const { net, ground, raised } = overpass();
     expect(nodeLift(net, net.segA[raised] ?? 0)).toBe(ROAD_LEVELS.elevated1);
     expect(nodeLift(net, net.segA[ground] ?? 0)).toBe(0);
+  });
+});
+
+describe("drawing street furniture near the camera only (issue 264)", () => {
+  /** Two triangles in the tile at (0, 0) of 100 m tiles, one in (2, 1), one past the far edge. */
+  function arrays() {
+    const positions = Float32Array.from([
+      10, 0, 10, 20, 0, 10, 10, 0, 20, // 0 1 2, tile (0, 0)
+      30, 0, 30, //                        3, with 1 and 2, tile (0, 0)
+      210, 1, 110, 220, 1, 110, 210, 1, 120, // 4 5 6, tile (2, 1)
+      510, 2, 10, 520, 2, 10, 510, 2, 20, // 7 8 9, past x = 500: the edge tile (4, 0)
+    ]);
+    const n = positions.length / 3;
+    const colors = new Float32Array(n * 3).map((_, i) => i);
+    const normals = new Float32Array(n * 3).fill(1);
+    return {
+      positions,
+      normals,
+      colors,
+      sides: new Float32Array(0),
+      halves: new Float32Array(0),
+      indices: Uint16Array.from([0, 1, 2, 4, 5, 6, 1, 3, 2, 7, 8, 9]),
+    };
+  }
+
+  it("tiles a mesh by each triangle's middle, keeping each triangle whole", () => {
+    const a = arrays();
+    const tiles = tileMesh(a, 0, 0, 100, 5);
+    expect(tiles.map((t) => [t.col, t.row])).toEqual([
+      [0, 0],
+      [4, 0],
+      [2, 1],
+    ]);
+    const [first, edge, other] = tiles;
+    // Vertices 0 to 3, in first use, and both triangles in their order.
+    expect(Array.from(first?.arrays.indices ?? [])).toEqual([0, 1, 2, 1, 3, 2]);
+    expect(Array.from(first?.arrays.positions ?? [])).toEqual(Array.from(a.positions.subarray(0, 12)));
+    expect(Array.from(first?.arrays.colors ?? [])).toEqual(Array.from(a.colors.subarray(0, 12)));
+    expect(first?.arrays.normals.length).toBe(12);
+    expect(first?.arrays.sides.length).toBe(0);
+    expect(Array.from(other?.arrays.positions ?? [])).toEqual(Array.from(a.positions.subarray(12, 21)));
+    expect(Array.from(edge?.arrays.indices ?? [])).toEqual([0, 1, 2]);
+    // Every triangle lands in exactly one tile.
+    expect(tiles.reduce((n, t) => n + t.arrays.indices.length, 0)).toBe(a.indices.length);
+  });
+
+  it("tiles a chunk's sidewalks without losing or moving a triangle", () => {
+    const net = city([
+      [[4300, 4500], [4700, 4500]],
+      [[4500, 4300], [4500, 4700], "avenue"],
+    ]);
+    let tiled = 0;
+    for (const [c, g] of allStreet(net)) {
+      const x0 = (c % CHUNKS_PER_SIDE) * 500;
+      const z0 = Math.floor(c / CHUNKS_PER_SIDE) * 500;
+      const tiles = tileMesh(g.sidewalks, x0, z0, 100, 5);
+      const corners = (a: { positions: Float32Array; indices: ArrayLike<number> }) => {
+        const out: string[] = [];
+        for (let i = 0; i < a.indices.length; i++) {
+          const v = a.indices[i] ?? 0;
+          out.push(Array.from(a.positions.subarray(v * 3, v * 3 + 3)).join(","));
+        }
+        return out.sort();
+      };
+      expect(tiles.flatMap((t) => corners(t.arrays)).sort()).toEqual(corners(g.sidewalks));
+      if (tiles.length > 1) tiled++;
+    }
+    expect(tiled).toBeGreaterThan(0);
+  });
+
+  it("picks the street lights within reach, in their order", () => {
+    const data = Float32Array.from([0, 1, 0, 0.5, 600, 2, 0, 1, 0, 3, 601, 1.5, 300, 4, 300, 2]);
+    const out = new Float32Array(data.length);
+    const n = propsWithin(data, 0, 0, 600, out);
+    expect(n).toBe(3);
+    expect(Array.from(out.subarray(0, n * PROP_STRIDE))).toEqual([0, 1, 0, 0.5, 600, 2, 0, 1, 300, 4, 300, 2]);
+    expect(propsWithin(data, 5000, 5000, 600, out)).toBe(0);
   });
 });
