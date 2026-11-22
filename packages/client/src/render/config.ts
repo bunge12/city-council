@@ -270,8 +270,8 @@ export const ROADS = {
    */
   sidewalks: {
     width: { street: 1.8, avenue: 2.5, oneWay: 1.5 } as Readonly<Record<string, number>>,
-    buildWithin: 1000,
-    keepWithin: 1250,
+    buildWithin: 1500,
+    keepWithin: 1750,
     buildBudgetMs: 4,
     kerbHeight: 0.15,
     top: 0xb3b0a8,

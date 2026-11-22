@@ -1343,11 +1343,26 @@ export function buildStreetChunk(
     if (!j) continue;
     const lift = nodeLift(net, node);
     const flat = lift === 0 ? null : heightAt(terrain, j.x, j.z) + lift;
+    /** The unit direction from (x, z), on road `i`'s edge at its cut, across to its centre line there. */
+    const inward = (i: number, x: number, z: number): { x: number; z: number } => {
+      const seg = j.segs[i] ?? 0;
+      const f = segPath(net, seg);
+      const t = j.trims[i] ?? 0;
+      const c = f.point(net.segA[seg] === node ? t : f.length - t);
+      const len = Math.hypot(c.x - x, c.z - z) || 1;
+      return { x: (c.x - x) / len, z: (c.z - z) / len };
+    };
+    const k = j.segs.length;
     for (let i = 0; i < j.kerbs.length; i++) {
       const from = sidewalkWidth(roadTypeOf(net, j.segs[i] ?? 0));
-      const to = sidewalkWidth(roadTypeOf(net, j.segs[(i + 1) % j.segs.length] ?? 0));
+      const to = sidewalkWidth(roadTypeOf(net, j.segs[(i + 1) % k] ?? 0));
       if (from <= 0 && to <= 0) continue;
-      cornerSidewalk(sidewalks, j.kerbs[i] ?? [], from, to, (x, z) => flat ?? heightAt(terrain, x, z), flat === null ? groundNormal : () => upright);
+      const edge = j.kerbs[i] ?? [];
+      const n = edge.length;
+      if (n < 4) continue;
+      // The ends meet each road's own sidewalk at its cut, so they step in square to that road.
+      const ends = { first: inward(i, edge[0] ?? 0, edge[1] ?? 0), last: inward((i + 1) % k, edge[n - 2] ?? 0, edge[n - 1] ?? 0) };
+      cornerSidewalk(sidewalks, edge, from, to, ends, (x, z) => flat ?? heightAt(terrain, x, z), flat === null ? groundNormal : () => upright);
     }
   }
   return { sidewalks: sidewalks.done(), lamps: Float32Array.from(lamps) };
@@ -1445,13 +1460,16 @@ const upright3: readonly [number, number, number] = [0, 1, 0];
  * does, so the junction lies on its left. Its width runs from `from` metres
  * at the first point to `to` at the last, by distance along the edge, and
  * it stands `kerbHeight` over the ground `height` gives, with a kerb face
- * on its inner edge as along a road.
+ * on its inner edge as along a road. `ends` are the directions in from its
+ * first and last points, square to the roads they meet, so the corner
+ * ends where each road's own sidewalk does.
  */
 function cornerSidewalk(
   mesh: Mesh,
   edge: readonly number[],
   from: number,
   to: number,
+  ends: { first: { x: number; z: number }; last: { x: number; z: number } },
   height: (x: number, z: number) => number,
   up: (x: number, z: number) => readonly [number, number, number],
 ): void {
@@ -1493,8 +1511,14 @@ function cornerSidewalk(
       mx /= ml;
       mz /= ml;
     }
+    let cos = mx * b.x + mz * b.z;
+    const end = k === 0 ? ends.first : k === n - 1 ? ends.last : null;
+    if (end) {
+      mx = end.x;
+      mz = end.z;
+      cos = 1;
+    }
     // A mitre keeps the width across the bend, up to twice it at a sharp one.
-    const cos = mx * b.x + mz * b.z;
     const w = (from + ((to - from) * (along[k] ?? 0)) / total) / Math.max(0.5, cos);
     const x = pts[k * 2] ?? 0;
     const z = pts[k * 2 + 1] ?? 0;
