@@ -41,7 +41,7 @@ import { holdDemand } from "../packages/sim/test/demand-helper";
 // (HELD_DEMAND_STATE in e2e/browser-state.ts), which holds every bar there
 // in the worker (packages/client/src/protocol/held-demand.ts), and step 15
 // replays the log in Node with the bars held the same way. Against a public
-// BASE_URL the switch is not in the browser's storage, so step 4 waits in vain.
+// BASE_URL the state also holds the switch for that origin (issue #283).
 
 type Vec3 = readonly [number, number, number];
 interface LogEntry {

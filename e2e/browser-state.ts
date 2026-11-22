@@ -18,10 +18,19 @@ import { TEST_SWITCH_KEY, type TestSwitch } from "../packages/client/src/test-sw
 const ORIGINS = ["http://localhost:5173", "http://localhost:4173"];
 const lowPreset = JSON.stringify({ preset: "low", source: "player", benchmarkMs: null, benchmarkBackend: null });
 
-function state(testSwitch: TestSwitch | null) {
+/**
+ * The public address's origin when the walkthroughs run against it
+ * (BASE_URL, playwright.config.ts), or null. Only the M2 walkthrough's state
+ * adds it: the M0 and M1 walkthroughs load the public page as a first-time
+ * player does (issue #283).
+ */
+const remoteBase = process.env["BASE_URL"];
+const REMOTE_ORIGIN = remoteBase ? new URL(remoteBase).origin : null;
+
+function state(testSwitch: TestSwitch | null, origins: readonly string[] = ORIGINS) {
   return {
     cookies: [],
-    origins: ORIGINS.map((origin) => ({
+    origins: origins.map((origin) => ({
       origin,
       localStorage: [{ name: "city-council:graphics", value: lowPreset }, ...(testSwitch ? [{ name: TEST_SWITCH_KEY, value: JSON.stringify(testSwitch) }] : [])],
     })),
@@ -51,6 +60,11 @@ export const WALKTHROUGH_DEMAND = 25;
 /**
  * For the M2 walkthrough (M3-07): the page as a player has it, but with
  * every demand bar held at `WALKTHROUGH_DEMAND`, so all five zones grow on
- * an empty city, houses slowly enough to be seen coming one by one.
+ * an empty city, houses slowly enough to be seen coming one by one. Against
+ * a public BASE_URL its origin gets the switch too, or the bars follow the
+ * empty city and step 4 waits in vain for shops and factories (issue #283).
  */
-export const HELD_DEMAND_STATE = state({ cheapFrames: false, autosave: true, heldDemand: WALKTHROUGH_DEMAND });
+export const HELD_DEMAND_STATE = state(
+  { cheapFrames: false, autosave: true, heldDemand: WALKTHROUGH_DEMAND },
+  REMOTE_ORIGIN === null ? ORIGINS : [...ORIGINS, REMOTE_ORIGIN],
+);
