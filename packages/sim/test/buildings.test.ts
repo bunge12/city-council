@@ -33,6 +33,8 @@ import {
   type Command,
   type Lot,
   type SimState,
+  applyStatsDelta,
+  encodeStatsDelta,
 } from "../src/index";
 import buildingsJson from "../balance/buildings.json";
 import { BUILDING_ARRAYS, addBuilding, removeBuilding, removeBuildings } from "../src/buildings/buildings";
@@ -642,6 +644,8 @@ describe("building deltas", () => {
     expect(Array.from(delta.ids)).toEqual([a]);
     expect(applyBuildingDelta(copy, delta)).toEqual([chunk]);
     expect(copy.buildings).toEqual(state.buildings);
+    // The statistics travel beside the rows (M3-04).
+    expect(applyStatsDelta(copy.stats, encodeStatsDelta(state.stats, copy.stats.next))).toBeNull();
     expect(hashState(copy)).toBe(hashState(state));
     const slot = (cellAt(copy, ...north(0, 0)) as { index: number }).index;
     expect(buildingOnSlot(copy, slot)).toBe(NO_BUILDING);

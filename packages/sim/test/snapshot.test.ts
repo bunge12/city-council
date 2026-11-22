@@ -46,11 +46,13 @@ import v14Fixture from "./fixtures/snapshots/v14.json";
 import v15Fixture from "./fixtures/snapshots/v15.json";
 import v16Fixture from "./fixtures/snapshots/v16.json";
 import v17Fixture from "./fixtures/snapshots/v17.json";
+import v18Fixture from "./fixtures/snapshots/v18.json";
 import { serializeStepsOf, snapshotChecksum, type SnapshotSteps } from "../src/snapshot";
 import { Fnv64 } from "../src/hash";
 import { checkConnections } from "../src/roads/connections";
 import { heldIds } from "../src/undo";
 import { createPops } from "../src/pops/pops";
+import { HISTORY_LENGTH, createStats } from "../src/stats/stats";
 import { addNode, addSegment, checkRoadNetwork, isSegment, removeSegment, segmentsAt } from "../src/roads/network";
 
 function fromHex(hex: string): Uint8Array {
@@ -371,6 +373,8 @@ describe("committed snapshots", () => {
       pops: createPops(),
       // No centre yet, due on the tick it was saved on.
       centre: { x: 0, z: 0, weight: 0, due: 42 },
+      // No buildings or pops to count, and no history yet.
+      stats: createStats(),
     });
   });
 
@@ -378,7 +382,7 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v2Fixture.hex));
     expect(header.stateVersion).toBe(2);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    const { roads, undo, connections, balance, cells, cellsReadyAt, buildings, growth, cellReads, pops, centre, ...rest } = state;
+    const { roads, undo, connections, balance, cells, cellsReadyAt, buildings, growth, cellReads, pops, centre, stats, ...rest } = state;
     const fresh = createState(state.seed);
     expect(roads).toEqual(fresh.roads);
     expect(connections).toEqual(fresh.connections);
@@ -391,6 +395,7 @@ describe("committed snapshots", () => {
     expect(cellReads).toBe(0);
     expect(pops).toEqual(createPops());
     expect(centre).toEqual({ x: 0, z: 0, weight: 0, due: state.tick });
+    expect(stats).toEqual(createStats());
     // Everything the version 2 save held comes back unchanged.
     expect(hashState({ ...rest, version: 2 })).toBe(v2Fixture.hash);
   });
@@ -405,16 +410,20 @@ describe("committed snapshots", () => {
     expect(Array.from(state.roads.segFree)).toEqual([]);
     expect(Array.from(state.roads.nodeFree)).toEqual([]);
     expect(checkConnections(state.connections, state.roads)).toBeNull();
-    // 837c1f5f97e7223e before version 16 added the pops, none of them, and
-    // 047f63c44d3532c6 before version 17 added the city centre.
-    expect(hashState(state)).toBe("2c8417bd488aaf2c");
+    // 837c1f5f97e7223e before version 16 added the pops, none of them,
+    // 047f63c44d3532c6 before version 17 added the city centre and
+    // 2c8417bd488aaf2c before version 18 added the statistics.
+    const { stats, ...before } = state;
+    expect(stats).toEqual(createStats());
+    expect(hashState({ ...before, version: 17 })).toBe("2c8417bd488aaf2c");
+    expect(hashState(state)).toBe("b90ed457773da23b");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
     const { state, header } = deserialize(fromHex(v4Fixture.hex));
     expect(header.stateVersion).toBe(4);
-    // Migrated, it is the version 17 fixture.
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    // Migrated, it is the version 18 fixture.
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(state.undo.map((r) => [r.playerId, r.type])).toEqual([
       ["p1", "BuildRoad"],
@@ -430,8 +439,8 @@ describe("committed snapshots", () => {
   it("loads the version 5 fixture with each segment's level at both its ends", () => {
     const { state, header } = deserialize(fromHex(v5Fixture.hex));
     expect(header.stateVersion).toBe(5);
-    // Migrated, it is the version 17 fixture.
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    // Migrated, it is the version 18 fixture.
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v5Fixture.held);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(Array.from(state.roads.segLevelB)).toEqual(Array.from(state.roads.segLevelA));
@@ -451,8 +460,8 @@ describe("committed snapshots", () => {
   it("loads the version 6 fixture with every undo op saying which road it means", () => {
     const { state, header } = deserialize(fromHex(v6Fixture.hex));
     expect(header.stateVersion).toBe(6);
-    // Migrated, it is the version 17 fixture.
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    // Migrated, it is the version 18 fixture.
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v6Fixture.held);
     expect(Array.from(state.connections)).toEqual(v6Fixture.connections);
     let filled = 0;
@@ -479,8 +488,8 @@ describe("committed snapshots", () => {
     expect(header.stateVersion).toBe(7);
     expect(state.balance).toBe("");
     expect(replaysUnderThisBalance(state)).toBe(false);
-    // Migrated, it is the version 17 fixture.
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    // Migrated, it is the version 18 fixture.
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v7Fixture.held);
     expect(Array.from(state.connections)).toEqual(v7Fixture.connections);
   });
@@ -489,8 +498,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v8Fixture.hex));
     expect(header.stateVersion).toBe(8);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 17 fixture.
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    // Migrated, it is the version 18 fixture.
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v8Fixture.held);
     expect(Array.from(state.connections)).toEqual(v8Fixture.connections);
     const net = state.roads;
@@ -517,8 +526,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v9Fixture.hex));
     expect(header.stateVersion).toBe(9);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 17 fixture.
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    // Migrated, it is the version 18 fixture.
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(state.cells.zone).toHaveLength(v10Fixture.cells);
     expect(state.cells.zone.every((z) => z === 0) && state.cells.density.every((d) => d === 0)).toBe(true);
     expect(state.cells.offset).toHaveLength(state.roads.segFlags.length + 1);
@@ -529,8 +538,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v10Fixture.hex));
     expect(header.stateVersion).toBe(10);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 17 fixture.
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    // Migrated, it is the version 18 fixture.
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(state.buildings).toEqual(createBareState(0).buildings);
     expect(heldIds(state.undo)).toEqual(v10Fixture.held);
     expect(Array.from(state.connections)).toEqual(v10Fixture.connections);
@@ -540,8 +549,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v11Fixture.hex));
     expect(header.stateVersion).toBe(11);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 17 fixture.
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    // Migrated, it is the version 18 fixture.
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(state.buildings).toEqual(createBareState(0).buildings);
     expect(heldIds(state.undo)).toEqual(v11Fixture.held);
     expect(Array.from(state.connections)).toEqual(v11Fixture.connections);
@@ -551,8 +560,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v12Fixture.hex));
     expect(header.stateVersion).toBe(12);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 17 fixture.
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    // Migrated, it is the version 18 fixture.
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(state.growth).toEqual(v13Fixture.growth);
     expect(heldIds(state.undo)).toEqual(v12Fixture.held);
     expect(Array.from(state.connections)).toEqual(v12Fixture.connections);
@@ -561,7 +570,7 @@ describe("committed snapshots", () => {
   it("loads the version 13 fixture with an empty zone journal on every undo record", () => {
     const { state, header } = deserialize(fromHex(v13Fixture.hex));
     expect(header.stateVersion).toBe(13);
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    expect(hashState(state)).toBe(v18Fixture.hash);
     expect(state.undo.map((r) => [r.playerId, r.type])).toEqual(v14Fixture.undo);
     for (const record of state.undo) expect(record.zones).toEqual(new Int32Array(0));
     expect(heldIds(state.undo)).toEqual(v13Fixture.held);
@@ -575,8 +584,9 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v14Fixture.hex));
     expect(header.stateVersion).toBe(14);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    expect(hashState(state)).toBe(v17Fixture.hash);
-    const { cellReads, pops, centre, ...before } = state;
+    expect(hashState(state)).toBe(v18Fixture.hash);
+    const { cellReads, pops, centre, stats, ...before } = state;
+    expect(stats).toEqual(createStats());
     expect(cellReads).toBe(0);
     expect(pops).toEqual(createPops());
     expect(centre).toEqual({ x: 0, z: 0, weight: 0, due: state.tick });
@@ -590,8 +600,9 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v15Fixture.hex));
     expect(header.stateVersion).toBe(15);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    expect(hashState(state)).toBe(v17Fixture.hash);
-    const { pops, centre, ...before } = state;
+    expect(hashState(state)).toBe(v18Fixture.hash);
+    const { pops, centre, stats, ...before } = state;
+    expect(stats).toEqual(createStats());
     expect(centre).toEqual({ x: 0, z: 0, weight: 0, due: state.tick });
     expect(pops).toEqual(createPops());
     expect(pops.sweep).toBe(0);
@@ -600,31 +611,67 @@ describe("committed snapshots", () => {
     expect(Array.from(state.connections)).toEqual(v15Fixture.connections);
   });
 
-  it("loads the version 16 fixture and migrates it to version 17, adding only the version and a city centre due on its tick", () => {
+  it("loads the version 16 fixture and migrates it, adding only the version, a city centre due on its tick and statistics with no history", () => {
     const { state, header } = deserialize(fromHex(v16Fixture.hex));
     expect(header.stateVersion).toBe(16);
-    expect(state.version).toBe(17);
-    expect(hashState(state)).toBe(v17Fixture.hash);
-    const { centre, ...before } = state;
+    expect(state.version).toBe(SNAPSHOT_VERSION);
+    expect(hashState(state)).toBe(v18Fixture.hash);
+    const { centre, stats, ...before } = state;
+    expect(stats).toEqual(createStats());
     expect(centre).toEqual({ x: 0, z: 0, weight: 0, due: state.tick });
     expect(hashState({ ...before, version: 16 })).toBe(v16Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v16Fixture.held);
     expect(Array.from(state.connections)).toEqual(v16Fixture.connections);
   });
 
-  it("loads the version 17 fixture to its recorded hash", () => {
+  it("loads the version 17 fixture and migrates it to version 18, adding only the version and its statistics, counted, with no history", () => {
     const { state, header } = deserialize(fromHex(v17Fixture.hex));
     expect(header.stateVersion).toBe(17);
-    expect(hashState(state)).toBe(v17Fixture.hash);
+    expect(state.version).toBe(18);
+    expect(hashState(state)).toBe(v18Fixture.hash);
+    const { stats, ...before } = state;
+    // No buildings and no pops, so every total is 0.
+    expect(stats).toEqual(createStats());
+    expect(hashState({ ...before, version: 17 })).toBe(v17Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v17Fixture.held);
     expect(Array.from(state.connections)).toEqual(v17Fixture.connections);
   });
 
-  it("still writes the version 17 fixture byte for byte", () => {
+  it("loads the version 18 fixture to its recorded hash", () => {
+    const { state, header } = deserialize(fromHex(v18Fixture.hex));
+    expect(header.stateVersion).toBe(18);
+    expect(hashState(state)).toBe(v18Fixture.hash);
+    expect(heldIds(state.undo)).toEqual(v18Fixture.held);
+    expect(Array.from(state.connections)).toEqual(v18Fixture.connections);
+  });
+
+  it("still writes the version 18 fixture byte for byte", () => {
     // If this fails the byte layout changed: bump SNAPSHOT_FORMAT_VERSION and
     // keep reading the old layout, or explain in the pull request why not.
-    const { state } = deserialize(fromHex(v17Fixture.hex));
-    expect(toHex(serialize(state))).toBe(v17Fixture.hex);
+    const { state } = deserialize(fromHex(v18Fixture.hex));
+    expect(toHex(serialize(state))).toBe(v18Fixture.hex);
+  });
+
+  it("refuses a save whose statistics are malformed", () => {
+    const breaks: ((stats: Record<string, unknown>) => void)[] = [
+      (st) => delete st["next"],
+      (st) => ((st["totals"] as Record<string, number>)["population"] = -1),
+      (st) => ((st["totals"] as Record<string, number>)["population"] = 0.5),
+      (st) => delete (st["totals"] as Record<string, number>)["pops"],
+      (st) => ((st["totals"] as Record<string, number>)["population"] = 10),
+      (st) => ((st["year"] as Record<string, number>)["births"] = -2),
+      (st) => ((st["history"] as Record<string, Int32Array>)["pops"] = new Int32Array(1)),
+      (st) => delete (st["history"] as Record<string, Int32Array>)["pops"],
+      (st) => (st["next"] = 3),
+      (st) => (st["next"] = HISTORY_LENGTH),
+    ];
+    for (const breakIt of breaks) {
+      const { state } = deserialize(fromHex(v18Fixture.hex));
+      breakIt(state.stats as unknown as Record<string, unknown>);
+      const error = refusal(serialize(state));
+      expect(error.code).toBe("corrupt");
+      expect(error.message).toMatch(/statistics/);
+    }
   });
 
   it("refuses a save whose city centre is malformed", () => {
@@ -772,14 +819,20 @@ describe("snapshots with a road network", () => {
     // 8688:eb848d418513d897. M3-13's landvalue.json and the city centre
     // version 17 adds moved them once more: with the centre taken out, the
     // version set back to 16 and the old stamp put back they were
-    // 9760:b326e4c3f30b6cf9 and 9736:1a2e2319ea47dd8c.
+    // 9760:b326e4c3f30b6cf9 and 9736:1a2e2319ea47dd8c. M3-04's statistics,
+    // version 18, moved them again; with them taken out and the version set
+    // back to 17 the bytes are the same, which the first two lines check.
     const digest = (bytes: Uint8Array): string => {
       const h = new Fnv64();
       h.bytes(bytes);
       return `${bytes.length}:${h.hex()}`;
     };
-    expect(digest(serialize(state))).toBe("9848:2fef5b1f49b30497");
-    expect(digest(serializeDetached(state))).toBe("9824:8ef9f989c0e9f202");
+    const { stats, ...before } = state;
+    void stats;
+    expect(digest(serialize({ ...before, version: 17 } as SimState))).toBe("9848:2fef5b1f49b30497");
+    expect(digest(serializeDetached({ ...before, version: 17 } as SimState))).toBe("9824:8ef9f989c0e9f202");
+    expect(digest(serialize(state))).toBe("18048:c7190637feaf2d5e");
+    expect(digest(serializeDetached(state))).toBe("18024:09c0e7870579ae73");
     expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 

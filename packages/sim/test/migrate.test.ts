@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { BUILDINGS_BALANCE, SNAPSHOT_VERSION, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, type SimState } from "../src/index";
+import { BUILDINGS_BALANCE, BUILDING_TYPES, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 import { checkUndoHistory } from "../src/undo";
+import { STAT_TOTALS, createStats, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
+import { addBuilding } from "../src/buildings/buildings";
+import { addPop, setPopWork } from "../src/pops/pops";
 import { withEnds } from "./seen-ends";
 
 /**
@@ -12,8 +15,8 @@ import { withEnds } from "./seen-ends";
  * they settle by, every version before 11 the buildings, every version
  * before 13 the grower's plan, every version before 14 the zoning in its
  * undo history, every version before 15 the count of cell commands,
- * every version before 16 the pops and every version before 17 the city
- * centre.
+ * every version before 16 the pops, every version before 17 the city
+ * centre and every version before 18 the statistics.
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
@@ -23,6 +26,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 15) gone.push("cellReads");
   if (version < 16) gone.push("pops");
   if (version < 17) gone.push("centre");
+  if (version < 18) gone.push("stats");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
   // Before version 14 a ZoneCells left no undo record and no record held zoning.
   if (version < 14 && Array.isArray(kept["undo"])) {
@@ -54,7 +58,22 @@ function asMigrated(state: SimState): SimState {
     undo: withoutZones(state.undo),
     growth: { quota: 1, day, deadline: day + 1, free: 0, used: 0 },
     centre: { x: 0, z: 0, weight: 0, due: state.tick },
+    stats: statsFor(state),
   };
+}
+
+/** Along the north side of a street at z 4600 from x 4200, adds at each free place the building `findLot` picks there, with the most residents its type holds, and returns their ids. */
+function growAll(state: SimState): number[] {
+  const built: number[] = [];
+  for (let p = 0; p < 50; p++) {
+    const cell = cellAt(state, 4200 + 8 * p + 4, 4591);
+    if (!cell) continue;
+    const found = findLot(state, { segment: cell.segment, side: cell.side, place: cell.place, depth: cell.depth });
+    const type = found.ok ? BUILDING_TYPES[found.lot.type] : undefined;
+    if (!found.ok || !type) continue;
+    built.push(addBuilding(state, { ...found.lot, residents: type.residents[1], variant: 0 }));
+  }
+  return built;
 }
 
 /** Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000) (build-road.test.ts). */
@@ -71,7 +90,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(17);
+    expect(SNAPSHOT_VERSION).toBe(18);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -89,6 +108,7 @@ describe("migrateState", () => {
       cellReads: 0,
       pops: fresh.pops,
       centre: { x: 0, z: 0, weight: 0, due: 42 },
+      stats: createStats(),
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -111,6 +131,7 @@ describe("migrateState", () => {
       cellReads: 0,
       pops: fresh.pops,
       centre: { x: 0, z: 0, weight: 0, due: 0 },
+      stats: createStats(),
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -320,8 +341,9 @@ describe("migrateState", () => {
     const v15 = older(state, 15);
     expect(v15).not.toHaveProperty("pops");
     const migrated = migrateState(v15);
-    // The version 17 migration then adds a city centre, due on the tick it was saved on.
-    const expected = { ...state, centre: { x: 0, z: 0, weight: 0, due: state.tick } };
+    // The version 17 migration then adds a city centre, due on the tick it
+    // was saved on, and the version 18 one statistics with no history yet.
+    const expected = { ...state, centre: { x: 0, z: 0, weight: 0, due: state.tick }, stats: createStats() };
     expect(migrated).toEqual(expected);
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
     expect(migrated.pops.flags).toHaveLength(0);
@@ -335,9 +357,66 @@ describe("migrateState", () => {
     state.tick = 1234;
     const v16 = older(state, 16);
     const migrated = migrateState(v16);
-    expect(migrated).toEqual({ ...v16, version: SNAPSHOT_VERSION, centre: { x: 0, z: 0, weight: 0, due: 1234 } });
-    // The centre is the last field, where a new city has it, so both hash the same.
+    expect(migrated).toEqual({ ...v16, version: SNAPSHOT_VERSION, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats() });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
+  });
+
+  it("upgrades a version 17 city with buildings and pops by counting them, with the history empty until the next month", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    const send = (type: string, payload: unknown) => {
+      expect(submit(state, { seq: state.log.length + 1, playerId: "p1", type, payload })).toEqual({ ok: true });
+      step(state);
+    };
+    send("BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4600, z: 4600 }, type: "street" });
+    state.speed = 0;
+    // On the street's north side: houses from x 4200, shops from x 4300 and an office tower from x 4400.
+    const zone = (zone: string, density: number, x0: number, x1: number) =>
+      send("ZoneCells", { zone, density, rects: [{ from: { x: x0 + 2, z: 4571 }, to: { x: x1 - 2, z: 4571 }, width: 44 }] });
+    zone("residential", 1, 4200, 4296);
+    zone("commercial", 2, 4296, 4392);
+    zone("office", 3, 4392, 4496);
+    const built = growAll(state);
+    expect(built.length).toBeGreaterThan(5);
+    const homes = built.filter((id) => (state.buildings.residents[id] ?? 0) > 0);
+    const work = built.find((id) => buildingJobs(state.buildings, id) >= 10) ?? -1;
+    const size = (home: number) => Math.min(4, state.buildings.residents[home] ?? 0);
+    for (const home of homes) addPop(state, { home, size: size(home), education: 2, wealth: 0, children: 1, satisfaction: 50 });
+    const people = homes.reduce((n, home) => n + size(home), 0);
+    const first = homes[0] ?? -1;
+    setPopWork(state, popsAtHome(state, first)[0] ?? -1, work);
+    state.tick = 31 * TIME_BALANCE.ticksPerDay + 7;
+    const v17 = older(state, 17);
+    expect(v17).not.toHaveProperty("stats");
+    const migrated = migrateState(v17);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    const totals = migrated.stats.totals;
+    const t = (name: string) => totals[name] ?? 0;
+    const count = (zone: number, density: number) => built.filter((id) => state.buildings.zone[id] === zone && state.buildings.density[id] === density).length;
+    expect([count(1, 1), count(2, 2), count(3, 3)].every((n) => n > 0)).toBe(true);
+    expect(t("buildingsR1")).toBe(count(1, 1));
+    expect(t("buildingsC2")).toBe(count(2, 2));
+    expect(t("buildingsO3")).toBe(count(3, 3));
+    expect(t("buildingsR1") + t("buildingsC2") + t("buildingsO3")).toBe(built.length);
+    expect(STAT_TOTALS.filter((name) => name.startsWith("buildings")).reduce((n, name) => n + t(name), 0)).toBe(built.length);
+    expect(t("jobsCommercial") + t("jobsOffice")).toBe(built.reduce((n, id) => n + buildingJobs(state.buildings, id), 0));
+    expect(t("population")).toBe(people);
+    expect(t("pops")).toBe(homes.length);
+    expect(t("popsWithChildren")).toBe(homes.length);
+    expect(t("residentsEducationHigh")).toBe(people);
+    expect(t("residentsWealthLow")).toBe(people);
+    expect(t("workersEmployed")).toBeGreaterThan(0);
+    expect(t("filledOffice") + t("filledCommercial")).toBe(jobsFilled(state, work));
+    expect(totals).toEqual(recountTotals(state));
+    expect(migrated.stats.highestPopulation).toBe(people);
+    expect(migrated.stats.year).toEqual({ births: 0, deaths: 0, arrivals: 0, departures: 0 });
+    expect(sampleCount(migrated.stats)).toBe(0);
+    // Its first sample comes on the first tick of the next month, 1 March.
+    migrated.speed = 1;
+    const march = (31 + 28) * TIME_BALANCE.ticksPerDay;
+    while (migrated.tick < march) step(migrated);
+    expect(sampleCount(migrated.stats)).toBe(0);
+    step(migrated);
+    expect(sampleCount(migrated.stats)).toBe(1);
   });
 
   it("leaves a current state as it is", () => {

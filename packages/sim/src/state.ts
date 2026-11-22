@@ -5,6 +5,7 @@ import type { Command } from "./commands";
 import { createCentre, type CentreState } from "./landvalue/centre";
 import type { LogEntry } from "./log";
 import { createPops, type PopState } from "./pops/pops";
+import { createStats, type StatsState } from "./stats/stats";
 import { seedRng } from "./rng";
 import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, type RoadNetwork } from "./roads/network";
@@ -16,7 +17,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 17;
+export const SNAPSHOT_VERSION = 18;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -108,6 +109,12 @@ export interface SimState {
    * again (landvalue/land-value.ts, M3-13). Land value itself is derived.
    */
   centre: CentreState;
+  /**
+   * The running totals, the highest population, the yearly counts and the
+   * monthly history (stats/stats.ts, M3-04). Adjusted where pops and
+   * buildings change, never recounted in a tick.
+   */
+  stats: StatsState;
 }
 
 /**
@@ -155,6 +162,8 @@ export function createBareState(seed: number): SimState {
     pops: createPops(),
     // After the pops, where the version 17 migration puts it.
     centre: createCentre(),
+    // After the centre, where the version 18 migration puts it.
+    stats: createStats(),
   };
 }
 

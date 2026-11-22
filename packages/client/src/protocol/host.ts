@@ -6,6 +6,7 @@ import {
   drainCellDelta,
   drainRoadChanges,
   encodeRoadDelta,
+  encodeStatsDelta,
   logLength,
   mergeRoadChanges,
   parseToSimMessage,
@@ -99,6 +100,8 @@ export class SimHost {
   /** Which commands the queue held when the last delta went out, as `queueKey` writes them. */
   private sentQueue: string;
   private sentLogFrom: number;
+  /** The statistics' write position as the last delta or snapshot left it, so the next delta sends the samples taken since. */
+  private sentStatsNext: number;
   private stepsSinceDelta = 0;
   /**
    * What an autosave copies the city into and writes it out to, kept from
@@ -152,6 +155,7 @@ export class SimHost {
     this.sentSpeed = state.speed;
     this.sentUndo = state.undo;
     this.sentQueue = queueKey(state.pending);
+    this.sentStatsNext = state.stats.next;
     this.sentLogFrom = this.logCursor;
     this.lastPump = now();
     transport.onMessage((raw) => this.receive(raw));
@@ -372,6 +376,7 @@ export class SimHost {
     // Rows are read now, after every step since the last delta, so an id
     // removed and reused in between goes out once, as what it is now.
     const roads = this.unsentRoads ? encodeRoadDelta(this.state.roads, this.unsentRoads) : undefined;
+    const stats = encodeStatsDelta(this.state.stats, this.sentStatsNext);
     const delta: FromSimMessage = {
       v: PROTOCOL_VERSION,
       type: "delta",
@@ -389,12 +394,13 @@ export class SimHost {
       growth: { ...this.state.growth },
       cellReads: this.state.cellReads,
       centre: { ...this.state.centre },
+      stats,
       ...(queue !== this.sentQueue ? { pending: this.state.pending.map((c) => ({ ...c })) } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
     };
     // The rows and the undo delta are fresh arrays, so a worker can move them.
-    this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings, undo }));
+    this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings, undo, stats }));
     this.deltaSeq++;
     this.unsent = [];
     this.unsentDropped = [];
@@ -403,6 +409,7 @@ export class SimHost {
     this.sentSpeed = this.state.speed;
     this.sentUndo = this.state.undo;
     this.sentQueue = queue;
+    this.sentStatsNext = this.state.stats.next;
     this.sentLogFrom += log.length;
     this.stepsSinceDelta = 0;
   }
