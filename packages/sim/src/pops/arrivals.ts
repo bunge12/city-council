@@ -100,7 +100,10 @@ export function arrive(state: SimState): void {
 
 /**
  * The step's system for arrivals. It runs after the pops' sweep starts its
- * day, so a pop that arrives waits for the next day's sweep, and before the
- * grower, which holds new homes back while there is room in standing ones.
+ * day, and before the grower, which holds new homes back while there is
+ * room in standing ones. A newcomer on a new id past the day's limit waits
+ * for the next day's sweep; one that reuses a freed id below the limit is
+ * visited today if the slices have not yet passed it, the same on every
+ * machine.
  */
 export const ARRIVALS: System = { name: ARRIVALS_SYSTEM, run: arrive };

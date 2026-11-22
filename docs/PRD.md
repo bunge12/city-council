@@ -500,7 +500,7 @@ The lot sizes are my starting proposal. The resident numbers are fixed by design
 
 **Capacity and residents are different numbers.** The figure for a lot is the building's capacity, the most people it can hold. The number living there is whatever its households add up to, and it changes over time. A single family home has room for four and may hold one person living alone, a couple, or a family. A tower with room for 1,000 is rarely full. Population counts the people who live in a building, not its capacity.
 
-Decided in M3-08 (#176): every single family home has room for four, and the draw of 1 to 4 that M2 made per building moves to the household that moves in. The type is marked `oneHousehold` in `buildings.json`, so once anyone lives in a house it takes no more newcomers, however few people it holds. Every other home takes households until its room is full.
+Decided in M3-08 (#176): every single family home has room for four, and the draw of 1 to 4 that M2 made per building moves to the household that moves in. The type is marked `oneHousehold` in `buildings.json`, so once anyone lives in a house it takes no more newcomers, however few people it holds. Every other home takes households until its room is full. A city saved before it keeps the room its houses drew, 1 to 4, and newcomers there are cut to it.
 
 How the grower chooses:
 
