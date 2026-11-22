@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   CELL_OPEN,
   DENSITY_NONE,
+  NONE,
   ZONE_NONE,
   ZONING_BALANCE,
   cellStatuses,
@@ -25,6 +26,7 @@ import {
   previewZone,
   rectsFor,
   stripCells,
+  stripParts,
   zonePayloads,
   type ZoneTarget,
   type ZoneToolHost,
@@ -196,8 +198,7 @@ describe("erase", () => {
 
 describe("the controller", () => {
   type Store = ReturnType<ZoneToolHost["get"]>;
-  function setup() {
-    const state = city();
+  function setup(state: SimState = city()) {
     let store: Store = { ...INITIAL_ROAD_TOOL, ...INITIAL_ZONE_TOOL };
     const sent: ZoneCellsPayload[] = [];
     let answer: (r: CommandResult) => void = () => undefined;
@@ -318,5 +319,136 @@ describe("the controller", () => {
     // As the road tool's toggle does.
     (tool as unknown as { host: ZoneToolHost }).host.set({ tool: "road" });
     expect(get().zoneBrush).toBeNull();
+  });
+
+  describe("a fill stops at a road across the strip (#196)", () => {
+    /** The south street, and a street north from (4300, 4500) that stops 12 m short of it, through its north strip. */
+    function stub(): SimState {
+      const state = createState(SEED);
+      road(state, [4200, 4600], [4392, 4600]);
+      road(state, [4300, 4588], [4300, 4500]);
+      return state;
+    }
+
+    /** The street, and a back street the whole length of it, 32 m north, across the back rows of its north strip. */
+    function backStreet(): SimState {
+      const state = createState(SEED);
+      road(state, [4200, 4600], [4392, 4600]);
+      road(state, [4180, 4568], [4412, 4568]);
+      return state;
+    }
+
+    it("cuts the strip into the parts the road leaves", () => {
+      const state = stub();
+      const seg = segmentAt(state, 4250, 4600);
+      const north = nearerSide(state, seg, 4250, 4590) ?? 0;
+      const parts = stripParts(state, seg, north, DEPTH);
+      expect(parts).toHaveLength(2);
+      const [west, east] = parts.map((p) => p.map((c) => c.x));
+      expect(Math.max(...(west ?? []))).toBeLessThan(4300);
+      expect(Math.min(...(east ?? []))).toBeGreaterThan(4300);
+      // Between them they hold every open cell of the strip.
+      const all = stripCells(state, seg, north, DEPTH).map((c) => c.slot);
+      expect(parts.flat().map((c) => c.slot).sort((a, b) => a - b)).toEqual(all);
+      // The south side has no road across it, so it is one part.
+      expect(stripParts(state, seg, 1 - north, DEPTH)).toHaveLength(1);
+    });
+
+    it("lights up only the cells on the hovered side of the road", () => {
+      const state = stub();
+      const { tool } = setup(state);
+      tool.toggle();
+      const seg = segmentAt(state, 4250, 4600);
+      // A cell west of the stub, and the street east of it.
+      const west = tool.targets({ ground: { x: 4250, z: 4580 }, segment: NONE });
+      expect(west.length).toBeGreaterThan(0);
+      expect(west.every((c) => c.segment === seg && c.x < 4300)).toBe(true);
+      const east = tool.targets({ ground: { x: 4350, z: 4597 }, segment: seg });
+      expect(east.length).toBeGreaterThan(0);
+      expect(east.every((c) => c.segment === seg && c.x > 4300)).toBe(true);
+      // The whole south strip, which nothing crosses.
+      const south = tool.targets({ ground: { x: 4350, z: 4603 }, segment: seg });
+      expect(south.map((c) => c.slot)).toEqual(stripCells(state, seg, south[0]?.side ?? 0, DEPTH).map((c) => c.slot));
+    });
+
+    it("keeps the cells behind a back street apart from the ones by the road", () => {
+      const state = backStreet();
+      const { tool } = setup(state);
+      tool.toggle();
+      const seg = segmentAt(state, 4300, 4600);
+      const north = nearerSide(state, seg, 4300, 4590) ?? 0;
+      const all = stripCells(state, seg, north, DEPTH);
+      // The back street leaves some of the strip's cells open behind it.
+      const behind = all.filter((c) => c.z < 4568);
+      expect(behind.length).toBeGreaterThan(0);
+      // Hovering one lights up only those behind it.
+      const back = tool.targets({ ground: { x: behind[0]?.x ?? 0, z: behind[0]?.z ?? 0 }, segment: NONE });
+      expect(back.map((c) => c.slot).sort((a, b) => a - b)).toEqual(behind.map((c) => c.slot));
+      // Hovering the street lights up only those in front of the back street.
+      const front = tool.targets({ ground: { x: 4300, z: 4597 }, segment: seg });
+      expect(front.length).toBeGreaterThan(0);
+      expect(front.map((c) => c.slot).sort((a, b) => a - b)).toEqual(all.filter((c) => c.z > 4568).map((c) => c.slot));
+    });
+
+    it("cuts the rows a fill takes where a short road cuts them, though the rows behind go round its end", () => {
+      // A stub 22 m long, 12 m short of the street: it covers the front four rows and no more.
+      const state = createState(SEED);
+      road(state, [4200, 4600], [4392, 4600]);
+      road(state, [4300, 4588], [4300, 4566]);
+      const seg = segmentAt(state, 4250, 4600);
+      const north = nearerSide(state, seg, 4250, 4590) ?? 0;
+      expect(stripParts(state, seg, north, DEPTH)).toHaveLength(1);
+      expect(stripParts(state, seg, north, 2)).toHaveLength(2);
+      const { tool } = setup(state);
+      tool.toggle();
+      tool.setDepth(2);
+      const west = tool.targets({ ground: { x: 4250, z: 4588 }, segment: NONE });
+      expect(west.length).toBeGreaterThan(0);
+      expect(west.every((c) => c.x < 4300 && c.depth < 2)).toBe(true);
+    });
+
+    it("fills the front rows on the hovered side from a cell further back than the fill reaches", () => {
+      const state = stub();
+      const { tool } = setup(state);
+      tool.toggle();
+      tool.setDepth(2);
+      const seg = segmentAt(state, 4250, 4600);
+      const deep = cellUnder(state, 4250, 4556);
+      expect(deep?.depth).toBeGreaterThanOrEqual(2);
+      const lit = tool.targets({ ground: { x: 4250, z: 4556 }, segment: NONE });
+      expect(lit.length).toBeGreaterThan(0);
+      expect(lit.every((c) => c.segment === seg && c.x < 4300 && c.depth < 2)).toBe(true);
+    });
+
+    it("keeps the inside of a tight bend whole", () => {
+      // On the inside, cells fold or overlap each other with no road between them.
+      const state = createState(SEED);
+      road(state, [4300, 4700], [4325, 4725], [4325, 4700]);
+      const seg = cellsInBox(state, 4250, 4650, 4400, 4800)[0]?.segment ?? -1;
+      const { tool } = setup(state);
+      tool.toggle();
+      for (const side of [0, 1]) {
+        const all = stripCells(state, seg, side, DEPTH);
+        expect(stripParts(state, seg, side, DEPTH)).toHaveLength(1);
+        // Hovering the road beside a road-edge cell lights the whole strip.
+        const edge = all.find((c) => c.depth === 0);
+        if (!edge) continue;
+        const lit = tool.targets({ ground: { x: edge.x, z: edge.z }, segment: seg });
+        expect(lit.map((c) => c.slot)).toEqual(all.map((c) => c.slot));
+      }
+    });
+
+    it("paints only the part it showed", () => {
+      const state = stub();
+      const { tool, sent } = setup(state);
+      tool.toggle();
+      const hover = { ground: { x: 4250, z: 4580 }, segment: NONE };
+      const shown = tool.preview(hover)?.cells ?? [];
+      expect(shown.length).toBeGreaterThan(0);
+      expect(shown.every((c) => c.x < 4300)).toBe(true);
+      tool.click(hover);
+      paint(state, sent);
+      expect(zonedSlots(state)).toEqual(shown.map((c) => c.slot).sort((a, b) => a - b));
+    });
   });
 });
