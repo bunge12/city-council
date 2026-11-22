@@ -13,6 +13,7 @@ import { candidateCount, candidatesBuilt, prepareCandidates } from "./buildings/
 import { pollutionGrid, prepareBuildingIndex, segmentBuildings } from "./buildings/where";
 import { blockIndexOf, existingBlockIndex, listBlocks, settleBlocks } from "./roads/blocks";
 import { popIndexOf } from "./pops/where";
+import { openingsOf } from "./pops/openings";
 import { catchUpOutside, prepareOutside } from "./roads/outside";
 import { routingGraphOf } from "./roads/routing";
 import { roadIndexOf } from "./roads/spatial";
@@ -41,6 +42,7 @@ export function prepareDerived(state: SimState): void {
   prepareCandidates(state, index, () => segmentBuildings(state));
   popIndexOf(state);
   prepareTravelTimes(state);
+  openingsOf(state);
 }
 
 /**

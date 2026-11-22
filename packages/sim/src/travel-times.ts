@@ -592,6 +592,23 @@ export function buildingTravelZone(state: SimState, id: number): number {
   return zone;
 }
 
+/** The entry `travelTimeTable` holds for a pair of zones with no route between them. */
+export const NO_ROUTE_SECONDS = UNREACHED;
+
+/**
+ * The whole table and each zone's source, for a reader that asks many
+ * times a tick (job matching, M3-09): seconds from zone `a` to zone `b` at
+ * `a * TRAVEL_ZONES + b`, NO_ROUTE_SECONDS for no route, and a zone with
+ * no source (NONE) answers no route to or from anywhere. Within one zone
+ * a reader gives `sameZoneSeconds`, as `zoneTravelTime` does, whatever
+ * the table holds there. Read only: the arrays are the table's own. Throws
+ * while the table is still being rebuilt (`travelTimesReady`).
+ */
+export function travelTimeTable(state: SimState): { table: Uint16Array; sources: Int32Array } {
+  if (!travelTimesReady(state)) throw new Error("travel times are still being rebuilt after a change of roads");
+  return tableOf(state);
+}
+
 /** Free-flow seconds to drive from building `from` to building `to`, read from their zones, or null for no route. */
 export function buildingTravelTime(state: SimState, from: number, to: number): number | null {
   return zoneTravelTime(state, buildingTravelZone(state, from), buildingTravelZone(state, to));

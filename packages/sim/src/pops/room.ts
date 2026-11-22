@@ -36,6 +36,11 @@ function roomFor(state: SimState, id: number, people: number): number {
   return room > 0 ? room : 0;
 }
 
+/** Whether live building `id`'s road reaches an outside connection: a home newcomers can reach, or a workplace they can (M3-09). */
+export function buildingReachesOutside(state: SimState, id: number): boolean {
+  return isBuilding(state.buildings, id) && roadReaches(state, outsideReachByNode(state), id);
+}
+
 /** Whether live building `id` is a home whose road reaches an outside connection, so newcomers can reach it. */
 export function homeReachesOutside(state: SimState, id: number): boolean {
   if (!isBuilding(state.buildings, id) || (state.buildings.residents[id] ?? 0) <= 0) return false;

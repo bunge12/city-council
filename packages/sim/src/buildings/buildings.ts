@@ -32,6 +32,7 @@ import { noteColumns } from "./candidates";
 import { noteBuildingChanged } from "./changes";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { removeBuildingPops } from "../pops/pops";
+import { noteOpening } from "../pops/opening-changes";
 import { countBuilding } from "../stats/stats";
 import { fileBuilding, lotColumns, lotProblem, lotShapeOf, unfileBuildings } from "./where";
 
@@ -276,6 +277,7 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   b.builtAt[id] = state.tick;
   countBuilding(state, id, 1);
   noteBuildingChanged(b, id);
+  noteOpening(state.pops, id);
   fileBuilding(state, id);
   noteLotFronts(state, shape.first, spec.width);
   if (shape.back) noteLotFronts(state, shape.back.first, spec.width);
@@ -346,7 +348,10 @@ export function removeBuildings(state: SimState, ids: readonly number[]): void {
   const free = resized(b.free, b.free.length + ids.length);
   free.set(ids, b.free.length);
   b.free = free;
-  for (const id of ids) noteBuildingChanged(b, id);
+  for (const id of ids) {
+    noteBuildingChanged(b, id);
+    noteOpening(state.pops, id);
+  }
 }
 
 /**

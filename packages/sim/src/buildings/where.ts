@@ -794,6 +794,16 @@ export function buildingChunk(state: SimState, id: number): number {
   return indexOf(state, false).bi.chunk[id] ?? NO_BUILDING;
 }
 
+/**
+ * By building id: the 500 m chunk its lot's centre is in, NO_BUILDING for
+ * none, for a reader that asks of every building in a pass (job matching,
+ * M3-09). Read only: the array is the index's own, and good until the next
+ * change of buildings or roads.
+ */
+export function buildingChunks(state: SimState): readonly number[] {
+  return indexOf(state, false).bi.chunk;
+}
+
 /** The ids of the buildings whose lot's centre is in 500 m chunk `chunk`, ascending. */
 export function buildingsInChunk(state: SimState, chunk: number): number[] {
   const { bi } = indexOf(state);

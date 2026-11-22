@@ -46,7 +46,7 @@ describe("the balance stamp", () => {
     expect(Object.keys(BALANCE_FILES).sort()).toEqual(files.sort());
     expect(BALANCE_STAMP).toBe(balanceStampOf(BALANCE_FILES));
     // Moves with any balance number. Update it with the replay fixtures and say which number moved.
-    expect(BALANCE_STAMP).toBe("ac0b914f4d2fb17d");
+    expect(BALANCE_STAMP).toBe("03b81fd101b40744");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

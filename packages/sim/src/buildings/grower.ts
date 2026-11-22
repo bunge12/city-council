@@ -30,6 +30,14 @@
 // joined to nothing, are left out of both: their room never fills, and
 // should not hold the rest of the city back.
 //
+// Open jobs in standing workplaces fill the same way (M3-09): the grower
+// adds no building to a zone that offers jobs, commercial, office,
+// industrial or mixed, while the open jobs in that zone's workplaces are
+// more than `openJobsShareMax` of their jobs (pops/open-jobs.ts). Mixed is
+// held by either rule. As for homes, it works the jobs out once on a tick
+// it adds such a building, adds each one it builds, and leaves out
+// workplaces on a street joined to nothing.
+//
 // For each building the grower draws a free zoned cell by the road of the
 // building's zone from the generator in state (candidates.ts; M3-25
 // replaces the draw with land value). It builds at an end of the free frontage that cell lies on, not
@@ -76,7 +84,9 @@ import { addBuilding } from "./buildings";
 import { candidateAt, candidateCount } from "./candidates";
 import { freeFrontage, lotOptions, type Lot, type LotOptions } from "./lots";
 import { segmentBuildings } from "./where";
-import { homeReachesOutside, reachableRoom, type ReachableRoom } from "../pops/room";
+import { buildingReachesOutside, reachableRoom, type ReachableRoom } from "../pops/room";
+import { workplacesHeldBy, zoneJobs, type ZoneJobs } from "../pops/open-jobs";
+import { buildingJobs } from "./jobs";
 
 /** Name the timer hook reports for the grower. */
 export const GROWER_SYSTEM = "grower";
@@ -255,6 +265,9 @@ export function freeFrontCells(state: SimState, zone = 0): number {
 /** Zone numbers with a type people live in: residential and mixed. */
 const HOME_ZONES: ReadonlySet<number> = new Set(BUILDING_TYPES.filter((t) => t.residents[1] > 0).map((t) => t.zoneNumber));
 
+/** Zone numbers with a type that offers jobs: commercial, office, industrial and mixed. */
+const WORK_ZONES: ReadonlySet<number> = new Set(BUILDING_TYPES.filter((t) => t.jobsPerCell > 0).map((t) => t.zoneNumber));
+
 /** Whether `room` holds new homes back: its empty room is more than `emptyRoomShareMax` of its capacity. */
 function holds(room: ReachableRoom): boolean {
   return room.empty > DEMAND_BALANCE.emptyRoomShareMax * room.capacity;
@@ -269,23 +282,36 @@ export function homesHeld(state: SimState): boolean {
 export function grow(state: SimState): void {
   if (!cellsSettled(state)) return;
   const quotas = dayQuotas(state.demand);
-  // Worked out on the first home the tick may add, then kept as it adds them.
+  // Each worked out on the first building of its kind the tick may add, then kept as it adds them.
   let room: ReachableRoom | null = null;
+  let jobs: ZoneJobs | null = null;
   for (let zone = 1; zone < quotas.length; zone++) {
     const due = growthOnTick(state.tick, quotas[zone] ?? 0);
     const homes = HOME_ZONES.has(zone);
+    const work = WORK_ZONES.has(zone);
     for (let i = 0; i < due; i++) {
       if (homes) {
         room ??= reachableRoom(state);
         if (holds(room)) break;
       }
+      if (work) {
+        jobs ??= zoneJobs(state);
+        if (workplacesHeldBy(jobs, zone)) break;
+      }
       const id = growOne(state, zone);
       if (id < 0) break;
       // A new home is empty: all its room is room left.
-      if (room && homeReachesOutside(state, id)) {
+      const reaches = buildingReachesOutside(state, id);
+      if (room && reaches && (state.buildings.residents[id] ?? 0) > 0) {
         const residents = state.buildings.residents[id] ?? 0;
         room.capacity += residents;
         room.empty += residents;
+      }
+      // And a new workplace's jobs are all open.
+      const offered = buildingJobs(state.buildings, id);
+      if (jobs && reaches && offered > 0) {
+        jobs.jobs[zone] = (jobs.jobs[zone] ?? 0) + offered;
+        jobs.open[zone] = (jobs.open[zone] ?? 0) + offered;
       }
     }
   }

@@ -1,0 +1,142 @@
+{
+  "description": "Job matching on seed 2026, every bar held at 60. p1 builds a street from the first outside connection and zones R1 along its north side; p2 zones R2 along its south side. p1 zones C1 and I1 further along the north side and p2 O1 across from the C1. Homes fill with newcomers, who take the shop, factory and office jobs their education allows, nearer ones likelier, while the grower holds each workplace zone back until its open jobs fall to the share. Fifteen game days.",
+  "seed": 2026,
+  "untilTick": 1500,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 200,
+          "z": 3608
+        },
+        "to": {
+          "x": 520,
+          "z": 3608
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3637
+            },
+            "to": {
+              "x": 326,
+              "z": 3637
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 3,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 2,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3579
+            },
+            "to": {
+              "x": 326,
+              "z": 3579
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 4,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "commercial",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 338,
+              "z": 3637
+            },
+            "to": {
+              "x": 414,
+              "z": 3637
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 4,
+      "seq": 5,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "office",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 338,
+              "z": 3579
+            },
+            "to": {
+              "x": 414,
+              "z": 3579
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 5,
+      "seq": 6,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "industrial",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 426,
+              "z": 3637
+            },
+            "to": {
+              "x": 502,
+              "z": 3637
+            },
+            "width": 44
+          }
+        ]
+      }
+    }
+  ],
+  "balance": "03b81fd101b40744",
+  "hash": "bd1e6ddd7bbc6b5b",
+  "heldDemand": 60
+}
