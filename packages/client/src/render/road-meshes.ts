@@ -3,11 +3,18 @@
 // A chunk rebuilds only when a delta says a road it draws changed.
 //
 // Layers by zoom band (PRD, "Zoom bands"):
-// - street: road surfaces, lane markings, crossings and one-way arrows, and
-//   the traffic lights and yield signs at junctions (issue 87)
-// - district: road surfaces, with markings and arrows while the camera is
-//   below `ROADS.markingsBelow`
+// - street: road surfaces, sidewalks, lane markings, crossings and one-way
+//   arrows, the traffic lights and yield signs at junctions (issue 87), and
+//   sidewalks and street lights near the camera (issue 151)
+// - district: road surfaces, with markings, arrows and the sidewalks near
+//   the camera while it is below `ROADS.markingsBelow`
 // - city: avenues and highways only, as lines of a fixed screen width
+//
+// Sidewalks and street lights are a second pass per chunk, built only for
+// chunks near the camera, a few each frame, and freed when it moves away
+// (issue 151). A big city has millions of sidewalk vertices, and building
+// them all with the roads doubled the time a 30,000 segment city took to
+// show its roads.
 //
 // The renderer reads the mirror; it never writes it.
 
@@ -23,16 +30,17 @@ import {
   Mesh,
   MeshBasicNodeMaterial,
   MeshLambertNodeMaterial,
-  Object3D,
+  type Object3D,
 } from "three/webgpu";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { CHUNKS_PER_SIDE, type Terrain } from "@city-council/sim";
+import { CHUNKS_PER_SIDE, CHUNK_SIZE, type Terrain } from "@city-council/sim";
 import type { ZoomBand } from "../camera/zoom-band";
 import { ROADS } from "./config";
 import {
   PROP_STRIDE,
   RoadChunks,
   buildRoadChunk,
+  buildStreetChunk,
   junctionAt,
   neighbourhood,
   roadMask,
@@ -55,6 +63,9 @@ export interface RoadStats {
   /** Traffic lights and yield signs standing, in every chunk. */
   signals: number;
   yields: number;
+  /** Chunks with their sidewalks and street lights built, and the street lights in them. */
+  streetChunks: number;
+  lamps: number;
 }
 
 export interface RoadLayer {
@@ -64,6 +75,14 @@ export interface RoadLayer {
   apply(nodeIds: readonly number[], segIds: readonly number[]): number[];
   /** Shows the layers for zoom band `band` with the camera `height` metres over the ground. */
   setBand(band: ZoomBand, height: number): void;
+  /**
+   * Builds the sidewalks and street lights of chunks near the camera at
+   * (x, z), nearest first, for up to `budgetMs` milliseconds but at least
+   * one chunk, and frees those it has left behind. Call each frame.
+   */
+  update(x: number, z: number, budgetMs: number): void;
+  /** Chunks near the camera still waiting for their sidewalks and street lights, while they are shown. */
+  pending(): number;
   stats(): RoadStats;
   /** Where decoration must not stand in `chunk`, or null if no road is near. See `roadMask`. */
   decorMask(chunk: number): Uint8Array | null;
@@ -79,6 +98,12 @@ interface ChunkMeshes {
   yields: number;
 }
 
+/** A chunk's sidewalks and street lights. */
+interface StreetMeshes {
+  sidewalks: Mesh | null;
+  lamps: InstancedMesh | null;
+}
+
 /** Distance from the camera, in metres. Model matrices are the identity, so local is world. */
 const distance = () => cameraPosition.distance(positionLocal);
 const lift = () => distance().mul(ROADS.lift.perMetre).add(ROADS.lift.base);
@@ -90,6 +115,17 @@ function surfaceMaterial(): MeshLambertNodeMaterial {
   m.polygonOffset = true;
   m.polygonOffsetFactor = -1;
   m.polygonOffsetUnits = -2;
+  return m;
+}
+
+/** Sidewalks: lit like the surface, and offset over it as the markings are, which never overlap them. */
+function sidewalkMaterial(): MeshLambertNodeMaterial {
+  const m = new MeshLambertNodeMaterial({ vertexColors: true });
+  m.name = "sidewalks";
+  m.positionNode = positionLocal.add(vec3(0, lift(), 0));
+  m.polygonOffset = true;
+  m.polygonOffsetFactor = -2;
+  m.polygonOffsetUnits = -4;
   return m;
 }
 
@@ -198,6 +234,21 @@ function yieldGeometry(): BufferGeometry {
   ]);
 }
 
+/**
+ * A street light: a pole at the origin and an arm reaching along +x, over
+ * the road, with the lamp's head at its end and the lens under it.
+ */
+function lampGeometry(): BufferGeometry {
+  const l = ROADS.lamps;
+  const top = l.poleHeight;
+  return merged([
+    paint(new CylinderGeometry(0.08, 0.12, top, 5, 1, true).translate(0, top / 2, 0), l.pole),
+    paint(new BoxGeometry(l.arm, 0.1, 0.1).translate(l.arm / 2, top - 0.1, 0), l.pole),
+    paint(new BoxGeometry(0.7, 0.18, 0.32).translate(l.arm, top - 0.12, 0), l.head),
+    paint(new BoxGeometry(0.56, 0.04, 0.24).translate(l.arm, top - 0.23, 0), l.lens),
+  ]);
+}
+
 /** Furthest a vertex moves in the shader, in metres, so frustum culling allows for it. */
 const SHADER_REACH = 40;
 
@@ -218,17 +269,17 @@ function geometryOf(a: MeshArrays): BufferGeometry | null {
 }
 
 export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
-  const roots = { surface: new Group(), markings: new Group(), lines: new Group(), props: new Group() };
+  const roots = { surface: new Group(), sidewalks: new Group(), markings: new Group(), lines: new Group(), props: new Group() };
   roots.surface.name = "road surfaces";
+  roots.sidewalks.name = "sidewalks";
   roots.markings.name = "road markings";
   roots.lines.name = "road lines";
   roots.props.name = "road props";
   for (const r of Object.values(roots)) parent.add(r);
-  const materials = { surface: surfaceMaterial(), markings: markingMaterial(), lines: lineMaterial() };
+  const materials = { surface: surfaceMaterial(), sidewalks: sidewalkMaterial(), markings: markingMaterial(), lines: lineMaterial() };
   const propMaterial = new MeshLambertNodeMaterial({ vertexColors: true });
   propMaterial.name = "road props";
-  const propGeometries = { signals: signalGeometry(), yields: yieldGeometry() };
-  const dummy = new Object3D();
+  const propGeometries = { signals: signalGeometry(), yields: yieldGeometry(), lamps: lampGeometry() };
 
   /** One instanced mesh of `kind` standing at each prop in `data`, or null when there are none. */
   function instanced(kind: keyof typeof propGeometries, data: Float32Array): InstancedMesh | null {
@@ -237,14 +288,18 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
     const mesh = new InstancedMesh(propGeometries[kind], propMaterial, count);
     mesh.name = kind;
     // Lights and signs stand up off the road, so they cast shadows as trees do.
-    mesh.castShadow = true;
+    // Street lights cast none: a big city has a hundred thousand of them.
+    mesh.castShadow = kind !== "lamps";
     mesh.receiveShadow = true;
+    // A turn about y and a move, written straight into the matrix: a street
+    // light per 17 m of road makes this the most instances a chunk sets.
+    const m = mesh.instanceMatrix.array;
     for (let k = 0; k < count; k++) {
       const o = k * PROP_STRIDE;
-      dummy.position.set(data[o] ?? 0, data[o + 1] ?? 0, data[o + 2] ?? 0);
-      dummy.rotation.set(0, data[o + 3] ?? 0, 0);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(k, dummy.matrix);
+      const yaw = data[o + 3] ?? 0;
+      const c = Math.cos(yaw);
+      const s = Math.sin(yaw);
+      m.set([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, data[o] ?? 0, data[o + 1] ?? 0, data[o + 2] ?? 0, 1], k * 16);
     }
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
@@ -257,7 +312,68 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
   let net: RoadNet | null = null;
   /** Junctions of the network as it is now, for the decoration mask. */
   let current: (node: number) => Junction | null = () => null;
-  let stats: RoadStats = { chunks: 0, segmentPieces: 0, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0, signals: 0, yields: 0 };
+  let stats: RoadStats = { chunks: 0, segmentPieces: 0, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0, signals: 0, yields: 0, streetChunks: 0, lamps: 0 };
+  const street: (StreetMeshes | null)[] = new Array<StreetMeshes | null>(chunks.length).fill(null);
+  /** Whether sidewalks show at all: in the street band, and the district band below `ROADS.markingsBelow`. */
+  let streetShown = false;
+  /** Where the camera was at the last `update`, across the ground. */
+  let eye: { x: number; z: number } | null = null;
+  /** Ground distance from the camera to the nearest point of chunk `c`, squared. */
+  const reach = (c: number): number => {
+    if (!eye) return Infinity;
+    const cx = ((c % CHUNKS_PER_SIDE) + 0.5) * CHUNK_SIZE;
+    const cz = (Math.floor(c / CHUNKS_PER_SIDE) + 0.5) * CHUNK_SIZE;
+    const dx = Math.max(0, Math.abs(eye.x - cx) - CHUNK_SIZE / 2);
+    const dz = Math.max(0, Math.abs(eye.z - cz) - CHUNK_SIZE / 2);
+    return dx * dx + dz * dz;
+  };
+  const hasRoads = (c: number) => (index.chunkSegs[c]?.size ?? 0) > 0 || (index.chunkNodes[c]?.size ?? 0) > 0;
+  /** Chunks near the camera with roads and no street furniture yet, nearest first. */
+  const wanted = (): number[] => {
+    if (!streetShown || !net) return [];
+    const within = ROADS.sidewalks.buildWithin * ROADS.sidewalks.buildWithin;
+    const out: number[] = [];
+    for (let c = 0; c < chunks.length; c++) if (!street[c] && hasRoads(c) && reach(c) <= within) out.push(c);
+    return out.sort((a, b) => reach(a) - reach(b) || a - b);
+  };
+
+  function clearStreet(c: number): void {
+    const old = street[c];
+    if (!old) return;
+    if (old.sidewalks) {
+      old.sidewalks.removeFromParent();
+      old.sidewalks.geometry.dispose();
+    }
+    if (old.lamps) {
+      old.lamps.removeFromParent();
+      old.lamps.dispose();
+    }
+    street[c] = null;
+  }
+
+  function buildStreet(c: number): void {
+    clearStreet(c);
+    if (!net) return;
+    const g = buildStreetChunk(net, terrain, c, index.chunkSegs[c] ?? [], index.chunkNodes[c] ?? [], current);
+    const name = `${c % CHUNKS_PER_SIDE},${Math.floor(c / CHUNKS_PER_SIDE)}`;
+    const geometry = geometryOf(g.sidewalks);
+    let sidewalks: Mesh | null = null;
+    if (geometry) {
+      sidewalks = new Mesh(geometry, materials.sidewalks);
+      sidewalks.name = `sidewalks ${name}`;
+      sidewalks.matrixAutoUpdate = false;
+      sidewalks.renderOrder = 2;
+      sidewalks.receiveShadow = true;
+      roots.sidewalks.add(sidewalks);
+    }
+    const lamps = instanced("lamps", g.lamps);
+    if (lamps) {
+      lamps.name = `lamps ${name}`;
+      roots.props.add(lamps);
+    }
+    // An empty entry still marks the chunk built, so it is not tried again each frame.
+    street[c] = { sidewalks, lamps };
+  }
 
   function clear(c: number): void {
     const old = chunks[c];
@@ -335,6 +451,17 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
     return { chunks: n, segmentPieces: pieces, signals, yields };
   }
 
+  function streetCounts(): Pick<RoadStats, "streetChunks" | "lamps"> {
+    let n = 0;
+    let lamps = 0;
+    for (const c of street) {
+      if (!c) continue;
+      n++;
+      lamps += c.lamps?.count ?? 0;
+    }
+    return { streetChunks: n, lamps };
+  }
+
   return {
     show(next) {
       const start = performance.now();
@@ -345,9 +472,10 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
       const built: number[] = [];
       for (let c = 0; c < chunks.length; c++) {
         build(c, junctions);
+        clearStreet(c);
         if (chunks[c]) built.push(c);
       }
-      stats = { ...counts(), lastRebuilt: built.length, totalRebuilt: 0, lastBuildMs: performance.now() - start };
+      stats = { ...counts(), ...streetCounts(), lastRebuilt: built.length, totalRebuilt: 0, lastBuildMs: performance.now() - start };
       return built;
     },
     apply(nodeIds, segIds) {
@@ -356,9 +484,14 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
       const dirty = [...index.apply(net, nodeIds, segIds)].sort((a, b) => a - b);
       const junctions = junctionCache(net);
       current = junctions;
-      for (const c of dirty) build(c, junctions);
+      for (const c of dirty) {
+        build(c, junctions);
+        // Built again at once where it stands, so an edit near the camera never leaves a gap for a frame.
+        if (street[c]) buildStreet(c);
+      }
       stats = {
         ...counts(),
+        ...streetCounts(),
         lastRebuilt: dirty.length,
         totalRebuilt: stats.totalRebuilt + dirty.length,
         lastBuildMs: performance.now() - start,
@@ -367,11 +500,26 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
     },
     setBand(band, height) {
       roots.surface.visible = band !== "city";
+      streetShown = band !== "city" && height < ROADS.markingsBelow;
+      roots.sidewalks.visible = streetShown;
       roots.markings.visible = band !== "city" && height < ROADS.markingsBelow;
       roots.lines.visible = band === "city";
       roots.props.visible = band === "street";
     },
-    stats: () => stats,
+    update(x, z, budgetMs) {
+      eye = { x, z };
+      const keep = ROADS.sidewalks.keepWithin * ROADS.sidewalks.keepWithin;
+      for (let c = 0; c < street.length; c++) if (street[c] && reach(c) > keep) clearStreet(c);
+      const todo = wanted();
+      if (todo.length === 0) return;
+      const start = performance.now();
+      for (const c of todo) {
+        buildStreet(c);
+        if (performance.now() - start >= budgetMs) break;
+      }
+    },
+    pending: () => wanted().length,
+    stats: () => ({ ...stats, ...streetCounts() }),
     decorMask(chunk) {
       if (!net) return null;
       const near = new Set<number>();
@@ -386,7 +534,10 @@ export function createRoadLayer(terrain: Terrain, parent: Object3D): RoadLayer {
       return near.size === 0 ? null : roadMask(net, chunk, near, rings);
     },
     dispose() {
-      for (let c = 0; c < chunks.length; c++) clear(c);
+      for (let c = 0; c < chunks.length; c++) {
+        clear(c);
+        clearStreet(c);
+      }
       for (const r of Object.values(roots)) r.removeFromParent();
       for (const m of Object.values(materials)) m.dispose();
       propMaterial.dispose();
