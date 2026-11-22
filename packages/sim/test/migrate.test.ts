@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILDINGS_BALANCE, BUILDING_TYPES, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, type SimState } from "../src/index";
+import { BUILDINGS_BALANCE, BUILDING_TYPES, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, travelTimesReady, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
@@ -27,6 +27,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 16) gone.push("pops");
   if (version < 17) gone.push("centre");
   if (version < 18) gone.push("stats");
+  if (version < 19) gone.push("travelReadyAt");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
   // Before version 14 a ZoneCells left no undo record and no record held zoning.
   if (version < 14 && Array.isArray(kept["undo"])) {
@@ -90,7 +91,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(18);
+    expect(SNAPSHOT_VERSION).toBe(19);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -109,6 +110,7 @@ describe("migrateState", () => {
       pops: fresh.pops,
       centre: { x: 0, z: 0, weight: 0, due: 42 },
       stats: createStats(),
+      travelReadyAt: 0,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -132,6 +134,7 @@ describe("migrateState", () => {
       pops: fresh.pops,
       centre: { x: 0, z: 0, weight: 0, due: 0 },
       stats: createStats(),
+      travelReadyAt: 0,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -334,6 +337,18 @@ describe("migrateState", () => {
     expect(migrated.cells.zone.every((z) => z === 0)).toBe(true);
   });
 
+  it("upgrades a version 18 state by adding no rebuild of the travel times under way, so they read at once", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const migrated = migrateState(older(state, 18));
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(migrated.travelReadyAt).toBe(0);
+    expect(travelTimesReady(migrated)).toBe(true);
+    expect(hashState(migrated)).toBe(hashState({ ...state, travelReadyAt: 0 }));
+  });
+
   it("upgrades a version 15 state by adding the pops, none of them, and changes nothing else", () => {
     const state = createState(SEED_WITH_FLAT_GROUND);
     expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
@@ -357,7 +372,7 @@ describe("migrateState", () => {
     state.tick = 1234;
     const v16 = older(state, 16);
     const migrated = migrateState(v16);
-    expect(migrated).toEqual({ ...v16, version: SNAPSHOT_VERSION, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats() });
+    expect(migrated).toEqual({ ...v16, version: SNAPSHOT_VERSION, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0 });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 

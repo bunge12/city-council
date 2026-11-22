@@ -302,7 +302,7 @@ export const STATS: System = { name: STATS_SYSTEM, run: keepStats };
  * the totals that changed since the last delta, the highest population and
  * the yearly counts as they stand, copies, and the samples taken since the
  * write position `sentNext` it last saw, oldest first, each a row of
- * `STAT_TOTALS.length` values (M3-05, protocol version 15).
+ * `STAT_TOTALS.length` values (M3-05, protocol version 16).
  */
 export interface StatsDelta {
   /** Only the totals that changed, by name. Empty when none did. */

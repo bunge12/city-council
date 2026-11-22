@@ -409,6 +409,7 @@ export class SimHost {
       cellReads: this.state.cellReads,
       centre: { ...this.state.centre },
       stats,
+      travelReadyAt: this.state.travelReadyAt,
       ...(queue !== this.sentQueue ? { pending: this.state.pending.map((c) => ({ ...c })) } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,

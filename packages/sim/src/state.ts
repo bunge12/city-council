@@ -17,7 +17,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 18;
+export const SNAPSHOT_VERSION = 19;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -115,6 +115,12 @@ export interface SimState {
    * buildings change, never recounted in a tick.
    */
   stats: StatsState;
+  /**
+   * The tick from which the sim may read the travel times between zones. A
+   * change of roads gives the table the ticks up to this one to be rebuilt
+   * in (travel-times.ts). At or below `tick` when nothing is being rebuilt.
+   */
+  travelReadyAt: number;
 }
 
 /**
@@ -164,6 +170,8 @@ export function createBareState(seed: number): SimState {
     centre: createCentre(),
     // After the centre, where the version 18 migration puts it.
     stats: createStats(),
+    // After the statistics, where the version 19 migration puts it.
+    travelReadyAt: 0,
   };
 }
 

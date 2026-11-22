@@ -16,7 +16,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 16;
 
 // ---- Client to sim ----
 
@@ -88,7 +88,7 @@ export interface DeltaMessage {
   buildings?: BuildingDelta;
   /**
    * The people and jobs filled of every building whose numbers changed,
-   * read when the delta is built (M3-05, protocol version 15). Left out
+   * read when the delta is built (M3-05, protocol version 16). Left out
    * when none did. Pop rows never travel in a delta; see `SnapshotMessage`.
    */
   people?: PopDelta;
@@ -131,12 +131,18 @@ export interface DeltaMessage {
   centre: CentreState;
   /**
    * The city statistics after the last step (M3-04, protocol version 14):
-   * the totals that changed since the last delta (M3-05, version 15), the
+   * the totals that changed since the last delta (M3-05, version 16), the
    * yearly counts, copies, and any monthly samples taken since the last
    * delta. Always sent, like `centre`: a copy whose totals or history fell
    * behind would hash differently from the sim.
    */
   stats: StatsDelta;
+  /**
+   * `travelReadyAt` after the last step, always sent, like `cellReads`: a
+   * copy without it would hash differently from the sim (issue #177,
+   * protocol version 15).
+   */
+  travelReadyAt: number;
   /**
    * The commands still queued, the ones waiting for the cells to settle,
    * when the queue changed since the last delta. Left out otherwise: a

@@ -87,6 +87,7 @@ describe("building deltas in the mirror", () => {
         cellReads: state.cellReads,
         centre: { ...state.centre },
         stats: encodeStatsDelta(state.stats, state.stats.next),
+        travelReadyAt: state.travelReadyAt,
         pending: [],
         steps: 0,
         timings: [],
