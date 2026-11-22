@@ -1,0 +1,96 @@
+{
+  "description": "Turnover on seed 2026 (M3-11). p1 builds a street from the first outside connection, zones C3 by the connection on its north side and R1 houses along the rest of it, and p2 zones R1 houses along its south side. Every bar is held at 40. The houses fill and the shops take workers in the first weeks; over the next two game years a few households a month are replaced, children grow up and leave, people die and babies are born, and the vacant houses fill again.",
+  "seed": 2026,
+  "untilTick": 73000,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 200,
+          "z": 3608
+        },
+        "to": {
+          "x": 488,
+          "z": 3608
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "commercial",
+        "density": 3,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3629
+            },
+            "to": {
+              "x": 246,
+              "z": 3629
+            },
+            "width": 28
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 3,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 266,
+              "z": 3621
+            },
+            "to": {
+              "x": 486,
+              "z": 3621
+            },
+            "width": 12
+          }
+        ]
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 4,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 266,
+              "z": 3595
+            },
+            "to": {
+              "x": 486,
+              "z": 3595
+            },
+            "width": 12
+          }
+        ]
+      }
+    }
+  ],
+  "balance": "4672c4929d82c237",
+  "hash": "28cbb565d3df4964",
+  "heldDemand": 40
+}

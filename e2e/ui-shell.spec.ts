@@ -135,6 +135,8 @@ test("the debug panel shows the tick rate, tick time against the budget and wher
   await expect(page.locator("#sim-timings")).toContainText("jobs");
   // And satisfaction (M3-10).
   await expect(page.locator("#sim-timings")).toContainText("satisfaction");
+  // And turnover (M3-11).
+  await expect(page.locator("#sim-timings")).toContainText("turnover");
   await expect(page.locator("#sim-budget")).toHaveText(/^[\d.]+ of 20 ms \([\d.]+%\)$/);
   await expect(page.locator("#render-backend")).toHaveText(/^(WebGPU|WebGL 2)$/);
   await expect(page.locator("#render-frame")).toHaveText(/ms \(\d+ fps\)$/);

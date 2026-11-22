@@ -154,6 +154,14 @@
       "mode": "blocks",
       "source": "M3-10"
     },
+    "turnover.tick": {
+      "name": "the turnover system's ticks on the scale town on a day every pop is replaced: 150,000 pops, every pop in the day's slice of 1,500 moving out and a newcomer drawn for its home; a fifth of the tick, for a case no city meets",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 4,
+      "mode": "blocks",
+      "source": "M3-11"
+    },
     "demand.outside": {
       "name": "working out which of the scale town's 30,000 segments reach outside again, in the step after a change of roads",
       "unit": "ms",

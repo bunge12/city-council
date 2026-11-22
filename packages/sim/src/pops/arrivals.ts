@@ -35,7 +35,7 @@ import type { System } from "../step";
 import { noteYear } from "../stats/stats";
 import { POPS_BALANCE } from "./balance";
 import { addPop, popSizeCap, type PopProfile } from "./pops";
-import { homeRoomLeft, homesWithRoom } from "./room";
+import { homeRoomLeft, homesWithRoom, newcomerRoomLeft } from "./room";
 import type { EducationShares } from "../buildings/balance";
 
 /** The name the timer hook reports for arrivals. */
@@ -56,7 +56,7 @@ function drawLevel(rng: Uint32Array, shares: EducationShares): number {
 }
 
 /** A newcomer's profile, drawn with the mix in pops.json: education, then wealth, then children. */
-function drawProfile(rng: Uint32Array): PopProfile {
+export function drawProfile(rng: Uint32Array): PopProfile {
   const mix = POPS_BALANCE.newcomer;
   const education = drawLevel(rng, mix.education);
   const wealth = drawLevel(rng, mix.wealth);
@@ -72,7 +72,7 @@ export function drawSize(rng: Uint32Array, density: number, room: number): numbe
   return Math.max(1, Math.min(drawn, popSizeCap(density), room));
 }
 
-/** Moves one household into a home drawn from `homes`, which are those with room, and returns its people. Takes the home off the list once it is full. */
+/** Moves one household into a home drawn from `homes`, which are those with room, and returns its people. Takes the home off the list once it has no room left for another household (room.ts). */
 function moveIn(state: SimState, homes: number[]): number {
   const rng = state.rng;
   const at = nextInt(rng, homes.length);
@@ -81,7 +81,7 @@ function moveIn(state: SimState, homes: number[]): number {
   const profile = drawProfile(rng);
   addPop(state, { home, size, ...profile, satisfaction: POPS_BALANCE.newcomer.satisfaction });
   noteYear(state, "arrivals", size);
-  if (homeRoomLeft(state, home) === 0) {
+  if (newcomerRoomLeft(state, home) === 0) {
     homes[at] = homes[homes.length - 1] as number;
     homes.pop();
   }
