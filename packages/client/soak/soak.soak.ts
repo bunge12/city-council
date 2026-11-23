@@ -88,7 +88,7 @@ import { beforeAll, describe, expect, test } from "vitest";
 import { holdDemandBars } from "../src/protocol/held-demand";
 import { PUMP_INTERVAL_MS, SimHost, type PendingSave } from "../src/protocol/host";
 import { build } from "vite";
-import { countHomes } from "../src/protocol/homes";
+import { countRoom } from "../src/protocol/room";
 import type { HostTransport } from "../src/protocol/transport";
 import type { FromMirror, MirrorQuestion, ToMirror } from "./mirror-worker";
 import { AUTOSAVE_INTERVAL_MS } from "../src/save/config";
@@ -270,14 +270,14 @@ interface SoakRun {
     tick: number;
     endTick: number;
     logEntries: number;
-    page: { roads: string; cells: string; buildings: string; homes: number | null } | null;
+    page: { roads: string; cells: string; buildings: string; room: number | null } | null;
     roads: string;
     cells: string;
     buildings: string;
     /** A save written in parts gave the same bytes as one written at once. */
     savePartsMatch: boolean;
-    homesMismatches: number;
-    homes: number;
+    roomMismatches: number;
+    room: number;
   };
   budgets: {
     checks: BudgetCheck[];
@@ -429,12 +429,13 @@ async function soakHour(): Promise<SoakRun> {
   /** The grower's time in each step it ran in. */
   const growerMs: number[] = [];
   /**
-   * Sampled with the heap: buildings standing, and the top bar's homes
-   * counter (M2-18), which the mirror keeps from the deltas, beside the
-   * homes counted afresh from the mirror's rows.
+   * Sampled with the heap: buildings standing, and the room behind the top
+   * bar's population (M3-15, the homes counter of M2-18 before it), which
+   * the mirror keeps from the deltas, beside the room counted afresh from
+   * the mirror's rows.
    */
-  const buildingsOverTime: { tick: number; buildings: number; homes: number }[] = [];
-  let homesMismatches = 0;
+  const buildingsOverTime: { tick: number; buildings: number; room: number }[] = [];
+  let roomMismatches = 0;
 
   const stepMs = new Float64Array(TICKS);
   let steps = 0;
@@ -553,10 +554,10 @@ async function soakHour(): Promise<SoakRun> {
     }
     if (host.tick % SAMPLE_EVERY === 0 && heap.at(-1)?.tick !== host.tick) {
       heap.push({ tick: host.tick, mb: mb(memoryUsage().heapUsed) });
-      const sample = await ask<{ homes: number; counted: number; buildings: number } | null>({ q: "homes" });
+      const sample = await ask<{ room: number; counted: number; buildings: number } | null>({ q: "room" });
       if (sample) {
-        if (sample.homes !== sample.counted) homesMismatches++;
-        buildingsOverTime.push({ tick: host.tick, buildings: sample.buildings, homes: sample.homes });
+        if (sample.room !== sample.counted) roomMismatches++;
+        buildingsOverTime.push({ tick: host.tick, buildings: sample.buildings, room: sample.room });
       }
     }
   }
@@ -575,7 +576,7 @@ async function soakHour(): Promise<SoakRun> {
   // The live city and a replay of its full log from the seed must agree.
   const live = deserialize(host.snapshotBytes());
   const replayed = replay(SEED, host.fullLog, host.tick);
-  const pageHashes = await ask<{ roads: string; cells: string; buildings: string; homes: number | null } | null>({ q: "hashes" });
+  const pageHashes = await ask<{ roads: string; cells: string; buildings: string; room: number | null } | null>({ q: "hashes" });
   await page.stop();
 
   const sorted = stepMs.slice(0, steps).sort();
@@ -660,9 +661,9 @@ async function soakHour(): Promise<SoakRun> {
         maxMs: ms(times.at(-1) ?? 0),
         buildingsAtEnd: buildingCount(live.state.buildings),
         mostBuildings: most,
-        homesAtEnd: pageHashes?.homes ?? null,
-        mostHomes: buildingsOverTime.reduce((a, b) => Math.max(a, b.homes), 0),
-        homesMismatches,
+        roomAtEnd: pageHashes?.room ?? null,
+        mostRoom: buildingsOverTime.reduce((a, b) => Math.max(a, b.room), 0),
+        roomMismatches,
         // Each grower step over GROWER_SLOW_MS and the collections that ran in its pump.
         slowSteps: slowPumps.filter((p) => p.growerMs > GROWER_SLOW_MS).map((p) => ({ tick: p.tick, ms: ms(p.growerMs), gc: pausedBy(p) })),
         // One sample every ten game minutes, for the shape of the growth.
@@ -718,8 +719,8 @@ async function soakHour(): Promise<SoakRun> {
       cells: hashState(live.state.cells),
       buildings: hashState(live.state.buildings),
       savePartsMatch,
-      homesMismatches,
-      homes: countHomes(live.state.buildings).count,
+      roomMismatches,
+      room: countRoom(live.state.buildings),
     },
     budgets: {
       checks,
@@ -748,9 +749,9 @@ describe("soak: one hour of game time at 4x", () => {
     expect(h.page?.buildings, "the page's buildings").toBe(h.buildings);
     // A save written in parts into the kept buffers is the save written at once.
     expect(h.savePartsMatch, "a save in parts, against one at once").toBe(true);
-    // The top bar's homes counter, kept from the deltas, never strayed from a count from scratch, and ends on the live city's.
-    expect(h.homesMismatches, "samples where the homes counter strayed").toBe(0);
-    expect(h.page?.homes, "the page's homes").toBe(h.homes);
+    // The room behind the top bar's population, kept from the deltas, never strayed from a count from scratch, and ends on the live city's.
+    expect(h.roomMismatches, "samples where the room counter strayed").toBe(0);
+    expect(h.page?.room, "the page's room").toBe(h.room);
   });
 
   test(`every source inside the ${BUDGET_MS} ms tick budget`, () => {

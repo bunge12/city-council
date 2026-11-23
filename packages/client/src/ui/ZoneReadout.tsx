@@ -22,6 +22,9 @@ export function zoneTitle(preview: ZonePreview): string {
   return `Zone ${cells(n)} ${zoneLabel(preview.zone, preview.density)}`;
 }
 
+/** The readout's line over mixed ground, which has no demand bar of its own (issue M3-15). */
+export const MIXED_NOTE = "Builds when residential and commercial demand are both above zero";
+
 /**
  * Next to the cursor while the zone tool is over cells: how many a click
  * would change and to what, or why it would change none, and over ground
@@ -48,6 +51,11 @@ export function ZoneReadout() {
       ) : (
         <div className="reason" id="zone-reason">
           Nothing to change here
+        </div>
+      )}
+      {preview.ok && preview.zone === "mixed" && (
+        <div className="lot-note" id="zone-mixed-note">
+          {MIXED_NOTE}
         </div>
       )}
       {hover.lotNote && (

@@ -40,7 +40,7 @@ import {
   copyDemand,
   whyNoNewcomers,
 } from "@city-council/sim";
-import { adjustHomes, countHomes, homesAfter, homesBefore, type Homes } from "./homes";
+import { countRoom, roomAfter, roomBefore } from "./room";
 import type { ClientTransport } from "./transport";
 
 /** Deeply read-only view of sim state. The client never writes it. */
@@ -129,7 +129,7 @@ export class SimMirror {
   private readonly listeners = new Set<Listener>();
   private hostStats: HostStats = { timings: [] };
   private awaitingSnapshot = false;
-  private homeTally: Homes | null = null;
+  private roomTally: number | null = null;
   /** Every building's people and jobs filled, counted from the last snapshot's pops and moved by each delta. */
   private occupancy: Occupancy = { people: new Int32Array(0), filled: new Int32Array(0) };
 
@@ -157,13 +157,12 @@ export class SimMirror {
   }
 
   /**
-   * The residential buildings standing in the copy and the residents they
-   * hold room for (issue M2-18), or null until the first snapshot. Counted
-   * in full from each snapshot, then moved by each building delta. The
-   * object is replaced only when a number changes, so a view can compare it.
+   * The people the copy's buildings hold room for (issue M3-15), or null
+   * until the first snapshot. Counted in full from each snapshot, then moved
+   * by each building delta.
    */
-  get homes(): Homes | null {
-    return this.homeTally;
+  get room(): number | null {
+    return this.roomTally;
   }
 
   /** The people living in building `id`, as the sim's `buildingPeople` has them. 0 for an id that is not a building. */
@@ -359,7 +358,7 @@ export class SimMirror {
         this.settleFromSnapshot(message.state);
         this.skipSeqs(message.state);
         this.current = message.state;
-        this.homeTally = countHomes(message.state.buildings);
+        this.roomTally = countRoom(message.state.buildings);
         this.occupancy = countOccupancy(message.state);
         this.logFrom = message.logFrom;
         this.deltaSeq = message.deltaSeq;
@@ -437,17 +436,16 @@ export class SimMirror {
     }
     // Then the buildings, on the cells as they now are.
     let buildingChunks: readonly number[] = [];
-    let homes = this.homeTally;
+    let room = this.roomTally;
     if (delta.buildings) {
-      const before = homesBefore(state.buildings, delta.buildings);
+      const before = roomBefore(state.buildings, delta.buildings);
       const applied = applyBuildingDelta(state, delta.buildings);
       if (typeof applied === "string") {
         this.outOfStep();
         return;
       }
       buildingChunks = applied;
-      const after = homesAfter(state.buildings, delta.buildings);
-      if (homes && (before.count !== after.count || before.capacity !== after.capacity)) homes = adjustHomes(homes, before, after);
+      if (room !== null) room += roomAfter(state.buildings, delta.buildings) - before;
     }
     if (delta.people) {
       const occupancy = applyPopDelta(this.occupancy, delta.people, state.buildings.flags.length);
@@ -459,7 +457,7 @@ export class SimMirror {
       this.occupancy = occupancy;
     }
     this.deltaSeq++;
-    this.homeTally = homes;
+    this.roomTally = room;
     state.tick = delta.tick;
     state.speed = delta.speed;
     // The host's queue as it stands: what a step neither applied nor
