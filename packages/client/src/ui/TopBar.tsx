@@ -3,7 +3,7 @@ import { PRESETS } from "../render/config";
 import { isPreset, presetLabel } from "../render/presets";
 import { formatGameDate, formatHomesTitle } from "./format";
 import { useHomes, useSaveStatus, useServices, useSim } from "./hooks";
-import { toggleDebug, toggleLog, toggleMenu, useGraphics, useSound, useUi } from "./store";
+import { toggleDebug, toggleLog, toggleMenu, toggleStats, useGraphics, useSound, useUi } from "./store";
 
 /** The graphics setting: Low, Balanced or High, kept in this browser. */
 function GraphicsSetting() {
@@ -82,6 +82,7 @@ export function TopBar() {
   const menuOpen = useUi((s) => s.menuOpen);
   const logOpen = useUi((s) => s.logOpen);
   const debugOpen = useUi((s) => s.debugOpen);
+  const statsOpen = useUi((s) => s.statsOpen);
 
   return (
     <header className="top-bar">
@@ -117,6 +118,7 @@ export function TopBar() {
       <SoundSetting />
       <nav className="panels" aria-label="Panels">
         <button type="button" aria-expanded={menuOpen} aria-controls="city-menu" onClick={toggleMenu}>City</button>
+        <button type="button" id="stats-toggle" aria-expanded={statsOpen} aria-controls="stats-panel" title="Statistics: population and the city's numbers over time (P)" onClick={toggleStats}>Stats</button>
         <button type="button" aria-expanded={logOpen} aria-controls="activity-log" onClick={toggleLog}>Log</button>
         <button type="button" aria-expanded={debugOpen} aria-controls="debug-panel" onClick={toggleDebug}>Debug</button>
       </nav>
