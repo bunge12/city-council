@@ -66,8 +66,17 @@ const totalRoom = homes.reduce((sum, h) => sum + h.room, 0);
 const size = Math.max(1, Math.floor(totalRoom / TARGET));
 state.pops = createPops();
 let n = 0;
-for (const h of homes) {
+// Homes taken in a fixed order spread over the town, not in id order: since
+// M3-25 the grower builds the best ground first, so ids run from one part of
+// the town to the next, and the first homes by id would all be near one
+// another, competing for the same few jobs.
+const STRIDE = 7919;
+if (homes.length % STRIDE === 0) throw new Error("the stride must not divide the homes");
+const spread = homes.map((_, i) => homes[(i * STRIDE) % homes.length] as (typeof homes)[number]);
+for (const h of spread) {
   if (n >= TARGET) break;
+  // The last home in that order stays empty, for reset's pop below.
+  if (h === spread[spread.length - 1]) break;
   const count = Math.max(cutPeople(h.room, h.density).length, Math.floor((h.room + size - 1) / size));
   for (let i = 0; i < count && n < TARGET; i++) {
     const people = Math.floor(h.room / count) + (i < h.room % count ? 1 : 0);
@@ -116,7 +125,7 @@ function reset(): void {
   // And room to grow, as a running city's arrays have: the first pop added
   // after a load doubles the pop arrays and the index, which the first
   // newcomer pays as often as the first split, and is not this system's.
-  removePop(state, addPop(state, { home: homes[homes.length - 1]?.home ?? 0, size: 1, education: 0, wealth: 0, children: 0, satisfaction: 50 }));
+  removePop(state, addPop(state, { home: spread[spread.length - 1]?.home ?? 0, size: 1, education: 0, wealth: 0, children: 0, satisfaction: 50 }));
 }
 
 test("job matching on the M2 scale town", async ({ bench, annotate }) => {
