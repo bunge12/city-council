@@ -27,6 +27,7 @@ import type { Ray } from "../camera/pick";
 import type { ZoomBand } from "../camera/zoom-band";
 import { createBuildingLayer, type BuildingLayer, type BuildingSource, type BuildingStats } from "./building-meshes";
 import { createCellLayer, type CellLayer, type CellSource, type CellStats } from "./cell-meshes";
+import type { CellColouring } from "./cell-geometry";
 import { createDecorLayer, type DecorLayer } from "./decor-meshes";
 import { frameSignature } from "./frame-signature";
 import { createLighting, skyColour, type LightingReport } from "./lighting";
@@ -89,6 +90,10 @@ export interface View {
   setCellSource(source: CellSource): void;
   /** Shows or hides the zoning overlay. */
   setCellsVisible(on: boolean): void;
+  /** What the overlay colours cells by: their zoning, or their land value (issue M3-18). */
+  setCellColouring(colouring: CellColouring): void;
+  /** The land values of these chunks, or of every chunk with no list, may have changed though their cells did not. */
+  revalueCells(chunks?: readonly number[]): void;
   /** Redraws the cells of every chunk, as after a snapshot, over the next frames. */
   showCells(): void;
   /** Redraws the cells of the chunks a delta changed, over the next frames. */
@@ -128,6 +133,8 @@ export interface View {
   setGameTick(tick: number | null): void;
   /** The colours building `id` is drawn in, as sRGB hex, or null. For tests. */
   buildingTint(id: number): { wall: number; roof: number; trim: number } | null;
+  /** Building `id`'s use as drawn (building-lod.ts, `IN_USE`, `VACANT`, `ABANDONED`), or null if it is not drawn (issue M3-17). */
+  buildingUse(id: number): number | null;
   /** Switches the lighting to a graphics preset once its shaders are compiled. */
   setPreset(preset: Preset): Promise<void>;
   /** The lighting on screen: its preset and its shadows. */
@@ -220,6 +227,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
   let cellSource: CellSource | null = null;
   let buildingSource: BuildingSource | null = null;
   let cellsVisible = false;
+  let cellColouring: CellColouring = "zoning";
 
   // Under cheap frames: set when something the frame signature does not see
   // has changed, so the next frame is drawn.
@@ -285,6 +293,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
     const cells = cellSource ? createCellLayer(scene, cellSource, (x, z) => heightAt(terrain, x, z)) : null;
     cells?.setBand(band);
     cells?.setVisible(cellsVisible);
+    cells?.setColouring(cellColouring);
     // The overlay is hidden until the zone tool opens; its shader is compiled now, so that frame does not build it (issue #163).
     // Under cheap frames a chunk drawn before the compile settles is left out, and nothing else would draw it again.
     void cells
@@ -496,6 +505,11 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
       cellsVisible = on;
       terrainRoot?.cells?.setVisible(on);
     },
+    setCellColouring(colouring) {
+      cellColouring = colouring;
+      terrainRoot?.cells?.setColouring(colouring);
+    },
+    revalueCells: (chunks) => terrainRoot?.cells?.revalue(chunks),
     showCells: () => terrainRoot?.cells?.reset(),
     updateCells: (chunks) => terrainRoot?.cells?.apply(chunks),
     cellStats: () => terrainRoot?.cells?.stats() ?? null,
@@ -518,6 +532,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
     },
     buildingForm: (chunk) => terrainRoot?.buildings?.formOf(chunk) ?? null,
     buildingTint: (id) => terrainRoot?.buildings?.tintOf(id) ?? null,
+    buildingUse: (id) => terrainRoot?.buildings?.useOf(id) ?? null,
     pickBuilding: (ray, limit) => terrainRoot?.buildings?.pick(ray, limit) ?? -1,
     buildingFormVersion: () => terrainRoot?.buildings?.formVersion() ?? 0,
     buildingTop: (id) => terrainRoot?.buildings?.topOf(id) ?? null,

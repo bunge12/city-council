@@ -3,6 +3,7 @@
 
 import type { Speed } from "@city-council/sim";
 import type { DrawMode, ToolRoadType } from "../tools/road-tool";
+import { OVERLAYS, type OverlayEntry } from "./overlays";
 
 export type ShortcutAction =
   | { kind: "speed"; speed: Speed }
@@ -17,6 +18,7 @@ export type ShortcutAction =
   | { kind: "upgradeTool" }
   | { kind: "zoneTool" }
   | { kind: "zoneDepth"; by: number }
+  | { kind: "overlay"; id: OverlayEntry["id"] }
   | { kind: "roadType"; type: ToolRoadType }
   | { kind: "drawMode"; mode: DrawMode }
   | { kind: "escape" }
@@ -45,6 +47,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["Enter", "NumpadEnter"], label: "Enter", description: "build the grid drawn with the grid tool", action: { kind: "confirm" } },
   { codes: ["KeyV"], label: "V", description: "upgrade tool on or off", action: { kind: "upgradeTool" } },
   { codes: ["KeyK"], label: "K", description: "zone tool, with the zoning overlay, on or off", action: { kind: "zoneTool" } },
+  ...OVERLAYS.map((o): Shortcut => ({ codes: [o.code], label: o.key, description: `${o.label.toLowerCase()} overlay on or off`, action: { kind: "overlay", id: o.id } })),
   { codes: ["BracketLeft"], label: "[", description: "zone tool: fill one cell shallower", action: { kind: "zoneDepth", by: -1 } },
   { codes: ["BracketRight"], label: "]", description: "zone tool: fill one cell deeper", action: { kind: "zoneDepth", by: 1 } },
   { codes: ["KeyZ"], label: "Z", description: "draw streets, or upgrade to one", action: { kind: "roadType", type: "street" } },

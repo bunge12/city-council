@@ -8,11 +8,12 @@ const hex = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
 /**
  * The zoning overlay's legend (issue M2-06): each zone's colour at each
  * density, and the outline of a cell nobody has zoned. Shown while the
- * overlay is on, which is while the zone tool is open. The colours come from `CELLS` in render/config.ts, the
+ * overlay is on, which is while the zone tool is open and no other overlay
+ * has been chosen over it (issue M3-18). The colours come from `CELLS` in render/config.ts, the
  * same place the overlay takes them from.
  */
 export function ZoneLegend() {
-  const on = useUi((s) => s.tool === "zone");
+  const on = useUi((s) => s.overlay === "zoning");
   if (!on) return null;
   return (
     <section className="panel zone-legend" id="zone-legend" aria-label="Zoning legend">

@@ -31,8 +31,8 @@ import { ROAD_TYPES } from "../roads/balance";
 import type { SimState } from "../state";
 import type { System } from "../step";
 import { terrainOf } from "../terrain/cache";
-import { cellCorners, cellsSettled } from "../zoning/cell-index";
-import type { CellRef } from "../zoning/cells";
+import { cellCorners, cellsSettled, type ChunkCellShapes } from "../zoning/cell-index";
+import { segmentOfSlot, type CellRef } from "../zoning/cells";
 import { LAND_VALUE_BALANCE, LAND_VALUE_MAX, falloff } from "./balance";
 import { pollutionAt, pollutionSide } from "./pollution";
 import { waterDistanceAt } from "./water";
@@ -113,6 +113,30 @@ function valueWith(state: SimState, terrain: Terrain, grid: Int32Array, x: numbe
   const pollution = Math.min(lv.maxPollution, Math.max(0, pollutionAt(grid, x, z)));
   const value = Math.min(LAND_VALUE_MAX, Math.max(0, lv.base + road + water + centre - pollution));
   return { value, base: lv.base, road, water, centre, pollution };
+}
+
+/**
+ * By the order of `shapes`, as `cellShapesInChunk` gives a chunk's cells,
+ * each cell's value, as `landValueAt` gives it: measured at the centre of
+ * its corners, fronting its own segment's road. For a view that colours a
+ * whole chunk at once (the client's land value overlay, M3-18), without a
+ * cell lookup per cell.
+ */
+export function landValuesOfShapes(state: SimState, shapes: ChunkCellShapes): Uint8Array {
+  const { slots, corners } = shapes;
+  const out = new Uint8Array(slots.length);
+  const terrain = terrainOf(state.seed);
+  const grid = pollutionGrid(state);
+  const offset = state.cells.offset;
+  let seg = -1;
+  for (let k = 0; k < slots.length; k++) {
+    seg = segmentOfSlot(offset, slots[k] ?? 0, seg);
+    const o = k * 8;
+    const x = ((corners[o] ?? 0) + (corners[o + 2] ?? 0) + (corners[o + 4] ?? 0) + (corners[o + 6] ?? 0)) / 4;
+    const z = ((corners[o + 1] ?? 0) + (corners[o + 3] ?? 0) + (corners[o + 5] ?? 0) + (corners[o + 7] ?? 0)) / 4;
+    out[k] = valueWith(state, terrain, grid, x, z, state.roads.segType[seg] ?? 0).value;
+  }
+  return out;
 }
 
 /**

@@ -16,7 +16,9 @@
     "guides-scale.spec.ts",
     "roads-scale.spec.ts",
     "cells-scale.spec.ts",
-    "statistics-scale.spec.ts"
+    "statistics-scale.spec.ts",
+    "building-use-scale.spec.ts",
+    "land-value-scale.spec.ts"
   ],
   "evidence": [
     "building-looks.spec.ts",
@@ -43,6 +45,8 @@
     "building-lod-scale.spec.ts": 172,
     "building-lod.spec.ts": 68,
     "building-looks.spec.ts": 264,
+    "building-use-scale.spec.ts": 480,
+    "building-use.spec.ts": 150,
     "bulldozer.spec.ts": 66,
     "camera.spec.ts": 49,
     "cell-snap.spec.ts": 46,
@@ -63,6 +67,8 @@
     "guides-scale.spec.ts": 287,
     "guides.spec.ts": 42,
     "land-value-order.spec.ts": 60,
+    "land-value-scale.spec.ts": 180,
+    "land-value.spec.ts": 60,
     "levels.spec.ts": 26,
     "population.spec.ts": 160,
     "presets-forest.spec.ts": 112,
