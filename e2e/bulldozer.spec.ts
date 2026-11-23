@@ -211,7 +211,7 @@ test("the bulldozer: its own tool, a price tag on what it picks, clicks and drag
     await expect(tag).toHaveAttribute("data-kind", "building");
     await expect(tag).toHaveAttribute("data-undoable", "false");
     await expect(tag.locator(".what")).toHaveText("Single family home");
-    await expect(tag.locator(".detail")).toHaveText(/^Residential R1 · lot 2 × 4 cells · 2 residents, room for 3$/);
+    await expect(tag.locator(".detail")).toHaveText(/^Residential R1 \(2 × 4 lot\) · 2\/3 residents$/);
     await expect(tag).toHaveAttribute("data-residents", "2");
     await expect(page.locator("#bulldoze-cost")).toHaveText("$0");
     await expect(page.locator("#bulldoze-no-undo")).toHaveText("Can't be undone");

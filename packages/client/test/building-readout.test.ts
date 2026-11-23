@@ -44,17 +44,17 @@ describe("the building readout's lines (issue M3-17)", () => {
   it("gives a lived-in home's people against its room, and no state", () => {
     const lines = buildingLines(row("single-family-home"), { people: 3, filled: 0, why: null });
     expect(lines.title).toBe("Single family home");
-    expect(lines.detail).toBe("Residential R1 · lot 2 × 4 cells · 3 residents, room for 4");
+    expect(lines.detail).toBe("Residential R1 (2 × 4 lot) · 3/4 residents");
     expect(lines.state).toBeNull();
   });
 
   it("says one resident in the singular", () => {
-    expect(buildingLines(row("single-family-home"), { people: 1 }).detail).toMatch(/· 1 resident, room for 4$/);
+    expect(buildingLines(row("single-family-home"), { people: 1 }).detail).toMatch(/ · 1\/4 residents$/);
   });
 
   it("says a home built and empty is empty, and why no newcomer comes", () => {
     expect(buildingLines(row("single-family-home"), { people: 0, why: "noRoute" })).toMatchObject({
-      detail: "Residential R1 · lot 2 × 4 cells · nobody living here, room for 4",
+      detail: "Residential R1 (2 × 4 lot) · 0/4 residents",
       state: "Empty · no road to an outside connection",
     });
     expect(buildingLines(row("single-family-home"), { people: 0, why: "noDemand" }).state).toBe("Empty · nobody is moving to the city");
@@ -64,33 +64,33 @@ describe("the building readout's lines (issue M3-17)", () => {
 
   it("says a vacant home is vacant, with the reason when there is one", () => {
     const vacant = row("single-family-home", { vacant: true });
-    expect(buildingLines(vacant, { people: 0, why: null })).toMatchObject({ detail: "Residential R1 · lot 2 × 4 cells · nobody living here, room for 4", state: "Vacant" });
+    expect(buildingLines(vacant, { people: 0, why: null })).toMatchObject({ detail: "Residential R1 (2 × 4 lot) · 0/4 residents", state: "Vacant" });
     expect(buildingLines(vacant, { people: 0, why: "noRoute" }).state).toBe("Vacant · no road to an outside connection");
   });
 
-  it("says an abandoned home is abandoned, whatever reason the mirror gives", () => {
+  it("says an abandoned home is abandoned and leaves out its residents, whatever reason the mirror gives", () => {
     const lines = buildingLines(row("single-family-home", { abandoned: true }), { people: 0, why: "abandoned" });
-    expect(lines.detail).toBe("Residential R1 · lot 2 × 4 cells · no room offered");
+    expect(lines.detail).toBe("Residential R1 (2 × 4 lot)");
     expect(lines.state).toBe("Abandoned");
   });
 
   it("gives a workplace's jobs filled against its jobs offered", () => {
     expect(shop).toBeDefined();
     const b = row(shop?.id ?? "", { zone: 2, residents: 0, jobs: 12 });
-    expect(buildingLines(b, { people: 0, filled: 5, why: null })).toMatchObject({ detail: expect.stringMatching(/^Commercial C\d · lot 2 × 4 cells · 5 of 12 jobs filled$/), state: null });
-    expect(buildingLines(row(shop?.id ?? "", { zone: 2, residents: 0, jobs: 1 }), { people: 0, filled: 0 }).detail).toMatch(/· 0 of 1 job filled$/);
+    expect(buildingLines(b, { people: 0, filled: 5, why: null })).toMatchObject({ detail: expect.stringMatching(/^Commercial C\d \(2 × 4 lot\) · 5\/12 jobs$/), state: null });
+    expect(buildingLines(row(shop?.id ?? "", { zone: 2, residents: 0, jobs: 1 }), { people: 0, filled: 0 }).detail).toMatch(/ · 0\/1 job$/);
     expect(buildingLines({ ...b, vacant: true }, { people: 0, filled: 0 }).state).toBe("Vacant");
   });
 
-  it("says an abandoned workplace offers no jobs", () => {
+  it("leaves out an abandoned workplace's jobs", () => {
     const b = row(shop?.id ?? "", { zone: 2, residents: 0, jobs: 0, abandoned: true });
-    expect(buildingLines(b, { people: 0, filled: 0 })).toMatchObject({ detail: expect.stringMatching(/· no jobs offered$/), state: "Abandoned" });
+    expect(buildingLines(b, { people: 0, filled: 0 })).toMatchObject({ detail: expect.stringMatching(/^Commercial C\d \(2 × 4 lot\)$/), state: "Abandoned" });
   });
 
   it("gives both for a building that is a home and a workplace", () => {
     expect(mixed).toBeDefined();
     const b = row(mixed?.id ?? "", { residents: 40, jobs: 6 });
-    expect(buildingLines(b, { people: 12, filled: 2 }).detail).toMatch(/· 12 residents, room for 40 · 2 of 6 jobs filled$/);
+    expect(buildingLines(b, { people: 12, filled: 2 }).detail).toMatch(/ \(2 × 4 lot\) · 12\/40 residents · 2\/6 jobs$/);
     // Nobody living there but people at work: not empty.
     expect(buildingLines(b, { people: 0, filled: 2, why: "noRoute" }).state).toBeNull();
     expect(buildingLines(b, { people: 0, filled: 0, why: "noRoute" }).state).toBe("Empty · no road to an outside connection");
@@ -99,6 +99,17 @@ describe("the building readout's lines (issue M3-17)", () => {
   it("gives a home's room alone, and a workplace's jobs, where who is in it is not known", () => {
     expect(buildingLines(row("single-family-home")).detail).toMatch(/· 4 residents$/);
     expect(buildingLines(row(shop?.id ?? "", { zone: 2, residents: 0, jobs: 12 })).detail).toMatch(/· 12 jobs$/);
+  });
+
+  it("leaves out both parts for a building with neither residents nor jobs", () => {
+    const plain = BUILDING_TYPES.find((t) => (t.residents[1] ?? 0) === 0 && t.jobsPerCell === 0);
+    if (!plain) return;
+    expect(buildingLines(row(plain.id, { residents: 0, jobs: 0 }), { people: 0, filled: 0 }).detail).toMatch(/^\S+ \S+ \(2 × 4 lot\)$/);
+  });
+
+  it("puts thousands separators in large figures", () => {
+    const b = row(mixed?.id ?? "", { residents: 1200, jobs: 54 });
+    expect(buildingLines(b, { people: 1191, filled: 48 }).detail).toMatch(/ · 1,191\/1,200 residents · 48\/54 jobs$/);
   });
 
   it("names the state for the data attribute", () => {

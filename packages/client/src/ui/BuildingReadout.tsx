@@ -28,47 +28,44 @@ function count(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-function residentsOf(n: number): string {
-  return n === 1 ? "1 resident" : `${count(n)} residents`;
+/** The residents part: people living there against its room, or its room alone when `people` is not known. */
+function homePart(b: BuildingInfo, people: number | undefined): string {
+  const noun = b.residents === 1 ? "resident" : "residents";
+  if (people === undefined) return `${count(b.residents)} ${noun}`;
+  return `${count(people)}/${count(b.residents)} ${noun}`;
 }
 
-/** The people line for a home: who lives there against its room, or its room alone when `people` is not known. */
-function homeLine(b: BuildingInfo, people: number | undefined): string {
-  const room = b.residents;
-  // An abandoned home offers no room (M3-24), though its lot holds it.
-  if (b.abandoned) return "no room offered";
-  if (people === undefined) return residentsOf(room);
-  return people === 0 ? `nobody living here, room for ${count(room)}` : `${residentsOf(people)}, room for ${count(room)}`;
-}
-
-/** The jobs line for a workplace: jobs filled against jobs offered, or the jobs alone when `filled` is not known. */
-function jobsLine(b: BuildingInfo, filled: number | undefined): string {
-  // An abandoned workplace offers none (M3-24), though its lot holds them.
-  if (b.abandoned) return "no jobs offered";
-  if (filled === undefined) return b.jobs === 1 ? "1 job" : `${count(b.jobs)} jobs`;
-  return `${count(filled)} of ${count(b.jobs)} ${b.jobs === 1 ? "job" : "jobs"} filled`;
+/** The jobs part: jobs filled against jobs offered, or the jobs alone when `filled` is not known. */
+function jobsPart(b: BuildingInfo, filled: number | undefined): string {
+  const noun = b.jobs === 1 ? "job" : "jobs";
+  if (filled === undefined) return `${count(b.jobs)} ${noun}`;
+  return `${count(filled)}/${count(b.jobs)} ${noun}`;
 }
 
 /**
  * The lines the readout shows for a building: its type, then zone and
- * density, lot size and who is in it, then its state when it is not
- * ordinary (issue M3-17). A home gives the people living there against its
- * room, a workplace its jobs filled against its jobs offered, and a mixed
- * building both. The state line says when it is vacant or abandoned, or a
- * home stands empty and why no newcomer would come. Without `occupants`, a
- * home says its room, as the bulldozer's tag does for several buildings.
+ * density with the lot size and who is in it, as
+ * "Mixed M2 (6 × 6 lot) · 191/200 residents · 48/54 jobs", then its state
+ * when it is not ordinary (issue M3-17). A part is left out where the
+ * building offers none: no residents part for a building nobody lives in,
+ * no jobs part for one with no jobs, and neither for an abandoned one,
+ * which offers no room or jobs (M3-24) and whose state line says so. The
+ * state line says when it is vacant or abandoned, or a home stands empty
+ * and why no newcomer would come. Without `occupants`, a home says its
+ * room and a workplace its jobs.
  */
 export function buildingLines(b: BuildingInfo, occupants?: Occupants): { title: string; detail: string; state: string | null } {
   const type = BUILDING_TYPES[b.type];
   const zone = ZONING_BALANCE.zones[b.zone - 1];
-  const lot = `lot ${b.width} × ${b.depth} cells`;
   const home = (type?.residents[1] ?? 0) > 0;
   // A workplace by its type, so an abandoned one, which offers no jobs, still says it is one.
   const work = (type?.jobsPerCell ?? 0) > 0;
-  const people = [home ? homeLine(b, occupants?.people) : null, work ? jobsLine(b, occupants?.filled) : null].filter((s) => s !== null);
+  const parts = [`${zone?.name ?? "?"} ${zone?.letter ?? "?"}${b.density} (${b.width} × ${b.depth} lot)`];
+  if (home && !b.abandoned) parts.push(homePart(b, occupants?.people));
+  if (work && !b.abandoned) parts.push(jobsPart(b, occupants?.filled));
   return {
     title: type?.name ?? "Building",
-    detail: `${zone?.name ?? "?"} ${zone?.letter ?? "?"}${b.density} · ${lot} · ${people.length > 0 ? people.join(" · ") : "no residents"}`,
+    detail: parts.join(" · "),
     state: stateLine(b, home, work, occupants),
   };
 }
