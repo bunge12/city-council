@@ -215,8 +215,10 @@ describe("density 2 and 3 strips", () => {
     const rng = state.rng.slice();
     runDays(state, 10);
     expect(buildings(state)).toEqual([]);
-    // It drew, found no lot, and gave up: the draws still advance the generator.
-    expect(state.rng).not.toEqual(rng);
+    // It tried, found no lot and set the cells aside (M3-25): a try spends
+    // nothing from the generator, so a city with none set aside, loaded from
+    // a save, takes the same draws.
+    expect(state.rng).toEqual(rng);
   });
 
   it("grows a tower on an R3 lot of 4 x 4 or more", () => {

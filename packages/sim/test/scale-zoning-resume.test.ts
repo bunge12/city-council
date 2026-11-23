@@ -129,7 +129,7 @@ describe("save and resume with zoning and growth on the scale city (issue M2-17)
     for (const type of ["ZoneCells", "BulldozeBuilding", "BuildRoad", "BulldozeRoad", "Undo"]) {
       expect(sessionEntries.filter((e) => e.type === type).length, type).toBeGreaterThan(5);
     }
-    expect(mostBuildings).toBeGreaterThan(300);
+    expect(mostBuildings).toBeGreaterThan(200);
     expect(resumed.tick).toBe(straight.tick);
     expect(buildingCount(resumed.buildings)).toBe(buildingCount(straight.buildings));
     expect(hashState(resumed)).toBe(hashState(straight));

@@ -11,7 +11,7 @@
 
 import { parentPort } from "node:worker_threads";
 import { SEG_ALIVE, SEG_FIXED, buildingCount, hashState, seeBuilding, segmentEnds, segmentTypeId, type BuildingSeen, type BuildingState } from "@city-council/sim";
-import { countHomes } from "../src/protocol/homes";
+import { countRoom } from "../src/protocol/room";
 import { SimMirror } from "../src/protocol/mirror";
 import type { ClientTransport } from "../src/protocol/transport";
 
@@ -24,7 +24,7 @@ export type MirrorQuestion =
   | { q: "ready" }
   | { q: "segment"; from: number }
   | { q: "buildings"; seed: number; count: number }
-  | { q: "homes" }
+  | { q: "room" }
   | { q: "hashes" };
 
 /** What the worker sends back: a message for the host, or an answer. */
@@ -80,12 +80,12 @@ function answer(question: MirrorQuestion): unknown {
       return segment(question.from);
     case "buildings":
       return buildings(question.seed, question.count);
-    case "homes":
-      // The top bar's figure, kept from the deltas, beside a count from scratch.
-      return state ? { homes: mirror.homes?.count ?? -1, counted: countHomes(state.buildings).count, buildings: buildingCount(state.buildings) } : null;
+    case "room":
+      // The room behind the top bar's population (M3-15), kept from the deltas, beside a count from scratch.
+      return state ? { room: mirror.room ?? -1, counted: countRoom(state.buildings), buildings: buildingCount(state.buildings) } : null;
     case "hashes":
       return state
-        ? { roads: hashState(state.roads), cells: hashState(state.cells), buildings: hashState(state.buildings), homes: mirror.homes?.count ?? null }
+        ? { roads: hashState(state.roads), cells: hashState(state.cells), buildings: hashState(state.buildings), room: mirror.room }
         : null;
   }
 }

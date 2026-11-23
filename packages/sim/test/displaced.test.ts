@@ -283,6 +283,24 @@ describe("displaced pops", () => {
     });
   });
 
+  it("leave the queue in order when one waiting pop is removed", () => {
+    const state = workingTown();
+    holdDemand(STILL, () => {
+      const occupied = homes(state).filter((id) => buildingPeople(state, id) > 0);
+      ok(state, "SetSpeed", { speed: 0 });
+      ok(state, "BulldozeBuilding", seen(state, occupied.slice(0, 6)));
+      const queue = Array.from(state.pops.displaced);
+      expect(queue.length).toBeGreaterThan(3);
+      const gone = queue[2] as number;
+      removePop(state, gone);
+      expect(Array.from(state.pops.displaced)).toEqual(queue.filter((id) => id !== gone));
+      removePop(state, queue[0] as number);
+      removePop(state, queue[queue.length - 1] as number);
+      expect(Array.from(state.pops.displaced)).toEqual(queue.slice(1, -1).filter((id) => id !== gone));
+      expectSound(state);
+    });
+  });
+
   it("are displaced by a road built through their homes, and placed the same way", () => {
     holdDemand({ residential: 60, commercial: 60 }, () =>
       withValue(DEMAND_BALANCE, "openJobsShareMax", 1, () => {

@@ -46,17 +46,6 @@ export function formatGameDate(date: GameDate): string {
   return `${date.day} ${MONTHS[date.month - 1] ?? "?"}, Year ${date.year}`;
 }
 
-/**
- * The tooltip on the top bar's homes figure (issue M2-18): the room the
- * homes hold, labelled as capacity, since nobody lives in them until M3.
- */
-export function formatHomesTitle(homes: { count: number; capacity: number } | null): string {
-  if (!homes) return "Homes built in the city";
-  const room = homes.capacity.toLocaleString("en-US");
-  const of = homes.count === 1 ? "this home" : "these homes";
-  return `Residential buildings standing. Capacity: room for ${room} ${homes.capacity === 1 ? "resident" : "residents"} in ${of}. Not a count of people.`;
-}
-
 /** Speed as the page shows it: "paused", "1x" and so on. */
 export function formatSpeed(speed: number): string {
   return speed === 0 ? "paused" : `${speed}x`;
