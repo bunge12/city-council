@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILDING_TYPES, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, step, submit, travelTimesReady, type SimState } from "../src/index";
+import { BUILDING_TYPES, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, popCount, step, submit, travelTimesReady, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
@@ -49,6 +49,12 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 22 && typeof kept["pops"] === "object" && kept["pops"] !== null) {
     const { owed, ...pops } = kept["pops"] as Record<string, unknown>;
     void owed;
+    kept["pops"] = pops;
+  }
+  // Before version 25 the pops had no queue of displaced pops.
+  if (version < 25 && typeof kept["pops"] === "object" && kept["pops"] !== null) {
+    const { displaced, ...pops } = kept["pops"] as Record<string, unknown>;
+    void displaced;
     kept["pops"] = pops;
   }
   // Before version 23 nothing kept satisfaction but the pops' scores.
@@ -108,7 +114,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(24);
+    expect(SNAPSHOT_VERSION).toBe(25);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -400,6 +406,28 @@ describe("migrateState", () => {
       step(migrated);
     }
     expect(hashState(migrated)).toBe(hashState(state));
+  });
+
+  it("upgrades a version 24 city with pops by giving them an empty queue of displaced pops, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    while (state.tick < 250) step(state);
+    const homes: number[] = [];
+    for (let id = 0; id < state.buildings.flags.length; id++) if (state.buildings.flags[id] && (state.buildings.residents[id] ?? 0) > 0) homes.push(id);
+    for (const home of homes) addPop(state, { home, size: 1, education: 0, wealth: 0, children: 0, satisfaction: 60 });
+    expect(popCount(state.pops)).toBeGreaterThan(0);
+    const v24 = older(structuredClone(state), 24);
+    expect("displaced" in (v24["pops"] as object)).toBe(false);
+    const migrated = migrateState(v24);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(Object.keys(migrated.pops)).toEqual(Object.keys(state.pops));
+    expect(migrated.pops.displaced).toEqual(new Int32Array(0));
+    expect(hashState(migrated)).toBe(hashState(state));
+    while (migrated.tick < 600) step(migrated);
+    expect(migrated.stats.totals).toEqual(recountTotals(migrated));
   });
 
   it("upgrades a version 23 city with buildings by giving each the tick it was built as the tick it came into use, and changes nothing else", () => {

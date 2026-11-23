@@ -351,7 +351,7 @@ const editTool = new EditToolController({
 const bulldozeTool = new BulldozeToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
-  world: () => (mirror.state && shownTerrain ? { state: mirror.state, terrain: shownTerrain } : null),
+  world: () => (mirror.state && shownTerrain ? { state: mirror.state, terrain: shownTerrain, people: (id: number) => mirror.buildingPeople(id) } : null),
   send: (type, payload) => sendCommand(type, payload),
 });
 

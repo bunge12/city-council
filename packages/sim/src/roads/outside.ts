@@ -40,6 +40,8 @@ interface OutsideIndex {
   stale: boolean;
   /** By node: 1 if its piece reaches outside. 0 for a node with no road, or a removed one. */
   reaches: Uint8Array;
+  /** By node: its piece, named by the lowest node id in it. NO_PIECE for a removed node. */
+  pieces: Int32Array;
   /** Road segments that are not a connection's fixed stub, on pieces that reach outside. */
   outsideSegments: number;
   // Scratch for the union and find, grown as needed.
@@ -47,6 +49,9 @@ interface OutsideIndex {
 }
 
 const live = new WeakMap<RoadNetwork, OutsideIndex>();
+
+/** `roadPieceByNode` for a removed node. */
+export const NO_PIECE = -1;
 
 function find(parent: Int32Array, node: number): number {
   let root = node;
@@ -71,6 +76,7 @@ function rebuild(index: OutsideIndex): void {
   const segs = segmentIdLimit(net);
   if (index.parent.length < nodes) index.parent = new Int32Array(Math.max(16, nodes * 2));
   if (index.reaches.length !== nodes) index.reaches = new Uint8Array(nodes);
+  if (index.pieces.length !== nodes) index.pieces = new Int32Array(nodes);
   const parent = index.parent;
   const { segA, segB, segFlags, segNetwork, nodeFlags } = net;
   // Imported constants as locals: under the test runner each import is a
@@ -96,7 +102,13 @@ function rebuild(index: OutsideIndex): void {
   // A root is the lowest id in its piece, so walking up the ids reaches it
   // before any other member, and its own entry, the piece's mark, is never
   // written over before the members read it.
-  for (let n = 0; n < nodes; n++) reaches[n] = ((nodeFlags[n] as number) & aliveNode) === 0 ? 0 : (reaches[find(parent, n)] as number);
+  const pieces = index.pieces;
+  for (let n = 0; n < nodes; n++) {
+    const dead = ((nodeFlags[n] as number) & aliveNode) === 0;
+    const root = find(parent, n);
+    pieces[n] = dead ? NO_PIECE : root;
+    reaches[n] = dead ? 0 : (reaches[root] as number);
+  }
   let outside = 0;
   for (let s = 0; s < segs; s++) {
     const flags = segFlags[s] as number;
@@ -110,7 +122,7 @@ function rebuild(index: OutsideIndex): void {
 function indexOf(net: RoadNetwork, connections: Int32Array): OutsideIndex {
   let index = live.get(net);
   if (!index) {
-    const made: OutsideIndex = { net, connections, stale: true, reaches: new Uint8Array(0), outsideSegments: 0, parent: new Int32Array(0) };
+    const made: OutsideIndex = { net, connections, stale: true, reaches: new Uint8Array(0), pieces: new Int32Array(0), outsideSegments: 0, parent: new Int32Array(0) };
     const mark = () => void (made.stale = true);
     observeNetwork(net, { nodeAdded: mark, nodeRemoving: mark, segmentAdded: mark, segmentRemoving: mark });
     live.set(net, made);
@@ -179,4 +191,14 @@ export function segmentsReachingOutside(state: { roads: RoadNetwork; connections
  */
 export function outsideReachByNode(state: { roads: RoadNetwork; connections: Int32Array }): Uint8Array {
   return indexOf(state.roads, state.connections).reaches;
+}
+
+/**
+ * By road node: its piece of road, named by the lowest node id in it, or
+ * NO_PIECE for a removed node. Two nodes on the same piece have a route
+ * between them by road. Displaced pops read it to keep a job they can
+ * still reach (M3-12). Read it at once: a change of roads may replace it.
+ */
+export function roadPieceByNode(state: { roads: RoadNetwork; connections: Int32Array }): Int32Array {
+  return indexOf(state.roads, state.connections).pieces;
 }

@@ -3,6 +3,7 @@ import {
   BUILDING_CHANGED,
   BUILDINGS_BALANCE,
   BUILDING_TYPES,
+  buildingPeople,
   ROAD_TYPES,
   TIME_BALANCE,
   ZONING_BALANCE,
@@ -42,6 +43,7 @@ import { enqueue } from "../src/commands";
 import fixtureJson from "./fixtures/replay/roads-and-buildings.json";
 import { expectReplay, runFixture, type ReplayFixture } from "./replay-helper";
 import { addBuilding, checkBuildings } from "../src/buildings/buildings";
+import { addPop } from "../src/pops/pops";
 import { candidateSets } from "../src/buildings/candidates";
 import { buildingIndexSets, lotStands, segmentBuildings } from "../src/buildings/where";
 import { nextInt, seedRng } from "../src/rng";
@@ -216,6 +218,8 @@ describe("a road that goes", () => {
 describe("a road that comes", () => {
   it("clears only the houses with a cell under it, as its preview says", () => {
     const { state, ids } = housesBothSides();
+    // A household in every other house, so the preview's residents are people and not room.
+    for (const [i, home] of ids.entries()) if (i % 2 === 0) addPop(state, { home, size: 2, education: 1, wealth: 1, children: 0, satisfaction: 60 });
     const payload = { from: { x: 4296, z: 4500 }, to: { x: 4296, z: 4700 }, type: "street" };
     const preview = previewBuildRoad(state, payload);
     if (!preview.ok) throw new Error(preview.reason);
@@ -227,7 +231,9 @@ describe("a road that comes", () => {
     });
     expect(inTheWay.length).toBeGreaterThan(0);
     expect(preview.clears.ids).toEqual(inTheWay);
-    expect(preview.clears.residents).toBe(inTheWay.reduce((n, id) => n + (state.buildings.residents[id] ?? 0), 0));
+    // The people living there, not the room the houses hold (M3-12).
+    expect(preview.clears.residents).toBe(inTheWay.reduce((n, id) => n + buildingPeople(state, id), 0));
+    expect(preview.clears.residents).toBeGreaterThan(0);
     // The preview took its rehearsal back.
     expect(hashState(state)).toBe(hashState(deserialize(serialize(state)).state));
     ok(state, command("BuildRoad", payload));

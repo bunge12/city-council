@@ -333,18 +333,19 @@ export class SimMirror {
   }
 
   /**
-   * The buildings a road the sim has planned would clear, and their
-   * residents, for the road tool's preview (issue M2-15). The sim rehearses
+   * The buildings a road the sim has planned would clear, and the people
+   * living in them as the copy counts them, for the road tool's preview
+   * (issue M2-15, M3-12). The sim rehearses
    * the road on the copy's network and takes it back, so the copy is as it
    * was. Empty until the first snapshot.
    */
   roadClears(plan: RoadPlan): BuildingsInTheWay {
-    return this.current ? roadClears(this.current, plan) : { ids: [], residents: 0 };
+    return this.current ? roadClears(this.current, plan, (id) => this.buildingPeople(id)) : { ids: [], residents: 0 };
   }
 
   /** As `roadClears`, for a grid the sim has planned. */
   gridClears(plan: GridPlan): BuildingsInTheWay {
-    return this.current ? gridClears(this.current, plan) : { ids: [], residents: 0 };
+    return this.current ? gridClears(this.current, plan, (id) => this.buildingPeople(id)) : { ids: [], residents: 0 };
   }
 
   requestSnapshot(): void {

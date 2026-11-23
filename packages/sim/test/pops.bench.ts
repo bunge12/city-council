@@ -19,7 +19,7 @@
 import { expect, test } from "vitest";
 import { collect } from "./budget";
 import { POP_ROW_BYTES, TIME_BALANCE, buildingIdLimit, cutPeople, popCount, prepareDerived, serialize, step } from "../src/index";
-import { addPop, createPops, removeBuildingPops } from "../src/pops/pops";
+import { addPop, createPops, displaceBuildingPops } from "../src/pops/pops";
 import { popIndexOf } from "../src/pops/where";
 import { loadScaleTown } from "./scale-fixture";
 
@@ -92,7 +92,7 @@ test("pops on the M2 scale town", async ({ bench, annotate }) => {
   });
 
   const cleared = plan.slice(0, 5000).map((p) => p.home);
-  await run("remove the pops of 5,000 homes", () => removeBuildingPops(state, cleared), { beforeEach: fill });
+  await run("displace the pops of 5,000 homes", () => displaceBuildingPops(state, cleared), { beforeEach: fill });
 
   fill();
   const perDay = TIME_BALANCE.ticksPerDay;

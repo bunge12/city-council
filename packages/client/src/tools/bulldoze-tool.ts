@@ -41,6 +41,7 @@ import {
   type BuildingInfo,
   type BuildingSeen,
   type CommandResult,
+  type PeopleIn,
   type Section,
   type SimState,
   type Terrain,
@@ -54,10 +55,12 @@ import type { RoadToolState } from "./road-tool";
 /** The kinds of thing the bulldozer removes in M2. Later milestones add theirs. */
 export type BulldozeKind = "building" | "road";
 
-/** The world a plan reads: the mirror's copy of state and the map. Read only. */
+/** The world a plan reads: the mirror's copy of state, the map, and the people living in each building. Read only. */
 export interface BulldozeWorld {
   state: ReadonlyDeep<SimState>;
   terrain: Terrain;
+  /** The people living in a building, from the mirror (`buildingPeople`): the copy holds no pop rows (M3-05). */
+  people: PeopleIn;
 }
 
 /**
@@ -87,7 +90,7 @@ export interface BulldozePreview {
   segments: readonly number[];
   /** Every building that goes: the targets themselves, or those standing on the roads' cells. Ascending ids. */
   buildings: readonly number[];
-  /** The residents those buildings hold. */
+  /** The people living in those buildings, who would be displaced (M3-12). Not the room they hold. */
   residents: number;
   /** One building picked alone, for the readout in the tag. Null otherwise. */
   building: BuildingInfo | null;
@@ -126,7 +129,7 @@ function roadPlan(world: BulldozeWorld, ids: readonly number[], seen: readonly u
   const state = asState(world);
   const edit = previewEdit(net, world.terrain, "bulldoze", ids, "street", seen as readonly SeenSegment[]);
   // The buildings on the roads' cells go with them (M2-11), counted by the sim's own planner.
-  const planned = edit.ok ? previewBulldozeRoad(state, edit.command.payload) : null;
+  const planned = edit.ok ? previewBulldozeRoad(state, edit.command.payload, world.people) : null;
   const clears = planned?.ok ? planned.clears : NOTHING;
   return {
     kind: "road",
@@ -150,9 +153,8 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
   const buildings = seen as readonly BuildingSeen[];
   const payload = { buildings: buildings.map((b) => ({ id: b.id, segment: b.segment, side: b.side, place: b.place, builtAt: b.builtAt })) };
   const state = asState(world);
-  const result = planBulldozeBuildings(state, payload);
-  let residents = 0;
-  if (result.ok) for (const id of result.ids) residents += world.state.buildings.residents[id] ?? 0;
+  const result = planBulldozeBuildings(state, payload, world.people);
+  const residents = result.ok ? result.residents : 0;
   return {
     kind: "building",
     ids: [...ids],

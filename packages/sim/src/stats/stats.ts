@@ -23,7 +23,7 @@ import { BUILDING_TYPES, JOB_KINDS, type JobKind } from "../buildings/balance";
 import { BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByKind, type JobsByKind } from "../buildings/jobs";
 import { isMonthStart, isYearStart } from "../calendar";
-import { NO_WORK, POP_ALIVE, POP_LEVELS, workersFor, type PopState } from "../pops/pops";
+import { NO_HOME, NO_WORK, POP_ALIVE, POP_LEVELS, workersFor, type PopState } from "../pops/pops";
 import { popIndexOf } from "../pops/where";
 import type { SimState } from "../state";
 import type { System } from "../step";
@@ -141,12 +141,13 @@ export function statsFor(state: Pick<SimState, "pops" | "buildings">): StatsStat
 function addPop(t: StatTotals, p: PopState, b: BuildingState, id: number, sign: number): void {
   const size = p.size[id] ?? 0;
   const children = p.children[id] ?? 0;
-  const density = b.density[p.home[id] ?? 0] ?? 1;
+  const home = p.home[id] ?? 0;
   const workers = workersFor(size, children);
   const people = sign * size;
   bump(t, "population", people);
   bump(t, "pops", sign);
-  bump(t, RESIDENTS_BY_DENSITY[Math.min(DENSITIES, Math.max(1, density)) - 1], people);
+  // A displaced pop waiting for a home (M3-12) is in the population but in no density's residents.
+  if (home !== NO_HOME) bump(t, RESIDENTS_BY_DENSITY[Math.min(DENSITIES, Math.max(1, b.density[home] ?? 1)) - 1], people);
   bump(t, RESIDENTS_BY_EDUCATION[Math.min(POP_LEVELS - 1, p.education[id] ?? 0)], people);
   bump(t, RESIDENTS_BY_WEALTH[Math.min(POP_LEVELS - 1, p.wealth[id] ?? 0)], people);
   bump(t, "residentSatisfaction", people * (p.satisfaction[id] ?? 0));
@@ -213,6 +214,16 @@ export function countPop(state: SimState, id: number, sign: 1 | -1): void {
  */
 export function countFilled(state: SimState, id: number, sign: 1 | -1): void {
   addFilled(state.stats.totals, state.buildings, id, popIndexOf(state).filled[id] ?? 0, sign);
+}
+
+/**
+ * Adds `people` to the residents of building `home`'s density, or takes
+ * them away when negative: all a move of pops between a home and none
+ * changes in the totals (M3-12).
+ */
+export function countHomeDensity(state: SimState, home: number, people: number): void {
+  const density = state.buildings.density[home] ?? 1;
+  bump(state.stats.totals, RESIDENTS_BY_DENSITY[Math.min(DENSITIES, Math.max(1, density)) - 1], people);
 }
 
 /** Moves `workers` from unemployed to employed in the running totals, or back with `sign` -1, as a pop takes a job or loses one. */
