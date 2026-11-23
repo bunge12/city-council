@@ -228,42 +228,46 @@ test("draws a street, crosses it with an avenue, and refuses a road into water",
 });
 
 test("shows the zoning cells already there and the cells a road would open (#323)", async ({ page }, testInfo) => {
-  // A street west to east, in Node, so the page and the test agree on the city.
+  // A street west to east, in Node, so the page and the test start from the same city.
   const state = createState(SEED);
   const first = { from: { x: 4220, z: 4600 }, to: { x: 4480, z: 4600 }, type: "street" };
   expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: first })).toEqual({ ok: true });
   step(state);
-  // A street north to south across it: the cells it would open, as the sim finds them.
-  const crossing = { from: { x: 4350, z: 4470 }, to: { x: 4350, z: 4730 }, type: "street" };
-  const plan = planRoad(state.roads, terrain, crossing);
-  if (!plan.ok) throw new Error(plan.reason);
-  const opened = roadEffects(state, plan.plan).cells.length / 8;
-  expect(opened).toBeGreaterThan(0);
 
   await openCity(page, Buffer.from(serialize(state)), { name: "One street" });
   const ground = groundAt(4350, 4600);
   await setPose(page, [4350, ground + 330, 4860], [4350, ground, 4600]);
   // No tool: no overlay.
-  await expect(page.locator("#zone-legend")).toHaveCount(0);
+  const body = page.locator("body");
+  await expect(body).toHaveAttribute("data-overlay", "");
 
-  // The road tool brings the zoning overlay, so the first street's cells show.
+  // The road tool brings the zoning overlay, so the first street's cells show, without the zone tool's legend.
   await page.keyboard.press("KeyR");
-  await expect(page.locator("#zone-legend")).toBeVisible();
+  await expect(body).toHaveAttribute("data-overlay", "zoning");
+  await expect(page.locator("#zone-legend")).toHaveCount(0);
   await attach(page, testInfo, "road tool shows the cells already there");
 
-  // Drawing the crossing street shows the cells it would open, as many as the sim says.
-  await clickGround(page, crossing.from.x, crossing.from.z);
-  await hover(page, crossing.to.x, crossing.to.z);
+  // A street north to south across it shows the cells it would open.
+  await clickGround(page, 4350, 4470);
+  await hover(page, 4350, 4730);
   await expect(page.locator("#road-readout")).toHaveAttribute("data-ok", "true");
-  await expect(page.locator("body")).toHaveAttribute("data-road-cells", String(opened));
+  const shown = Number(await body.getAttribute("data-road-cells"));
+  expect(shown).toBeGreaterThan(0);
   await attach(page, testInfo, "the cells the crossing street would open");
 
-  // Escape drops the road and its cells; leaving the tool puts the overlay away.
+  // Built, they are the cells the sim finds for the road as the log has it.
+  const start = await logLength(page);
+  await clickGround(page, 4350, 4730);
+  await expect.poll(() => logLength(page)).toBe(start + 1);
+  const sent = await page.evaluate(() => (window.cityCouncil.mirror.state?.log.at(-1) as { payload?: unknown } | undefined)?.payload);
+  const plan = planRoad(state.roads, terrain, sent);
+  if (!plan.ok) throw new Error(plan.reason);
+  expect(roadEffects(state, plan.plan).cells.length / 8).toBe(shown);
+  await expect(body).toHaveAttribute("data-road-cells", "0");
+
+  // Leaving the tool puts the overlay away.
   await page.keyboard.press("Escape");
-  await frames(page);
-  await expect(page.locator("body")).toHaveAttribute("data-road-cells", "0");
-  await page.keyboard.press("Escape");
-  await expect(page.locator("#zone-legend")).toHaveCount(0);
+  await expect(body).toHaveAttribute("data-overlay", "");
 });
 
 test("Escape drops a road being drawn, and the keys are listed with the others", async ({ page }) => {
