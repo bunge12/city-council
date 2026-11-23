@@ -3,8 +3,14 @@
 // While the residential bar is above zero, people arrive each game day and
 // take free room in homes newcomers can reach (room.ts). A bar of b brings
 // ceil(b / 100 x `arrivalsPerYearAtFullDemand` / days a year) people a day
-// (demand.json), so a bar barely above zero still brings one. The day's
-// people are spread over its ticks the way the grower spreads its buildings
+// (demand.json), so a bar barely above zero still brings one, or, where
+// more room stands empty, ceil(b / 100 x empty room / `fillDays`) (M3-21),
+// so a few new towers fill in about `fillDays` days while a street of
+// houses fills at the first rate. The empty room is read afresh on each
+// tick, from state, so a tick takes its share of that tick's figure and the
+// day's people follow the room as it fills, roughly and not exactly the
+// figure the day started with: deterministic, since every tick reads state.
+// They are spread over its ticks the way the grower spreads its buildings
 // (`growthOnTick`).
 //
 // `pops.owed` is the day's plan: people due who have not yet found a home.
@@ -37,7 +43,7 @@ import type { System } from "../step";
 import { noteYear } from "../stats/stats";
 import { POPS_BALANCE } from "./balance";
 import { addPop, popSizeCap, type PopProfile } from "./pops";
-import { homeRoomLeft, homesWithRoom, newcomerRoomLeft } from "./room";
+import { homeRoomLeft, homesAndEmptyRoom, newcomerRoomLeft } from "./room";
 import type { EducationShares } from "../buildings/balance";
 import { LAND_VALUE_BALANCE, wealthMixAt } from "../landvalue/balance";
 import { buildingValues } from "../landvalue/land-value";
@@ -45,11 +51,19 @@ import { buildingValues } from "../landvalue/land-value";
 /** The name the timer hook reports for arrivals. */
 export const ARRIVALS_SYSTEM = "arrivals";
 
-/** People due a game day with the residential bar at `bar`: none at or below zero, else the full rate times the bar over 100, rounded up. */
-export function dayArrivals(bar: number): number {
+/**
+ * People due a game day with the residential bar at `bar` and `emptyRoom`
+ * places empty in homes newcomers can reach: none at or below zero, else
+ * the more of the full rate and the empty room over `fillDays`, each times
+ * the bar over 100, rounded up.
+ */
+export function dayArrivals(bar: number, emptyRoom = 0): number {
   if (!(bar > 0)) return 0;
+  const { arrivalsPerYearAtFullDemand, fillDays } = DEMAND_BALANCE;
   // ceil(x) as -floor(-x), so it uses only floor (CLAUDE.md rule 6).
-  return -Math.floor(-(DEMAND_BALANCE.arrivalsPerYearAtFullDemand * bar) / (100 * yearDays()));
+  const floor = -Math.floor(-(arrivalsPerYearAtFullDemand * bar) / (100 * yearDays()));
+  const room = -Math.floor(-(emptyRoom * bar) / (100 * fillDays));
+  return Math.max(floor, room);
 }
 
 /** A level, 0 low to 2 high, drawn with `shares`. One draw. */
@@ -89,13 +103,19 @@ export function drawSize(rng: Uint32Array, density: number, room: number): numbe
  * The homes with room (room.ts), in id order, each with its land value and
  * its weight in the draw, and the weights' sum. A home that fills keeps its
  * place with a weight of 0, so the order of the rest, and so the draw,
- * follows from state alone. A tick brings a household or a few, so each
- * draw walks the weights rather than keeping a tree of them.
+ * follows from state alone. Since M3-21 a tick can bring hundreds of
+ * households where much room stands empty, so the weights are kept in a
+ * Fenwick tree as well: a draw descends it in log steps and lands on the
+ * home a walk along the weights in id order would, so nothing a draw picks
+ * changed with it. The weights are whole numbers (`homeWeight`), so the
+ * sums are exact.
  */
 interface HomeDraw {
   homes: number[];
   values: Float64Array;
   weights: Float64Array;
+  /** The Fenwick tree over `weights`, 1-based: `tree[i]` sums the weights of the places from i - (i & -i) to i - 1. */
+  tree: Float64Array;
   /** The weights' sum, and the homes with a weight left. */
   total: number;
   left: number;
@@ -108,37 +128,58 @@ interface HomeDraw {
  */
 let scratchValues = new Float64Array(0);
 let scratchWeights = new Float64Array(0);
+let scratchTree = new Float64Array(0);
 
-function homeDraw(state: SimState): HomeDraw {
-  const homes = homesWithRoom(state);
+function homeDraw(state: SimState, homes: number[]): HomeDraw {
   if (scratchValues.length < homes.length) {
     const size = Math.max(homes.length, 2 * scratchValues.length);
     scratchValues = new Float64Array(size);
     scratchWeights = new Float64Array(size);
+    scratchTree = new Float64Array(size + 1);
   }
   const values = buildingValues(state, homes, scratchValues);
   const weights = scratchWeights;
+  const tree = scratchTree;
+  const n = homes.length;
   let total = 0;
-  for (let i = 0; i < homes.length; i++) {
+  for (let i = 0; i < n; i++) {
     const w = homeWeight(values[i] as number);
     weights[i] = w;
+    tree[i + 1] = w;
     total += w;
   }
-  return { homes, values, weights, total, left: homes.length };
+  // Built in place in one pass: each node adds itself to its parent.
+  for (let i = 1; i <= n; i++) {
+    const parent = i + (i & -i);
+    if (parent <= n) tree[parent] = (tree[parent] as number) + (tree[i] as number);
+  }
+  return { homes, values, weights, tree, total, left: n };
 }
 
 /** The place in `d.homes` of the home a whole number `u` from 0 to under `d.total` lands on, the weights laid end to end in id order. */
-function drawnAt(d: HomeDraw, u: number): number {
-  const w = d.weights;
+export function drawnAt(d: Pick<HomeDraw, "homes" | "tree">, u: number): number {
+  const n = d.homes.length;
+  let step = 1;
+  while (step * 2 <= n) step *= 2;
+  // The last place whose weights before it sum to u or less, among those with a weight: descend from the top.
   let at = 0;
-  for (let edge = w[0] as number; u >= edge; edge += w[at] as number) at++;
+  let rest = u;
+  for (; step > 0; step = Math.floor(step / 2)) {
+    const next = at + step;
+    if (next <= n && (d.tree[next] as number) <= rest) {
+      at = next;
+      rest -= d.tree[next] as number;
+    }
+  }
   return at;
 }
 
 /** Takes the home at place `at` out of the draw. */
 function fill(d: HomeDraw, at: number): void {
-  d.total -= d.weights[at] as number;
+  const w = d.weights[at] as number;
+  d.total -= w;
   d.weights[at] = 0;
+  for (let i = at + 1; i <= d.homes.length; i += i & -i) d.tree[i] = (d.tree[i] as number) - w;
   d.left--;
 }
 
@@ -163,9 +204,13 @@ function moveIn(state: SimState, d: HomeDraw): number {
 /** The arrivals system's work for one tick, as the header says. */
 export function arrive(state: SimState): void {
   const p = state.pops;
-  p.owed += growthOnTick(state.tick, dayArrivals(state.demand.residential.value));
+  const bar = state.demand.residential.value;
+  if (!(bar > 0) && p.owed <= 0) return;
+  // One pass over the buildings gives both the empty room the day's people follow and the homes they draw among.
+  const { homes, empty } = homesAndEmptyRoom(state);
+  p.owed += growthOnTick(state.tick, dayArrivals(bar, empty));
   if (p.owed <= 0) return;
-  const d = homeDraw(state);
+  const d = homeDraw(state, homes);
   while (p.owed > 0 && d.left > 0) p.owed -= moveIn(state, d);
   if (p.owed > 0) p.owed = 0;
 }

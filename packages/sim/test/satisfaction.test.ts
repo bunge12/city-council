@@ -273,8 +273,10 @@ describe("leaving for lack of work", () => {
     runDays(state, 200, (day) => {
       highest = Math.max(highest, population(state));
       if (day === 60) atDay60 = population(state);
-      // Never past the residents the pull from outside holds the bar up for.
-      expect(population(state)).toBeLessThanOrEqual(DEMAND_BALANCE.outsidePull.untilResidents);
+      // Never far past the residents the pull from outside holds the bar up for. Since M3-21 the bar
+      // takes about 20 game days to fall (dailyShare 0.05) and the day's arrivals follow the empty
+      // room, so a few households more come while it falls.
+      expect(population(state)).toBeLessThanOrEqual(1.1 * DEMAND_BALANCE.outsidePull.untilResidents);
     });
     expect(atDay60).toBeGreaterThan(100);
     // It stalled: no higher at the end than it was at two months, give or take a household.

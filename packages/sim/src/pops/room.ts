@@ -12,12 +12,16 @@
 // Everything here is worked out from state when it is asked for, with one
 // pass over the buildings, and nothing is kept: the arrivals system asks on
 // the ticks people are due, and the grower once on a tick it adds a home.
+// `reachableRoom` also counts the homes still filling, which hold new homes
+// back (M3-21, `homeUnfilled`), and its empty room sets how many people
+// arrive a day (arrivals.ts).
 
 import { BUILDING_TYPES } from "../buildings/balance";
 import { BUILDING_ABANDONED, BUILDING_ALIVE, homeRoom, isAbandoned, isBuilding } from "../buildings/buildings";
 import { NETWORK_ROAD } from "../roads/network";
 import { outsideReachByNode } from "../roads/outside";
 import type { SimState } from "../state";
+import { DEMAND_BALANCE } from "../demand/balance";
 import { POPS_BALANCE } from "./balance";
 import { popIndexOf } from "./where";
 
@@ -78,12 +82,26 @@ export function newcomerRoomLeft(state: SimState, id: number): number {
   return usableRoom(homeRoomLeft(state, id), state.buildings.density[id] ?? 1);
 }
 
-/** The homes newcomers can reach: their room, and how much of it is empty. */
+/** The homes newcomers can reach: their room, how much of it is empty, and how many of them are still filling. */
 export interface ReachableRoom {
   /** The people they hold room for. */
   capacity: number;
   /** The people they may still take. A household home with anyone in it has none, and nor does a home with less room left than the least newcomer household there. */
   empty: number;
+  /** The homes still filling: room left for a newcomer household, and fewer people than `homeFullShare` of their room (M3-21, `homeUnfilled`). */
+  unfilled: number;
+}
+
+/**
+ * Whether a home of `room` places with `left` of them usable by a newcomer
+ * household is still filling, for the grower's hold on new homes (M3-21):
+ * it has room left for a household and fewer people in it than
+ * `homeFullShare` of its room (demand.json). A tower that a death or two
+ * has left a few places short counts as full, so turnover does not hold the
+ * city's new homes back.
+ */
+export function homeUnfilled(room: number, left: number): boolean {
+  return left > 0 && room - left < DEMAND_BALANCE.homeFullShare * room;
 }
 
 /**
@@ -122,11 +140,13 @@ function eachReachableHome(state: SimState, visit: (id: number, room: number, le
 export function reachableRoom(state: SimState): ReachableRoom {
   let capacity = 0;
   let empty = 0;
+  let unfilled = 0;
   eachReachableHome(state, (_, room, left) => {
     capacity += room;
     empty += left;
+    if (homeUnfilled(room, left)) unfilled++;
   });
-  return { capacity, empty };
+  return { capacity, empty, unfilled };
 }
 
 /**
@@ -135,11 +155,20 @@ export function reachableRoom(state: SimState): ReachableRoom {
  * reaches outside. One pass over the buildings.
  */
 export function homesWithRoom(state: SimState): number[] {
-  const out: number[] = [];
+  return homesAndEmptyRoom(state).homes;
+}
+
+/** `homesWithRoom` and the room they have left for households, `reachableRoom`'s `empty`, from one pass over the buildings, for arrivals (M3-21). */
+export function homesAndEmptyRoom(state: SimState): { homes: number[]; empty: number } {
+  const homes: number[] = [];
+  let empty = 0;
   eachReachableHome(state, (id, _, left) => {
-    if (left > 0) out.push(id);
+    if (left > 0) {
+      homes.push(id);
+      empty += left;
+    }
   });
-  return out;
+  return { homes, empty };
 }
 
 /**

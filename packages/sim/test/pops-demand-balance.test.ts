@@ -93,8 +93,8 @@ describe("the pops balance", () => {
 describe("the demand balance", () => {
   it("is well formed and holds the numbers later issues read", () => {
     expect(checkDemandBalance(demandJson)).toEqual([]);
-    // About 17,000 new residents a game year at full demand, from "Pacing" in the PRD.
-    expect(DEMAND_BALANCE.arrivalsPerYearAtFullDemand).toBe(17000);
+    // At least 40,000 new residents a game year at full demand, more where room stands empty (M3-21, "Pacing" in the PRD).
+    expect(DEMAND_BALANCE.arrivalsPerYearAtFullDemand).toBe(40000);
     expect(DEMAND_BALANCE.outsidePull.bar).toBeGreaterThan(0);
     // Open office jobs count against industrial demand (M3.md, "Office standing in for industry").
     expect(DEMAND_BALANCE.industrial.openOfficeJobs).toBeLessThan(0);

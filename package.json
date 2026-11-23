@@ -18,6 +18,7 @@
     "e2e:shard": "node scripts/e2e-shard-run.mjs",
     "soak": "pnpm --filter @city-council/client soak",
     "bench": "pnpm -r --workspace-concurrency=1 --no-bail --if-present bench",
+    "balance": "node scripts/balance.mjs",
     "prepare": "node scripts/git-setup.mjs"
   },
   "devDependencies": {

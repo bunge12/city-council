@@ -276,7 +276,7 @@ describe("a street of houses joined to nothing", () => {
       expect(state.buildings.residents[id]).toBeGreaterThan(0);
     }
     expect(homesWithRoom(state)).toEqual([]);
-    expect(reachableRoom(state)).toEqual({ capacity: 0, empty: 0 });
+    expect(reachableRoom(state)).toEqual({ capacity: 0, empty: 0, unfilled: 0 });
     expectRecount(state);
   });
 });
