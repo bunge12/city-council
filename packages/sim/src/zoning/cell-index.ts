@@ -2408,7 +2408,7 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
     const seg = segOfKey(key);
     cellQuad(index.segs[seg] as SegShape, key - seg * KEY_STRIDE, q);
     quadBoxInto(q, box);
-    forOverlappingCells(index, q, Float64Array.from(box), LOST_GROUND, (k) => candidates.add(k));
+    forOverlappingCells(index, q, box, LOST_GROUND, (k) => candidates.add(k));
   }
   const reopened = filed();
   for (const key of [...candidates].sort((p, r) => (claimsFirst(index, p, r) ? -1 : 1))) {
@@ -2417,7 +2417,7 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
     const local = key - seg * KEY_STRIDE;
     cellQuad(shape, local, q);
     quadBoxInto(q, box);
-    const qBox = Float64Array.from(box);
+    const qBox = box;
     if (underNew(q, qBox, -1)) continue;
     let blocked = false;
     forOverlappingCells(
@@ -2452,7 +2452,7 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
     quadBoxInto(q, box);
     if (groundStatus(index.terrain, q, box) !== CELL_OPEN) continue;
     if (covered(index, id, q, box)) continue;
-    const qBox = Float64Array.from(box);
+    const qBox = box;
     if (underNew(q, qBox, c.n)) continue;
     // Any old open cell claims first, unless the new roads cover it.
     let blocked = false;

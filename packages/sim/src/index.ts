@@ -193,17 +193,17 @@ export type { BuildingInfo } from "./buildings/where";
 export {
   BUILDING_CHANGED,
   bulldozeClears,
-  gridCells,
+  gridEffects,
   gridClears,
   planBulldozeBuildings,
   previewBuildRoad,
   previewBuildRoadGrid,
   previewBulldozeRoad,
-  roadCells,
+  roadEffects,
   roadClears,
   seeBuilding,
 } from "./buildings/bulldoze";
-export type { BuildingSeen, BuildingsInTheWay, BulldozeBuildingPayload, PeopleIn } from "./buildings/bulldoze";
+export type { BuildingSeen, BuildingsInTheWay, RoadEffects, BulldozeBuildingPayload, PeopleIn } from "./buildings/bulldoze";
 export { applyBuildingDelta, drainBuildingDelta, recordBuildingChanges } from "./buildings/delta";
 export type { BuildingDelta } from "./buildings/delta";
 export type { ZoneCellsPayload, ZonePlan, ZonePlanResult, ZonePoint, ZoneRect } from "./zoning/zone";

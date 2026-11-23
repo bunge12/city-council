@@ -699,12 +699,6 @@ export const CONSTRUCTION = {
 } as const;
 
 /**
- * The zone tool's marks (issue M2-07): the cells a click would change, in
- * the colour they would take, and the cells of a stroke sent and not yet
- * painted. Drawn through the terrain over the overlay, like the road
- * preview. An erase shows the cells it would clear in `erase`.
- */
-/**
  * The cells a road or grid would open (the road tools' preview), drawn
  * with the zone tool's marks (zone-preview.ts) over the zoning overlay. In
  * the overlay's unzoned colour, since that is what they are when built,
@@ -719,6 +713,12 @@ export const ROAD_CELLS = {
   pendingOpacity: 0.3,
 } as const;
 
+/**
+ * The zone tool's marks (issue M2-07): the cells a click would change, in
+ * the colour they would take, and the cells of a stroke sent and not yet
+ * painted. Drawn through the terrain over the overlay, like the road
+ * preview. An erase shows the cells it would clear in `erase`.
+ */
 export const ZONE_PREVIEW = {
   /** Opacity of the cells the click would change. */
   opacity: 0.9,

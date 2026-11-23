@@ -89,7 +89,7 @@ export interface GridPreview {
   clears: BuildingsInTheWay | null;
   /**
    * The cells the grid's streets would open, eight corner numbers a cell,
-   * from the sim's `gridCells` on the mirror. Found once the rectangle is
+   * from the sim's `gridEffects` on the mirror. Found once the rectangle is
    * placed, as `clears` is; null before then and for a refused grid.
    */
   newCells: Float64Array | null;
@@ -98,7 +98,7 @@ export interface GridPreview {
 /** Finds the buildings a planned grid would clear: the sim's `gridClears` on the mirror. */
 export type GridClears = (plan: GridPlan) => BuildingsInTheWay;
 
-/** Finds the cells a planned grid would open: the sim's `gridCells` on the mirror. */
+/** Finds the cells a planned grid would open: the sim's `gridEffects` on the mirror. */
 export type GridCells = (plan: GridPlan) => Float64Array;
 
 /** A grid the tool has sent and the sim has not yet built or refused. */

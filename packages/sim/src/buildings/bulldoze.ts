@@ -162,42 +162,56 @@ function cellsCoveredBy(state: SimState, build: (net: RoadNetwork) => boolean): 
   return rehearse(state, build, (index, added) => openCellsUnder(index, state.roads, added), []);
 }
 
+/** What a road or grid would do to the ground: the buildings it would clear and the cells it would open. */
+export interface RoadEffects {
+  clears: BuildingsInTheWay;
+  /** The open cells on its own new segments, eight corner numbers a cell (`newCellsOf`). */
+  cells: Float64Array;
+}
+
 /**
- * The cells a build would open on its own new roads, as corners, eight
- * numbers a cell (`newCellsOf`). The pieces of a road it splits keep
- * their cells, so only segments with a new build order count.
+ * The buildings a build would clear and the cells it would open, from one
+ * rehearsal. The pieces of a road it splits keep their cells, so only
+ * segments with a new build order bring cells.
  */
-function cellsOpenedBy(state: SimState, build: (net: RoadNetwork) => boolean): Float64Array {
+function effectsOf(state: SimState, build: (net: RoadNetwork) => boolean, people: PeopleIn): RoadEffects {
   const firstNew = state.roads.segOrderNext;
-  return rehearse(
+  const { lost, cells } = rehearse(
     state,
     build,
     (index, added) => {
       const net = state.roads;
-      const lost = new Set(openCellsUnder(index, net, added));
-      return newCellsOf(index, net, added.filter((id) => (net.segOrder[id] ?? 0) >= firstNew), lost);
+      const lost = openCellsUnder(index, net, added);
+      return { lost, cells: newCellsOf(index, net, added.filter((id) => (net.segOrder[id] ?? 0) >= firstNew), new Set(lost)) };
     },
-    new Float64Array(0),
+    { lost: [] as number[], cells: new Float64Array(0) },
   );
+  // Asked once the build is taken back: the building index follows the cell index, which must not see the rehearsal.
+  return { clears: inTheWay(buildingsOnCells(state, lost, CELL_KEY_STRIDE), people), cells };
 }
 
 /**
- * The cells a new road would bring that a player could zone: open, on its
- * own segments, as corners, eight numbers a cell. For the road tool's
- * preview, so the player sees the lots a road makes before building it.
+ * The buildings a new road would clear, as `roadClears` finds them, and
+ * the cells it would bring that a player could zone: open, on its own
+ * segments. For the road tool's preview, so the player sees the lots a
+ * road makes before building it.
  */
-export function roadCells(state: SimState, plan: RoadPlan): Float64Array {
+export function roadEffects(state: SimState, plan: RoadPlan, people: PeopleIn = peopleOf(state)): RoadEffects {
   const terrain = terrainOf(state.seed);
-  return cellsOpenedBy(state, (net) => {
-    buildRoad(net, terrain, plan);
-    return true;
-  });
+  return effectsOf(
+    state,
+    (net) => {
+      buildRoad(net, terrain, plan);
+      return true;
+    },
+    people,
+  );
 }
 
-/** As `roadCells`, for every street of a grid. None for a grid a street of which is refused. */
-export function gridCells(state: SimState, plan: GridPlan): Float64Array {
+/** As `roadEffects`, for every street of a grid. Nothing for a grid a street of which is refused. */
+export function gridEffects(state: SimState, plan: GridPlan, people: PeopleIn = peopleOf(state)): RoadEffects {
   const terrain = terrainOf(state.seed);
-  return cellsOpenedBy(state, (net) => buildRoadGrid(net, terrain, plan) === null);
+  return effectsOf(state, (net) => buildRoadGrid(net, terrain, plan) === null, people);
 }
 
 /**

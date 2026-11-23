@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { ROAD_TYPES, createState, generateTerrain, heightAt, planRoad, roadCells, serialize, step, submit } from "../packages/sim/src/index";
+import { ROAD_TYPES, createState, generateTerrain, heightAt, planRoad, roadEffects, serialize, step, submit } from "../packages/sim/src/index";
 import { formatMoneyShort } from "../packages/client/src/ui/format";
 import { FLAT, SEED, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
@@ -237,7 +237,7 @@ test("shows the zoning cells already there and the cells a road would open (#323
   const crossing = { from: { x: 4350, z: 4470 }, to: { x: 4350, z: 4730 }, type: "street" };
   const plan = planRoad(state.roads, terrain, crossing);
   if (!plan.ok) throw new Error(plan.reason);
-  const opened = roadCells(state, plan.plan).length / 8;
+  const opened = roadEffects(state, plan.plan).cells.length / 8;
   expect(opened).toBeGreaterThan(0);
 
   await openCity(page, Buffer.from(serialize(state)), { name: "One street" });

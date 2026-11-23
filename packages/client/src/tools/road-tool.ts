@@ -98,7 +98,7 @@ export interface RoadPreview {
   clears: BuildingsInTheWay | null;
   /**
    * The cells the road would open on its own segments, eight corner
-   * numbers a cell, from the sim's `roadCells` on the mirror: the ground a
+   * numbers a cell, from the sim's `roadEffects` on the mirror: the ground a
    * player could zone once it is built. Null when refused, or when nothing
    * gave a way to find them.
    */
@@ -108,7 +108,7 @@ export interface RoadPreview {
 /** Finds the buildings a planned road would clear: the sim's `roadClears` on the mirror. */
 export type RoadClears = (plan: RoadPlan) => BuildingsInTheWay;
 
-/** Finds the cells a planned road would open: the sim's `roadCells` on the mirror. */
+/** Finds the cells a planned road would open: the sim's `roadEffects` on the mirror. */
 export type RoadCells = (plan: RoadPlan) => Float64Array;
 
 /** A part of a previewed road between two of its stops. */

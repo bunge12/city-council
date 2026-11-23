@@ -5,11 +5,11 @@ import {
   cellStatuses,
   createState,
   deserialize,
-  gridCells,
+  gridEffects,
   hashState,
   planRoad,
   planRoadGrid,
-  roadCells,
+  roadEffects,
   serialize,
   step,
   type Command,
@@ -53,13 +53,13 @@ function cellsAsText(corners: ArrayLike<number>): string[] {
   return out.sort();
 }
 
-/** The open cells of the segments built since build order `firstNew`, as `cellsAsText` gives them. */
-function openCellsSince(state: SimState, firstNew: number): string[] {
+/** The open cells of the segments built since build order `firstNew`, or before it with `before`, as `cellsAsText` gives them. */
+function openCellsSince(state: SimState, firstNew: number, before = false): string[] {
   const statuses = cellStatuses(state);
   const net = state.roads;
   const out: number[] = [];
   for (let id = 0; id < segmentIdLimit(net); id++) {
-    if (!isSegment(net, id) || (net.segOrder[id] ?? 0) < firstNew) continue;
+    if (!isSegment(net, id) || ((net.segOrder[id] ?? 0) < firstNew) !== before) continue;
     const start = state.cells.offset[id] ?? 0;
     const count = (state.cells.offset[id + 1] ?? 0) - start;
     for (let local = 0; local < count; local++) {
@@ -72,17 +72,25 @@ function openCellsSince(state: SimState, firstNew: number): string[] {
   return cellsAsText(out);
 }
 
+/** How many builds `expectRoadPreview` has seen give an older road's cell its ground back. */
+let regained = 0;
+
 function expectRoadPreview(state: SimState, payload: ReturnType<typeof roadPayload>): string[] {
   const plan = planRoad(state.roads, terrainOf(state.seed), payload);
   if (!plan.ok) throw new Error(plan.reason);
+  // Statuses first: the first question about cells lays them out.
+  const statuses = cellStatuses(state);
   const hash = hashState(state);
-  const preview = cellsAsText(roadCells(state, plan.plan));
-  // The preview took its rehearsal back.
+  const preview = cellsAsText(roadEffects(state, plan.plan).cells);
+  // The preview took its rehearsal back, from state and from the cell index.
   expect(hashState(state)).toBe(hash);
   expect(hashState(deserialize(serialize(state)).state)).toBe(hash);
+  expect(cellStatuses(state)).toEqual(statuses);
   const firstNew = state.roads.segOrderNext;
+  const oldOpen = new Set(openCellsSince(state, firstNew, true));
   ok(state, command("BuildRoad", payload));
   expect(preview).toEqual(openCellsSince(state, firstNew));
+  if (openCellsSince(state, firstNew, true).some((c) => !oldOpen.has(c))) regained++;
   return preview;
 }
 
@@ -109,10 +117,10 @@ describe("the cells a new road would open", () => {
     expectRoadPreview(state, roadPayload([4250, 4500], [4380, 4560], [4250, 4560]));
   });
 
-  it("are none for a road that brings no zonable ground", () => {
+  it("leave out the ground an older street's strip holds, for a street along its back", () => {
     const state = createState(SEED);
     ok(state, command("BuildRoad", roadPayload([4200, 4600], [4392, 4600])));
-    // Along the street's own strip, so every cell of the new road lies on ground the old one holds or its surface.
+    // Along the street's south strip, so the new street's north strip lies on ground the old one holds.
     const preview = expectRoadPreview(state, roadPayload([4200, 4624], [4392, 4624]));
     expect(preview.length).toBeLessThan(24 * 2 * DEPTH);
   });
@@ -126,7 +134,7 @@ describe("the cells a new grid would open", () => {
     const plan = planRoadGrid(state.roads, terrainOf(state.seed), payload);
     if (!plan.ok) throw new Error(plan.reason);
     const hash = hashState(state);
-    const preview = cellsAsText(gridCells(state, plan.plan));
+    const preview = cellsAsText(gridEffects(state, plan.plan).cells);
     expect(hashState(state)).toBe(hash);
     expect(preview.length).toBeGreaterThan(0);
     const firstNew = state.roads.segOrderNext;
@@ -150,5 +158,7 @@ describe("the cells a random road would open", () => {
       previews++;
     }
     expect(previews).toBeGreaterThan(10);
+    // Some of them give an older road's cell its ground back, the case the preview walks older cells again for.
+    expect(regained).toBeGreaterThan(0);
   });
 });
