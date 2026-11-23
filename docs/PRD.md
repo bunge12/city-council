@@ -992,6 +992,8 @@ The history keeps one Int32Array per total and one write position shared by all 
 
 Each delta carries a copy of the totals and the yearly counts, plus any samples taken since the previous delta. The client's copy therefore matches the sim's hash. M3-05 cuts this down to the totals that changed.
 
+The statistics panel (M3-16) opens from the top bar's Stats button or with P. It graphs one series at a time over 1, 10 or 100 game years, never reaching back before the city's first month, and any breakdown below the graph can take population's place on it. A series is one entry in a list in the client (`stat-series.ts`): a label, a colour, where its value and monthly history are read and how its numbers are written, so a later module adds a line by adding an entry. The panel reads the client's copy and changes nothing in state.
+
 ### M4 Economy
 
 One treasury per city. The budget closes once per game month.

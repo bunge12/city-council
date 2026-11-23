@@ -15,7 +15,8 @@
     "construction-frame-time.spec.ts",
     "guides-scale.spec.ts",
     "roads-scale.spec.ts",
-    "cells-scale.spec.ts"
+    "cells-scale.spec.ts",
+    "statistics-scale.spec.ts"
   ],
   "evidence": [
     "building-looks.spec.ts",
@@ -72,6 +73,8 @@
     "smoke.spec.ts": 1,
     "snapping.spec.ts": 124,
     "sound.spec.ts": 40,
+    "statistics-scale.spec.ts": 90,
+    "statistics.spec.ts": 30,
     "terrain.spec.ts": 7,
     "through-lots.spec.ts": 86,
     "tools-and-buildings.spec.ts": 101,

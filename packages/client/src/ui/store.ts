@@ -5,6 +5,7 @@
 
 import { create } from "zustand";
 import type { BuildingInfo } from "@city-council/sim";
+import type { StatRange } from "./stat-series";
 import { DEFAULT_PRESET } from "../render/config";
 import type { Preset, PresetSource } from "../render/presets";
 import { DEFAULT_SOUND } from "../sound/config";
@@ -22,6 +23,10 @@ export interface UiState extends RoadToolState, GridToolState, EditToolState, Bu
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
+  /** The statistics panel (issue M3-16), the series on its graph and the game years the graph covers. */
+  statsOpen: boolean;
+  statsSeries: string;
+  statsRange: StatRange;
   /** The sim's answer to the last command the page sent, such as "NoOp: ok". */
   lastCommand: string | null;
   /** Notes about city files and switching cities. Null when there is none. */
@@ -41,6 +46,9 @@ export const useUi = create<UiState>(() => ({
   debugOpen: false,
   logOpen: false,
   menuOpen: false,
+  statsOpen: false,
+  statsSeries: "population",
+  statsRange: 10,
   lastCommand: null,
   fileNote: null,
   fileProblem: null,
@@ -67,6 +75,19 @@ export function toggleLog(): void {
 
 export function toggleMenu(): void {
   useUi.setState((s) => ({ menuOpen: !s.menuOpen }));
+}
+
+export function toggleStats(): void {
+  useUi.setState((s) => ({ statsOpen: !s.statsOpen }));
+}
+
+/** Puts series `id` on the statistics panel's graph. */
+export function setStatsSeries(id: string): void {
+  useUi.setState({ statsSeries: id });
+}
+
+export function setStatsRange(range: StatRange): void {
+  useUi.setState({ statsRange: range });
 }
 
 /** What the renderer and camera report, as text, for the debug panel. */
