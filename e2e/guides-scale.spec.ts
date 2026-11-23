@@ -102,9 +102,11 @@ test("drawing in a network of 30,000 segments keeps its frame time with the guid
   // takes 1.2 s ran past five minutes (issue #152). Since sidewalks and
   // street lights (#279, #264) a frame takes 1.1 to 1.4 s and the test 4.6 to
   // 5.7 minutes on most runners, and 1.6 s and 8.2 minutes on an AMD EPYC
-  // 7763, past the old 8 (issue #289). 12 minutes is under a third of the perf
-  // job's 54.
-  test.setTimeout(720_000);
+  // 7763, past the old 8 (issue #289). On that CPU it then took 11.2 and 12.2
+  // minutes with frames of 1.6 s, against a limit of 12, while the other perf
+  // files in its job took what they had before (issue #317). 15 minutes is
+  // under a third of the perf job's 54.
+  test.setTimeout(900_000);
   const bytes = scaleCity(30_000);
   const at = busySpot(bytes, 150);
   await openCity(page, bytes, { name: "Thirty thousand" });
