@@ -80,7 +80,7 @@ export function toggleLog(): void {
 
 /** Turns overlay `id` on, putting away the one showing, or off again (overlays.ts, `toggledOverlay`). */
 export function toggleOverlay(id: OverlayEntry["id"]): void {
-  useUi.setState((s) => ({ overlay: toggledOverlay(s.overlay, id, s.tool === "zone") }));
+  useUi.setState((s) => ({ overlay: toggledOverlay(s.overlay, id, s.tool) }));
 }
 
 export function toggleMenu(): void {

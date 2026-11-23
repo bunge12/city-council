@@ -88,15 +88,29 @@ describe("choosing an overlay", () => {
   it("shows one at a time: land value puts zoning away, and the zone tool brings it back", () => {
     // With the zone tool on, zoning shows; land value replaces it, and turning land value off goes back to zoning.
     expect(overlayAfterTool(null, "zone", null)).toBe("zoning");
-    expect(toggledOverlay("zoning", "landValue", true)).toBe("landValue");
-    expect(toggledOverlay("landValue", "landValue", true)).toBe("zoning");
-    expect(toggledOverlay("landValue", "landValue", false)).toBeNull();
+    expect(toggledOverlay("zoning", "landValue", "zone")).toBe("landValue");
+    expect(toggledOverlay("landValue", "landValue", "zone")).toBe("zoning");
+    expect(toggledOverlay("landValue", "landValue", null)).toBeNull();
+    expect(toggledOverlay("landValue", "landValue", "bulldoze")).toBeNull();
     // Picking the zone tool with land value on brings zoning back.
     expect(overlayAfterTool("landValue", "zone", "road")).toBe("zoning");
     // Leaving the zone tool puts zoning away, but not land value.
     expect(overlayAfterTool("zoning", null, "zone")).toBeNull();
     expect(overlayAfterTool("landValue", null, "zone")).toBe("landValue");
     expect(overlayAfterTool("landValue", "road", null)).toBe("landValue");
+  });
+
+  it("comes with the road and grid tools, so a road's cells show beside the ones already there", () => {
+    expect(overlayAfterTool(null, "road", null)).toBe("zoning");
+    expect(overlayAfterTool(null, "grid", "bulldoze")).toBe("zoning");
+    // From one tool that brings it to another, it stays.
+    expect(overlayAfterTool("zoning", "grid", "road")).toBe("zoning");
+    expect(overlayAfterTool("zoning", "road", "zone")).toBe("zoning");
+    // Leaving them puts it away.
+    expect(overlayAfterTool("zoning", null, "road")).toBeNull();
+    expect(overlayAfterTool("zoning", "bulldoze", "grid")).toBeNull();
+    // Turning land value off with the road tool on goes back to zoning.
+    expect(toggledOverlay("landValue", "landValue", "road")).toBe("zoning");
   });
 });
 

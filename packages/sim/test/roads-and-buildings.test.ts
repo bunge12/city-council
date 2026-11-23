@@ -349,7 +349,8 @@ describe("rezoning built land", () => {
   it("leaves the building standing; cleared, the lot grows under the new zoning", () => {
     const state = street();
     zone(state, "residential", 1, 0, 2, 4);
-    const [house] = fill(state);
+    // Since M3-21 the grower may have built the house on the tick that zoned it, 50 a day at full demand.
+    const [house] = [...live(state), ...fill(state)];
     expect(typeId(state.buildings.type[house as number] ?? 0)).toBe("single-family-home");
     const row = readBuilding(state.buildings, house as number);
     // Rezoned to C2, then cleared: the house stays both times.

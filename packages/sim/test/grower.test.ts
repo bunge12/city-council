@@ -158,7 +158,8 @@ describe("a street zoned R1", () => {
 
   it("grows houses along it on the pull from outside, with households of different sizes", () => {
     const all = buildings(state);
-    expect(all.length).toBeGreaterThan(10);
+    // Since M3-21 the bar climbs to the pull more slowly (dailyShare 0.05), so fewer houses than the 10 before.
+    expect(all.length).toBeGreaterThan(5);
     const homes = all.filter((b) => typeId(b.type) === "single-family-home");
     expect(homes.length).toBeGreaterThan(3);
     // Every house has room for four. The households that move in draw their
@@ -335,8 +336,10 @@ describe("the grower and state", () => {
     while (growthOnTick(state.tick, dayQuotas(state.demand)[1] ?? 0) === 0) step(state);
     state.cellsReadyAt = state.tick + 1;
     const rng = state.rng.slice();
+    // Since M3-21 a house can come on the tick that zones, 50 a day at full demand.
+    const before = buildings(state);
     grow(state);
-    expect(buildings(state)).toEqual([]);
+    expect(buildings(state)).toEqual(before);
     expect(state.rng).toEqual(rng);
   });
 
@@ -464,7 +467,8 @@ describe("replay fixture growth", () => {
     const state = expectReplay(fixture);
     expect(state.log).toEqual(fixture.log);
     const all = buildings(state);
-    expect(all.length).toBeGreaterThan(10);
+    // Since M3-21 the bar climbs to the pull more slowly (dailyShare 0.05), so fewer houses than the 10 before.
+    expect(all.length).toBeGreaterThan(5);
     const kinds = new Set(all.map((b) => typeId(b.type)));
     for (const kind of ["single-family-home", "townhomes"]) expect(kinds).toContain(kind);
     expect(buildings(runFixture(fixture).state)).toEqual(all);
@@ -513,7 +517,8 @@ describe("the grower's queries make no garbage and change no answer (issue 166)"
     zone(state, "office", 3, 12, 2, 6, "south");
     // C3, where through-lot types grow.
     zone(state, "commercial", 3, 16, 14, 6, "south");
-    runDays(state, 1);
+    // Until a few have grown: since M3-21 houses come 50 a day at full demand, and a whole day fills the R1 strip, leaving no free cell too deep for a lot.
+    for (let t = 0; t < DAY && buildings(state).length <= 5; t++) step(state);
     expect(buildings(state).length).toBeGreaterThan(5);
     return state;
   }

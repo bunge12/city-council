@@ -1,7 +1,8 @@
 // Demand numbers from `balance/demand.json`, checked when the module loads
 // (M3-01, PRD "Four demand bars" and "Pacing"). The bars (demand.ts, M3-06)
 // read all but `arrivalsPerYearAtFullDemand`, which arrivals read, and
-// `emptyRoomShareMax`, which the grower reads for homes (M3-08),
+// `unfilledHomesMax` and `homeFullShare`, which the grower reads for homes
+// (M3-08, a count since M3-21), `fillDays`, which arrivals read (M3-21),
 // `openJobsShareMax`, which it reads for workplaces, and `jobMatching`,
 // which job matching reads (M3-09), `departuresPerYearAtFullDemand`, which
 // satisfaction reads to send people away while the residential bar is below
@@ -38,10 +39,16 @@ export interface DemandBalance {
   departuresPerYearAtFullDemand: number;
   /** The average satisfaction at which residents neither raise nor lower the residential bar (M3-10). */
   satisfactionNeutral: number;
-  /** New homes wait while the empty room in homes newcomers can reach is above this share of their room (M3-08). */
-  emptyRoomShareMax: number;
+  /** New homes wait while this many homes newcomers can reach, or more, are still filling (M3-21, replacing M3-08's share of empty room). */
+  unfilledHomesMax: number;
+  /** A home with fewer people than this share of its room, and room left for a household, is still filling (M3-21). */
+  homeFullShare: number;
+  /** With the residential bar at b, at least ceil(b / 100 x empty room / `fillDays`) people arrive a day, the empty room in homes newcomers can reach (M3-21). */
+  fillDays: number;
   /** The grower adds no workplace to a zone while the open jobs in its buildings newcomers can reach are above this share of their jobs (M3-09). */
   openJobsShareMax: number;
+  /** Open jobs a zone may have whatever their share, so a zone starting from nothing is not held by its first workplace (M3-21). */
+  openJobsMin: number;
   /** How a pop looking for work weights an open job t seconds from home: 1 / (1 + (t / halfWeightSeconds)^falloffPower) (M3-09). */
   jobMatching: { halfWeightSeconds: number; falloffPower: number };
   /**
@@ -75,8 +82,11 @@ const TOP: Readonly<Record<string, NumberRule>> = {
   arrivalsPerYearAtFullDemand: { min: 0 },
   departuresPerYearAtFullDemand: { min: 0 },
   satisfactionNeutral: { min: 0, max: 100 },
-  emptyRoomShareMax: { min: 0, max: 1 },
+  unfilledHomesMax: { min: 1, whole: true },
+  homeFullShare: { min: 0, max: 1, aboveMin: true },
+  fillDays: { min: 0, aboveMin: true },
   openJobsShareMax: { min: 0, max: 1 },
+  openJobsMin: { min: 0, whole: true },
   shopJobsPerSpending: { min: 0, max: 10 },
   officeJobsPerBuyer: { min: 0, max: 10 },
   factoryJobsPerShopJob: { min: 0, max: 10 },

@@ -87,10 +87,19 @@ export interface GridPreview {
    * and for a refused grid.
    */
   clears: BuildingsInTheWay | null;
+  /**
+   * The cells the grid's streets would open, eight corner numbers a cell,
+   * from the sim's `gridEffects` on the mirror. Found once the rectangle is
+   * placed, as `clears` is; null before then and for a refused grid.
+   */
+  newCells: Float64Array | null;
 }
 
 /** Finds the buildings a planned grid would clear: the sim's `gridClears` on the mirror. */
 export type GridClears = (plan: GridPlan) => BuildingsInTheWay;
+
+/** Finds the cells a planned grid would open: the sim's `gridEffects` on the mirror. */
+export type GridCells = (plan: GridPlan) => Float64Array;
 
 /** A grid the tool has sent and the sim has not yet built or refused. */
 export interface PendingGrid {
@@ -267,11 +276,17 @@ function clearOfRoads(net: RoadNetwork, a: BuildPoint, b: BuildPoint): boolean {
  * Changes nothing. A refused plan has no streets; a plan whose link the
  * sim would refuse keeps its streets and names the street, as the sim does.
  */
-export function previewGrid(net: RoadNet, terrain: Terrain, payload: BuildRoadGridPayload, clearsOf: GridClears | null = null): GridPreview {
+export function previewGrid(
+  net: RoadNet,
+  terrain: Terrain,
+  payload: BuildRoadGridPayload,
+  clearsOf: GridClears | null = null,
+  cellsOf: GridCells | null = null,
+): GridPreview {
   const type = typeById(payload.type);
   const result = planRoadGrid(asNetwork(net), terrain, payload);
   if (!result.ok) {
-    return { payload, type, ok: false, reason: result.reason, streets: [], junctions: [], cuts: [], length: 0, cost: 0, clears: null };
+    return { payload, type, ok: false, reason: result.reason, streets: [], junctions: [], cuts: [], length: 0, cost: 0, clears: null, newCells: null };
   }
   const { streets, length, cost } = result.plan;
   const junctions: BuildPoint[] = [];
@@ -303,7 +318,19 @@ export function previewGrid(net: RoadNet, terrain: Terrain, payload: BuildRoadGr
     }
   });
   const ok = reason === null;
-  return { payload, type, ok, reason, streets, junctions, cuts, length, cost: ok ? cost : 0, clears: ok && clearsOf ? clearsOf(result.plan) : null };
+  return {
+    payload,
+    type,
+    ok,
+    reason,
+    streets,
+    junctions,
+    cuts,
+    length,
+    cost: ok ? cost : 0,
+    clears: ok && clearsOf ? clearsOf(result.plan) : null,
+    newCells: ok && cellsOf ? cellsOf(result.plan) : null,
+  };
 }
 
 /** The road preview strips for a grid: one per link, with junction discs on the links that meet a road. */
@@ -357,11 +384,11 @@ export interface GridToolHost {
   get(): GridToolState & Pick<RoadToolState, "tool" | "roadType" | "guides">;
   set(patch: Partial<GridToolState & Pick<RoadToolState, "tool" | "roadNote" | "roadStart" | "roadControl" | "roadChain">>): void;
   /**
-   * The mirror's roads and the map, its zoned cells for the snap, and a way
-   * to find the buildings a grid would clear, or null before the first
-   * snapshot.
+   * The mirror's roads and the map, its zoned cells for the snap, and ways
+   * to find the buildings a grid would clear and the cells it would open,
+   * or null before the first snapshot.
    */
-  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup; clears?: GridClears } | null;
+  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup; clears?: GridClears; newCells?: GridCells } | null;
   /** Sends `BuildRoadGrid` and resolves once the sim has built it, or with why it did not. */
   send(payload: BuildRoadGridPayload): Promise<CommandResult>;
 }
@@ -615,7 +642,7 @@ export class GridToolController {
     const key = `${JSON.stringify(payload)}|${this.version}|${settled ? this.buildingsVersion : "-"}`;
     if (key !== this.cacheKey) {
       this.cacheKey = key;
-      this.cached = previewGrid(world.net, world.terrain, payload, settled ? (world.clears ?? null) : null);
+      this.cached = previewGrid(world.net, world.terrain, payload, settled ? (world.clears ?? null) : null, settled ? (world.newCells ?? null) : null);
     }
     return this.cached;
   }

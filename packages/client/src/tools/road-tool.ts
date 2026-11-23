@@ -96,10 +96,20 @@ export interface RoadPreview {
    * nothing gave a way to find them.
    */
   clears: BuildingsInTheWay | null;
+  /**
+   * The cells the road would open on its own segments, eight corner
+   * numbers a cell, from the sim's `roadEffects` on the mirror: the ground a
+   * player could zone once it is built. Null when refused, or when nothing
+   * gave a way to find them.
+   */
+  newCells: Float64Array | null;
 }
 
 /** Finds the buildings a planned road would clear: the sim's `roadClears` on the mirror. */
 export type RoadClears = (plan: RoadPlan) => BuildingsInTheWay;
+
+/** Finds the cells a planned road would open: the sim's `roadEffects` on the mirror. */
+export type RoadCells = (plan: RoadPlan) => Float64Array;
 
 /** A part of a previewed road between two of its stops. */
 export interface PreviewSpan {
@@ -141,6 +151,7 @@ export function previewRoad(
   control: BuildPoint | null = null,
   level: string = "ground",
   clearsOf: RoadClears | null = null,
+  cellsOf: RoadCells | null = null,
 ): RoadPreview {
   const type = typeById(typeId);
   const payload = roadPayload(from, to, typeId, control, level);
@@ -152,7 +163,7 @@ export function previewRoad(
     const b = onGrid(to);
     const c = control ? onGrid(control) : null;
     const length = c ? curveLength(a.x, a.z, c.x, c.z, b.x, b.z) : Math.hypot(b.x - a.x, b.z - a.z);
-    return { from: a, to: b, control: c, type, ok: false, reason: result.reason, length, cost: 0, junctions: [], bridges: [], bridgeLength: 0, clears: null };
+    return { from: a, to: b, control: c, type, ok: false, reason: result.reason, length, cost: 0, junctions: [], bridges: [], bridgeLength: 0, clears: null, newCells: null };
   }
   const { stops, length, cost, levels, bridgeLength } = result.plan;
   const first = stops[0];
@@ -182,6 +193,7 @@ export function previewRoad(
     bridges,
     bridgeLength,
     clears: clearsOf ? clearsOf(result.plan) : null,
+    newCells: cellsOf ? cellsOf(result.plan) : null,
   };
 }
 
@@ -264,7 +276,7 @@ export interface RoadToolHost {
    * to find the buildings a road would clear, or null before the first
    * snapshot.
    */
-  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup; clears?: RoadClears } | null;
+  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup; clears?: RoadClears; newCells?: RoadCells } | null;
   /** Sends `BuildRoad` and resolves once the sim has built it, or with why it did not. */
   send(payload: BuildRoadPayload): Promise<CommandResult>;
 }
@@ -400,7 +412,7 @@ export class RoadToolController {
     const world = this.host.world();
     if (s.tool !== "road" || !s.roadStart || !cursor || !world) return null;
     if (s.roadMode === "curved" && !s.roadControl) return null;
-    return previewRoad(world.net, world.terrain, s.roadStart, cursor, s.roadType, s.roadControl, s.roadLevel, world.clears ?? null);
+    return previewRoad(world.net, world.terrain, s.roadStart, cursor, s.roadType, s.roadControl, s.roadLevel, world.clears ?? null, world.newCells ?? null);
   }
 
   /**

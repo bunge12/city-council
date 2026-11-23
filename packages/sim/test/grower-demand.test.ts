@@ -156,13 +156,15 @@ describe("the grower follows demand", () => {
 
   it("builds a day's quota in a day, so the pace follows the bar", () => {
     for (const bar of [10, 50, 100]) {
-      // Two streets of R1 on both sides: more frontage than a day at 100 builds on.
+      // Three streets of R1 on both sides: more frontage than a day at 100 builds on, 50 since M3-21.
       const state = street(24, 4600);
       zone(state, "residential", 1, 0, 24, 6);
       zone(state, "residential", 1, 0, 24, 6, true);
-      ok(state, "BuildRoad", { from: { x: 4200, z: 4800 }, to: { x: 4200 + CELL * 24, z: 4800 }, type: "street" });
-      zone(state, "residential", 1, 0, 24, 6, false, 4800);
-      zone(state, "residential", 1, 0, 24, 6, true, 4800);
+      for (const z of [4800, 4400]) {
+        ok(state, "BuildRoad", { from: { x: 4200, z }, to: { x: 4200 + CELL * 24, z }, type: "street" });
+        zone(state, "residential", 1, 0, 24, 6, false, z);
+        zone(state, "residential", 1, 0, 24, 6, true, z);
+      }
       while (state.tick % DAY !== 0) step(state);
       const before = buildings(state).length;
       holdDemand({ residential: bar }, () => runDays(state, 1));

@@ -47,7 +47,7 @@ import { connectionMarks } from "./render/connection-marks-geometry";
 import type { RoadNet } from "./render/road-geometry";
 import { createSnapMarkLayer } from "./render/snap-marks";
 import { cellColour } from "./render/cell-geometry";
-import { ZONE_PREVIEW } from "./render/config";
+import { ROAD_CELLS, ZONE_PREVIEW } from "./render/config";
 import { createZonePreviewLayer, type ZoneMark } from "./render/zone-preview";
 import { createBuildingMarkLayer } from "./render/building-marks";
 import { createGameClock } from "./render/construction";
@@ -330,7 +330,7 @@ const roadTool = new RoadToolController({
   set: (patch) => useUi.setState(patch),
   world: () =>
     mirror.state && shownTerrain
-      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.roadClears(plan) }
+      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.roadClears(plan), newCells: (plan) => mirror.roadCells(plan) }
       : null,
   send: (payload) => sendCommand("BuildRoad", payload),
 });
@@ -340,7 +340,7 @@ const gridTool = new GridToolController({
   set: (patch) => useUi.setState(patch),
   world: () =>
     mirror.state && shownTerrain
-      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.gridClears(plan) }
+      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.gridClears(plan), newCells: (plan) => mirror.gridCells(plan) }
       : null,
   send: (payload) => sendCommand("BuildRoadGrid", payload),
 });
@@ -755,7 +755,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
     showCells({ kind: "snapshot" });
     showBuildings({ kind: "snapshot" });
   }
-  setCellsVisible(useUi.getState().tool === "zone");
+  setCellsVisible(useUi.getState().overlay !== null);
   return view;
 });
 viewReady.catch((error: unknown) => {
@@ -950,6 +950,17 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   const marks = createSnapMarkLayer(view.scene, () => hooks.terrain);
   const connectionLayer = createConnectionMarkLayer(view.scene, () => hooks.terrain);
   const zoneLayer = createZonePreviewLayer(view.scene, () => hooks.terrain);
+  // The cells a road or grid would open, over the zoning overlay the road tools bring.
+  const roadCellLayer = createZonePreviewLayer(view.scene, () => hooks.terrain, { name: "road cells", opacity: ROAD_CELLS.opacity, pendingOpacity: ROAD_CELLS.pendingOpacity });
+  const roadCellMarks = (previews: readonly { newCells: Float64Array | null }[]): ZoneMark[] => {
+    const out: ZoneMark[] = [];
+    for (const p of previews) {
+      const c = p.newCells;
+      if (!c) continue;
+      for (let i = 0; i < c.length; i += 8) out.push({ corners: Array.from(c.subarray(i, i + 8)), colour: ROAD_CELLS.colour });
+    }
+    return out;
+  };
   const buildingMarks = createBuildingMarkLayer(view.scene, () => hooks.terrain);
   /** Metres one CSS pixel covers on the ground at (x, z). */
   const scaleAt = (x: number, z: number): number => metresPerPixel({ x, y: heightAt(hooks.terrain, x, z), z, distance: 0 });
@@ -1259,6 +1270,15 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       `${zoneShown ? zonePreviewId : "-"}|${zonePendingNow.map((p) => p.id).join(",")}`,
     );
     document.body.dataset["zonePreview"] = zoneNow ? (zoneNow.ok ? String(zoneNow.cells.length) : "0") : "";
+    // The road and grid tools: the cells the roads in flight would open, then those of the road drawn.
+    const opening = [...(live?.ok ? [live] : []), ...(gridNow?.ok ? [gridNow] : [])];
+    const openingSent = [...useUi.getState().roadPending.map((p) => p.preview), ...useUi.getState().gridPending.map((p) => p.preview)];
+    roadCellLayer.show(
+      () => roadCellMarks(opening),
+      () => roadCellMarks(openingSent),
+      `${opening.map(previewId).join(",")}|${openingSent.map(previewId).join(",")}`,
+    );
+    document.body.dataset["roadCells"] = String(opening.reduce((n, p) => n + (p.newCells?.length ?? 0) / 8, 0));
     setZoneHover(zoneNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, preview: zoneNow, lotNote: lotNoteUnder(cursor) } : null);
     // The buildings the road or the grid would clear, those of roads and grids in flight, and the building under the pointer.
     const liveClears = live?.ok ? live : null;

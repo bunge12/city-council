@@ -44,6 +44,7 @@ pnpm lint       includes the package boundary rule
 pnpm e2e        Playwright walkthroughs
 pnpm soak       sim host at 4x for one game hour, reports tick time and memory
 pnpm bench      times the spatial index, routing, blocks, levels, grids and commands on 30,000 segments
+pnpm balance    runs the standard cities for ten game years and prints a line a year; --set file.path=value changes one balance number
 pnpm build
 pnpm verify     typecheck, lint and test, before every push
 pnpm verify:ci  verify, then soak and bench

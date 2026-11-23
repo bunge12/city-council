@@ -3,9 +3,14 @@
 // does the timing; nothing here reads the clock (CLAUDE.md rule 3).
 //
 // The arrivals system's work on a tick people are due is one pass over the
-// buildings for the homes with room (pops/room.ts) and a household or two
-// moving in. Its worst tick is one at the arrivals cap, the residential bar
-// at 100, with every home in the town empty, so the pass finds them all.
+// buildings for the homes with room and their empty room (pops/room.ts), and
+// the households due moving in. Since M3-21 the people due follow the empty
+// room, so its worst tick is the residential bar at 100 with every home in
+// the town empty: the pass finds them all, and the tick's share of a day
+// that would fill them in `fillDays` days moves in, hundreds of households,
+// each drawn from the weights' tree. Play rarely comes near it, since new
+// homes wait while a few are filling, but a town that loses its people or
+// joins a street of empty houses to the network can.
 // The grower asks the same pass before each home it adds (`homesHeld`),
 // timed here too. The pass grows with the buildings, not the pops.
 
@@ -17,6 +22,7 @@ import {
   cellsSettled,
   dayArrivals,
   growthOnTick,
+  homesAndEmptyRoom,
   homesHeld,
   homesWithRoom,
   popCount,
@@ -51,7 +57,7 @@ test("arrivals on the M2 scale town", async ({ bench, annotate }) => {
   expect(segmentsReachingOutside(state)).toBeGreaterThan(0);
   setBars(state, { residential: 100 });
   const day = TIME_BALANCE.ticksPerDay;
-  const quota = dayArrivals(100);
+  const quota = dayArrivals(100, homesAndEmptyRoom(state).empty);
   // A tick of the day on which people are due at the cap.
   let k = 0;
   while (growthOnTick(k, quota) === 0) k++;

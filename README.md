@@ -78,6 +78,7 @@ pnpm lint
 pnpm e2e     Playwright walkthroughs
 pnpm soak    one hour of game time at 4x, reporting tick time and memory
 pnpm bench   times the hot sim queries on a 30,000 segment network
+pnpm balance runs the standard cities for ten game years, a line a year
 pnpm build
 ```
 

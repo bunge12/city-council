@@ -30,6 +30,7 @@ import {
   step,
   workersFor,
   workplacesHeld,
+  workplacesHeldBy,
   zoneJobs,
   type Command,
   type SimState,
@@ -308,7 +309,8 @@ describe("job matching", () => {
       else if (heldTicks > 0 && shops() > before) grewAfterHeld = true;
     };
     try {
-      holdDemand({ residential: 100, commercial: 100 }, () => runDays(state, 10));
+      // The share alone: a strip of corner shops never has more open jobs than the floor (M3-21).
+      withValue(DEMAND_BALANCE, "openJobsMin", 0, () => holdDemand({ residential: 100, commercial: 100 }, () => runDays(state, 10)));
     } finally {
       GROWER.run = original;
     }
@@ -322,6 +324,18 @@ describe("job matching", () => {
     expect(offered).toBeGreaterThan(0);
     expect(jobs.jobs[COMMERCIAL]).toBe(offered);
     expectRecount(state);
+  });
+
+  it("holds no zone while its open jobs are at most openJobsMin, whatever their share (M3-21)", () => {
+    const least = DEMAND_BALANCE.openJobsMin;
+    const share = DEMAND_BALANCE.openJobsShareMax;
+    const jobs = (offered: number, open: number) => ({ jobs: Float64Array.of(0, offered, 0, 0, 0, 0), open: Float64Array.of(0, open, 0, 0, 0, 0) });
+    // A zone starting again from nothing: its first workshop's jobs all open.
+    expect(workplacesHeldBy(jobs(6, 6), 1)).toBe(false);
+    expect(workplacesHeldBy(jobs(least, least), 1)).toBe(false);
+    // Past the floor, the share holds it as before.
+    expect(workplacesHeldBy(jobs(10 * least, least + 1), 1)).toBe(share * 10 * least < least + 1);
+    expect(workplacesHeldBy(jobs(1000 * least, 1000 * least), 1)).toBe(true);
   });
 
   it("leaves a bulldozed workplace's pops unemployed, then working elsewhere", () => {
@@ -401,9 +415,11 @@ describe("job matching", () => {
 
   it("does nothing while the travel times are still being rebuilt", () => {
     const { state } = nearAndFar();
+    // Since M3-21 houses fill faster, and a pop or two may have found work on the first day, before the rebuild.
+    const employed = state.stats.totals["workersEmployed"] ?? 0;
     state.travelReadyAt = state.tick + 10 * DAY;
     holdDemand(NEAR_FAR_BARS, () => runDays(state, 3));
-    expect(state.stats.totals["workersEmployed"]).toBe(0);
+    expect(state.stats.totals["workersEmployed"]).toBeLessThanOrEqual(employed);
     expect(state.stats.totals["workersUnemployed"]).toBeGreaterThan(0);
   });
 });

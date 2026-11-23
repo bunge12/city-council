@@ -64,7 +64,17 @@ export interface ZonePreviewLayer {
   dispose(): void;
 }
 
-export function createZonePreviewLayer(scene: Scene, terrain: () => Terrain): ZonePreviewLayer {
+/** How a layer of marks looks: its meshes' names and opacities. */
+export interface ZoneMarkLook {
+  name: string;
+  opacity: number;
+  pendingOpacity: number;
+}
+
+const ZONE_LOOK: ZoneMarkLook = { name: "zone", opacity: ZONE_PREVIEW.opacity, pendingOpacity: ZONE_PREVIEW.pendingOpacity };
+
+/** The zone tool's marks, or with `look` another tool's cells drawn the same way: the road tools' new cells. */
+export function createZonePreviewLayer(scene: Scene, terrain: () => Terrain, look: ZoneMarkLook = ZONE_LOOK): ZonePreviewLayer {
   const make = (name: string, opacity: number, order: number) => {
     const material = new MeshBasicNodeMaterial({ vertexColors: true, transparent: true, opacity, depthTest: false, depthWrite: false, side: DoubleSide });
     const mesh = new Mesh(new BufferGeometry(), material);
@@ -76,8 +86,8 @@ export function createZonePreviewLayer(scene: Scene, terrain: () => Terrain): Zo
     return mesh;
   };
   // Pending under the preview, both under the road preview at 9.
-  const pendingMesh = make("zone pending", ZONE_PREVIEW.pendingOpacity, 7);
-  const previewMesh = make("zone preview", ZONE_PREVIEW.opacity, 8);
+  const pendingMesh = make(`${look.name} pending`, look.pendingOpacity, 7);
+  const previewMesh = make(`${look.name} preview`, look.opacity, 8);
   let shown = "";
   const height = (x: number, z: number) => {
     const t = terrain();

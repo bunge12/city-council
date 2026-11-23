@@ -21,18 +21,19 @@ import {
   cellAt,
   cellShapesInChunk,
   cellsInChunk,
-  gridClears,
+  gridEffects,
   landValueAt,
   landValuesOfShapes,
   lotMarkAt,
   lotMarksInChunk,
   prepareWaterMap,
   terrainOf,
-  roadClears,
+  roadEffects,
   roadIndexOf,
   type BuildingGround,
   type BuildingInfo,
   type BuildingsInTheWay,
+  type RoadEffects,
   type GridPlan,
   type RoadPlan,
   type CellInfo,
@@ -376,12 +377,40 @@ export class SimMirror {
    * was. Empty until the first snapshot.
    */
   roadClears(plan: RoadPlan): BuildingsInTheWay {
-    return this.current ? roadClears(this.current, plan, (id) => this.buildingPeople(id)) : { ids: [], residents: 0 };
+    return this.effectsOf(plan, (state) => roadEffects(state, plan, (id) => this.buildingPeople(id))).clears;
   }
 
   /** As `roadClears`, for a grid the sim has planned. */
   gridClears(plan: GridPlan): BuildingsInTheWay {
-    return this.current ? gridClears(this.current, plan, (id) => this.buildingPeople(id)) : { ids: [], residents: 0 };
+    return this.effectsOf(plan, (state) => gridEffects(state, plan, (id) => this.buildingPeople(id))).clears;
+  }
+
+  /**
+   * The buildings a road or grid the sim has planned would clear and the
+   * cells it would open on its own segments, for the road tools' previews
+   * (issue #323): the sim's `roadEffects` and `gridEffects`, rehearsed on
+   * the copy and taken back. Kept for each plan, so the preview's two
+   * questions about one plan cost one rehearsal.
+   */
+  private effectsOf(plan: RoadPlan | GridPlan, find: (state: SimState) => RoadEffects): RoadEffects {
+    let effects = this.effects.get(plan);
+    if (!effects) {
+      effects = this.current ? find(this.current) : { clears: { ids: [], residents: 0 }, cells: new Float64Array(0) };
+      this.effects.set(plan, effects);
+    }
+    return effects;
+  }
+
+  private readonly effects = new WeakMap<object, RoadEffects>();
+
+  /** The cells a road the sim has planned would open, as corners, eight numbers a cell. Empty until the first snapshot. */
+  roadCells(plan: RoadPlan): Float64Array {
+    return this.effectsOf(plan, (state) => roadEffects(state, plan, (id) => this.buildingPeople(id))).cells;
+  }
+
+  /** As `roadCells`, for a grid the sim has planned. */
+  gridCells(plan: GridPlan): Float64Array {
+    return this.effectsOf(plan, (state) => gridEffects(state, plan, (id) => this.buildingPeople(id))).cells;
   }
 
   requestSnapshot(): void {
