@@ -18,6 +18,7 @@ import { matchJobs } from "./pops/matching";
 import { popCount, popIdLimit } from "./pops/pops";
 import { buildingReachesOutside } from "./pops/room";
 import { prepareTravelTimes, travelTimesReady } from "./travel-times";
+import { findCentre, nextMonth } from "./landvalue/land-value";
 import { roadPieceByNode, segmentsReachingOutside } from "./roads/outside";
 import { growOne } from "./buildings/grower";
 import { submit, type Command } from "./commands";
@@ -612,12 +613,23 @@ export function generateScaleCity(residents: ScaleCityResidents, base?: ScaleCit
   }
   if (behind() !== null) throw new Error(`the map ran out of room for a city of ${residents}: ${behind()} is short (${JSON.stringify({ reach: segmentsReachingOutside(state), joins, room, mixedRoom, jobs, zoneCommands })})`);
 
+  // The city centre, as the land value system would work it out on the
+  // month's first tick, so the homes newcomers draw, and their wealth,
+  // follow land value with its distance to the centre in it. Paused, the
+  // system has not run since the buildings went up.
+  state.centre = { ...findCentre(state), due: nextMonth(state.tick) };
   // The residents, as arrivals bring them, all owed at once.
   state.pops.owed = residents;
   arrive(state);
+  // They were placed, not arrivals of the city's first year: the year's
+  // counts start from nothing, so a city file's statistics and the soak's
+  // count of the hour's arrivals hold only people who came later.
+  state.stats.year = { births: 0, deaths: 0, arrivals: 0, departures: 0 };
   // Job matching over whole days of slices, as the sweep gives them: the
-  // tick is set to each tick of the next game day in turn, which is all
-  // `matchJobs` reads of it, and put back after. Each day starts the sweep
+  // tick is set to each tick of the next game day in turn, once for each of
+  // MATCHING_DAYS days, which is all `matchJobs` reads of it (through
+  // `popSlice` and `travelTimesReady`), and put back after. If matching
+  // ever reads the tick for anything else, this must change with it. Each day starts the sweep
   // afresh, so the pops a split made look on the next.
   prepareTravelTimes(state);
   const tick = state.tick;
@@ -632,6 +644,9 @@ export function generateScaleCity(residents: ScaleCityResidents, base?: ScaleCit
   }
   state.tick = tick;
   run("SetSpeed", { speed: 1 });
+  // Every entry still in live state, so a host can take the city as it is
+  // and a city file carries the whole log (log.ts pages past LOG_LIVE_LIMIT).
+  if (state.logOffset !== 0) throw new Error(`the generator's log of ${state.log.length + state.logOffset} entries passed the live limit`);
 
   const totals = state.stats.totals;
   return {

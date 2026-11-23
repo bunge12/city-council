@@ -331,11 +331,12 @@ async function soakHour(): Promise<SoakRun> {
   // hour goes. Held since the scale city had no residents; the city of
   // 200,000 keeps it so the grower and arrivals stay busy all hour. The
   // replay at the end runs in this thread, so it is held the same way.
-  holdDemandBars(100);
   // The generator lets the scale city's walk of about 4,200 ticks of
   // zoning cells settle before it zones (M2 review, #147), so the hour
-  // starts on a settled city, as a player's would be.
+  // starts on a settled city, as a player's would be. Generated before the
+  // bars are held, so it is the city the bench and the e2e tests open.
   const scale = generateScaleCity(200_000, buildScaleCity());
+  holdDemandBars(100);
   const startTick = scale.state.tick;
   /** The city as the hour begins, which the replay at the end starts from. */
   const startBytes = serialize(scale.state);
@@ -804,11 +805,15 @@ describe("soak: one hour of game time at 4x", () => {
     expect(b.autosaves, "autosaves taken").toBeGreaterThan(20);
     expect(b.settleSteps, "steps that walked a slice of zoning cells").toBeGreaterThan(20);
     for (const [type, applied] of Object.entries(b.applied)) expect(applied, `${type} applied`).toBeGreaterThan(20);
-    // The grower built a town on the zoning, and the clearing took some of it away again.
-    // Since M3-07 its pace follows demand: with every bar at 100 the zones add
-    // about 50 buildings a game day together, against up to 1,000 at the M2
-    // pace, and the hour's 360 game days grew about 2,800 (10,000 before).
-    expect(b.grown, "buildings grown").toBeGreaterThan(0);
+    // On the empty scale city the grower built a town of about 2,800
+    // buildings over the hour. On the city of 200,000 (M3-20) the homes
+    // stand part empty from the start, at 1.1 times the room, and empty
+    // further as the clearing and departures go on, so the grower holds
+    // new homes back (`emptyRoomShareMax`) and adds few: one run grew 15
+    // past the start while the clearing took about 15,000. The grower is
+    // timed at full size in scale-cities.bench.ts instead. #324
+    // tracks a soak that keeps the grower busy on a full city.
+    expect(b.grown, "buildings standing past the start at some sample").toBeGreaterThan(0);
     // The tick budget is an exit number. A part of an autosave runs in the
     // worker between two steps, so it holds up the next one and gets the
     // same budget as a step (issue #83).
