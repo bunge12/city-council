@@ -85,6 +85,12 @@ import {
   KINDS,
   mergedRise,
   modelExtent,
+  setMergedUse,
+  useOf,
+  vertexStarts,
+  BOX_VERTICES,
+  FLAT_VERTICES,
+  USE_STRIDE,
   stepFade,
   type BuildingForm,
   type ChunkFade,
@@ -152,6 +158,8 @@ export interface BuildingStats {
    */
   building: number;
   scaffolds: number;
+  /** Buildings re-tinted in place since the layer was made because they came into or out of use (issue M3-17). */
+  retints: number;
 }
 
 /** Where the camera is, for the layer's frame work. */
@@ -209,6 +217,8 @@ export interface BuildingLayer {
   lotMask(chunk: number): Uint8Array | null;
   /** The colours building `id` is drawn in, as sRGB hex, or null if it is not drawn. For tests. */
   tintOf(id: number): { wall: number; roof: number; trim: number } | null;
+  /** Building `id`'s use as drawn (building-lod.ts, `IN_USE`, `VACANT`, `ABANDONED`), or null if it is not drawn. For tests. */
+  useOf(id: number): number | null;
   /** The form chunk `chunk` shows whole, or null. For tests. */
   formOf(chunk: number): BuildingForm | null;
   /**
@@ -366,11 +376,45 @@ function glassColours(theme: Theme): GlassColours {
 }
 
 /**
+ * In the full form's tint, the look and the building's use share the
+ * fourth number: the look plus `LOOK_STRIDE` times the use (issue M3-17).
+ * Whole numbers, exact in a float32.
+ */
+const LOOK_STRIDE = 32;
+
+/** The boards over an abandoned building's windows, linear. */
+const boards = linear(BUILDINGS.disuse.boards);
+
+/** How far `colour` dulls for a building in use `use`: 0 for in use, else its grey share, darkening and glass, from `BUILDINGS.disuse`. */
+function disuseOf(use: Node<"float">) {
+  const { vacant, abandoned } = BUILDINGS.disuse;
+  return {
+    grey: select(use.lessThan(0.5), 0, select(use.lessThan(1.5), vacant.grey, abandoned.grey)),
+    dark: select(use.lessThan(0.5), 1, select(use.lessThan(1.5), vacant.dark, abandoned.dark)),
+    glass: select(use.lessThan(0.5), 1, select(use.lessThan(1.5), vacant.glass, abandoned.glass)),
+    boarded: use.greaterThan(1.5),
+  };
+}
+
+/**
+ * `colour`, linear, dulled for a building in use `use` (issue M3-17): moved
+ * towards its own grey and darkened, so a vacant or abandoned building
+ * reads as one whatever tint its id gave it.
+ */
+function dulled(colour: Node<"vec3">, use: Node<"float">): Node<"vec3"> {
+  const d = disuseOf(use);
+  const grey = dot(colour, vec3(0.2126, 0.7152, 0.0722));
+  return mix(colour, vec3(grey, grey, grey), d.grey).mul(d.dark);
+}
+
+/**
  * A wall's colour with its pattern drawn on, and the light its glass
  * reflects: `kind` is the vertex's `FACADE`, `bay` where it is along its
  * face in window bays from one end, a whole number of them to the other
- * end so no window is cut at a corner, `up` how high in floors, and `look`
- * the building's look (building-tint.ts, `lookFor`).
+ * end so no window is cut at a corner, `up` how high in floors, `look`
+ * the building's look (building-tint.ts, `lookFor`), and `use` whether
+ * anyone uses it (building-lod.ts, `IN_USE`): a vacant building is dulled
+ * and its glass dimmed, an abandoned one darker with its panes boarded.
  * Loading and garage doors are a darker shade of the wall; every other
  * opening is glass.
  *
@@ -380,7 +424,9 @@ function glassColours(theme: Theme): GlassColours {
  * the sky. There are no blinds: a pale blind read as a missing window. The
  * reflection is emitted, not lit, so windows on a wall in shadow still show.
  */
-function patterned(colour: Node<"vec3">, glass: GlassColours, kind: Node<"float">, bay: Node<"float">, up: Node<"float">, look: Node<"float">) {
+function patterned(base: Node<"vec3">, glass: GlassColours, kind: Node<"float">, bay: Node<"float">, up: Node<"float">, look: Node<"float">, use: Node<"float">) {
+  const disuse = disuseOf(use);
+  const colour = dulled(base, use);
   // Whole numbers first: the look reaches the fragment a hair either side
   // of its value, and a floor on it then flips from pixel to pixel.
   const whole = floor(look.add(0.5));
@@ -411,11 +457,13 @@ function patterned(colour: Node<"vec3">, glass: GlassColours, kind: Node<"float"
   const lit = tint.mul(shade.mul(BUILDINGS.glass.variation).add(1 - BUILDINGS.glass.variation / 2));
   const reflected = mix(lit, glass.sky, high.mul(high).mul(BUILDINGS.glass.skyMix));
   const door = kind.greaterThan(3.5).and(kind.lessThan(4.5));
-  const opening = select(door, colour.mul(0.6), reflected);
+  // An abandoned building's panes are boarded (issue M3-17): plywood, each board a little lighter or darker. Not dulled with the walls, so the boards stand out.
+  const board = boards.mul(shade.mul(0.3).add(0.7));
+  const opening = select(door, colour.mul(0.6), select(disuse.boarded, board, dulled(reflected, use)));
   const glassy = select(door, 0, pane);
   return {
     colour: mix(colour, opening, pane),
-    emissive: glass.sky.mul(glassy.mul(high.mul(0.6).add(0.4)).mul(BUILDINGS.glass.reflection)),
+    emissive: glass.sky.mul(glassy.mul(high.mul(0.6).add(0.4)).mul(BUILDINGS.glass.reflection).mul(disuse.glass)),
   };
 }
 
@@ -449,7 +497,10 @@ function buildingMaterial(theme: Theme, tick: Node<"float">): MeshLambertNodeMat
   // instance stretches it along the face's axis (theme/model.ts, `baysOn`).
   const span = facade.z.abs().mul(select(facade.z.lessThan(0), stretch.y, stretch.x));
   const bay = facade.x.mul(floor(span.add(0.5)));
-  const pattern = patterned(colour, glassColours(theme), facade.w, bay, facade.y, tint.w);
+  // The look and the use share the tint's fourth number (`LOOK_STRIDE`).
+  const lookUse = floor(tint.w.add(0.5));
+  const use = floor(lookUse.add(0.5).div(LOOK_STRIDE));
+  const pattern = patterned(colour, glassColours(theme), facade.w, bay, facade.y, lookUse.sub(use.mul(LOOK_STRIDE)), use);
   m.colorNode = pattern.colour;
   m.emissiveNode = pattern.emissive;
   // After the instance's matrix, which turns about y only, so down is down.
@@ -496,7 +547,9 @@ function simpleMaterial(theme: Theme, tick: Node<"float"> | null): MeshLambertNo
   // The alpha byte holds the facade's kind and the building's look (building-lod.ts, `mergeModels`).
   const packedKind = floor(fill.a.mul(255).add(0.5));
   const look = floor(packedKind.add(0.5).div(KINDS));
-  const pattern = patterned(colour, glassColours(theme), packedKind.sub(look.mul(KINDS)), facade.x, facade.y, look);
+  // The building's use rides on the floors (building-lod.ts, `USE_STRIDE`).
+  const use = floor(facade.y.add(USE_STRIDE / 2).div(USE_STRIDE));
+  const pattern = patterned(colour, glassColours(theme), packedKind.sub(look.mul(KINDS)), facade.x, facade.y.sub(use.mul(USE_STRIDE)), look, use);
   m.colorNode = pattern.colour;
   m.emissiveNode = pattern.emissive;
   const shown = kept(objectFade()).greaterThan(0.5);
@@ -524,7 +577,8 @@ function flatMaterial(tick: Node<"float"> | null): MeshBasicNodeMaterial {
   const fill = attribute<"vec4">("mergedColour", "vec4");
   const distance = cameraPosition.distance(positionLocal);
   m.positionNode = positionLocal.add(vec3(0, distance.mul(BUILDINGS.flatLift.perMetre).add(BUILDINGS.flatLift.base), 0));
-  m.colorNode = vec4(sRGBTransferEOTF(fill.rgb) as unknown as typeof fill.rgb, 1);
+  // The alpha byte is the building's use (building-lod.ts, `mergeFlats`).
+  m.colorNode = vec4(dulled(sRGBTransferEOTF(fill.rgb) as unknown as Node<"vec3">, floor(fill.a.mul(255).add(0.5))), 1);
   const shown = kept(varying(slotFade(attribute<"float">("mergedSlot", "float")))).greaterThan(0.5);
   // A block has no height to rise by: one under construction dithers in over the stage its building rises in.
   m.maskNode = tick ? shown.and(dither().lessThan(varying(riseNode(tick, attribute<"vec3">("mergedRise", "vec3").x)).sub(1e-4))) : shown;
@@ -587,6 +641,8 @@ interface Placed {
   builtAt: number;
   /** Its instance in the scaffolding's mesh, or -1. */
   scaffold: number;
+  /** Whether anyone uses it (building-lod.ts, `IN_USE`, `VACANT`, `ABANDONED`), as drawn. */
+  use: number;
 }
 
 /** A chunk's forms. */
@@ -762,6 +818,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     waiting: 0,
     building: 0,
     scaffolds: 0,
+    retints: 0,
   };
   /** Buildings under construction, checked each frame until they finish. Every building drawing scaffolding is one. */
   const young = new Set<Placed>();
@@ -772,6 +829,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   let batchMs = 0;
   let merged = 0;
   let formChanges = 0;
+  /** Buildings re-tinted in place for a change of use since the layer was made (issue M3-17). */
+  let retints = 0;
   /** One box reused for every test, so a pick allocates nothing per building. */
   const probe: PickBox = { extent: { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 }, x: 0, y: 0, z: 0, angle: 0, sx: 1, sz: 1 };
   const mergedBytes: Record<Merged, number> = { simple: 0, box: 0, flat: 0 };
@@ -995,7 +1054,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     size.set(p.sx, 1, p.sz);
     matrix.compose(position, turn, size);
     m.mesh.setMatrixAt(p.slot, matrix);
-    m.tints.setXYZW(p.slot, packed(p.tint.wall), packed(p.tint.roof), packed(p.tint.trim), p.look);
+    m.tints.setXYZW(p.slot, packed(p.tint.wall), packed(p.tint.roof), packed(p.tint.trim), p.look + LOOK_STRIDE * p.use);
     m.scales.setXY(p.slot, p.sx, p.sz);
     m.fades.setX(p.slot, chunkAt(p.chunk).fullFade);
     m.builts.setXYZ(p.slot, p.builtAt, m.extent.maxY, m.extent.minY);
@@ -1229,7 +1288,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     const corners = info.corners ? [...info.corners] : [];
     const lots = cornerChunks(corners);
     fileLot(info.id, lots);
-    const p: Placed = { id: info.id, model, slot: -1, chunk, sig, lotChunks: lots, corners, tint, look: lookFor(info.id), place, ...placeInfo(info, place), flat: flatColour(info.type), builtAt: info.builtAt, scaffold: -1 };
+    const p: Placed = { id: info.id, model, slot: -1, chunk, sig, lotChunks: lots, corners, tint, look: lookFor(info.id), place, ...placeInfo(info, place), flat: flatColour(info.type), builtAt: info.builtAt, scaffold: -1, use: useOf(info) };
     placed.set(info.id, p);
     if (underConstruction(p.builtAt, now)) young.add(p);
     chunkAt(chunk).ids.add(info.id);
@@ -1246,11 +1305,17 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       seen.add(info.id);
       const sig = `${info.type}/${info.variant}/${info.width}/${info.depth}/${info.builtAt}`;
       const p = placed.get(info.id);
-      if (p && p.sig === sig && mode === "apply" && p.chunk === c && sameCorners(p.corners, info.corners)) continue;
+      const use = useOf(info);
+      if (p && p.sig === sig && mode === "apply" && p.chunk === c && sameCorners(p.corners, info.corners)) {
+        // Only its use changed, or nothing: re-tinted where it is drawn, no chunk built again (issue M3-17).
+        if (p.use !== use) retint(p, use);
+        continue;
+      }
       const place = placeLot(info.corners, height);
       if (p && p.sig === sig) {
         // The same building: placed again in its own instance, on its lot as it is now.
         p.place = place;
+        p.use = use;
         Object.assign(p, placeInfo(info, place));
         staleChunk(p.chunk);
         if (p.chunk !== c) {
@@ -1273,6 +1338,39 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     }
     for (const id of [...(chunks.get(c)?.ids ?? [])]) if (!seen.has(id)) remove(id);
     if (mode === "rebuild") batchRebuilt++;
+  }
+
+  /**
+   * Building `p` came to be used, or stopped being used (issue M3-17): its
+   * instance, if it has one, and its vertices in each merged mesh built
+   * with it are written again with its new use. No chunk is built again.
+   */
+  function retint(p: Placed, use: number): void {
+    p.use = use;
+    retints++;
+    if (p.slot >= 0) write(p);
+    const ch = chunkAt(p.chunk);
+    for (const form of PER_CHUNK) {
+      const mesh = ch.mesh[form];
+      if (mesh) restate(mesh, form, p.id, use);
+    }
+    if (ch.group.mesh) restate(ch.group.mesh, "flat", p.id, use);
+  }
+
+  /** Writes building `id`'s use into merged mesh `mesh` of `form`, if the mesh was built with it. */
+  function restate(mesh: Mesh, form: Merged, id: number, use: number): void {
+    const ids = mesh.userData["ids"] as Int32Array | undefined;
+    const k = ids ? ids.indexOf(id) : -1;
+    if (k < 0) return;
+    const starts = mesh.userData["starts"] as Int32Array | undefined;
+    const per = form === "box" ? BOX_VERTICES : FLAT_VERTICES;
+    const start = starts ? (starts[k] ?? 0) : k * per;
+    const end = starts ? (starts[k + 1] ?? 0) : start + per;
+    const name = form === "flat" ? "mergedColour" : "mergedFacade";
+    const attr = mesh.geometry.getAttribute(name) as BufferAttribute;
+    const arrays = form === "flat" ? { facades: null, colours: attr.array as Uint8Array } : { facades: attr.array as Float32Array, colours: new Uint8Array(0) };
+    const range = setMergedUse(form, arrays, start, end, use);
+    dirtyRange(attr, range.from, range.count);
   }
 
   function mark(list: Iterable<number>, mode: "rebuild" | "apply"): void {
@@ -1299,7 +1397,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     return box;
   }
 
-  function itemsOf(ch: Chunk): MergedItem[] {
+  /** The merged items of a chunk's buildings, and their ids in the same order into `ids` when given. */
+  function itemsOf(ch: Chunk, ids?: number[]): MergedItem[] {
     const items: MergedItem[] = [];
     for (const id of ch.ids) {
       const p = placed.get(id);
@@ -1320,7 +1419,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         flat: p.flat,
         built: p.builtAt,
         height: p.model.extent.maxY,
+        use: p.use,
       });
+      if (ids) ids.push(id);
     }
     return items;
   }
@@ -1359,11 +1460,12 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   function buildGroup(group: FlatGroup): void {
     dropGroup(group);
     const items: MergedItem[] = [];
+    const ids: number[] = [];
     const runs: { slot: number; count: number }[] = [];
     for (const c of [...group.chunks].sort((a, b) => a - b)) {
       const ch = chunks.get(c);
       if (!ch) continue;
-      const own = itemsOf(ch);
+      const own = itemsOf(ch, ids);
       for (const item of own) items.push(item);
       runs.push({ slot: ch.slot, count: own.length });
     }
@@ -1380,6 +1482,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       const bytes = arrays.positions.byteLength + arrays.colours.byteLength + arrays.indices.byteLength + slots.byteLength + (rise?.byteLength ?? 0);
       mesh.userData["bytes"] = bytes;
       mesh.userData["fades"] = group.fades;
+      mesh.userData["ids"] = Int32Array.from(ids);
       mergedBytes.flat += bytes;
       mesh.visible = groupDrawn(group);
       root.add(mesh);
@@ -1397,7 +1500,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       return;
     }
     dropMerged(ch, form);
-    const items = itemsOf(ch);
+    const ids: number[] = [];
+    const items = itemsOf(ch, ids);
     if (items.length > 0) {
       const ci = c % CHUNKS_PER_SIDE;
       const cj = (c - ci) / CHUNKS_PER_SIDE;
@@ -1410,6 +1514,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       const mesh = mergedMesh(`${MERGED_NAMES[form]} ${ci},${cj}`, { ...arrays, rise }, form);
       const bytes = arrays.positions.byteLength + (arrays.normals?.byteLength ?? 0) + arrays.colours.byteLength + (arrays.facades?.byteLength ?? 0) + arrays.indices.byteLength + (rise?.byteLength ?? 0);
       mesh.userData["bytes"] = bytes;
+      mesh.userData["ids"] = Int32Array.from(ids);
+      // Boxes give every building the same vertices; the simple form's follow its model.
+      if (form === "simple") mesh.userData["starts"] = vertexStarts(items, form);
       mergedBytes[form] += bytes;
       mesh.visible = draws(ch.fade, form);
       mesh.userData["fade"] = fadeOf(ch.fade, form);
@@ -1678,6 +1785,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
         forms: count(view.frustum),
         building: young.size,
         scaffolds: scaffolds.count,
+        retints,
       };
       if (dirty.size === 0 && wasDirty) {
         stats = { ...stats, lastWrites: batchWrites, lastRebuilt: batchRebuilt, totalRebuilt: stats.totalRebuilt + batchRebuilt, lastBuildMs: batchMs };
@@ -1732,6 +1840,7 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       return mask;
     },
     tintOf: (id) => placed.get(id)?.tint ?? null,
+    useOf: (id) => placed.get(id)?.use ?? null,
     formOf: (chunk) => chunks.get(chunk)?.fade.shown ?? null,
     pick(ray, limit = Infinity) {
       let best = -1;

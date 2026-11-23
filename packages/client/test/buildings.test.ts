@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { Scene } from "three/webgpu";
 import { BUILDING_TYPES, CHUNKS_PER_SIDE, CHUNK_SIZE, ZONING_BALANCE, type BuildingInfo } from "@city-council/sim";
 import { createBuildingLayer, type BuildingSource } from "../src/render/building-meshes";
+import { ABANDONED, IN_USE, VACANT, splitFacadeUse } from "../src/render/building-lod";
 import { placeLot } from "../src/render/building-place";
 import { hashId, tintFor } from "../src/render/building-tint";
 import { MASK_GRASS, MASK_SIDE, MASK_TREES } from "../src/render/road-geometry";
@@ -220,6 +221,8 @@ function fakeSource() {
       builtAt: 0,
       corners: lot(x, z, 2 * CELL, 3 * CELL),
       chunk: 0,
+      vacant: false,
+      abandoned: false,
     };
     info.chunk = chunkOf(info);
     rows.set(id, info);
@@ -648,6 +651,98 @@ describe("the building layer's levels of detail (issue M2-13)", () => {
     });
     const hex = CELLS.zones["residential"]?.[2] ?? 0;
     expect(colour).toEqual([(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff]);
+    layer.dispose();
+  });
+});
+
+describe("a building nobody uses (issue M3-17)", () => {
+  const near = { x: 4000, z: 4000 };
+  const run = (layer: ReturnType<typeof createBuildingLayer>, band: "street" | "district" | "city", frames = 50) => {
+    for (let k = 0; k < frames; k++) layer.update(near, 1000, { band, seconds: 1 });
+  };
+  type Geometry = { geometry: { getAttribute(n: string): { array: ArrayLike<number>; version: number } }; userData: Record<string, unknown> };
+  /** The meshes of `scene` whose names start with `prefix`. */
+  const meshes = (scene: Scene, prefix: string): Geometry[] => {
+    const out: Geometry[] = [];
+    scene.traverse((o) => {
+      if (o.name.startsWith(prefix)) out.push(o as unknown as Geometry);
+    });
+    return out;
+  };
+  /** A chunk's merged mesh's name for `form`, as the layer names it. */
+  const named = (form: string, c: number) => `${form} ${c % CHUNKS_PER_SIDE},${Math.floor(c / CHUNKS_PER_SIDE)}`;
+  /** The use every vertex of the meshes carries: the facade's floors for buildings and boxes, the colour's alpha for blocks. */
+  const usesIn = (scene: Scene, prefix: string, flat: boolean): Set<number> => {
+    const out = new Set<number>();
+    for (const m of meshes(scene, prefix)) {
+      const a = m.geometry.getAttribute(flat ? "mergedColour" : "mergedFacade").array;
+      for (let k = flat ? 3 : 1; k < a.length; k += flat ? 4 : 2) out.add(flat ? (a[k] ?? 0) : splitFacadeUse(a[k] ?? 0).use);
+    }
+    return out;
+  };
+
+  it("draws vacant and abandoned buildings as such in every form, carried in data the forms already have", () => {
+    const { source, rows, put } = fakeSource();
+    const here = put(1, 4004, 4004);
+    put(2, 4040, 4004);
+    const mid = put(3, 5004, 4004);
+    const far = put(4, 9004, 9004);
+    Object.assign(rows.get(2) ?? {}, { vacant: true });
+    Object.assign(rows.get(3) ?? {}, { abandoned: true });
+    Object.assign(rows.get(4) ?? {}, { abandoned: true });
+    const scene = new Scene();
+    const layer = createBuildingLayer(scene, source, theme, () => 0);
+    layer.reset();
+    run(layer, "street");
+    expect([1, 2, 3, 4].map((id) => layer.useOf(id))).toEqual([IN_USE, VACANT, ABANDONED, ABANDONED]);
+    // Simple buildings for the chunk past the full form's reach and built ahead for the near one, boxes for the far one.
+    expect(usesIn(scene, named("simple buildings", here), false)).toEqual(new Set([IN_USE, VACANT]));
+    expect(usesIn(scene, named("simple buildings", mid), false)).toEqual(new Set([ABANDONED]));
+    expect(usesIn(scene, named("building boxes", far), false)).toEqual(new Set([ABANDONED]));
+    run(layer, "city");
+    expect(usesIn(scene, "building blocks ", true)).toEqual(new Set([IN_USE, VACANT, ABANDONED]));
+    layer.dispose();
+  });
+
+  it("re-tints a building whose use changed where it is drawn, and builds no chunk again", () => {
+    const { source, rows, put } = fakeSource();
+    const here = put(1, 4004, 4004);
+    put(2, 4040, 4004);
+    const mid = put(3, 5004, 4004);
+    const scene = new Scene();
+    const layer = createBuildingLayer(scene, source, theme, () => 0);
+    layer.reset();
+    // Both bands once, so every form is built.
+    run(layer, "city");
+    run(layer, "street");
+    const before = layer.stats();
+    const versions = meshes(scene, "simple buildings ").map((m) => m.geometry.getAttribute("mergedFacade").version);
+    Object.assign(rows.get(2) ?? {}, { vacant: true });
+    Object.assign(rows.get(3) ?? {}, { abandoned: true });
+    layer.applyIds([2, 3]);
+    run(layer, "street", 1);
+    const after = layer.stats();
+    expect(after.retints - before.retints).toBe(2);
+    expect(after.totalMerged).toBe(before.totalMerged);
+    expect(after.totalRebuilt).toBe(before.totalRebuilt);
+    // Building 2 is drawn in full: its instance alone is written again.
+    expect(after.totalWrites - before.totalWrites).toBe(1);
+    expect([layer.formOf(here), layer.formOf(mid)]).toEqual(["full", "simple"]);
+    expect(layer.useOf(2)).toBe(VACANT);
+    expect(usesIn(scene, named("simple buildings", mid), false)).toEqual(new Set([ABANDONED]));
+    expect(usesIn(scene, named("simple buildings", here), false)).toEqual(new Set([IN_USE, VACANT]));
+    expect(meshes(scene, "simple buildings ").map((m) => m.geometry.getAttribute("mergedFacade").version)).not.toEqual(versions);
+    // The blocks, built ahead for the city band, took the change too, and are not built again on the way out.
+    expect(usesIn(scene, "building blocks ", true)).toEqual(new Set([IN_USE, VACANT, ABANDONED]));
+    run(layer, "city");
+    expect(layer.stats().totalMerged).toBe(before.totalMerged);
+    // And back into use.
+    Object.assign(rows.get(2) ?? {}, { vacant: false });
+    Object.assign(rows.get(3) ?? {}, { abandoned: false });
+    layer.applyIds([2, 3]);
+    run(layer, "city", 1);
+    expect(usesIn(scene, "building blocks ", true)).toEqual(new Set([IN_USE]));
+    expect(layer.stats().totalMerged).toBe(before.totalMerged);
     layer.dispose();
   });
 });

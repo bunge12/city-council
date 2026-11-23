@@ -621,6 +621,19 @@ export const BUILDINGS = {
    */
   glass: { variation: 0.3, skyMix: 0.35, reflection: 0.16 },
   /**
+   * How a building nobody uses looks (issue M3-17), in every form: its
+   * colours move `grey` of the way to their own grey and are scaled by
+   * `dark`, and its glass gives off `glass` of its usual reflection. An
+   * abandoned building's panes are boarded, in `boards` (sRGB), which
+   * are not dulled, so they stand out against its darkened walls. Every tint dulls the same way, so the look holds
+   * whatever colours a building's id gave it. Presentation only.
+   */
+  disuse: {
+    vacant: { grey: 0.6, dark: 0.78, glass: 0.25 },
+    abandoned: { grey: 0.8, dark: 0.5, glass: 0 },
+    boards: 0x8c7a5b,
+  },
+  /**
    * Metres round a building's lot kept clear of trees, so no crown pokes
    * through a wall or a roof (issue #137): the widest crown, 0.3 of the
    * tallest tree's height (decor-meshes.ts), with some to spare.

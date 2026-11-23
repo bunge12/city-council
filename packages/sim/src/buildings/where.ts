@@ -33,7 +33,7 @@
 // and followed across a change of roads from its own first column, so a
 // building whose back road goes is lost like one whose front road goes.
 
-import { BUILDING_ALIVE, BUILDING_ARRAYS, type BuildingState } from "./buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_ARRAYS, BUILDING_VACANT, type BuildingState } from "./buildings";
 import { noteColumns, noteFrontColumns, segmentsNear } from "./candidates";
 import { noteBuildingChanged } from "./changes";
 import { buildingJobs, lotJobs } from "./jobs";
@@ -870,6 +870,9 @@ export interface BuildingInfo {
   corners: number[] | null;
   /** The 500 m chunk its lot's centre is in, or NO_BUILDING. */
   chunk: number;
+  /** Whether it stands vacant, and whether it is abandoned (M3-24), from its flags. Not columns: the readout and the renderer read them (M3-17). */
+  vacant: boolean;
+  abandoned: boolean;
 }
 
 /** Building `id` with its lot's corners, or null if there is no such building. */
@@ -879,7 +882,16 @@ export function buildingInfo(state: SimState, id: number): BuildingInfo | null {
   const { bi, cellIndex } = indexOf(state);
   const row = Object.fromEntries(BUILDING_ARRAYS.filter((key) => key !== "flags").map((key) => [key, b[key][id] ?? 0])) as Omit<
     BuildingInfo,
-    "id" | "jobs" | "corners" | "chunk"
+    "id" | "jobs" | "corners" | "chunk" | "vacant" | "abandoned"
   >;
-  return { id, ...row, jobs: buildingJobs(b, id), corners: lotShapeCorners(cellIndex, shapeOfBuilding(b, id)), chunk: bi.chunk[id] ?? NO_BUILDING };
+  const flags = b.flags[id] ?? 0;
+  return {
+    id,
+    ...row,
+    jobs: buildingJobs(b, id),
+    corners: lotShapeCorners(cellIndex, shapeOfBuilding(b, id)),
+    chunk: bi.chunk[id] ?? NO_BUILDING,
+    vacant: (flags & BUILDING_VACANT) !== 0,
+    abandoned: (flags & BUILDING_ABANDONED) !== 0,
+  };
 }
