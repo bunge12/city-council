@@ -117,16 +117,65 @@
   color: var(--ink-soft);
 }
 
-.top-bar .homes {
+.top-bar .population {
   white-space: nowrap;
   color: var(--ink-soft);
   cursor: default;
 }
 
-.top-bar .homes #homes-count {
+.top-bar .population #population-count {
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   font-weight: 600;
+}
+
+.top-bar .population .trend {
+  display: inline-block;
+  width: 1em;
+  margin-left: 3px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.top-bar .population .trend[data-trend="up"] {
+  color: #2f8f2f;
+}
+
+.top-bar .population .trend[data-trend="down"] {
+  color: #c0392b;
+}
+
+/* Four bars about 8 px wide, -100 to 100 about a centre line (M3-15). */
+.top-bar .demand {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ink-soft);
+}
+
+.top-bar .demand-bar {
+  position: relative;
+  width: 8px;
+  height: 26px;
+  background: rgba(74, 88, 102, 0.16);
+  border-radius: 1px;
+  cursor: default;
+}
+
+.top-bar .demand-bar::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  top: 50%;
+  height: 1px;
+  background: var(--ink-soft);
+}
+
+.top-bar .demand-bar .fill {
+  position: absolute;
+  left: 0;
+  right: 0;
 }
 
 .top-bar .speeds,

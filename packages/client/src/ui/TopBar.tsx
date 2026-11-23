@@ -1,8 +1,10 @@
-import { SPEEDS, gameDate, type Speed } from "@city-council/sim";
+import { DEMAND_BARS, SPEEDS, ZONING_BALANCE, gameDate, type DemandBar, type Speed } from "@city-council/sim";
+import { cellColour } from "../render/cell-geometry";
 import { PRESETS } from "../render/config";
 import { isPreset, presetLabel } from "../render/presets";
-import { formatGameDate, formatHomesTitle } from "./format";
-import { useHomes, useSaveStatus, useServices, useSim } from "./hooks";
+import { formatGameDate } from "./format";
+import { useRoom, useSaveStatus, useServices, useSim } from "./hooks";
+import { BAR_NAMES, formatDemandTitle, formatPopulationTitle, populationTrend, trendArrow } from "./top-figures";
 import { toggleDebug, toggleLog, toggleMenu, useGraphics, useSound, useUi } from "./store";
 
 /** The graphics setting: Low, Balanced or High, kept in this browser. */
@@ -69,6 +71,64 @@ function SoundSetting() {
   );
 }
 
+/** The people living in the city, with an arrow for the last game month, and people against room in the tooltip (issue M3-15). */
+function Population() {
+  const population = useSim((s) => s?.stats.totals["population"] ?? null);
+  const trend = useSim((s) => (s ? populationTrend(s.stats, s.tick) : null));
+  const room = useRoom();
+  return (
+    <span className="population" id="population" title={formatPopulationTitle(population, room, trend)}>
+      Population{" "}
+      <span id="population-count" data-room={room ?? ""}>
+        {population === null ? "-" : population.toLocaleString("en-US")}
+      </span>
+      <span className="trend" id="population-trend" data-trend={trend ?? ""} aria-label={trend ? `trend ${trend}` : undefined}>
+        {trendArrow(trend)}
+      </span>
+    </span>
+  );
+}
+
+const hex = (n: number) => `#${n.toString(16).padStart(6, "0")}`;
+/** Each bar in its zone's middle shade from the zoning overlay. */
+const BAR_COLOURS = Object.fromEntries(
+  DEMAND_BARS.map((bar) => [bar, hex(cellColour(ZONING_BALANCE.zones.findIndex((z) => z.id === bar) + 1, 2))]),
+) as Record<DemandBar, string>;
+
+/** One demand bar, from -100 to 100 about a centre line, with what pushes it in the tooltip (issue M3-15). */
+function DemandMeter({ bar }: { bar: DemandBar }) {
+  const value = useSim((s) => s?.demand[bar].value ?? null);
+  const title = useSim((s) => (s ? formatDemandTitle(bar, s.demand[bar].value, s.demand[bar].parts) : formatDemandTitle(bar, null, null)));
+  const shown = value === null ? null : Math.round(value);
+  const size = value === null ? 0 : Math.min(100, Math.abs(value)) / 2;
+  return (
+    <span
+      className="demand-bar"
+      id={`demand-${bar}`}
+      role="meter"
+      aria-label={`${BAR_NAMES[bar]} demand`}
+      aria-valuemin={-100}
+      aria-valuemax={100}
+      aria-valuenow={shown ?? undefined}
+      aria-valuetext={shown === null ? "-" : String(shown)}
+      data-value={value ?? ""}
+      title={title}
+    >
+      <span className="fill" style={{ background: BAR_COLOURS[bar], height: `${size}%`, ...(value !== null && value < 0 ? { top: "50%" } : { bottom: "50%" }) }} />
+    </span>
+  );
+}
+
+/** The four demand bars, or "-" before a city is open. */
+function Demand() {
+  const open = useSim((s) => s !== null);
+  return (
+    <span className="demand" id="demand" role="group" aria-label="Demand">
+      {open ? DEMAND_BARS.map((bar) => <DemandMeter key={bar} bar={bar} />) : "-"}
+    </span>
+  );
+}
+
 const SPEED_LABELS: Record<Speed, string> = { 0: "Pause", 1: "1x", 2: "2x", 4: "4x" };
 
 export function TopBar() {
@@ -76,7 +136,6 @@ export function TopBar() {
   const canUndo = useSim((s) => s?.undo.some((r) => r.playerId === mirror.playerId) ?? false);
   const date = useSim((s) => (s ? formatGameDate(gameDate(s.tick)) : "-"));
   const speed = useSim((s) => s?.speed ?? null);
-  const homes = useHomes();
   const status = useSaveStatus();
   const city = !status ? "Loading…" : status.openElsewhere ? "No city open" : status.city.name;
   const menuOpen = useUi((s) => s.menuOpen);
@@ -88,9 +147,8 @@ export function TopBar() {
       <h1>City Council</h1>
       <span className="city-name" id="city-name">{city}</span>
       <span className="game-date" id="game-date" aria-label="Game date">{date}</span>
-      <span className="homes" id="homes" title={formatHomesTitle(homes)}>
-        Homes <span id="homes-count" data-capacity={homes?.capacity ?? ""}>{homes ? homes.count.toLocaleString("en-US") : "-"}</span>
-      </span>
+      <Population />
+      <Demand />
       <div className="speeds" role="group" aria-label="Game speed">
         {SPEEDS.map((s) => (
           <button

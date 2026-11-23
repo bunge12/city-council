@@ -28,15 +28,11 @@ export function useSim<T>(selector: (state: MirrorState) => T): T {
   return useSyncExternalStore(subscribe, () => selector(mirror.state));
 }
 
-/**
- * The homes the copy has built and the room they hold (issue M2-18), or
- * null before the first snapshot. The mirror replaces the object only when
- * a number changes, so this re-renders only then.
- */
-export function useHomes(): SimMirror["homes"] {
+/** The people the copy's buildings hold room for (issue M3-15), or null before the first snapshot. */
+export function useRoom(): SimMirror["room"] {
   const { mirror } = useServices();
   const subscribe = useCallback((listener: () => void) => mirror.subscribe(listener), [mirror]);
-  return useSyncExternalStore(subscribe, () => mirror.homes);
+  return useSyncExternalStore(subscribe, () => mirror.room);
 }
 
 /** The latest save status from the worker, or null before the city loads. */
