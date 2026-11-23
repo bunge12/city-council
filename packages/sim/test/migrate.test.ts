@@ -10,6 +10,7 @@ import { addBuilding } from "../src/buildings/buildings";
 import { addPop, setPopWork } from "../src/pops/pops";
 import { withEnds } from "./seen-ends";
 import { withoutSatisfaction } from "./before-satisfaction";
+import { withoutVacancy } from "./before-vacancy";
 
 /**
  * `state` as an older version: its fields minus the ones that version did
@@ -52,6 +53,8 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   }
   // Before version 23 nothing kept satisfaction but the pops' scores.
   if (version < 23) return { ...withoutSatisfaction(kept), version };
+  // Before version 24 no building said when it became what it is.
+  if (version < 24) return { ...withoutVacancy(kept), version };
   return { ...kept, version };
 }
 
@@ -105,7 +108,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(23);
+    expect(SNAPSHOT_VERSION).toBe(24);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -399,6 +402,29 @@ describe("migrateState", () => {
     expect(hashState(migrated)).toBe(hashState(state));
   });
 
+  it("upgrades a version 23 city with buildings by giving each the tick it was built as the tick it came into use, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    while (state.tick < 450) step(state);
+    const built = Array.from(state.buildings.flags).filter((f) => f !== 0).length;
+    expect(built).toBeGreaterThan(1);
+    const v23 = older(structuredClone(state), 23);
+    expect("statusSince" in (v23["buildings"] as object)).toBe(false);
+    const migrated = migrateState(v23);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(Object.keys(migrated.buildings)).toEqual(Object.keys(state.buildings));
+    expect(Array.from(migrated.buildings.statusSince)).toEqual(Array.from(migrated.buildings.builtAt));
+    expect(Array.from(migrated.buildings.flags)).toEqual(Array.from(state.buildings.flags));
+    // Nothing went vacant in the first days, so it is the city as it was.
+    expect(hashState(migrated)).toBe(hashState(state));
+    // And it steps on.
+    while (migrated.tick < 900) step(migrated);
+    expect(migrated.stats.totals).toEqual(recountTotals(migrated));
+  });
+
   it("upgrades a version 22 city with pops by giving them no days low, no plan of departures, the summed satisfaction counted and the bar's part at 0", () => {
     const state = createState(SEED_WITH_FLAT_GROUND);
     expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
@@ -471,7 +497,7 @@ describe("migrateState", () => {
     const migrated = migrateState(v16);
     const { growth, ...kept } = v16;
     void growth;
-    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand() });
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand() });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 

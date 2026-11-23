@@ -7,6 +7,7 @@ import { TURNOVER } from "./pops/turnover";
 import { STATS } from "./stats/stats";
 import { DEMAND } from "./demand/demand";
 import { keepBuildings } from "./buildings/upkeep";
+import { VACANCY } from "./buildings/vacancy";
 import { LAND_VALUE } from "./landvalue/land-value";
 import { applyPending, type DroppedCommand } from "./commands";
 import { catchUpDerived } from "./derived";
@@ -34,11 +35,14 @@ export interface System {
  * grower, which holds new workplaces back while open jobs stand.
  * Satisfaction comes after job matching, so a pop that finds work today is
  * scored with it, and before the grower, which then sees the room the
- * day's departures freed. Land value
+ * day's departures freed. The vacancy check comes after satisfaction, so
+ * a home the day's departures emptied is seen empty, and before the
+ * grower, which builds nothing in a zone while an abandoned building of it
+ * could come back into use. Land value
  * keeps the city centre before the grower builds, so a building grown on
  * the first tick of a month sees the month's centre.
  */
-export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, ARRIVALS, TURNOVER, JOBS, SATISFACTION, LAND_VALUE, GROWER];
+export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";

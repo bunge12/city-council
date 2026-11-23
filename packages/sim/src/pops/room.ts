@@ -5,14 +5,16 @@
 // through the connections, so a street joined to nothing builds and stays
 // empty. A home of a type with `oneHousehold`, the single family home,
 // takes one household however few people it holds, so it has no room left
-// once anyone lives there.
+// once anyone lives there. An abandoned home (M3-24) offers no room at all,
+// so newcomers pass it by and it holds no new homes back here: it waits
+// for the vacancy check to bring it back into use (buildings/vacancy.ts).
 //
 // Everything here is worked out from state when it is asked for, with one
 // pass over the buildings, and nothing is kept: the arrivals system asks on
 // the ticks people are due, and the grower once on a tick it adds a home.
 
 import { BUILDING_TYPES } from "../buildings/balance";
-import { BUILDING_ALIVE, isBuilding } from "../buildings/buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, homeRoom, isAbandoned, isBuilding } from "../buildings/buildings";
 import { NETWORK_ROAD } from "../roads/network";
 import { outsideReachByNode } from "../roads/outside";
 import type { SimState } from "../state";
@@ -50,7 +52,7 @@ function roadReaches(state: SimState, reach: Uint8Array, id: number): boolean {
 function roomFor(state: SimState, id: number, people: number): number {
   const b = state.buildings;
   if (people > 0 && ONE_HOUSEHOLD[b.type[id] ?? 0] === 1) return 0;
-  const room = (b.residents[id] ?? 0) - people;
+  const room = homeRoom(b, id) - people;
   return room > 0 ? room : 0;
 }
 
@@ -61,7 +63,7 @@ export function buildingReachesOutside(state: SimState, id: number): boolean {
 
 /** Whether live building `id` is a home whose road reaches an outside connection, so newcomers can reach it. */
 export function homeReachesOutside(state: SimState, id: number): boolean {
-  if (!isBuilding(state.buildings, id) || (state.buildings.residents[id] ?? 0) <= 0) return false;
+  if (!isBuilding(state.buildings, id) || homeRoom(state.buildings, id) <= 0) return false;
   return roadReaches(state, outsideReachByNode(state), id);
 }
 
@@ -85,7 +87,7 @@ export interface ReachableRoom {
 }
 
 /**
- * One pass over the buildings: calls `visit` with each live home whose road
+ * One pass over the buildings: calls `visit` with each live home, abandoned ones aside, whose road
  * reaches outside, its room and the room it has left, in id order. The one
  * loop both questions below share, kept tight: it runs over every building
  * on the ticks people are due and before each home the grower adds.
@@ -100,12 +102,14 @@ function eachReachableHome(state: SimState, visit: (id: number, room: number, le
   // Imported constants as locals: under the test runner each import is a
   // property read on a module object (roads/outside.ts).
   const alive = BUILDING_ALIVE;
+  const abandoned = BUILDING_ABANDONED;
   const road = NETWORK_ROAD;
   const oneHousehold = ONE_HOUSEHOLD;
   const n = flags.length;
   for (let id = 0; id < n; id++) {
     const room = residents[id] as number;
-    if (room <= 0 || ((flags[id] as number) & alive) === 0) continue;
+    const f = flags[id] as number;
+    if (room <= 0 || (f & alive) === 0 || (f & abandoned) !== 0) continue;
     const seg = firstSeg[id] as number;
     if (segNetwork[seg] !== road || reach[segA[seg] as number] !== 1) continue;
     const living = people[id] ?? 0;
@@ -140,14 +144,16 @@ export function homesWithRoom(state: SimState): number[] {
 
 /**
  * Why no newcomer would move into home `id` today, whatever room it has:
- * `noRoute` when its road does not reach an outside connection, `noDemand`
+ * `abandoned` while it is abandoned and offers no room (M3-24), `noRoute`
+ * when its road does not reach an outside connection, `noDemand`
  * when the residential bar is at or below zero. Null when newcomers would
  * come, or `id` is not a home. Reads only the buildings, the roads, the
  * outside connections and the bars, so a client's copy answers it too
  * (M3-08).
  */
-export function whyNoNewcomers(state: SimState, id: number): "noRoute" | "noDemand" | null {
+export function whyNoNewcomers(state: SimState, id: number): "abandoned" | "noRoute" | "noDemand" | null {
   if (!isBuilding(state.buildings, id) || (state.buildings.residents[id] ?? 0) <= 0) return null;
+  if (isAbandoned(state.buildings, id)) return "abandoned";
   if (!homeReachesOutside(state, id)) return "noRoute";
   if (state.demand.residential.value <= 0) return "noDemand";
   return null;

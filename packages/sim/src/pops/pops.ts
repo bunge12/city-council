@@ -23,7 +23,7 @@
 // (satisfaction.ts).
 
 import { BUILDING_TYPES } from "../buildings/balance";
-import { isBuilding, type BuildingState } from "../buildings/buildings";
+import { homeRoom, isAbandoned, isBuilding, type BuildingState } from "../buildings/buildings";
 import { buildingJobs } from "../buildings/jobs";
 import { resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
@@ -266,7 +266,7 @@ function checkHomeRoom(state: SimState, home: number, size: number, others: numb
   const b = state.buildings;
   const cap = popSizeCap(homeDensity(b, home));
   if (!Number.isInteger(size) || size < 1 || size > cap) throw new RangeError(`a pop in building ${home} holds 1 to ${cap} people, not ${size}`);
-  const room = b.residents[home] ?? 0;
+  const room = homeRoom(b, home);
   if (others + size > room) throw new RangeError(`building ${home} has room for ${room} people, not ${others + size}`);
 }
 
@@ -291,6 +291,7 @@ export function addPop(state: SimState, spec: NewPop): number {
   if (!isBuilding(state.buildings, spec.home) || (state.buildings.residents[spec.home] ?? 0) <= 0) {
     throw new RangeError(`building ${spec.home} is not a home`);
   }
+  if (isAbandoned(state.buildings, spec.home)) throw new RangeError(`building ${spec.home} is abandoned`);
   checkProfile(spec);
   checkSatisfaction(spec.satisfaction);
   checkDaysLow(spec.daysLow ?? 0);
@@ -584,6 +585,7 @@ export function checkPops(value: unknown, buildings: BuildingState): string | nu
     }
     const home = p.home[id] ?? 0;
     if (!isBuilding(buildings, home) || (buildings.residents[home] ?? 0) <= 0) return `pop ${id} lives in a building that is not a home`;
+    if (isAbandoned(buildings, home)) return `pop ${id} lives in an abandoned building`;
     const size = p.size[id] ?? 0;
     if (size < 1) return `pop ${id} has nobody in it`;
     if ((p.education[id] ?? 0) >= POP_LEVELS || (p.wealth[id] ?? 0) >= POP_LEVELS) return `pop ${id} has a bad education or wealth`;

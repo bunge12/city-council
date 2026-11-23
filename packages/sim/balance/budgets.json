@@ -162,6 +162,22 @@
       "mode": "blocks",
       "source": "M3-11"
     },
+    "vacancy.tick": {
+      "name": "the vacancy check's ticks on the scale town on a day every building changes: 54,000 buildings, every one in the day's slice of 542 abandoned at once, or come back at once, the worse of the two; a fifth of the tick, for a case a city meets only when a whole town empties or returns together",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 4,
+      "mode": "blocks",
+      "source": "M3-24"
+    },
+    "vacancy.waiting": {
+      "name": "the grower's count of the abandoned buildings that may come back, on the scale town with every building abandoned: one pass over 54,000 buildings' flags, once on a tick the grower adds a building; a twentieth of the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 1,
+      "mode": "blocks",
+      "source": "M3-24"
+    },
     "demand.outside": {
       "name": "working out which of the scale town's 30,000 segments reach outside again, in the step after a change of roads",
       "unit": "ms",

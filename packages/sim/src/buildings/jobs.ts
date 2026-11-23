@@ -5,7 +5,7 @@
 // levels is from `jobMix` and `jobKinds` in buildings.json.
 
 import { BUILDINGS_BALANCE, BUILDING_TYPES, EDUCATION_LEVELS, JOB_KINDS, type BuildingType, type EducationLevel, type JobKind } from "./balance";
-import { BUILDING_ALIVE, type BuildingState } from "./buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, type BuildingState } from "./buildings";
 
 /** Whole jobs for each kind. */
 export type JobsByKind = Record<JobKind, number>;
@@ -27,8 +27,22 @@ export function jobsForLot(type: Pick<BuildingType, "jobsPerCell">, width: numbe
   return Math.max(1, roundHalfUp(type.jobsPerCell * (width * depth)));
 }
 
-/** The jobs building `id` offers, from its row's type and lot. 0 for a free id or a type with none. */
+/**
+ * The jobs building `id` offers, from its row's type and lot. 0 for a free
+ * id, a type with none, or an abandoned building (M3-24): job matching, the
+ * running totals and the bars read a dead district as no jobs, not open ones.
+ */
 export function buildingJobs(b: Pick<BuildingState, "flags" | "type" | "width" | "depth">, id: number): number {
+  if (((b.flags[id] ?? 0) & BUILDING_ABANDONED) !== 0) return 0;
+  return lotJobs(b, id);
+}
+
+/**
+ * The jobs building `id`'s type and lot hold, abandoned or not. 0 for a
+ * free id or a type with none. For what does not change as a building is
+ * abandoned, such as the middle of the city's jobs (where.ts).
+ */
+export function lotJobs(b: Pick<BuildingState, "flags" | "type" | "width" | "depth">, id: number): number {
   if (((b.flags[id] ?? 0) & BUILDING_ALIVE) === 0) return 0;
   const type = BUILDING_TYPES[b.type[id] ?? 0];
   return type ? jobsForLot(type, b.width[id] ?? 0, b.depth[id] ?? 0) : 0;

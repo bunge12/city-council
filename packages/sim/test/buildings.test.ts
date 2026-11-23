@@ -429,6 +429,9 @@ describe("buildings in state", () => {
       residents: 50,
       variant: 2,
       builtAt: state.tick,
+      vacant: false,
+      abandoned: false,
+      statusSince: state.tick,
     });
     expect(Object.getPrototypeOf(state.buildings)).toBe(Object.prototype);
     for (const [key, value] of Object.entries(state.buildings)) {

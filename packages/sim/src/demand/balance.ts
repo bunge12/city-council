@@ -5,7 +5,7 @@
 // `openJobsShareMax`, which it reads for workplaces, and `jobMatching`,
 // which job matching reads (M3-09), `departuresPerYearAtFullDemand`, which
 // satisfaction reads to send people away while the residential bar is below
-// zero (M3-10),
+// zero (M3-10), `vacancy`, which the vacancy check reads (M3-24),
 // and `buildingsPerDayAtFullDemand`, which the grower reads (M3-07).
 
 import balance from "../../balance/demand.json" with { type: "json" };
@@ -43,6 +43,11 @@ export interface DemandBalance {
   openJobsShareMax: number;
   /** How a pop looking for work weights an open job t seconds from home: 1 / (1 + (t / halfWeightSeconds)^falloffPower) (M3-09). */
   jobMatching: { halfWeightSeconds: number; falloffPower: number };
+  /**
+   * When an empty building is vacant, and a vacant one abandoned (M3-24): game days since it was built or came back into
+   * use before it can be vacant, and game days vacant before it is abandoned.
+   */
+  vacancy: { newDays: number; abandonDays: number };
   /** By zone id: buildings the grower adds a game day with the zone's bar at 100 (M3-07). */
   buildingsPerDayAtFullDemand: Record<string, number>;
 }
@@ -78,7 +83,7 @@ const TOP: Readonly<Record<string, NumberRule>> = {
 export function checkDemandBalance(data: unknown): string[] {
   if (!isRecord(data)) return ["the demand balance is not an object"];
   const errors: string[] = [];
-  const others = ["spendingByWealth", "outsidePull", "jobMatching", "buildingsPerDayAtFullDemand"];
+  const others = ["spendingByWealth", "outsidePull", "jobMatching", "vacancy", "buildingsPerDayAtFullDemand"];
   for (const key of [...Object.keys(BARS), ...others]) if (!(key in data)) errors.push(`${key} is missing`);
   for (const [key, rule] of Object.entries(TOP)) {
     const problem = numberProblem(data, key, rule, "");
@@ -96,6 +101,10 @@ export function checkDemandBalance(data: unknown): string[] {
   if ("jobMatching" in data) {
     const rules = { halfWeightSeconds: { min: 1, max: 36000 }, falloffPower: { min: 1, max: 8, whole: true } };
     errors.push(...numberProblems(data["jobMatching"], rules, "jobMatching"));
+  }
+  if ("vacancy" in data) {
+    const days = { min: 0, max: 3600, whole: true };
+    errors.push(...numberProblems(data["vacancy"], { newDays: days, abandonDays: { ...days, min: 1 } }, "vacancy"));
   }
   if ("buildingsPerDayAtFullDemand" in data) {
     const rules = Object.fromEntries(ZONING_BALANCE.zones.map((zone) => [zone.id, { min: 0, whole: true }]));

@@ -4,15 +4,17 @@
 // part. For the migration and snapshot tests, which check that a version 22
 // save loads to the same city with only these added.
 
+import { withoutVacancy } from "./before-vacancy";
+
 type Loose = Record<string, unknown>;
 
 function without(record: Loose, ...keys: string[]): Loose {
   return Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
 }
 
-/** `state` with the fields version 23 added taken out. Leaves a state that has none of them as it is. */
+/** `state` with the fields version 23 added taken out, and those of version 24 after it (before-vacancy.ts). Leaves a state that has none of them as it is. */
 export function withoutSatisfaction<T extends object>(state: T): T {
-  const out: Loose = { ...(state as Loose) };
+  const out: Loose = { ...(withoutVacancy(state) as Loose) };
   const pops = out["pops"];
   if (typeof pops === "object" && pops !== null) out["pops"] = without(pops as Loose, "daysLow", "leaveScore", "leaveAtScore");
   const stats = out["stats"] as Loose | undefined;
