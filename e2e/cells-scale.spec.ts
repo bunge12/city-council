@@ -199,7 +199,9 @@ test("a 30,000 segment city with every cell zoned, overlay on, in each zoom band
   // catches a gross regression, such as one mesh per cell. The numbers are
   // logged above either way.
   for (const { band } of poses) expect(overlay[band] ?? Infinity).toBeLessThan(Math.max(1000 / 55, (plain[band] ?? 0) * 3));
-  // Issue #164: no chunk's lot marks take a frame at 60 fps. They took 50 to 90 ms on the densest chunks here before.
-  // About 2 ms on the development container, so the bound only catches the old cost coming back, not a slow runner.
-  expect(stats.slowestMarksMs).toBeLessThan(16);
+  // Issue #164: the lot marks cost does not come back. They took 50 to 90 ms on every dense chunk here before.
+  // About 2 ms on the development container and 2 to 6 ms on CI, but this is the wall-clock maximum over
+  // some 350 chunks, so one GC pause or main-thread stall sets it: 26.1 and 16.4 ms on an AMD EPYC 7763
+  // (issues #298, #300). 40 ms clears those stalls and still fails on the old cost on any runner.
+  expect(stats.slowestMarksMs).toBeLessThan(40);
 });
