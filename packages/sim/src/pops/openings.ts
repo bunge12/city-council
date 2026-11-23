@@ -170,6 +170,20 @@ function unfile(o: Openings, id: number): void {
   o.zoneOf[id] = -1;
 }
 
+/** Moves the open jobs building `id`, filed in `zone` with its jobs in `upTo`, gives its zone to what `filled` leaves open now. */
+function moveGiven(o: Openings, id: number, zone: number, filled: Int32Array): void {
+  const u = id * POP_LEVELS;
+  const at = zone * POP_LEVELS;
+  for (let e = 0; e < POP_LEVELS; e++) {
+    const open = openJobsFrom(o.upTo, u, filled, u, e);
+    const by = open - (o.given[u + e] as number);
+    if (by === 0) continue;
+    o.given[u + e] = open;
+    o.open[at + e] = (o.open[at + e] as number) + by;
+    addToTree(o.trees[e] as Int32Array, zone, by);
+  }
+}
+
 /**
  * Files building `id` again from its row, the roads and its jobs filled as
  * they are now: out of where it was, and into its zone if it is a live
@@ -193,22 +207,14 @@ function refile(state: SimState, o: Openings, id: number, reach: Uint8Array, chu
   const u = id * POP_LEVELS;
   // The open jobs for the highest level are the most any level has.
   if (openJobsFrom(levels, 0, filled, u, 2) === 0) return unfile(o, id);
-  const at = zone * POP_LEVELS;
   if (o.zoneOf[id] === zone) {
     // Filed in this zone already and staying, as after most takes: its
     // place in the zone's list holds, so only the sums move (issue #293).
     o.upTo.set(levels, u);
-    for (let e = 0; e < POP_LEVELS; e++) {
-      const open = openJobsFrom(o.upTo, u, filled, u, e);
-      const by = open - (o.given[u + e] as number);
-      if (by === 0) continue;
-      o.given[u + e] = open;
-      o.open[at + e] = (o.open[at + e] as number) + by;
-      addToTree(o.trees[e] as Int32Array, zone, by);
-    }
-    return;
+    return moveGiven(o, id, zone, filled);
   }
   unfile(o, id);
+  const at = zone * POP_LEVELS;
   o.upTo.set(levels, u);
   for (let e = 0; e < POP_LEVELS; e++) {
     const open = openJobsFrom(o.upTo, u, filled, u, e);
@@ -269,7 +275,14 @@ export function openingsOf(state: SimState): Openings {
  * tick: a take changes none of them but the jobs filled, in place.
  */
 export function refileOpening(state: SimState, o: Openings, id: number, reach: Uint8Array, chunks: readonly number[], filled: Int32Array): void {
-  refile(state, o, id, reach, chunks, filled);
+  const zone = o.zoneOf[id] ?? -1;
+  if (zone < 0 || zone !== chunks[id]) return refile(state, o, id, reach, chunks, filled);
+  // Filed, as every workplace a pop draws is: its row, its road and its
+  // jobs are as they were when it was filed, so only what the take left
+  // open moves, as `refile` would move it without reading the row again
+  // (issue #314).
+  if (openJobsFrom(o.upTo, id * POP_LEVELS, filled, id * POP_LEVELS, 2) === 0) return unfile(o, id);
+  moveGiven(o, id, zone, filled);
 }
 
 /** The zones with any workplace filed, ascending. */

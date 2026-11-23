@@ -14,6 +14,10 @@
   --bad-bg: #fde2e1;
   --bad-ink: #7a1712;
   --bar-height: 44px;
+  /* The statistics graph (M3-16): the line, its recessive grid, and the ring in the panel's colour that keeps a dot clear of the line. */
+  --stat-line: #1d6fd6;
+  --stat-grid: #e3e8ed;
+  --stat-surface: #ffffff;
 }
 
 #ui {
@@ -117,16 +121,65 @@
   color: var(--ink-soft);
 }
 
-.top-bar .homes {
+.top-bar .population {
   white-space: nowrap;
   color: var(--ink-soft);
   cursor: default;
 }
 
-.top-bar .homes #homes-count {
+.top-bar .population #population-count {
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   font-weight: 600;
+}
+
+.top-bar .population .trend {
+  display: inline-block;
+  width: 1em;
+  margin-left: 3px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.top-bar .population .trend[data-trend="up"] {
+  color: #2f8f2f;
+}
+
+.top-bar .population .trend[data-trend="down"] {
+  color: #c0392b;
+}
+
+/* Four bars about 8 px wide, -100 to 100 about a centre line (M3-15). */
+.top-bar .demand {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ink-soft);
+}
+
+.top-bar .demand-bar {
+  position: relative;
+  width: 8px;
+  height: 26px;
+  background: rgba(74, 88, 102, 0.16);
+  border-radius: 1px;
+  cursor: default;
+}
+
+.top-bar .demand-bar::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  top: 50%;
+  height: 1px;
+  background: var(--ink-soft);
+}
+
+.top-bar .demand-bar .fill {
+  position: absolute;
+  left: 0;
+  right: 0;
 }
 
 .top-bar .speeds,
@@ -444,6 +497,196 @@ kbd {
 .activity-log .payload {
   color: var(--ink-soft);
   overflow-wrap: anywhere;
+}
+
+/* The statistics panel (M3-16). It scrolls itself, so its graph can stay in view. */
+.stats-panel {
+  flex: 0 1 auto;
+  min-height: 160px;
+  max-height: calc(100vh - var(--bar-height) - 16px);
+  padding-top: 0;
+}
+
+.stats-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 -12px;
+  padding: 0 12px 4px;
+  background: var(--stat-surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.stats-title {
+  padding-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#ui .stats-close {
+  padding: 0 8px;
+  line-height: 1.4;
+}
+
+.stats-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stats-head h3 {
+  margin: 4px 0;
+}
+
+.stats-now {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stats-graph-wrap {
+  position: relative;
+}
+
+#stats-graph {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-size: 10px;
+}
+
+#stats-graph text {
+  fill: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+#stats-graph .stats-end {
+  fill: var(--ink);
+  font-weight: 600;
+}
+
+.stats-grid line {
+  stroke: var(--stat-grid);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+#stats-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.stats-dot {
+  stroke: var(--stat-surface);
+  stroke-width: 2;
+}
+
+.stats-cross line {
+  stroke: var(--ink-soft);
+  stroke-width: 1;
+}
+
+.stats-hit {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.stats-empty {
+  position: absolute;
+  inset: 40% 0 auto;
+  text-align: center;
+}
+
+.stats-tooltip {
+  position: absolute;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px;
+  background: var(--stat-surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-tooltip-date {
+  color: var(--ink-soft);
+}
+
+.stats-key {
+  display: inline-block;
+  width: 10px;
+  height: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.stats-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.stats-group dl {
+  gap: 0 10px;
+}
+
+.stats-row {
+  display: contents;
+}
+
+.stats-group dt {
+  font-weight: 400;
+}
+
+.stats-group dd {
+  text-align: right;
+}
+
+#ui .stat-pick {
+  padding: 0 4px;
+  border: none;
+  background: none;
+  font-variant-numeric: tabular-nums;
+  text-decoration: underline dotted var(--ink-soft);
+  text-underline-offset: 3px;
+}
+
+#ui .stat-pick[aria-pressed="true"],
+#ui .stat-pick[aria-pressed="true"]:hover:not(:disabled) {
+  background: none;
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: underline solid var(--stat-line) 2px;
+}
+
+.stats-year {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-year th {
+  text-align: left;
+  font-weight: 400;
+}
+
+.stats-year thead th {
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.stats-year td,
+.stats-year thead th:not(:first-child) {
+  text-align: right;
 }
 
 @media (max-width: 720px) {
