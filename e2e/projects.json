@@ -15,7 +15,8 @@
     "construction-frame-time.spec.ts",
     "guides-scale.spec.ts",
     "roads-scale.spec.ts",
-    "cells-scale.spec.ts"
+    "cells-scale.spec.ts",
+    "land-value-scale.spec.ts"
   ],
   "evidence": [
     "building-looks.spec.ts",
@@ -57,6 +58,8 @@
     "guides-scale.spec.ts": 153,
     "guides.spec.ts": 29,
     "homes.spec.ts": 105,
+    "land-value-scale.spec.ts": 180,
+    "land-value.spec.ts": 60,
     "levels.spec.ts": 36,
     "presets-forest.spec.ts": 184,
     "presets.spec.ts": 52,

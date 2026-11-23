@@ -167,6 +167,7 @@ export { GROWER_SYSTEM, dayOf, dayQuotas, homesHeld, freeFrontCells, growthOnTic
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";
+export { prepareWaterMap } from "./landvalue/water";
 export {
   HISTORY_LENGTH,
   STATS_SYSTEM,
@@ -185,7 +186,7 @@ export {
   type YearCount,
   type YearCounts,
 } from "./stats/stats";
-export { LAND_VALUE_SYSTEM, falloff, findCentre, landValueAt, landValueAtPoint, nextMonth, type LandValue } from "./landvalue/land-value";
+export { LAND_VALUE_SYSTEM, falloff, findCentre, landValueAt, landValueAtPoint, landValuesOfShapes, nextMonth, type LandValue } from "./landvalue/land-value";
 export { NO_BUILDING, buildingInfo, buildingOnSlot, buildingsInChunk, buildingsOnSlots, cellBuildings } from "./buildings/where";
 export type { BuildingInfo } from "./buildings/where";
 export {

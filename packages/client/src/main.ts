@@ -14,6 +14,7 @@ import {
   ZONING_BALANCE,
   type Block,
   type BuildingInfo,
+  type LandValue,
   type CommandResult,
   type LogEntry,
   type Section,
@@ -64,7 +65,9 @@ import { ZoneToolController, type ZoneHover, type ZonePreview } from "./tools/zo
 import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
+import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setLandValueHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
+import { colouringOf, overlayAfterTool } from "./ui/overlays";
+import { withNeighbours } from "./render/cell-meshes";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
 const TAB_CITY_KEY = "city-council:city";
@@ -374,6 +377,12 @@ const zoneTool = new ZoneToolController({
 useUi.subscribe((now, before) => {
   if (now.tool !== before.tool) zoneTool.toolChanged(now.tool, before.tool);
 });
+// The zone tool brings the zoning overlay with it and takes it away again; any other overlay stays as it was (issue M3-18).
+useUi.subscribe((now, before) => {
+  if (now.tool === before.tool) return;
+  const overlay = overlayAfterTool(now.overlay, now.tool, before.tool);
+  if (overlay !== now.overlay) useUi.setState({ overlay });
+});
 
 const routeTool = new RouteToolController({
   get: () => useUi.getState(),
@@ -642,6 +651,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
     built: (shapes) => mirror.buildingsOnSlots(shapes.slots),
     // Free zoned ground where no building type fits, hatched (issue M2-15).
     marks: (chunk, shapes) => mirror.lotMarksInChunk(chunk, shapes),
+    // Each cell's land value, worked out from the copy by the sim's own code (issue M3-18).
+    values: (shapes) => mirror.landValuesOfShapes(shapes),
   });
   // Buildings come from the mirror alone too: a snapshot draws them all,
   // nearest the camera first, and a delta the chunks it changed.
@@ -672,7 +683,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
   view.onFrame(buildingReadout);
   const cellReadout = () => {
     const cells = view.cellStats();
-    document.body.dataset["zoningOverlay"] = String(cells?.visible ?? false);
+    document.body.dataset["zoningOverlay"] = String((cells?.visible ?? false) && cells?.colouring === "zoning");
+    document.body.dataset["overlay"] = cells?.visible ? (useUi.getState().overlay ?? "") : "";
     document.body.dataset["cellsPending"] = String(cells?.pending ?? 0);
     if (!cells || cells.totalRebuilt === 0) return;
     setViewReadout({
@@ -680,10 +692,26 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
       cellRebuilds: `${cells.lastRebuilt} last, ${cells.totalRebuilt} total, ${cells.lastBuildMs.toFixed(1)} ms; at most ${cells.slowestFrameMs.toFixed(1)} ms a frame and ${cells.slowestMarksMs.toFixed(1)} ms of lot marks a chunk, after a first ${cells.firstFrameMs.toFixed(1)} and ${cells.firstMarksMs.toFixed(1)}`,
     });
   };
+  /** The city centre land value was last drawn from, to see when it moves. */
+  let centreKey = "";
   const showCells = (update: MirrorUpdate) => {
-    if (update.kind === "snapshot") view.showCells();
+    const c = mirror.state?.centre;
+    const centre = c ? `${c.x},${c.z},${c.weight}` : "";
+    const moved = centre !== centreKey;
+    centreKey = centre;
+    if (update.kind === "snapshot") {
+      view.showCells();
+      return;
+    }
     // Cells a building came onto or left are drawn again, without it or with it.
-    else if (update.cellChunks.length > 0 || update.buildingChunks.length > 0) view.updateCells([...new Set([...update.cellChunks, ...update.buildingChunks])]);
+    if (update.cellChunks.length > 0 || update.buildingChunks.length > 0) view.updateCells([...new Set([...update.cellChunks, ...update.buildingChunks])]);
+    // Land value follows the centre, which moves once a game month, and the
+    // roads and buildings nearby. An industrial building's reach (400 m at
+    // most) is inside the chunks next to its own.
+    if (moved) view.revalueCells();
+    else if (update.roadChunks.length > 0 || update.buildingChunks.length > 0) {
+      view.revalueCells([...new Set([...update.roadChunks, ...update.buildingChunks].flatMap(withNeighbours))]);
+    }
   };
   // Chunks are built over frames, so the readout follows the frames.
   view.onFrame(cellReadout);
@@ -691,8 +719,11 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
     view.setCellsVisible(on);
     cellReadout();
   };
+  // One overlay at a time on the same cell meshes, coloured by what it shows (issue M3-18).
   useUi.subscribe((now, before) => {
-    if (now.tool !== before.tool && (now.tool === "zone" || before.tool === "zone")) setCellsVisible(now.tool === "zone");
+    if (now.overlay === before.overlay) return;
+    view.setCellColouring(colouringOf(now.overlay));
+    setCellsVisible(now.overlay !== null);
   });
   // Buildings under construction draw at the tick on screen (issue 136): the
   // mirror's, run on between deltas at the city's speed. `?noconstruction`
@@ -1077,6 +1108,19 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     }
     return hoverBuilding;
   };
+  let landKey = "";
+  let land: { value: LandValue; roadType: number } | null = null;
+  const landValueUnder = (cursor: { x: number; z: number } | null): { value: LandValue; roadType: number } | null => {
+    const ui = useUi.getState();
+    const c = mirror.state?.centre;
+    // The centre moves on a tick that changes no road or building, so it is part of the key.
+    const key = ui.overlay === "landValue" && ui.tool === null && cursor ? `${cursor.x.toFixed(1)},${cursor.z.toFixed(1)},${worldVersion},${c?.x},${c?.z}` : "";
+    if (key !== landKey) {
+      landKey = key;
+      land = key === "" || !cursor ? null : mirror.landValueAt(cursor.x, cursor.z);
+    }
+    return land;
+  };
   let lotNoteKey = "";
   let lotNote: string | null = null;
   const lotNoteUnder = (cursor: { x: number; z: number } | null): string | null => {
@@ -1207,7 +1251,11 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       ...razePending.map((p) => bulldozeClearsOf(p.preview)),
     ];
     const razeShown = razeNow?.ok ? razeNow : null;
-    const under = buildingUnder(cursor);
+    // While the land value overlay is on, the land under the pointer speaks instead of the building on it (issue M3-18).
+    const land = landValueUnder(cursor);
+    setLandValueHover(land && pointerNow ? { x: pointerNow.x, y: pointerNow.y, value: land.value, roadType: land.roadType } : null);
+    document.body.dataset["landValueHover"] = land ? String(land.value.value) : "";
+    const under = land ? null : buildingUnder(cursor);
     setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under } : null);
     document.body.dataset["buildingHover"] = under ? String(under.id) : "";
     document.body.dataset["buildingsToClear"] = String((liveClears?.clears?.ids.length ?? 0) + (gridClearsNow?.clears?.ids.length ?? 0));

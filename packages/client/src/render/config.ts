@@ -579,6 +579,32 @@ export const CELLS = {
   runSag: 0.25,
 } as const;
 
+/** One stop on the land value overlay's scale: the colour, as sRGB hex, of land worth `value`. */
+export interface LandValueStop {
+  value: number;
+  colour: number;
+}
+
+/**
+ * The land value overlay's colour scale (issue M3-18): one hue, violet,
+ * light for land worth little and dark for land worth a lot, mixed in a
+ * straight line between the stops. Violet, so it reads against the blue of
+ * the water and the greens and browns of the ground, and against none of
+ * the zones' colours. The steps were checked with the dataviz skill's
+ * palette validator as an ordinal ramp: lightness falls at every step,
+ * each gap is visible, and the hue spreads by 10°. The legend shows the
+ * stops. Presentation only, so not balance data.
+ */
+export const LAND_VALUE_SCALE = {
+  stops: [
+    { value: 0, colour: 0xa99cee },
+    { value: 25, colour: 0x8577e6 },
+    { value: 50, colour: 0x6250d6 },
+    { value: 75, colour: 0x4535b5 },
+    { value: 100, colour: 0x2a1d7a },
+  ] as readonly LandValueStop[],
+} as const;
+
 /**
  * Buildings on screen (issues M2-12 and M2-13). `buildBudgetMs` is how long
  * a frame may spend reading chunks of buildings from the mirror, writing

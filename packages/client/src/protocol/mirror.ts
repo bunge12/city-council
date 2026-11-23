@@ -21,8 +21,12 @@ import {
   cellShapesInChunk,
   cellsInChunk,
   gridClears,
+  landValueAt,
+  landValuesOfShapes,
   lotMarkAt,
   lotMarksInChunk,
+  prepareWaterMap,
+  terrainOf,
   roadClears,
   roadIndexOf,
   type BuildingInfo,
@@ -31,6 +35,7 @@ import {
   type RoadPlan,
   type CellInfo,
   type ChunkCellShapes,
+  type LandValue,
   type CommandResult,
   type FromSimMessage,
   type Occupancy,
@@ -290,6 +295,8 @@ export class SimMirror {
     if (!state) return;
     roadIndexOf(state.roads);
     blockIndexOf(state.roads);
+    // And the distance to water the land value overlay reads (issue M3-18).
+    prepareWaterMap(terrainOf(state.seed));
   }
 
   /**
@@ -314,6 +321,24 @@ export class SimMirror {
    */
   lotMarksInChunk(chunk: number, shapes?: ChunkCellShapes): Uint8Array | null {
     return this.current ? lotMarksInChunk(this.current, chunk, shapes) : null;
+  }
+
+  /**
+   * By the order of `shapes`, as `cellShapesInChunk` just gave them, each
+   * cell's land value, worked out by the sim's own code from the copy
+   * (issue M3-18). Land value is derived, not state, so nothing of it
+   * travels in a delta. Null until the first snapshot.
+   */
+  landValuesOfShapes(shapes: ChunkCellShapes): Uint8Array | null {
+    return this.current ? landValuesOfShapes(this.current, shapes) : null;
+  }
+
+  /** The land value of the zoning cell at (x, z), its parts, and the type of road it fronts, or null where there is no cell. */
+  landValueAt(x: number, z: number): { value: LandValue; roadType: number } | null {
+    const state = this.current;
+    const cell = state ? cellAt(state, x, z) : null;
+    const value = state && cell ? landValueAt(state, cell) : null;
+    return state && cell && value ? { value, roadType: state.roads.segType[cell.segment] ?? 0 } : null;
   }
 
   /** Why no building type fits on the free ground at (x, z), as the overlay marks it, or null where it is not marked. */

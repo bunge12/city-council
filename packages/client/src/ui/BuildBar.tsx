@@ -6,7 +6,8 @@ import { DRAW_MODES, TOOL_ROAD_TYPES, type DrawMode } from "../tools/road-tool";
 import { ZONE_DEPTHS, ZONE_MODES, type ZoneMode } from "../tools/zone-tool";
 import { GridPanel, gridHint } from "./GridPanel";
 import { useServices, useSim } from "./hooks";
-import { useUi } from "./store";
+import { OVERLAYS } from "./overlays";
+import { toggleOverlay, useUi } from "./store";
 
 const TYPE_KEYS: Record<string, string> = { street: "Z", avenue: "X", oneWay: "C" };
 
@@ -104,6 +105,7 @@ export function BuildBar() {
   const bulldozePending = useUi((s) => s.bulldozePending.length);
   const bulldozeNote = useUi((s) => s.bulldozeNote);
   const filters = useUi((s) => s.bulldozeFilters);
+  const overlay = useUi((s) => s.overlay);
   const zoning = tool === "zone";
   const bulldozing = tool === "bulldoze";
   const active = tool === "road";
@@ -346,6 +348,22 @@ export function BuildBar() {
           >
             Zone <kbd>K</kbd>
           </button>
+        </div>
+        {/* The overlays, one button each, from the list in overlays.ts (issue M3-18). Zoning comes with the zone tool. */}
+        <div className="dock-slot overlays" role="group" aria-label="Overlays">
+          {OVERLAYS.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              id={`overlay-${o.id}`}
+              aria-pressed={overlay === o.id}
+              disabled={!ready}
+              title={o.title}
+              onClick={() => toggleOverlay(o.id)}
+            >
+              {o.label} <kbd>{o.key}</kbd>
+            </button>
+          ))}
         </div>
       </div>
       {(hint || anyPending) && (

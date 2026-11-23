@@ -4,7 +4,7 @@
 // `useSim` (hooks.ts) and change it only by sending commands.
 
 import { create } from "zustand";
-import type { BuildingInfo } from "@city-council/sim";
+import type { BuildingInfo, LandValue } from "@city-council/sim";
 import { DEFAULT_PRESET } from "../render/config";
 import type { Preset, PresetSource } from "../render/presets";
 import { DEFAULT_SOUND } from "../sound/config";
@@ -17,6 +17,7 @@ import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tool
 import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
 import { INITIAL_ZONE_TOOL, type ZonePreview, type ZoneToolState } from "../tools/zone-tool";
+import { toggledOverlay, type OverlayEntry, type OverlayId } from "./overlays";
 
 export interface UiState extends RoadToolState, GridToolState, EditToolState, BulldozeToolState, RouteToolState, BlockOverlayState, ZoneToolState {
   debugOpen: boolean;
@@ -35,6 +36,8 @@ export interface UiState extends RoadToolState, GridToolState, EditToolState, Bu
   busy: boolean;
   /** Why the sim refused the last undo, until the next one is sent. */
   undoNote: string | null;
+  /** The overlay on the map, one at a time (issue M3-18): zoning while the zone tool is on, one from `OVERLAYS`, or none. */
+  overlay: OverlayId | null;
 }
 
 export const useUi = create<UiState>(() => ({
@@ -48,6 +51,7 @@ export const useUi = create<UiState>(() => ({
   reminderDismissed: false,
   busy: false,
   undoNote: null,
+  overlay: null,
   ...INITIAL_ROAD_TOOL,
   ...INITIAL_GRID_TOOL,
   ...INITIAL_EDIT_TOOL,
@@ -63,6 +67,11 @@ export function toggleDebug(): void {
 
 export function toggleLog(): void {
   useUi.setState((s) => ({ logOpen: !s.logOpen }));
+}
+
+/** Turns overlay `id` on, putting away the one showing, or off again (overlays.ts, `toggledOverlay`). */
+export function toggleOverlay(id: OverlayEntry["id"]): void {
+  useUi.setState((s) => ({ overlay: toggledOverlay(s.overlay, id, s.tool === "zone") }));
 }
 
 export function toggleMenu(): void {
@@ -233,6 +242,28 @@ export function setBuildingHover(hover: BuildingHover | null): void {
   if (current === hover) return;
   if (current && hover && current.x === hover.x && current.y === hover.y && current.building === hover.building) return;
   useBuildingHover.setState({ hover });
+}
+
+/**
+ * The land under the pointer while the land value overlay is on (issue
+ * M3-18): the pointer in CSS pixels over the canvas, the cell's value and
+ * its parts, and the type of road the cell fronts. Its own store, like the
+ * road readout's.
+ */
+export interface LandValueHover {
+  x: number;
+  y: number;
+  value: LandValue;
+  roadType: number;
+}
+
+export const useLandValueHover = create<{ hover: LandValueHover | null }>(() => ({ hover: null }));
+
+export function setLandValueHover(hover: LandValueHover | null): void {
+  const current = useLandValueHover.getState().hover;
+  if (current === hover) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.value === hover.value) return;
+  useLandValueHover.setState({ hover });
 }
 
 /** A block's area label on screen: CSS pixels over the canvas. */

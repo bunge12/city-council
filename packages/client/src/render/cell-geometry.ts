@@ -16,8 +16,8 @@
 // zoned cells only, no lines or hatch, and one quad per straight run of
 // cells of one colour along a road.
 
-import { CELL_OPEN, DENSITY_NONE, ZONE_NONE, ZONING_BALANCE, type ChunkCellShapes } from "@city-council/sim";
-import { CELLS } from "./config";
+import { CELL_OPEN, DENSITY_NONE, LAND_VALUE_MAX, ZONE_NONE, ZONING_BALANCE, type ChunkCellShapes } from "@city-council/sim";
+import { CELLS, LAND_VALUE_SCALE, type LandValueStop } from "./config";
 
 /** Typed arrays for one chunk's cells, ready for a BufferGeometry. Empty when no cell is drawn. */
 export interface CellArrays {
@@ -33,6 +33,8 @@ export interface CellArrays {
    */
   marks: Float32Array;
   indices: Uint16Array | Uint32Array;
+  /** By quad, the cell it draws, as its place in `shapes`, so the quads can be coloured again without building them (`paintCells`). */
+  cells: Int32Array;
   /** Cells drawn: zoned ones filled, unzoned ones as outlines. */
   zoned: number;
   unzoned: number;
@@ -92,6 +94,7 @@ export function buildCellChunk(
   const fills = new Uint8Array(drawn * 16);
   const uv = new Uint8Array(drawn * 8);
   const hatch = new Float32Array(drawn * 4);
+  const drawnCells = new Int32Array(drawn);
   const indices = drawn * 4 > 0xffff ? new Uint32Array(drawn * 6) : new Uint16Array(drawn * 6);
   const densities = ZONING_BALANCE.densities.length;
   let zoned = 0;
@@ -99,6 +102,7 @@ export function buildCellChunk(
   let n = 0;
   for (let k = 0; k < statuses.length; k++) {
     if (!shown(k)) continue;
+    drawnCells[n] = k;
     const slot = slots[k] ?? 0;
     const z = zone[slot] ?? ZONE_NONE;
     const d = density[slot] ?? DENSITY_NONE;
@@ -126,7 +130,7 @@ export function buildCellChunk(
     indices.set([v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3], n * 6);
     n++;
   }
-  return { positions, fills, corners: uv, marks: hatch, indices, zoned, unzoned: drawn - zoned, marked };
+  return { positions, fills, corners: uv, marks: hatch, indices, cells: drawnCells, zoned, unzoned: drawn - zoned, marked };
 }
 
 /** One chunk's zoned cells for the city band: a quad per run, flat colour, no lines. */
@@ -136,6 +140,8 @@ export interface CityCellArrays {
   /** r, g, b per vertex and 255, sRGB bytes. */
   fills: Uint8Array;
   indices: Uint32Array;
+  /** By run, its first cell, as its place in `shapes`, from which `paintCity` takes the run's zoning colour again. */
+  firsts: Int32Array;
   /** Quads drawn, and the zoned cells they cover. */
   runs: number;
   cells: number;
@@ -258,8 +264,10 @@ export function buildCityCells(
   const positions = new Float32Array(runs * 12);
   const fills = new Uint8Array(runs * 16);
   const indices = new Uint32Array(runs * 6);
+  const firsts = new Int32Array(runs);
   for (let r = 0; r < runs; r++) {
     const first = quads[r * 2] ?? 0;
+    firsts[r] = first;
     const last = quads[r * 2 + 1] ?? 0;
     const p = colour[first] ?? 0;
     const quad = [at(first, 0), at(last, 1), at(last, 2), at(first, 3)];
@@ -276,5 +284,130 @@ export function buildCityCells(
     }
     indices.set([r * 4, r * 4 + 1, r * 4 + 2, r * 4, r * 4 + 2, r * 4 + 3], r * 6);
   }
-  return { positions, fills, indices, runs, cells };
+  return { positions, fills, indices, firsts, runs, cells };
+}
+
+/**
+ * What the overlay colours cells by: what each is zoned for (M2-06), or
+ * what its land is worth (M3-18). The cells and their quads are the same
+ * either way; only the colour each quad carries changes.
+ */
+export type CellColouring = "zoning" | "landValue";
+
+/** The land value overlay's scale as r, g, b bytes, one entry per whole value from 0 to `LAND_VALUE_MAX`. */
+const VALUE_RGB = (() => {
+  const out = new Uint8Array((LAND_VALUE_MAX + 1) * 3);
+  for (let v = 0; v <= LAND_VALUE_MAX; v++) {
+    const hex = landValueColour(v);
+    out.set([(hex >> 16) & 255, (hex >> 8) & 255, hex & 255], v * 3);
+  }
+  return out;
+})();
+
+/**
+ * The colour of land worth `value` on the land value overlay's one
+ * sequential scale (`LAND_VALUE_SCALE`), as sRGB hex: the stops' colours,
+ * mixed in a straight line between the two stops either side of it. Values
+ * outside the stops take the nearest end.
+ */
+export function landValueColour(value: number, stops: readonly LandValueStop[] = LAND_VALUE_SCALE.stops): number {
+  const first = stops[0];
+  if (!first) return 0;
+  if (value <= first.value) return first.colour;
+  for (let i = 1; i < stops.length; i++) {
+    const a = stops[i - 1] ?? first;
+    const b = stops[i] ?? first;
+    if (value > b.value) continue;
+    const t = (value - a.value) / (b.value - a.value || 1);
+    let hex = 0;
+    for (const shift of [16, 8, 0]) {
+      const ca = (a.colour >> shift) & 255;
+      const cb = (b.colour >> shift) & 255;
+      hex |= Math.round(ca + (cb - ca) * t) << shift;
+    }
+    return hex;
+  }
+  return (stops[stops.length - 1] ?? first).colour;
+}
+
+/** The r, g, b bytes of `landValueColour(value)`, rounded to a whole value. */
+function valueRgb(value: number): number {
+  return Math.min(LAND_VALUE_MAX, Math.max(0, Math.round(value))) * 3;
+}
+
+/**
+ * Colours a chunk's quads again, in place, without building them: `fills`
+ * and `cells` as `buildCellChunk` made them. By zoning, a cell takes its
+ * zone's shade, filled, or the unzoned outline; by land value, every cell
+ * is filled with the colour of `values[k]`, its value by the order of
+ * `shapes`. Returns the mean value of the cells drawn, or 0 for none, for
+ * the city band (`paintCity`).
+ */
+export function paintCells(
+  fills: Uint8Array,
+  cells: Int32Array,
+  shapes: ChunkCellShapes,
+  zone: ArrayLike<number>,
+  density: ArrayLike<number>,
+  colouring: CellColouring,
+  values: ArrayLike<number> | null,
+): number {
+  const densities = ZONING_BALANCE.densities.length;
+  let sum = 0;
+  for (let n = 0; n < cells.length; n++) {
+    const k = cells[n] ?? 0;
+    let p: number;
+    let filled: boolean;
+    let rgb: Uint8Array;
+    if (colouring === "landValue") {
+      const v = values?.[k] ?? 0;
+      sum += v;
+      p = valueRgb(v);
+      filled = true;
+      rgb = VALUE_RGB;
+    } else {
+      const slot = shapes.slots[k] ?? 0;
+      const z = zone[slot] ?? ZONE_NONE;
+      const d = density[slot] ?? DENSITY_NONE;
+      filled = z !== ZONE_NONE && d !== DENSITY_NONE;
+      p = (filled ? (z - 1) * densities + d - 1 : UNZONED) * 3;
+      rgb = PALETTE;
+    }
+    for (let c = 0; c < 4; c++) {
+      const v = (n * 4 + c) * 4;
+      fills[v] = rgb[p] ?? 0;
+      fills[v + 1] = rgb[p + 1] ?? 0;
+      fills[v + 2] = rgb[p + 2] ?? 0;
+      fills[v + 3] = filled ? 255 : 0;
+    }
+  }
+  return cells.length === 0 ? 0 : sum / cells.length;
+}
+
+/**
+ * Colours a chunk's city band runs again, in place: `run` as
+ * `buildCityCells` made it. By zoning, each run takes its first cell's
+ * zone shade; by land value, every run in the chunk takes the colour of
+ * `mean`, one colour per chunk (M3-18).
+ */
+export function paintCity(run: CityCellArrays, shapes: ChunkCellShapes, zone: ArrayLike<number>, density: ArrayLike<number>, colouring: CellColouring, mean: number): void {
+  const densities = ZONING_BALANCE.densities.length;
+  for (let r = 0; r < run.runs; r++) {
+    let p: number;
+    let rgb: Uint8Array;
+    if (colouring === "landValue") {
+      p = valueRgb(mean);
+      rgb = VALUE_RGB;
+    } else {
+      const slot = shapes.slots[run.firsts[r] ?? 0] ?? 0;
+      p = ((zone[slot] ?? 1) - 1) * densities * 3 + ((density[slot] ?? 1) - 1) * 3;
+      rgb = PALETTE;
+    }
+    for (let c = 0; c < 4; c++) {
+      const v = (r * 4 + c) * 4;
+      run.fills[v] = rgb[p] ?? 0;
+      run.fills[v + 1] = rgb[p + 1] ?? 0;
+      run.fills[v + 2] = rgb[p + 2] ?? 0;
+    }
+  }
 }
