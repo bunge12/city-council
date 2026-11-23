@@ -21,6 +21,7 @@ import {
   segmentTypeId,
   step,
   submit,
+  addPop,
   type SimState,
 } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
@@ -53,6 +54,11 @@ function houseCity(): SimState {
   run(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4571 }, to: { x: 4390, z: 4571 }, width: 44 }] }, seq);
   for (let t = 0; t < 6000 && buildingCount(state.buildings) < 8; t++) step(state);
   if (buildingCount(state.buildings) < 8) throw new Error("the houses did not grow");
+  // The street reaches no outside connection, so nobody moves in: put a household in every other house.
+  for (let id = 0, n = 0; id < state.buildings.flags.length; id++) {
+    if (!isBuilding(state.buildings, id) || n++ % 2 === 1) continue;
+    addPop(state, { home: id, size: 2, education: 1, wealth: 1, children: 0, satisfaction: 70 });
+  }
   return state;
 }
 
@@ -68,7 +74,7 @@ function setup(state: SimState) {
     set: (patch) => {
       ui = { ...ui, ...patch };
     },
-    world: () => (mirror.state ? { state: mirror.state, terrain } : null),
+    world: () => (mirror.state ? { state: mirror.state, terrain, people: (id: number) => mirror.buildingPeople(id) } : null),
     send: (type, payload) => {
       sent.push({ type, payload });
       return mirror.sendCommandSettled(type, payload);
@@ -159,7 +165,9 @@ describe("BulldozeToolController", () => {
     tool.toggle();
     const road = street(copy());
     const houses = liveBuildings(copy());
-    const residents = houses.reduce((n, id) => n + (copy().buildings.residents[id] ?? 0), 0);
+    // The people living there, as the mirror counts them, not the room the houses hold (M3-12).
+    const residents = houses.reduce((n, id) => n + mirror.buildingPeople(id), 0);
+    expect(residents).toBe(2 * Math.ceil(houses.length / 2));
     const preview = tool.preview({ kind: "road", id: road });
     expect(preview).toMatchObject({ kind: "road", ok: true, undoable: true, segments: [road], buildings: houses, residents });
     expect(preview?.cost).toBeGreaterThan(0);

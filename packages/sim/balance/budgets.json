@@ -138,6 +138,22 @@
       "mode": "blocks",
       "source": "M3-08"
     },
+    "displaced.bulldoze-step": {
+      "name": "the step that applies a BulldozeBuilding at its cap of occupied homes on the scale town, its pops displaced and the first slice placed, inside the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, M3-12"
+    },
+    "displaced.drain-tick": {
+      "name": "a step on the scale town that places a slice of displaced pops from the queue, inside the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, M3-12"
+    },
     "jobs.tick": {
       "name": "the job matching system's worst tick on the scale town: 150,000 pops looking and every job open, the day's first slice of 1,500; half the tick, for a case a city meets only when every pop looks at once",
       "unit": "ms",

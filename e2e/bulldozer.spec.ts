@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { BUILDING_TYPES, SEG_FIXED, cellAt, createState, generateTerrain, heightAt, syncCells, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
+import { addPop } from "../packages/sim/src/pops/pops";
 import { lotProblem } from "../packages/sim/src/buildings/where";
 import { finishConstruction } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
@@ -17,8 +18,10 @@ import { frames, openCity } from "./helpers";
 //
 // The city is built in Node with the sim and imported as a city file: a
 // street running east from (4200, 4600) with a house on every two cells of
-// its north side, and a second street north of the houses, along z = 4480,
-// with nothing on it.
+// its north side, two people living in each of its room for three, and a
+// second street north of the houses, along z = 4480, with nothing on it.
+// The tags count the people living there, whom a click displaces (M3-12),
+// not the room.
 
 type Vec3 = readonly [number, number, number];
 declare const window: {
@@ -71,7 +74,9 @@ function houseCity(): { state: SimState; houses: number } {
     const shape = { first: { seg: cell.segment, side: cell.side, place: cell.place, dir: 0 }, width: 2, depth: 4, back: null };
     if (lotProblem(state, shape, 1, 1) !== null) continue;
     const lot = { firstSeg: cell.segment, firstSide: cell.side, firstPlace: cell.place, dir: 0, width: 2, depth: 4, backSeg: 0, backSide: 0, backPlace: 0, backDir: 0, backDepth: 0 };
-    addBuilding(state, { ...lot, type, residents: 3, variant: p * 7 });
+    const home = addBuilding(state, { ...lot, type, residents: 3, variant: p * 7 });
+    // Two people in a house with room for three, so a count of the people living there differs from the room (M3-12).
+    addPop(state, { home, size: 2, education: 1, wealth: 1, children: 0, satisfaction: 100 });
     houses++;
   }
   finishConstruction(state);
@@ -191,7 +196,7 @@ test("the bulldozer: its own tool, a price tag on what it picks, clicks and drag
     await expect(tag).toHaveAttribute("data-ok", "true");
     await expect(tag.locator(".what")).toHaveText("Bulldoze this road");
     await expect(tag.locator(".price")).toHaveText(/^192 m · \$[\d.]+K$/);
-    await expect(page.locator("#bulldoze-clears")).toHaveText(`Takes ${houses} buildings, ${houses * 3} residents`);
+    await expect(page.locator("#bulldoze-clears")).toHaveText(`Takes ${houses} buildings, ${houses * 2} residents`);
     await expect(tag).toHaveAttribute("data-buildings", String(houses));
     await attach(page, testInfo, "a road's price tag, and the houses it takes marked");
   });
@@ -206,7 +211,8 @@ test("the bulldozer: its own tool, a price tag on what it picks, clicks and drag
     await expect(tag).toHaveAttribute("data-kind", "building");
     await expect(tag).toHaveAttribute("data-undoable", "false");
     await expect(tag.locator(".what")).toHaveText("Single family home");
-    await expect(tag.locator(".detail")).toHaveText(/^Residential R1 · lot 2 × 4 cells · 3 residents$/);
+    await expect(tag.locator(".detail")).toHaveText(/^Residential R1 · lot 2 × 4 cells · 2 residents, room for 3$/);
+    await expect(tag).toHaveAttribute("data-residents", "2");
     await expect(page.locator("#bulldoze-cost")).toHaveText("$0");
     await expect(page.locator("#bulldoze-no-undo")).toHaveText("Can't be undone");
     await attach(page, testInfo, "a house's price tag");
@@ -235,7 +241,7 @@ test("the bulldozer: its own tool, a price tag on what it picks, clicks and drag
     await page.mouse.move(c.x, c.y, { steps: 15 });
     await frames(page, 3);
     await expect(tag).toHaveAttribute("data-ids", [first, second, third].join(","));
-    await expect(tag.locator(".what")).toHaveText("Bulldoze 3 buildings, 9 residents");
+    await expect(tag.locator(".what")).toHaveText("Bulldoze 3 buildings, 6 residents");
     await attach(page, testInfo, "a drag over three houses, one tag with the total");
     await page.mouse.up();
     await expect.poll(async () => bulldozedFrom(page, log), { timeout: 30_000 }).toEqual([[first, second, third]]);

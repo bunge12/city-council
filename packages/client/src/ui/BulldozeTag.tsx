@@ -19,7 +19,7 @@ export function bulldozeTitle(p: BulldozePreview): string {
     if (n === 1) return part ? "Bulldoze this stretch of road" : "Bulldoze this road";
     return `Bulldoze ${plural(n, "road", "road segments")}`;
   }
-  if (n === 1 && p.building) return buildingLines(p.building).title;
+  if (n === 1 && p.building) return buildingLines(p.building, p.residents).title;
   return `Bulldoze ${plural(n, "building", "buildings")}`;
 }
 
@@ -35,7 +35,8 @@ export function BulldozeTag() {
   if (!hover) return null;
   const p = hover.preview;
   const clears = p.kind === "road" ? formatClears({ ids: [...p.buildings], residents: p.residents }, "Takes") : null;
-  const one = p.kind === "building" && p.ids.length === 1 && p.building ? buildingLines(p.building) : null;
+  // A building's residents are the people living there, whom a click displaces (M3-12).
+  const one = p.kind === "building" && p.ids.length === 1 && p.building ? buildingLines(p.building, p.residents) : null;
   const residents = p.kind === "building" && !one && p.residents > 0 ? `, ${plural(p.residents, "resident", "residents")}` : "";
   return (
     <div

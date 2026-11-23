@@ -60,7 +60,7 @@ export function countOccupancy(state: Pick<SimState, "pops" | "buildings">): Occ
   for (let id = 0; id < p.flags.length; id++) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0) continue;
     const home = p.home[id] ?? 0;
-    if (home < limit) people[home] = (people[home] ?? 0) + (p.size[id] ?? 0);
+    if (home >= 0 && home < limit) people[home] = (people[home] ?? 0) + (p.size[id] ?? 0);
     const work = p.work[id] ?? NO_WORK;
     if (work !== NO_WORK && work < limit) filled[work] = (filled[work] ?? 0) + workersFor(p.size[id] ?? 0, p.children[id] ?? 0);
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILDING_TYPES,
+  NO_HOME,
   NO_WORK,
   POPS_BALANCE,
   POP_ROW_BYTES,
@@ -32,9 +33,10 @@ import {
 } from "../src/index";
 import { addBuilding, removeBuilding } from "../src/buildings/buildings";
 import { checkPopsBalance } from "../src/pops/balance";
-import { POP_ARRAYS, addPop, checkPops, createPops, removePop, setPopProfile, setPopSatisfaction, setPopSize, setPopWork, type NewPop } from "../src/pops/pops";
+import { POP_ARRAYS, addPop, checkPops, createPops, rehomePop, removePop, setPopProfile, setPopSatisfaction, setPopSize, setPopWork, type NewPop } from "../src/pops/pops";
 import { nextInt, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
+import { recountTotals } from "../src/stats/stats";
 import popsJson from "../balance/pops.json" with { type: "json" };
 
 // M3-03: pops in state.
@@ -110,8 +112,10 @@ function countFromScratch(state: SimState) {
   for (let id = 0; id < p.flags.length; id++) {
     if (!p.flags[id]) continue;
     const home = p.home[id] ?? 0;
-    homes[home]?.push(id);
-    people[home] = (people[home] ?? 0) + (p.size[id] ?? 0);
+    if (home !== NO_HOME) {
+      homes[home]?.push(id);
+      people[home] = (people[home] ?? 0) + (p.size[id] ?? 0);
+    }
     const work = p.work[id] ?? NO_WORK;
     if (work === NO_WORK) continue;
     works[work]?.push(id);
@@ -139,6 +143,7 @@ function expectConsistent(state: SimState): void {
   // A clone has no index yet, so it builds one from the rows.
   expect(derived(cloneState(state))).toEqual(scratch);
   expect(checkPops(state.pops, state.buildings)).toBeNull();
+  expect(state.stats.totals).toEqual(recountTotals(state));
 }
 
 describe("the rules a pop row follows", () => {
@@ -333,7 +338,7 @@ describe("pops in state", () => {
     expectConsistent(state);
   });
 
-  it("removes a building's pops with it and frees the jobs in it", () => {
+  it("displaces a building's pops into the queue, keeping their jobs, and frees the jobs in it", () => {
     const { state, house, mall, office, tower } = town();
     const atHouse = addPop(state, pop(house, 4));
     const workers = [addPop(state, pop(tower, 20)), addPop(state, pop(tower, 30))];
@@ -348,17 +353,45 @@ describe("pops in state", () => {
     expect(jobsFilled(state, mall)).toBe(0);
     expectConsistent(state);
 
+    // The house's pop is displaced (M3-12): no home, in the queue, still in
+    // the population and still at work.
+    const population = state.stats.totals["population"];
     removeBuilding(state, house);
-    expect(state.pops.flags[atHouse]).toBe(0);
+    expect(readPop(state.pops, atHouse)).toMatchObject({ home: NO_HOME, work: office, size: 4 });
+    expect(Array.from(state.pops.displaced)).toEqual([atHouse]);
     expect(popsAtHome(state, house)).toEqual([]);
-    expect(popsAtWork(state, office)).toEqual([]);
-    expect(jobsFilled(state, office)).toBe(0);
-    expect(popCount(state.pops)).toBe(2);
+    expect(popsAtWork(state, office)).toEqual([atHouse]);
+    expect(jobsFilled(state, office)).toBe(2);
+    expect(popCount(state.pops)).toBe(3);
+    expect(state.stats.totals["population"]).toBe(population);
     expectConsistent(state);
 
-    // The tower, its people working nowhere now, takes its pops with it.
+    // The tower's pops join the queue behind it, in id order.
     removeBuilding(state, tower);
-    expect(popCount(state.pops)).toBe(0);
+    expect(Array.from(state.pops.displaced)).toEqual([atHouse, ...workers]);
+    expect(popCount(state.pops)).toBe(3);
+    expectConsistent(state);
+
+    // A pop that leaves from the queue leaves it.
+    removePop(state, workers[0] as number);
+    expect(Array.from(state.pops.displaced)).toEqual([atHouse, workers[1]]);
+    expectConsistent(state);
+  });
+
+  it("moves a pop with no home into one with room, and refuses one with too little", () => {
+    const { state, house, tower, office } = town();
+    const id = addPop(state, pop(tower, 8));
+    setPopWork(state, id, office);
+    const other = addPop(state, pop(house, 2));
+    removeBuilding(state, tower);
+    expect(() => setPopSize(state, id, 10)).toThrow(/has no home/);
+    // A density 1 house takes a pop of at most 5.
+    expect(() => rehomePop(state, id, house)).toThrow(RangeError);
+    expect(() => rehomePop(state, other, house)).toThrow(/has a home/);
+    removePop(state, id);
+    const small = addPop(state, pop(house, 1));
+    removeBuilding(state, house);
+    expect(Array.from(state.pops.displaced)).toEqual([other, small].sort((a, b) => a - b));
     expectConsistent(state);
   });
 

@@ -709,6 +709,8 @@ kbd {
   transform: translate(-50%, -100%);
   pointer-events: none;
   border-color: #ff8a1f;
+  /* A house's line says the people living there against its room (M3-12), wider than the readouts' 280px. */
+  max-width: 400px;
 }
 
 .bulldoze-tag .detail,

@@ -119,6 +119,9 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // No building was vacant or abandoned before it, so each is in use since
   // the tick it was built, and its flags stay as they are.
   23: (old) => ({ ...old, version: 24, buildings: withStatusSince(old["buildings"]) }),
+  // Version 25 adds the queue of displaced pops (M3-12), empty: before it a
+  // removed home took its pops with it, so nobody is waiting for a home.
+  24: (old) => ({ ...old, version: 25, pops: { ...(old["pops"] as Record<string, unknown>), displaced: new Int32Array(0) } }),
 };
 
 /** A version 23 set of buildings with `statusSince`, each building's `builtAt`, after `builtAt` as a new state has it. */
