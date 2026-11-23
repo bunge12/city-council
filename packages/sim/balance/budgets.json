@@ -76,6 +76,14 @@
       "mode": "blocks",
       "source": "M0 tick budget, M2 exit"
     },
+    "cities.step": {
+      "name": "a step on each scale city of M3-20, the mean over two game days, inside the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 20,
+      "mode": "blocks",
+      "source": "M0 tick budget, M3-20"
+    },
     "town.autosave-part": {
       "name": "one part of an autosave on the scale town, between two ticks",
       "unit": "ms",

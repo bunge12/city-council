@@ -10,6 +10,11 @@ export default mergeConfig(
       // hangs, and holds no speed (issue #319).
       testTimeout: 60_000,
       hookTimeout: 60_000,
+      // The scale cities' bench collects before each city it times, as the
+      // sim's benches do (packages/sim/vitest.config.ts): on the third city
+      // the garbage of generating all three landed in one tick as a 440 ms
+      // pause. The tests do not call it.
+      execArgv: ["--expose-gc"],
       benchmark: {
         // As in packages/sim/vitest.config.ts: the benches time the code,
         // not Vitest counting calls across modules.

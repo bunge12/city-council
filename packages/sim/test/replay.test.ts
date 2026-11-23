@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   createState,
   hashState,
+  deserialize,
   replay,
+  replayFrom,
+  serialize,
   step,
   submit,
   type Command,
@@ -140,5 +143,21 @@ describe("replay", () => {
     const bad = [{ tick: 0, seq: 1, playerId: "p1", type: "SetSpeed", payload: { speed: 3 } }];
     const state = replay(1, bad, 5);
     expect(state.log).toEqual([]);
+  });
+});
+
+describe("replayFrom", () => {
+  it("replays the entries recorded since a saved state onto it, and leaves the state as it was", () => {
+    const live = playLive(2);
+    const full = replay(fixture.seed, live.log, live.tick);
+    // The city as saved at tick 4, and the entries recorded after it.
+    const early = replay(fixture.seed, live.log, 4);
+    const bytes = serialize(early);
+    const since = live.log.filter((e) => e.tick >= 4);
+    const replayed = replayFrom(early, since, live.tick);
+    expect(hashState(replayed)).toBe(hashState(full));
+    expect(serialize(early)).toEqual(bytes);
+    // From the saved bytes, as a city file opens.
+    expect(hashState(replayFrom(deserialize(bytes).state, since, live.tick))).toBe(hashState(full));
   });
 });
