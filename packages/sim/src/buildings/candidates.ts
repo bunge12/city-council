@@ -189,18 +189,60 @@ function refreshSegment(c: Candidates, state: SimState, onCell: OnCell, seg: num
   c.bits[seg] = bits;
 }
 
-/** Looks at one column again. */
-function refreshColumn(c: Candidates, state: SimState, onCell: OnCell, seg: number, col: number): void {
-  const columns = (c.index.segs[seg]?.places ?? 0) * 2;
-  if (col >= columns) return;
-  const now = isCandidate(state, c.index, onCell, seg, col);
-  let bits = c.bits[seg] ?? null;
-  const was = bits?.[col] ?? 0;
-  if (was === now) return;
-  if (!bits) c.bits[seg] = bits = new Uint8Array(columns);
-  bits[col] = now;
-  if (was !== 0) addCount(c, seg, was, -1);
-  if (now !== 0) addCount(c, seg, now, 1);
+/**
+ * Looks again at the front cells `keys` names, in key order, so each
+ * segment's columns are looked at together and once: each is a candidate
+ * when `isCandidate` says so. A clear of thousands of buildings notes
+ * about twelve thousand columns over the city, so a segment's rows are
+ * read once for its run of keys, not once a column (issue #304).
+ */
+function refreshFronts(c: Candidates, state: SimState, onCell: OnCell, keys: Float64Array): void {
+  const { segs } = c.index;
+  const { offset, zone } = state.cells;
+  const open = CELL_OPEN;
+  const none = ZONE_NONE;
+  const stride = CELL_KEY_STRIDE;
+  let seg = -1;
+  let skip = true;
+  let columns = 0;
+  let status: Uint8Array | null = null;
+  let first = 0;
+  let onSeg: Int32Array | null | undefined;
+  let bits: Uint8Array | null = null;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i] as number;
+    if (i > 0 && key === keys[i - 1]) continue;
+    const s = Math.floor(key / stride);
+    if (s !== seg) {
+      seg = s;
+      skip = c.segs.has(seg);
+      const at = segs[seg];
+      columns = (at?.places ?? 0) * 2;
+      status = at?.status ?? null;
+      first = offset[seg] ?? 0;
+      // Read only once a column of the segment needs it, as `isCandidate` does.
+      onSeg = undefined;
+      bits = c.bits[seg] ?? null;
+    }
+    if (skip) continue;
+    const col = key - seg * stride;
+    if (col >= columns) continue;
+    const cell = col * DEPTH;
+    let now = 0;
+    if (status && status[cell] === open) {
+      const z = zone[first + cell] ?? none;
+      if (z !== none) {
+        if (onSeg === undefined) onSeg = onCell()[seg] ?? null;
+        if ((onSeg?.[cell] ?? NO_BUILDING) === NO_BUILDING) now = z;
+      }
+    }
+    const was = bits?.[col] ?? 0;
+    if (was === now) continue;
+    if (!bits) c.bits[seg] = bits = new Uint8Array(columns);
+    bits[col] = now;
+    if (was !== 0) addCount(c, seg, was, -1);
+    if (now !== 0) addCount(c, seg, now, 1);
+  }
 }
 
 /**
@@ -291,14 +333,7 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
   if (c.segs.size === 0 && c.fronts.length === 0) return c;
   fit(c, index.segs.length);
   for (const seg of c.segs) refreshSegment(c, state, onCell, seg);
-  // In key order, so each segment's columns are looked at together, and once.
-  const keys = Float64Array.from(c.fronts).sort();
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i] ?? 0;
-    if (i > 0 && key === keys[i - 1]) continue;
-    const seg = Math.floor(key / CELL_KEY_STRIDE);
-    if (!c.segs.has(seg)) refreshColumn(c, state, onCell, seg, key - seg * CELL_KEY_STRIDE);
-  }
+  refreshFronts(c, state, onCell, Float64Array.from(c.fronts).sort());
   if (c.segs.size > 0) c.segs = new Set();
   c.fronts.length = 0;
   c.frontsCap = MOST_FRONTS;
