@@ -216,8 +216,8 @@ describe("the bars' range and parts", () => {
     expect(demand.residential.value).toBeCloseTo(want * share, 9);
     moveDemand(demand, busy, share);
     expect(demand.residential.value).toBeCloseTo(want * (1 - (1 - share) * (1 - share)), 9);
-    // From high to low it takes days, not one.
-    for (let d = 0; d < 60; d++) moveDemand(demand, busy, share);
+    // From high to low it takes days, not one: at a share of 0.05 a year gets within 0.0005.
+    for (let d = 0; d < 365; d++) moveDemand(demand, busy, share);
     expect(demand.residential.value).toBeCloseTo(want, 3);
     const idle = demandTargets({ totals: totals(city(2000, 1000, 1000)), segmentsOutside: 1 });
     moveDemand(demand, idle, share);

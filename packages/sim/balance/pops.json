@@ -19,6 +19,6 @@
     "birthsPerPersonYear": 0.011,
     "deathsPerPersonYear": 0.008,
     "childrenLeaveYears": 18,
-    "replacementsPerPopYear": 0.05
+    "replacementsPerPopYear": 0.07
   }
 }

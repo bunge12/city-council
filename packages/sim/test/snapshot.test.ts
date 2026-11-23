@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { syncCells } from "../src/zoning/cell-index";
 import {
   BALANCE_STAMP,
+  DEMAND_BALANCE,
   replaysUnderThisBalance,
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
@@ -30,6 +31,7 @@ import {
   type SimState,
   type SnapshotBuffer,
 } from "../src/index";
+import { withValue } from "./with-value";
 import v1Fixture from "./fixtures/snapshots/v1.json";
 import v2Fixture from "./fixtures/snapshots/v2.json";
 import v3Fixture from "./fixtures/snapshots/v3.json";
@@ -1073,12 +1075,17 @@ describe("snapshots with a road network", () => {
     // redeveloped today, version 26, moved them again: with each taken out,
     // the version set back and the stamp before it, the bytes are main's,
     // which the lines below check.
+    // M3-21 slowed the bars (`dailyShare`), so the stepped city's bars, which
+    // these bytes hold, moved: the city for the lines below is stepped at the
+    // old share, and with it the bytes are main's but for the stamp, which
+    // only the last two lines carry.
     const digest = (bytes: Uint8Array): string => {
       const h = new Fnv64();
       h.bytes(bytes);
       return `${bytes.length}:${h.hex()}`;
     };
-    const { stats, travelReadyAt, demand, ...rest } = withoutSatisfaction(withoutRedevelopment(state));
+    const old = withValue(DEMAND_BALANCE, "dailyShare", 0.2, withRoads);
+    const { stats, travelReadyAt, demand, ...rest } = withoutSatisfaction(withoutRedevelopment(old));
     const before = withPlan(rest, { quota: 1, day: 0, deadline: 30, free: 0, used: 0 });
     // The stamp main had, before M3-23's balance numbers.
     const v17 = { ...before, version: 17, balance: "1cbab0077b3a0b86" } as SimState;
@@ -1093,23 +1100,23 @@ describe("snapshots with a road network", () => {
     const v20 = { ...before, stats, travelReadyAt, demand, version: 20, balance: "0ef336e5d5886479" } as SimState;
     expect(digest(serialize(v20))).toBe("18800:729675b587eff893");
     expect(digest(serializeDetached(v20))).toBe("18776:0b455789496e4d74");
-    const v21 = { ...withoutOwed(withoutRedevelopment(state)), version: 21, balance: "8f43a4e4c054be82" } as SimState;
+    const v21 = { ...withoutOwed(withoutRedevelopment(old)), version: 21, balance: "8f43a4e4c054be82" } as SimState;
     expect(digest(serialize(v21))).toBe("18680:4ef9247766983ea3");
     expect(digest(serializeDetached(v21))).toBe("18656:bc87851caa95eed8");
-    const v22 = { ...withoutSatisfaction(withoutRedevelopment(state)), version: 22, balance: "03b81fd101b40744" } as SimState;
+    const v22 = { ...withoutSatisfaction(withoutRedevelopment(old)), version: 22, balance: "03b81fd101b40744" } as SimState;
     expect(digest(serialize(v22))).toBe("18696:91fd3064b4cf8893");
     expect(digest(serializeDetached(v22))).toBe("18672:4a93762c49972633");
-    const v23 = { ...withoutVacancy(withoutRedevelopment(state)), version: 23, balance: "4672c4929d82c237" } as SimState;
+    const v23 = { ...withoutVacancy(withoutRedevelopment(old)), version: 23, balance: "4672c4929d82c237" } as SimState;
     expect(digest(serialize(v23))).toBe("19184:0054c66e8dde554f");
     expect(digest(serializeDetached(v23))).toBe("19160:afbc14db5924acc5");
-    const v24 = { ...withoutDisplaced(withoutRedevelopment(state)), version: 24, balance: "9095ef77f1543543" } as SimState;
+    const v24 = { ...withoutDisplaced(withoutRedevelopment(old)), version: 24, balance: "9095ef77f1543543" } as SimState;
     expect(digest(serialize(v24))).toBe("19336:dbd6a79733c4b461");
     expect(digest(serializeDetached(v24))).toBe("19312:aff953be152a7156");
-    const v25 = { ...withoutRedevelopment(state), version: 25, balance: "8dc8d084bbb30043" } as SimState;
+    const v25 = { ...withoutRedevelopment(old), version: 25, balance: "8dc8d084bbb30043" } as SimState;
     expect(digest(serialize(v25))).toBe("19464:2848b690113dc7a6");
     expect(digest(serializeDetached(v25))).toBe("19440:084523f65622559e");
-    expect(digest(serialize(state))).toBe("19504:9f7f4877e5601d9e");
-    expect(digest(serializeDetached(state))).toBe("19480:7532319f2f8aaa2f");
+    expect(digest(serialize(old))).toBe("19504:630fb06d8449e94f");
+    expect(digest(serializeDetached(old))).toBe("19480:1db562f26a930822");
     expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 

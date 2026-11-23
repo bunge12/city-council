@@ -45,6 +45,14 @@
 // it takes, with residents for its lot and a variant drawn, as the grower
 // makes one. Redevelopment is free (M3, M4). Nothing runs while a change of
 // roads is settling, since the cells cannot be read.
+//
+// A home is not replaced while the grower holds new homes back (M3-21,
+// grower.ts, `holdsHomes`): with `unfilledHomesMax` homes newcomers can
+// reach still filling, its owner waits, draws nothing and counts nothing,
+// as a new home on open ground would wait. Without the hold a district
+// zoned R3 rebuilt in a game year, and stood empty for years after. The
+// homes are counted on a tick that considers one, and again after each
+// home it replaces.
 
 import { TIME_BALANCE } from "../calendar";
 import { DEMAND_BALANCE } from "../demand/balance";
@@ -58,7 +66,8 @@ import { cellsSettled, syncCells } from "../zoning/cell-index";
 import { segmentOfSlot } from "../zoning/cells";
 import { BUILDING_TYPES, type BuildingType } from "./balance";
 import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_UNZONED, addBuilding, removeBuildings } from "./buildings";
-import { residentsFor, zoneBar } from "./grower";
+import { holdsHomes, residentsFor, zoneBar } from "./grower";
+import { reachableRoom, type ReachableRoom } from "../pops/room";
 import { lotOptions, type Lot } from "./lots";
 import { NO_BUILDING, buildingSlots, lotColumns, lotShapeCorners, lotShapeOf, lotSlots, segmentBuildings, zonedUpTo } from "./where";
 
@@ -193,6 +202,8 @@ export function checkRedevelopment(state: SimState): void {
   const allowed = Math.floor(((at + 1) * most) / perDay);
   // The slice turns a place each day, so a slice that comes after the allowance runs out one day comes before it on another.
   const first = (at + Math.floor(state.tick / perDay)) % perDay;
+  // Counted on the first home the tick considers, then again after each it replaces.
+  let room: ReachableRoom | null = null;
   for (let id = first; id < b.flags.length && state.redevelopedToday < allowed; id += perDay) {
     const flags = b.flags[id] ?? 0;
     if ((flags & BUILDING_ALIVE) === 0) continue;
@@ -208,12 +219,18 @@ export function checkRedevelopment(state: SimState): void {
     if (density === 0) continue;
     const bar = zoneBar(state.demand, ZONE_IDS[b.zone[id] ?? 0] ?? "");
     if (!(bar > 0)) continue;
+    if ((b.residents[id] ?? 0) > 0) {
+      room ??= reachableRoom(state);
+      if (holdsHomes(room)) continue;
+    }
     if (!ownerRebuilds(state, buildingValue(state, id), bar)) continue;
     const plan = planRedevelopment(state, id, density);
     // Every building it replaces counts toward the day's cap, so a tower that takes in eight houses counts eight.
     if (!plan || state.redevelopedToday + plan.replaces.length > most) continue;
     redevelop(state, plan);
     state.redevelopedToday += plan.replaces.length;
+    // The homes it replaced were counted as they stood, and their pops wait to be placed: count afresh for the next.
+    room = null;
   }
 }
 

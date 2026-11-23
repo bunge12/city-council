@@ -141,9 +141,17 @@ export function zoneJobs(state: SimState): ZoneJobs {
   return out;
 }
 
-/** Whether `jobs` holds new workplaces of zone number `zone` back: its open jobs are more than `openJobsShareMax` of its jobs. */
+/**
+ * Whether `jobs` holds new workplaces of zone number `zone` back: its open
+ * jobs are more than `openJobsShareMax` of its jobs and more than
+ * `openJobsMin` (M3-21). Without the floor a zone starting again from
+ * nothing, as industry zoned once more after its factories went, was held
+ * by its first workshop, whose jobs were all open, and in a city with
+ * nobody out of work they never filled.
+ */
 export function workplacesHeldBy(jobs: ZoneJobs, zone: number): boolean {
-  return (jobs.open[zone] ?? 0) > DEMAND_BALANCE.openJobsShareMax * (jobs.jobs[zone] ?? 0);
+  const open = jobs.open[zone] ?? 0;
+  return open > DEMAND_BALANCE.openJobsMin && open > DEMAND_BALANCE.openJobsShareMax * (jobs.jobs[zone] ?? 0);
 }
 
 /** Whether the grower holds new workplaces of zone number `zone` back now. One pass over the buildings. */

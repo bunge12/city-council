@@ -19,16 +19,18 @@
 // made up later. Density is whatever the cell is zoned for: an R3 cell
 // gets an R3 building as soon as residential demand is above zero.
 //
-// Free room in standing homes fills before more is built (M3-08, PRD
-// "Turnover"): the grower adds no building to a zone people live in,
-// residential or mixed, while the room empty in homes newcomers can reach
-// is more than `emptyRoomShareMax` of those homes' room (demand.json,
-// pops/room.ts). It works the room out once on a tick it adds such a
-// building, after the tick's arrivals, and adds each home it builds to it,
-// so it asks again before each and a home that fills mid-day lets the next
-// one come. Homes newcomers cannot reach, on a street
-// joined to nothing, are left out of both: their room never fills, and
-// should not hold the rest of the city back.
+// Homes standing fill before more are built (M3-08, PRD "Turnover"; a
+// count since M3-21): the grower adds no building to a zone people live in,
+// residential or mixed, while `unfilledHomesMax` or more of the homes
+// newcomers can reach are still filling (demand.json, pops/room.ts,
+// `homeUnfilled`). A count and not a share of the room, so a few towers
+// fill side by side as a street of houses does, and arrivals, which follow
+// the empty room (pops/arrivals.ts), tell the densities apart. It counts
+// once on a tick it adds such a building, after the tick's arrivals, and
+// adds each home it builds, so it asks again before each and a home that
+// fills mid-day lets the next one come. Homes newcomers cannot reach, on a
+// street joined to nothing, are left out of both: their room never fills,
+// and should not hold the rest of the city back.
 //
 // Open jobs in standing workplaces fill the same way (M3-09): the grower
 // adds no building to a zone that offers jobs, commercial, office,
@@ -286,14 +288,23 @@ const HOME_ZONES: ReadonlySet<number> = new Set(BUILDING_TYPES.filter((t) => t.r
 /** Zone numbers with a type that offers jobs: commercial, office, industrial and mixed. */
 const WORK_ZONES: ReadonlySet<number> = new Set(BUILDING_TYPES.filter((t) => t.jobsPerCell > 0).map((t) => t.zoneNumber));
 
-/** Whether `room` holds new homes back: its empty room is more than `emptyRoomShareMax` of its capacity. */
-function holds(room: ReachableRoom): boolean {
-  return room.empty > DEMAND_BALANCE.emptyRoomShareMax * room.capacity;
+/** Whether `room` holds new homes back: `unfilledHomesMax` or more of its homes are still filling. */
+export function holdsHomes(room: ReachableRoom): boolean {
+  return room.unfilled >= DEMAND_BALANCE.unfilledHomesMax;
 }
 
-/** Whether the grower holds new homes back: the room empty in homes newcomers can reach is more than `emptyRoomShareMax` of their room. */
+/** Whether the grower holds new homes back: `unfilledHomesMax` or more of the homes newcomers can reach are still filling. */
 export function homesHeld(state: SimState): boolean {
-  return holds(reachableRoom(state));
+  return holdsHomes(reachableRoom(state));
+}
+
+/** Adds new home `id` to `room`, as `reachableRoom` would count it, if newcomers can reach it: all its room is empty. */
+export function countNewHome(state: SimState, room: ReachableRoom, id: number): void {
+  const residents = state.buildings.residents[id] ?? 0;
+  if (residents <= 0 || !buildingReachesOutside(state, id)) return;
+  room.capacity += residents;
+  room.empty += residents;
+  room.unfilled++;
 }
 
 /** The grower's work for one tick. */
@@ -315,7 +326,7 @@ export function grow(state: SimState): void {
     for (let i = 0; i < due; i++) {
       if (homes) {
         room ??= reachableRoom(state);
-        if (holds(room)) break;
+        if (holdsHomes(room)) break;
       }
       if (work) {
         jobs ??= zoneJobs(state);
@@ -323,16 +334,11 @@ export function grow(state: SimState): void {
       }
       const id = growOne(state, zone);
       if (id < 0) break;
-      // A new home is empty: all its room is room left.
-      const reaches = buildingReachesOutside(state, id);
-      if (room && reaches && (state.buildings.residents[id] ?? 0) > 0) {
-        const residents = state.buildings.residents[id] ?? 0;
-        room.capacity += residents;
-        room.empty += residents;
-      }
+      // A new home is empty and still filling.
+      if (room) countNewHome(state, room, id);
       // And a new workplace's jobs are all open.
       const offered = buildingJobs(state.buildings, id);
-      if (jobs && reaches && offered > 0) {
+      if (jobs && offered > 0 && buildingReachesOutside(state, id)) {
         jobs.jobs[zone] = (jobs.jobs[zone] ?? 0) + offered;
         jobs.open[zone] = (jobs.open[zone] ?? 0) + offered;
       }

@@ -156,14 +156,14 @@ const COLUMNS: [string, number][] = [
   ["Arrive", 7],
   ["Depart", 7],
   ["Room", 6],
-  ["Open R", 6],
+  ["Open R/C/O/I", 12],
   ["Shop/Off/Fac", 12],
 ];
 if (city.watch) COLUMNS.push([`${city.watch.zone[0]?.toUpperCase()}${city.watch.density} built`, 9]);
 
 console.log(`${city.name}: ${city.about}`);
 console.log(`Seed ${SEED}, ${options.years} game years. ${options.sets.length === 0 ? "Balance as in packages/sim/balance/." : `Balance changed: ${options.sets.join(", ")}.`}`);
-console.log("Res to Ind: each bar's average over the year. Flips: times each bar changed sign in the year. The rest at the year\'s end. Unemp: workers without a job. Room: empty places in homes. Open R: residential cells with no building. Shop/Off/Fac: the jobs by kind, in percent.");
+console.log("Res to Ind: each bar's average over the year. Flips: times each bar changed sign in the year, as the top bar shows it, rounded. The rest at the year's end. Unemp: workers without a job. Room: empty places in homes. Open R/C/O/I: the percent of each zone's cells with no building. Shop/Off/Fac: the jobs by kind, in percent.");
 console.log(COLUMNS.map(([name, width]) => pad(name, width)).join(" "));
 
 // The year the setup ran in counts as year 1: setting up takes a few ticks.
@@ -177,7 +177,7 @@ for (let year = 1; year <= options.years; year++) {
   for (const bar of DEMAND_BARS) {
     sums[bar] = 0;
     flips[bar] = 0;
-    signs[bar] = Math.sign(state.demand[bar].value);
+    signs[bar] = Math.sign(Math.round(state.demand[bar].value));
   }
   while (state.tick < end) {
     step(state);
@@ -187,7 +187,8 @@ for (let year = 1; year <= options.years; year++) {
     for (const bar of DEMAND_BARS) {
       const value = state.demand[bar].value;
       sums[bar] = (sums[bar] ?? 0) + value;
-      const sign = Math.sign(value);
+      // The sign the top bar shows: a bar between -0.5 and 0.5 reads 0 there and changes nothing.
+      const sign = Math.sign(Math.round(value));
       if (sign !== 0 && sign !== signs[bar]) {
         if (signs[bar] !== 0) flips[bar] = (flips[bar] ?? 0) + 1;
         signs[bar] = sign;
@@ -218,7 +219,7 @@ for (let year = 1; year <= options.years; year++) {
     counts.arrivals,
     counts.departures,
     Math.max(0, room - people),
-    `${Math.round(100 * openShare(state, "residential"))}%`,
+    ["residential", "commercial", "office", "industrial"].map((zone) => Math.round(100 * openShare(state, zone))).join("/"),
     ["jobsCommercial", "jobsOffice", "jobsIndustrial"].map((k) => Math.round((100 * (t[k] ?? 0)) / Math.max(1, jobs))).join("/"),
   ];
   if (city.watch) row.push(`${Math.round(100 * builtShare(state, city.watch.zone, city.watch.density))}%`);

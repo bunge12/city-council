@@ -171,8 +171,18 @@ function houses(depth = 6): { state: SimState; street: Street; avenue: Street } 
  */
 function avenueWorthMore<T>(body: () => T): T {
   return withValue(LAND_VALUE_BALANCE.roadAccess, "street", 0, () =>
-    withValue(LAND_VALUE_BALANCE.roadAccess, "avenue", 40, () => withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 40, body)),
+    withValue(LAND_VALUE_BALANCE.roadAccess, "avenue", 40, () => withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 40, () => noHomeHold(body))),
   );
+}
+
+/**
+ * Runs `body` with the hold on new homes out of reach (M3-21). These towns
+ * have no jobs and their bar is held up, so newcomers leave for want of
+ * work as fast as they come, the towers never fill, and the hold would
+ * stop redevelopment for good. The hold has a test of its own below.
+ */
+function noHomeHold<T>(body: () => T): T {
+  return withValue(DEMAND_BALANCE, "unfilledHomesMax", 1_000_000, body);
 }
 
 /** Rezones the houses' ground, six deep on both sides of the street and the avenue. */
@@ -217,6 +227,8 @@ describe("a built R1 street rezoned to R3", () => {
       const lived = new Map<number, number>();
       for (let pop = 0; pop < state.pops.home.length; pop++) if (isPop(state.pops, pop)) lived.set(pop, state.pops.home[pop] ?? NO_HOME);
       const standing = new Set(before.map((id) => key(state, id)));
+      const worthAt = new Map(before.map((id) => [id, buildingValue(state, id)]));
+      const goneOn = new Map<number, number>();
       holdDemand({ residential: 60 }, () =>
         runDays(state, 200, () => {
           // Each house goes whole, all at once with the ones its tower takes in.
@@ -224,6 +236,7 @@ describe("a built R1 street rezoned to R3", () => {
             const id = Number(k.split("/")[0]);
             if (b.flags[id] && key(state, id) === k) continue;
             standing.delete(k);
+            goneOn.set(id, state.tick);
           }
           // Displaced pops find homes within the day.
           expect(state.pops.displaced.length).toBe(0);
@@ -241,16 +254,18 @@ describe("a built R1 street rezoned to R3", () => {
       const counts = new Map<number, number>();
       for (const day of days) counts.set(day, (counts.get(day) ?? 0) + 1);
       expect(Math.max(...counts.values())).toBeLessThanOrEqual(DEMAND_BALANCE.redevelopment.perDayMax);
-      // The avenue's ground is worth more, so its towers came first.
-      const median = (ids: number[]) => {
-        const ticks = ids.map((id) => b.builtAt[id] ?? 0).sort((p, q) => p - q);
-        return ticks[Math.floor(ticks.length / 2)] ?? 0;
-      };
+      // Towers came on both the avenue and the street.
       const avenueTowers = towers.filter((id) => onAvenue(b.firstSeg[id] ?? -1));
       const streetTowers = towers.filter((id) => !onAvenue(b.firstSeg[id] ?? -1));
       expect(avenueTowers.length).toBeGreaterThan(2);
       expect(streetTowers.length).toBeGreaterThan(2);
-      expect(median(avenueTowers)).toBeLessThan(median(streetTowers) - 20 * DAY);
+      // The houses on the most valuable ground went first (M3-21: by the houses' own value, since a
+      // tower count of a dozen made the avenue's and the street's median towers a matter of chance).
+      const gone = [...goneOn].sort((p, q) => p[1] - q[1]).map(([id]) => worthAt.get(id) ?? 0);
+      const half = Math.floor(gone.length / 2);
+      const mean = (xs: number[]) => xs.reduce((sum, x) => sum + x, 0) / Math.max(1, xs.length);
+      expect(gone.length).toBeGreaterThan(20);
+      expect(mean(gone.slice(0, half))).toBeGreaterThan(mean(gone.slice(half)) + 5);
       // The pops of the houses replaced live elsewhere now, nobody waits, and the towers hold more people than the houses did.
       let moved = 0;
       for (const [pop, home] of lived) {
@@ -328,6 +343,28 @@ describe("a built R1 street rezoned to R3", () => {
   });
 });
 
+describe("the hold on new homes", () => {
+  it("replaces no house while unfilledHomesMax homes are still filling, and starts again as they fill (M3-21)", () => {
+    avenueWorthMore(() => {
+      const { state, street, avenue } = houses();
+      const before = new Map(live(state).map((id) => [id, key(state, id)]));
+      rezone(state, street, avenue, "residential", 3);
+      const replaced = () => [...before].filter(([id, k]) => !(state.buildings.flags[id] && key(state, id) === k)).length;
+      withValue(DEMAND_BALANCE.redevelopment, "chancePerDay", 1, () =>
+        holdDemand({ residential: 100 }, () => {
+          // Every home still filling: none replaced, however keen the owners.
+          withValue(DEMAND_BALANCE, "unfilledHomesMax", 0, () => runDays(state, 5));
+          expect(replaced()).toBe(0);
+          // With room for one more home filling, towers come.
+          withValue(DEMAND_BALANCE, "unfilledHomesMax", 1_000_000, () => runDays(state, 3));
+          expect(replaced()).toBeGreaterThan(0);
+        }),
+      );
+      expectRecount(state);
+    });
+  });
+});
+
 describe("the daily cap", () => {
   it("counts every house a tower takes in, and spreads them over the day", () => {
     avenueWorthMore(() => {
@@ -336,7 +373,8 @@ describe("the daily cap", () => {
       const before = new Map(live(state).map((id) => [id, key(state, id)]));
       rezone(state, street, avenue, "residential", 3);
       toDayStart(state);
-      const gone = new Set<number>();
+      // Houses an owner rebuilt on the rest of the rezone's day, at the balance's own chance, are not the loop's to count.
+      const gone = new Set([...before].filter(([id, k]) => !(state.buildings.flags[id] && key(state, id) === k)).map(([id]) => id));
       let towers = 0;
       // Every owner draws, so the cap and not the chance sets the pace.
       withValue(DEMAND_BALANCE.redevelopment, "perDayMax", most, () =>

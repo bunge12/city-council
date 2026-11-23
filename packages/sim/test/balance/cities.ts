@@ -63,30 +63,30 @@ const LETTERS: Readonly<Record<string, readonly [string, number]>> = {
  * map decide what grows.
  */
 const BALANCED = [
-  "crrcrrcrrcrrcrrcrriiiIII",
-  "rrrrrrrrrrrrrrrrrriiiIII",
-  "rrrrrrrrrrrrrrrrrriiiIII",
-  "rrcrrcrrcrrcrrcrrciiiIII",
-  "rrrrrrrrrrrrrrrrrriiiIII",
-  "rrrrrrrrrrrrrrrrrriiiIII",
-  "rcrcRRRRRRcRRRRRcriiiIII",
-  "rrrRRRRcRRRRRRcRrriiiIII",
-  "rrrRcoRRRRcoRRRRrriiiIII",
-  "crrRRRRRRcoRRRRcrriiiIII",
-  "rrrRRRRTCTTCRRRRrriiiIII",
-  "rrrRRRRCpCpTRcRRrriiiIII",
-  "rrcRRRcTCOCTcoRRrciiiIII",
-  "rrrcRcoTpCpCoRRRrriiiIII",
-  "rrrRRoRCTTCTRRcRrriiiIII",
-  "rcrRcRRRRcoRRRRRcriiiIII",
-  "rrrRRRRRcoRRRRRcrriiiIII",
-  "rrrRRcRRRRRRcRRRrriiiIII",
-  "crrRRRRRRcRRRRRRrriiiIII",
-  "rrrrrrrrrrrrrrrrrriiiIII",
-  "rrrrrrrrrrrrrrrrrriiiIII",
-  "rrcrrcrrcrrcrrcrrciiiIII",
-  "rrrrrrrrrrrrrrrrrriiiIII",
-  "rrrrrrrrrrrrrrrrrriiiIII",
+  "crrrcrorcrrrcrorcriiiIII",
+  "rcrorcrrrcrorcrrrciiiIII",
+  "orcrrrcrorcrrrcroriiiIII",
+  "rrrcrorcrrrcrorcrriiiIII",
+  "crorcrrrcrorcrrrcriiiIII",
+  "rcrrrcrorcrrrcrorciiiIII",
+  "rrccRRcRRcRRcRRcrriiiIII",
+  "rorRRCRpRCRpRCRRroiiiIII",
+  "crrRCpCpRRcpCppRcriiiIII",
+  "rcrcRCpRRcpCpRRcrciiiIII",
+  "orcRppRTpTTpRRCRoriiiIII",
+  "rrrRRRRpOCOTRcRRrriiiIII",
+  "crocCRcTCOCTcppccriiiIII",
+  "rcrRRcpTOCOppCRRrciiiIII",
+  "rrcRppCpTTpTCpCRrriiiIII",
+  "rorcRCpRRcpCpRRcroiiiIII",
+  "crrRCpRRcpCpRRpRcriiiIII",
+  "rcrRRpRCRpRCRpRRrciiiIII",
+  "orccRRcRRcRRcRRcoriiiIII",
+  "rrrcrorcrrrcrorcrriiiIII",
+  "crorcrrrcrorcrrrcriiiIII",
+  "rcrrrcrorcrrrcrorciiiIII",
+  "rrcrorcrrrcrorcrrriiiIII",
+  "rorcrrrcrorcrrrcroiiiIII",
 ];
 
 /**
@@ -97,6 +97,16 @@ const BALANCED = [
 const LOW_RISE = BALANCED.map((line, row) =>
   [...line].map((ch, col) => (ch === "T" || (ch === "R" && row >= 6 && row <= 18 && col >= 3 && col <= 15) ? "h" : ch)).join(""),
 );
+
+/**
+ * The town that loses its industry: the balanced town's north half with
+ * houses on its office ground and its south half left unzoned, so it is
+ * full of people before year five and its jobs are in shops and factories.
+ * In the whole balanced town, still filling in year five and with office
+ * ground to spare, the offices took up the workers the factories let go and
+ * the town only grew more slowly.
+ */
+const MILL_TOWN = BALANCED.map((line, row) => (row < 12 ? line.replace(/[opO]/g, "r") : ".".repeat(line.length)));
 
 /** Homes and nothing else. */
 const HOMES_ONLY = BALANCED.map((line) => "r".repeat(line.length));
@@ -213,20 +223,19 @@ export const CITIES: readonly City[] = [
   },
   {
     name: "industry-lost",
-    about: "The balanced town; at the start of year 5 every factory is bulldozed and its ground unzoned, and at the start of year 7 it is zoned for industry again",
+    about: "The balanced town's north half, with no offices; at the start of year 5 every factory is bulldozed and its ground unzoned, and at the start of year 7 it is zoned for industry again",
     setup(player) {
       buildRoads(player);
-      zoneMap(player, BALANCED);
+      zoneMap(player, MILL_TOWN);
     },
     atYear(player, year) {
-      const industry = blocksOf(BALANCED, "iI");
       if (year === 5) {
-        zoneBlocks(player, industry, ZONE_CLEAR);
+        zoneBlocks(player, blocksOf(MILL_TOWN, "iI"), ZONE_CLEAR);
         bulldozeZone(player, "industrial");
       }
       if (year === 7) {
-        zoneBlocks(player, blocksOf(BALANCED, "i"), "industrial", 1);
-        zoneBlocks(player, blocksOf(BALANCED, "I"), "industrial", 2);
+        zoneBlocks(player, blocksOf(MILL_TOWN, "i"), "industrial", 1);
+        zoneBlocks(player, blocksOf(MILL_TOWN, "I"), "industrial", 2);
       }
     },
   },

@@ -16,6 +16,8 @@ import {
   drawSize,
   hashState,
   homeRoomLeft,
+  newcomerRoomLeft,
+  homeUnfilled,
   homesHeld,
   popSizeCap,
   popsAtHome,
@@ -136,13 +138,24 @@ describe("the day's arrivals", () => {
   it("are none while the residential bar is at or below zero, and follow it above", () => {
     const perDay = DEMAND_BALANCE.arrivalsPerYearAtFullDemand / yearDays();
     expect(dayArrivals(0)).toBe(0);
-    expect(dayArrivals(-40)).toBe(0);
+    expect(dayArrivals(-40, 5000)).toBe(0);
     expect(dayArrivals(100)).toBe(Math.ceil(perDay));
     expect(dayArrivals(50)).toBe(Math.ceil(perDay / 2));
     expect(dayArrivals(0.01)).toBe(1);
-    // About 17,000 a year at full demand, from "Pacing" in the PRD.
-    expect(dayArrivals(100) * yearDays()).toBeGreaterThanOrEqual(17000);
-    expect(dayArrivals(100) * yearDays()).toBeLessThan(17500);
+    // About 40,000 a year at full demand with little room empty (M3-21).
+    expect(dayArrivals(100) * yearDays()).toBeGreaterThanOrEqual(40000);
+    expect(dayArrivals(100) * yearDays()).toBeLessThan(40500);
+  });
+
+  it("follow the empty room where more stands empty, so towers fill in about fillDays days (M3-21)", () => {
+    const days = DEMAND_BALANCE.fillDays;
+    const perDay = DEMAND_BALANCE.arrivalsPerYearAtFullDemand / yearDays();
+    // A street of houses with a few places empty arrives at the floor.
+    expect(dayArrivals(100, 20)).toBe(Math.ceil(perDay));
+    // Five empty towers of 1,000 bring their room over fillDays a day.
+    expect(dayArrivals(100, 5000)).toBe(Math.ceil(5000 / days));
+    expect(dayArrivals(50, 5000)).toBe(Math.ceil(2500 / days));
+    expect(dayArrivals(-1, 5000)).toBe(0);
   });
 
   it("draw a household's size within its density's range, the size cap and the room left", () => {
@@ -234,7 +247,7 @@ describe("a street joined to nothing, zoned R1", () => {
     expect(state.demand.residential.value).toBeGreaterThan(0);
     for (const home of homes(state)) expect(whyNoNewcomers(state, home)).toBe("noRoute");
     // Room nobody can reach does not hold new homes back.
-    expect(reachableRoom(state)).toEqual({ capacity: 0, empty: 0 });
+    expect(reachableRoom(state)).toEqual({ capacity: 0, empty: 0, unfilled: 0 });
     expect(homesHeld(state)).toBe(false);
     expectRecount(state);
   });
@@ -279,43 +292,37 @@ describe("an R3 lot of 4 x 4 from an outside connection", () => {
   });
 });
 
-describe("free room in standing homes fills before more is built", () => {
-  /** Whether the homes standing before `added` were built would have held new homes back. */
-  function heldWithout(state: SimState, added: number[]): boolean {
-    const { capacity, empty } = reachableRoom(state);
-    let cap = capacity;
-    let free = empty;
-    for (const id of added) {
-      cap -= state.buildings.residents[id] ?? 0;
-      free -= homeRoomLeft(state, id);
-    }
-    return free > DEMAND_BALANCE.emptyRoomShareMax * cap;
+describe("homes standing fill before more are built", () => {
+  /** The homes newcomers can reach that are still filling, leaving out `added`. */
+  function unfilledWithout(state: SimState, added: readonly number[]): number {
+    let n = reachableRoom(state).unfilled;
+    for (const id of added) if (homeUnfilled(state.buildings.residents[id] ?? 0, newcomerRoomLeft(state, id))) n--;
+    return n;
   }
 
-  it("holds homes back once empty room passes the share, and builds them again when it fills", () => {
-    const { state, s } = towerLot();
+  it("holds homes back while unfilledHomesMax of them are still filling, fills several towers side by side, and builds again as they fill (M3-21)", () => {
+    const state = createState(SEED);
+    const s = street(state, 48);
+    zone(state, s, "residential", 3, 0, 24, 6, 1);
+    zone(state, s, "residential", 3, 24, 24, 6, 1);
+    const most = DEMAND_BALANCE.unfilledHomesMax;
     hold({ residential: 100 }, () => {
-      runDays(state, 1);
-      expect(homes(state)).toHaveLength(1);
-      // A tower of 300 or more, nearly empty, is far past the share.
-      expect(homesHeld(state)).toBe(true);
-      zone(state, s, "residential", 1, 0, 12, 6, -1);
-      // No house comes while the tower fills.
-      let heldTicks = 0;
-      for (let t = 0; t < 60 * DAY && homes(state).length === 1; t++) {
-        if (homesHeld(state)) heldTicks++;
-        step(state);
-      }
-      expect(heldTicks).toBeGreaterThan(2 * DAY);
-      expect(homes(state).length).toBeGreaterThan(1);
-      // Then houses come again, each only when the homes before it left room under the share.
-      for (let t = 0; t < 5 * DAY; t++) {
+      let filling = 0;
+      for (let t = 0; t < 40 * DAY; t++) {
         const before = new Set(homes(state));
         step(state);
         const added = homes(state).filter((id) => !before.has(id));
-        if (added.length > 0) expect(heldWithout(state, added), `tick ${state.tick}`).toBe(false);
+        // A home comes only while fewer than the most were still filling before it.
+        if (added.length > 0) expect(unfilledWithout(state, added), `tick ${state.tick}`).toBeLessThan(most);
+        filling = Math.max(filling, reachableRoom(state).unfilled);
       }
-      expect(homes(state).length).toBeGreaterThan(3);
+      // More than one tower filled at once. A full tower a household leaves counts again, so the count can pass the most for a while.
+      expect(filling).toBeGreaterThan(1);
+      expect(homesHeld(state)).toBe(reachableRoom(state).unfilled >= most);
+      // Towers filled in days, not weeks: most of what was built is lived in.
+      const { capacity, empty } = reachableRoom(state);
+      expect(homes(state).length).toBeGreaterThan(most);
+      expect(empty).toBeLessThan(0.5 * capacity);
     });
     expectRecount(state);
   });

@@ -3,9 +3,13 @@
 // While the residential bar is above zero, people arrive each game day and
 // take free room in homes newcomers can reach (room.ts). A bar of b brings
 // ceil(b / 100 x `arrivalsPerYearAtFullDemand` / days a year) people a day
-// (demand.json), so a bar barely above zero still brings one. The day's
-// people are spread over its ticks the way the grower spreads its buildings
-// (`growthOnTick`).
+// (demand.json), so a bar barely above zero still brings one, or, where
+// more room stands empty, ceil(b / 100 x empty room / `fillDays`) (M3-21),
+// so a few new towers fill in about `fillDays` days while a street of
+// houses fills at the first rate. The empty room is read afresh on each
+// tick, from state, so the day's people are a little fewer than either
+// figure as the homes fill through the day. They are spread over its ticks
+// the way the grower spreads its buildings (`growthOnTick`).
 //
 // `pops.owed` is the day's plan: people due who have not yet found a home.
 // A tick adds its share, then newcomers move in while any are owed. Each
@@ -37,7 +41,7 @@ import type { System } from "../step";
 import { noteYear } from "../stats/stats";
 import { POPS_BALANCE } from "./balance";
 import { addPop, popSizeCap, type PopProfile } from "./pops";
-import { homeRoomLeft, homesWithRoom, newcomerRoomLeft } from "./room";
+import { homeRoomLeft, homesWithRoom, newcomerRoomLeft, reachableRoom } from "./room";
 import type { EducationShares } from "../buildings/balance";
 import { LAND_VALUE_BALANCE, wealthMixAt } from "../landvalue/balance";
 import { buildingValues } from "../landvalue/land-value";
@@ -45,11 +49,19 @@ import { buildingValues } from "../landvalue/land-value";
 /** The name the timer hook reports for arrivals. */
 export const ARRIVALS_SYSTEM = "arrivals";
 
-/** People due a game day with the residential bar at `bar`: none at or below zero, else the full rate times the bar over 100, rounded up. */
-export function dayArrivals(bar: number): number {
+/**
+ * People due a game day with the residential bar at `bar` and `emptyRoom`
+ * places empty in homes newcomers can reach: none at or below zero, else
+ * the more of the full rate and the empty room over `fillDays`, each times
+ * the bar over 100, rounded up.
+ */
+export function dayArrivals(bar: number, emptyRoom = 0): number {
   if (!(bar > 0)) return 0;
+  const { arrivalsPerYearAtFullDemand, fillDays } = DEMAND_BALANCE;
   // ceil(x) as -floor(-x), so it uses only floor (CLAUDE.md rule 6).
-  return -Math.floor(-(DEMAND_BALANCE.arrivalsPerYearAtFullDemand * bar) / (100 * yearDays()));
+  const floor = -Math.floor(-(arrivalsPerYearAtFullDemand * bar) / (100 * yearDays()));
+  const room = -Math.floor(-(emptyRoom * bar) / (100 * fillDays));
+  return Math.max(floor, room);
 }
 
 /** A level, 0 low to 2 high, drawn with `shares`. One draw. */
@@ -163,7 +175,9 @@ function moveIn(state: SimState, d: HomeDraw): number {
 /** The arrivals system's work for one tick, as the header says. */
 export function arrive(state: SimState): void {
   const p = state.pops;
-  p.owed += growthOnTick(state.tick, dayArrivals(state.demand.residential.value));
+  const bar = state.demand.residential.value;
+  if (!(bar > 0) && p.owed <= 0) return;
+  p.owed += growthOnTick(state.tick, dayArrivals(bar, reachableRoom(state).empty));
   if (p.owed <= 0) return;
   const d = homeDraw(state);
   while (p.owed > 0 && d.left > 0) p.owed -= moveIn(state, d);
