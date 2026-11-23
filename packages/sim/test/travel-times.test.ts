@@ -254,6 +254,25 @@ describe("keeping the table current", () => {
     });
   });
 
+  it("gives the table a fresh city gets when each step's share is smaller than one row's search (#326)", () => {
+    // 176 nodes and 40 settles a tick: every row's search stops part way
+    // through at least four steps and carries on in the next.
+    withSettlesPerTick(40, () => {
+      const state = createBareState(1);
+      const net = state.roads;
+      const ids = grid(net, 1010, 1010, 16, 11, 100);
+      prepareTravelTimes(state);
+      addSegment(net, ids[0] ?? 0, ids[ids.length - 1] ?? 0, { type: AVENUE });
+      markRoadsChanged(state);
+      step(state);
+      const { nodes, zones } = travelRebuildSize(state);
+      expect(nodes).toBe(176);
+      expect(state.travelReadyAt - state.tick).toBe(Math.ceil((zones * nodes) / 40) + 1);
+      stepUntilReady(state);
+      expect(allAnswers(state)).toEqual(allAnswers(cloneState(state)));
+    });
+  });
+
   it("refuses to answer while a change of roads is being rebuilt, and answers from the tick it is ready by", () => {
     withSettlesPerTick(2_000, () => {
       const state = createBareState(1);
