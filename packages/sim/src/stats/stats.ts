@@ -50,6 +50,8 @@ const RESIDENTS_BY_WEALTH = LEVELS.map((l) => `residentsWealth${l}`);
 const JOBS_BY_KIND = JOB_KINDS.map((k) => `jobs${KIND_NAMES[k]}`);
 /** Jobs filled, in `JOB_KINDS` order. */
 const FILLED_BY_KIND = JOB_KINDS.map((k) => `filled${KIND_NAMES[k]}`);
+/** By type index: 1 for a type that offers jobs. */
+const OFFERS_JOBS = Uint8Array.from(BUILDING_TYPES, (t) => (t.jobsPerCell > 0 ? 1 : 0));
 /** Buildings by zone number less 1, then density less 1: `buildingsR1` to `buildingsM3`. */
 const BUILDINGS_BY_ZONE = ZONING_BALANCE.zones.map((zone) => ZONING_BALANCE.densities.map((d) => `buildings${zone.letter}${d.level}`));
 
@@ -184,6 +186,11 @@ function addBuilding(t: StatTotals, b: BuildingState, id: number, sign: number):
   const zone = b.zone[id] ?? 0;
   const density = b.density[id] ?? 0;
   bump(t, BUILDINGS_BY_ZONE[zone - 1]?.[density - 1], sign);
+  addJobs(t, b, id, sign);
+}
+
+/** Adds `sign` times the jobs live building `id` offers to `t`, by kind. */
+function addJobs(t: StatTotals, b: BuildingState, id: number, sign: number): void {
   const type = BUILDING_TYPES[b.type[id] ?? 0];
   const jobs = buildingJobs(b, id);
   if (!type || jobs === 0) return;
@@ -236,6 +243,29 @@ export function countEmployment(state: SimState, workers: number, sign: 1 | -1):
 /** Adds live building `id` and the jobs it offers to the running totals, or takes it out with `sign` -1, while its row still says what it is. */
 export function countBuilding(state: SimState, id: number, sign: 1 | -1): void {
   addBuilding(state.stats.totals, state.buildings, id, sign);
+}
+
+/**
+ * `countBuilding` for each of `ids`, with the buildings by zone and density
+ * added up first and each total moved once: a bulldoze of thousands would
+ * look each name up thousands of times (issue #306). Every count is a
+ * whole number, so the totals come out the same.
+ */
+export function countBuildings(state: SimState, ids: readonly number[], sign: 1 | -1): void {
+  const t = state.stats.totals;
+  const b = state.buildings;
+  const zones = BUILDINGS_BY_ZONE.length;
+  const densities = DENSITIES;
+  const byZone = new Int32Array(zones * densities);
+  for (const id of ids) {
+    const zone = (b.zone[id] ?? 0) - 1;
+    const density = (b.density[id] ?? 0) - 1;
+    if (zone >= 0 && zone < zones && density >= 0 && density < densities) byZone[zone * densities + density] = (byZone[zone * densities + density] as number) + 1;
+    if (OFFERS_JOBS[b.type[id] ?? 0] === 1) addJobs(t, b, id, sign);
+  }
+  for (let zone = 0; zone < zones; zone++) {
+    for (let density = 0; density < densities; density++) bump(t, BUILDINGS_BY_ZONE[zone]?.[density], sign * (byZone[zone * densities + density] as number));
+  }
 }
 
 /** Adds `by` to the residents' summed satisfaction: a pop's people times the change in its score (M3-10). */

@@ -227,6 +227,61 @@ export function moveHome(index: PopIndex, p: PopState, id: number, home: number)
   notePopBuilding(p, home);
 }
 
+/**
+ * Moves every pop out of `home`, as `moveHome` to NO_HOME does each, first
+ * in its list first, and adds them to `out` in that order. One walk down
+ * the list and one note for the building, for a bulldoze of thousands of
+ * homes (issue #306).
+ */
+export function emptyHome(index: PopIndex, p: PopState, home: number, out: number[]): void {
+  const { homeHead, homeTail, homeNext, homePrev, people } = index;
+  let id = homeHead[home] ?? NONE;
+  if (id === NONE) return;
+  let left = people[home] ?? 0;
+  while (id !== NONE) {
+    const after = homeNext[id] ?? NONE;
+    left -= p.size[id] ?? 0;
+    p.home[id] = NO_HOME;
+    homeNext[id] = NONE;
+    homePrev[id] = NONE;
+    out.push(id);
+    id = after;
+  }
+  homeHead[home] = NONE;
+  homeTail[home] = NONE;
+  people[home] = left;
+  notePopBuilding(p, home);
+}
+
+/**
+ * Takes every pop off workplace `work`'s list and sets its work to NO_WORK,
+ * as `unlinkWork` and then the write of NO_WORK do each, and returns their
+ * workers added up. One walk and one note of each kind for the building.
+ */
+export function emptyWork(index: PopIndex, p: PopState, work: number): number {
+  const { workHead, workTail, workNext, workPrev, filled, filledByEducation } = index;
+  let id = workHead[work] ?? NONE;
+  if (id === NONE) return 0;
+  let all = 0;
+  while (id !== NONE) {
+    const after = workNext[id] ?? NONE;
+    const workers = popWorkers(p, id);
+    all += workers;
+    filled[work] = (filled[work] ?? 0) - workers;
+    const at = work * POP_LEVELS + Math.min(POP_LEVELS - 1, p.education[id] ?? 0);
+    filledByEducation[at] = (filledByEducation[at] ?? 0) - workers;
+    p.work[id] = NO_WORK;
+    workNext[id] = NONE;
+    workPrev[id] = NONE;
+    id = after;
+  }
+  workHead[work] = NONE;
+  workTail[work] = NONE;
+  notePopBuilding(p, work);
+  noteOpening(p, work);
+  return all;
+}
+
 /** Adds `people` to the count at satisfaction `score`, or takes them away when negative. pops.ts calls it around every change of a pop's size or score. */
 export function moveSatisfactionPeople(index: PopIndex, score: number, people: number): void {
   index.peopleBySatisfaction[score] = (index.peopleBySatisfaction[score] ?? 0) + people;
