@@ -19,10 +19,12 @@ import {
   ZONING_BALANCE,
   deserialize,
   findRouteBetween,
+  gridEffects,
   planRoad,
   planRoadGrid,
   planZoneCells,
   prepareDerived,
+  roadEffects,
   routingGraphOf,
   serialize,
   serializeDetached,
@@ -152,6 +154,9 @@ const last = grids.at(-1);
 
 test("the M1 scale network", async ({ bench, annotate }) => {
   if (!first || !last) throw new Error("no grids");
+  const plannedGrid = planRoadGrid(net, terrain, grid);
+  if (!plannedGrid.ok) throw new Error(plannedGrid.reason);
+  const gridPlan = plannedGrid.plan;
   const segments = segmentCount(net);
   expect(segments).toBeGreaterThanOrEqual(30_000);
   const blocks = blockIndexOf(net);
@@ -282,6 +287,14 @@ test("the M1 scale network", async ({ bench, annotate }) => {
       reverseOps(net, ops);
       syncCells(state);
     },
+    // #323: what the road tool's preview pays for the same road, on the main
+    // thread while the pointer moves: one rehearsal that finds the buildings
+    // it clears and the cells it opens, taken back.
+    "the road tool's preview of one BuildRoad crossing ten segments: the buildings it clears and the cells it opens": () =>
+      void roadEffects(state, crossing.plan),
+    // The same for the grid tool once a grid at the cap over the city's streets is placed.
+    "the grid tool's preview of that grid at the cap, once placed: the buildings it clears and the cells it opens": () =>
+      void gridEffects(state, gridPlan),
     "generate every zoning cell of the city from scratch, as a load does": () => void buildCellIndex(net, terrain),
     // M2-04: what the zone tool's preview pays for the same stroke.
     "planZoneCells for one ZoneCells at the cap": () => void planZoneCells(state, zoning.command.payload),
@@ -314,6 +327,7 @@ test("the M1 scale network", async ({ bench, annotate }) => {
   const runsOf: Record<string, ReturnType<typeof fixedRuns>> = {
     "generate every zoning cell of the city from scratch, as a load does": fixedRuns(5),
     "one BuildRoadGrid at the cap over existing streets with every cell settled, and taking it back, for comparison": fixedRuns(10),
+    "the grid tool's preview of that grid at the cap, once placed: the buildings it clears and the cells it opens": fixedRuns(20),
   };
   for (const name of Object.keys(hooked)) runsOf[name] = fixedRuns(30);
   const meanMs: Record<string, number> = {};
