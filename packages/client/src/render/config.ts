@@ -704,6 +704,21 @@ export const CONSTRUCTION = {
  * painted. Drawn through the terrain over the overlay, like the road
  * preview. An erase shows the cells it would clear in `erase`.
  */
+/**
+ * The cells a road or grid would open (the road tools' preview), drawn
+ * with the zone tool's marks (zone-preview.ts) over the zoning overlay. In
+ * the overlay's unzoned colour, since that is what they are when built,
+ * but filled, so they read apart from the outlines of the cells already
+ * there.
+ */
+export const ROAD_CELLS = {
+  colour: CELLS.unzoned,
+  /** Opacity of the cells the road under the pointer would open. */
+  opacity: 0.45,
+  /** Opacity of the cells of a road or grid sent and not yet built. */
+  pendingOpacity: 0.3,
+} as const;
+
 export const ZONE_PREVIEW = {
   /** Opacity of the cells the click would change. */
   opacity: 0.9,

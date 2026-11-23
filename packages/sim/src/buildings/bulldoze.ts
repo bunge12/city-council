@@ -18,7 +18,7 @@ import { endJournal, reverseOps, startJournal, type NetworkOp, type RoadNetwork 
 import type { SimState } from "../state";
 import { terrainOf } from "../terrain/cache";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
-import { openCellsUnder, syncCells } from "../zoning/cell-index";
+import { newCellsOf, openCellsUnder, syncCells, type CellIndex } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE } from "./balance";
 import { popIndexOf } from "../pops/where";
 import { isBuilding, removeBuildings, type BuildingState } from "./buildings";
@@ -133,27 +133,71 @@ export function bulldozeClears(state: SimState, plan: BulldozePlan, people: Peop
 }
 
 /**
- * Builds on `net` with its journal open, finds the open cells the new
- * segments' surfaces cover, and takes the build back. The cell index is
- * not asked until the network is as it was, so it never sees the change.
+ * Builds on `net` with its journal open, hands `read` the segments the
+ * build added, ascending, with the cell index as it was before the build,
+ * and takes the build back. `read` must not sync the index, so once the
+ * network is as it was the index has never seen the change.
  */
-function cellsCoveredBy(state: SimState, build: (net: RoadNetwork) => boolean): number[] {
+function rehearse<T>(state: SimState, build: (net: RoadNetwork) => boolean, read: (index: CellIndex, added: number[]) => T, none: T): T {
   const index = syncCells(state);
   const net = state.roads;
   startJournal(net);
   let ops: NetworkOp[] | null = null;
   try {
-    if (!build(net)) return [];
+    if (!build(net)) return none;
     ops = endJournal(net);
     const added = new Set<number>();
     for (const op of ops) {
       if (op.op === "addSeg") added.add(op.id);
       else if (op.op === "removeSeg") added.delete(op.id);
     }
-    return openCellsUnder(index, net, [...added].sort((p, q) => p - q));
+    return read(index, [...added].sort((p, q) => p - q));
   } finally {
     reverseOps(net, ops ?? endJournal(net));
   }
+}
+
+/** The open cells the new segments' surfaces would cover, by key. */
+function cellsCoveredBy(state: SimState, build: (net: RoadNetwork) => boolean): number[] {
+  return rehearse(state, build, (index, added) => openCellsUnder(index, state.roads, added), []);
+}
+
+/**
+ * The cells a build would open on its own new roads, as corners, eight
+ * numbers a cell (`newCellsOf`). The pieces of a road it splits keep
+ * their cells, so only segments with a new build order count.
+ */
+function cellsOpenedBy(state: SimState, build: (net: RoadNetwork) => boolean): Float64Array {
+  const firstNew = state.roads.segOrderNext;
+  return rehearse(
+    state,
+    build,
+    (index, added) => {
+      const net = state.roads;
+      const lost = new Set(openCellsUnder(index, net, added));
+      return newCellsOf(index, net, added.filter((id) => (net.segOrder[id] ?? 0) >= firstNew), lost);
+    },
+    new Float64Array(0),
+  );
+}
+
+/**
+ * The cells a new road would bring that a player could zone: open, on its
+ * own segments, as corners, eight numbers a cell. For the road tool's
+ * preview, so the player sees the lots a road makes before building it.
+ */
+export function roadCells(state: SimState, plan: RoadPlan): Float64Array {
+  const terrain = terrainOf(state.seed);
+  return cellsOpenedBy(state, (net) => {
+    buildRoad(net, terrain, plan);
+    return true;
+  });
+}
+
+/** As `roadCells`, for every street of a grid. None for a grid a street of which is refused. */
+export function gridCells(state: SimState, plan: GridPlan): Float64Array {
+  const terrain = terrainOf(state.seed);
+  return cellsOpenedBy(state, (net) => buildRoadGrid(net, terrain, plan) === null);
 }
 
 /**

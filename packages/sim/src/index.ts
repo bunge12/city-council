@@ -193,11 +193,13 @@ export type { BuildingInfo } from "./buildings/where";
 export {
   BUILDING_CHANGED,
   bulldozeClears,
+  gridCells,
   gridClears,
   planBulldozeBuildings,
   previewBuildRoad,
   previewBuildRoadGrid,
   previewBulldozeRoad,
+  roadCells,
   roadClears,
   seeBuilding,
 } from "./buildings/bulldoze";

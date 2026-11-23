@@ -713,6 +713,18 @@ function covered(index: CellIndex, seg: number, q: Float64Array, box: Float64Arr
   return false;
 }
 
+/** What the ground alone says of quad `q`, whose box is `box`: off the map, water, steep, a fold, or open. */
+function groundStatus(t: Terrain, q: Float64Array, box: Float64Array): number {
+  const size = mapSize(t);
+  if ((box[0] ?? 0) < 0 || (box[1] ?? 0) < 0 || (box[2] ?? 0) > size || (box[3] ?? 0) > size) return CELL_OFF_MAP;
+  const { x, z } = quadCentre(q);
+  if (isWaterAt(t, x, z)) return CELL_WATER;
+  for (let i = 0; i < 8; i += 2) if (isWaterAt(t, q[i] ?? 0, q[i + 1] ?? 0)) return CELL_WATER;
+  if (slopeAt(t, x, z) > ZONING_BALANCE.maxSlope) return CELL_STEEP;
+  if (!isConvexQuad(q)) return CELL_BEND;
+  return CELL_OPEN;
+}
+
 /** The CELL_ value of cell `local` of segment `seg`, given the cells that claim before it. */
 function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): number {
   const q = quadW;
@@ -723,14 +735,8 @@ function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): nu
   const minZ = box[1] ?? 0;
   const maxX = box[2] ?? 0;
   const maxZ = box[3] ?? 0;
-  const t = index.terrain;
-  const size = mapSize(t);
-  if (minX < 0 || minZ < 0 || maxX > size || maxZ > size) return CELL_OFF_MAP;
-  const { x, z } = quadCentre(q);
-  if (isWaterAt(t, x, z)) return CELL_WATER;
-  for (let i = 0; i < 8; i += 2) if (isWaterAt(t, q[i] ?? 0, q[i + 1] ?? 0)) return CELL_WATER;
-  if (slopeAt(t, x, z) > ZONING_BALANCE.maxSlope) return CELL_STEEP;
-  if (!isConvexQuad(q)) return CELL_BEND;
+  const ground = groundStatus(index.terrain, q, box);
+  if (ground !== CELL_OPEN) return ground;
   if (covered(index, seg, q, box)) return CELL_ROAD;
   // Lost to an open cell that claims first and overlaps it.
   const key = keyOf(seg, local);
@@ -2305,4 +2311,163 @@ export function openCellsTakenBy(index: CellIndex, segs: readonly ReturningSegme
     }
   }
   return [...out].sort((p, q) => p - q);
+}
+
+/**
+ * The corners of the cells new segments `segs` of `net` would open, eight
+ * numbers a cell, for the road and grid tools' previews: what a player
+ * could zone once the road is built. `net` holds a change `index` has not
+ * seen, as in `openCellsUnder`; nothing in the index changes. `segs` must
+ * be segments with build orders newer than any the index holds, so every
+ * cell already there claims first. `lost` holds the keys of the open cells
+ * their surfaces cover, which claim nothing once the road is built.
+ *
+ * This is the walk the step does, cut short. First the old cells that lost
+ * ground to a cell in `lost` are walked again, in claim order: one opens
+ * when no new surface covers it and no open old cell, or one opened before
+ * it, claims first and overlaps it. Then each new cell, in claim order, is
+ * open when the ground allows it, no surface but its own covers it, and no
+ * open old cell overlaps it, nor a new cell opened before it. The step goes
+ * on from there: an old cell that opens takes ground from old cells after
+ * it, which can free more. The preview stops at the first round, so it can
+ * be wrong where a chain of old cells lies across each other's ground, and
+ * the step's walk has the final say.
+ */
+export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly number[], lost: ReadonlySet<number>): Float64Array {
+  const shapes: { id: number; s: SegShape }[] = [];
+  for (const id of segs) {
+    const s = shapeOf(net, id);
+    if (s) shapes.push({ id, s });
+  }
+  const box = new Float64Array(4);
+  const q = new Float64Array(8);
+  const other = new Float64Array(8);
+  const otherBox = new Float64Array(4);
+  /** Buckets of quads, eight numbers each in `quads`, for the overlap tests. */
+  const filed = () => ({ quads: [] as number[], buckets: new Map<number, number[]>() });
+  const file = (into: ReturnType<typeof filed>, quad: Float64Array, quadBox: Float64Array) => {
+    const at = into.quads.length / 8;
+    for (let i = 0; i < 8; i++) into.quads.push(quad[i] ?? 0);
+    forBuckets(index, quadBox, (bucket) => {
+      const list = into.buckets.get(bucket);
+      if (list) list.push(at);
+      else into.buckets.set(bucket, [at]);
+    });
+  };
+  const overlapsAny = (from: ReturnType<typeof filed>, quad: Float64Array, quadBox: Float64Array): boolean => {
+    let hit = false;
+    forBuckets(index, quadBox, (bucket) => {
+      if (hit) return;
+      for (const at of from.buckets.get(bucket) ?? []) {
+        for (let i = 0; i < 8; i++) other[i] = from.quads[at * 8 + i] ?? 0;
+        quadBoxInto(other, otherBox);
+        if (boxesTouch(quadBox, otherBox) && quadsOverlap(quad, other)) {
+          hit = true;
+          return;
+        }
+      }
+    });
+    return hit;
+  };
+  // The new surfaces, filed by bucket as (shape, piece) pairs, so a grid's thousands of cells test only the pieces near them.
+  const surfaces = new Map<number, number[]>();
+  shapes.forEach(({ s }, n) => {
+    const data = s.data;
+    if (!data) return;
+    for (let k = 0; k < s.pieces; k++) {
+      forBuckets(index, data.subarray(s.boxesAt + k * 4, s.boxesAt + k * 4 + 4), (bucket) => {
+        const list = surfaces.get(bucket);
+        if (list) list.push(n, k);
+        else surfaces.set(bucket, [n, k]);
+      });
+    }
+  });
+  /** Whether a new surface, other than shape `own`'s, covers `quad`. */
+  const underNew = (quad: Float64Array, quadBox: Float64Array, own: number): boolean => {
+    let hit = false;
+    forBuckets(index, quadBox, (bucket) => {
+      if (hit) return;
+      const list = surfaces.get(bucket);
+      if (!list) return;
+      for (let e = 0; e < list.length && !hit; e += 2) {
+        const n = list[e] ?? 0;
+        if (n === own) continue;
+        const o = shapes[n]?.s as SegShape;
+        const k = list[e + 1] ?? 0;
+        const b = o.boxesAt + k * 4;
+        const data = o.data as Float64Array;
+        if ((data[b] ?? 0) > (quadBox[2] ?? 0) || (data[b + 2] ?? 0) < (quadBox[0] ?? 0) || (data[b + 1] ?? 0) > (quadBox[3] ?? 0) || (data[b + 3] ?? 0) < (quadBox[1] ?? 0)) continue;
+        if (quadsOverlap(quad, surfacePiece(o, k))) hit = true;
+      }
+    });
+    return hit;
+  };
+  // Old cells that lost ground to a cell the new roads cover may have it back.
+  const candidates = new Set<number>();
+  for (const key of lost) {
+    const seg = segOfKey(key);
+    cellQuad(index.segs[seg] as SegShape, key - seg * KEY_STRIDE, q);
+    quadBoxInto(q, box);
+    forOverlappingCells(index, q, Float64Array.from(box), LOST_GROUND, (k) => candidates.add(k));
+  }
+  const reopened = filed();
+  for (const key of [...candidates].sort((p, r) => (claimsFirst(index, p, r) ? -1 : 1))) {
+    const seg = segOfKey(key);
+    const shape = index.segs[seg] as SegShape;
+    const local = key - seg * KEY_STRIDE;
+    cellQuad(shape, local, q);
+    quadBoxInto(q, box);
+    const qBox = Float64Array.from(box);
+    if (underNew(q, qBox, -1)) continue;
+    let blocked = false;
+    forOverlappingCells(
+      index,
+      q,
+      qBox,
+      BIT_OPEN,
+      () => {
+        blocked = true;
+      },
+      (k, ks) => blocked || lost.has(k) || !claimsBefore(index.segs[ks] as SegShape, k - ks * KEY_STRIDE, k, shape, local, key),
+    );
+    if (blocked || overlapsAny(reopened, q, qBox)) continue;
+    file(reopened, q, qBox);
+  }
+  // Every new cell, in claim order.
+  const cells: { n: number; local: number }[] = [];
+  shapes.forEach(({ s }, n) => {
+    const count = s.places * cellsPerPlace();
+    for (let local = 0; local < count; local++) cells.push({ n, local });
+  });
+  const keyOfCell = (c: { n: number; local: number }) => keyOf(shapes[c.n]?.id ?? 0, c.local);
+  cells.sort((p, r) => {
+    const ps = shapes[p.n]?.s as SegShape;
+    const rs = shapes[r.n]?.s as SegShape;
+    return claimsBefore(ps, p.local, keyOfCell(p), rs, r.local, keyOfCell(r)) ? -1 : 1;
+  });
+  const opened = filed();
+  for (const c of cells) {
+    const { id, s } = shapes[c.n] as { id: number; s: SegShape };
+    cellQuad(s, c.local, q);
+    quadBoxInto(q, box);
+    if (groundStatus(index.terrain, q, box) !== CELL_OPEN) continue;
+    if (covered(index, id, q, box)) continue;
+    const qBox = Float64Array.from(box);
+    if (underNew(q, qBox, c.n)) continue;
+    // Any old open cell claims first, unless the new roads cover it.
+    let blocked = false;
+    forOverlappingCells(
+      index,
+      q,
+      qBox,
+      BIT_OPEN,
+      () => {
+        blocked = true;
+      },
+      (key) => blocked || lost.has(key),
+    );
+    if (blocked || overlapsAny(reopened, q, qBox) || overlapsAny(opened, q, qBox)) continue;
+    file(opened, q, qBox);
+  }
+  return Float64Array.from(opened.quads);
 }

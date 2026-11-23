@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { ROAD_TYPES, createState, generateTerrain, heightAt, serialize } from "../packages/sim/src/index";
+import { ROAD_TYPES, createState, generateTerrain, heightAt, planRoad, roadCells, serialize, step, submit } from "../packages/sim/src/index";
 import { formatMoneyShort } from "../packages/client/src/ui/format";
 import { FLAT, SEED, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
@@ -225,6 +225,45 @@ test("draws a street, crosses it with an avenue, and refuses a road into water",
   await expect(readout).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("shows the zoning cells already there and the cells a road would open (#323)", async ({ page }, testInfo) => {
+  // A street west to east, in Node, so the page and the test agree on the city.
+  const state = createState(SEED);
+  const first = { from: { x: 4220, z: 4600 }, to: { x: 4480, z: 4600 }, type: "street" };
+  expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: first })).toEqual({ ok: true });
+  step(state);
+  // A street north to south across it: the cells it would open, as the sim finds them.
+  const crossing = { from: { x: 4350, z: 4470 }, to: { x: 4350, z: 4730 }, type: "street" };
+  const plan = planRoad(state.roads, terrain, crossing);
+  if (!plan.ok) throw new Error(plan.reason);
+  const opened = roadCells(state, plan.plan).length / 8;
+  expect(opened).toBeGreaterThan(0);
+
+  await openCity(page, Buffer.from(serialize(state)), { name: "One street" });
+  const ground = groundAt(4350, 4600);
+  await setPose(page, [4350, ground + 330, 4860], [4350, ground, 4600]);
+  // No tool: no overlay.
+  await expect(page.locator("#zone-legend")).toHaveCount(0);
+
+  // The road tool brings the zoning overlay, so the first street's cells show.
+  await page.keyboard.press("KeyR");
+  await expect(page.locator("#zone-legend")).toBeVisible();
+  await attach(page, testInfo, "road tool shows the cells already there");
+
+  // Drawing the crossing street shows the cells it would open, as many as the sim says.
+  await clickGround(page, crossing.from.x, crossing.from.z);
+  await hover(page, crossing.to.x, crossing.to.z);
+  await expect(page.locator("#road-readout")).toHaveAttribute("data-ok", "true");
+  await expect(page.locator("body")).toHaveAttribute("data-road-cells", String(opened));
+  await attach(page, testInfo, "the cells the crossing street would open");
+
+  // Escape drops the road and its cells; leaving the tool puts the overlay away.
+  await page.keyboard.press("Escape");
+  await frames(page);
+  await expect(page.locator("body")).toHaveAttribute("data-road-cells", "0");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#zone-legend")).toHaveCount(0);
 });
 
 test("Escape drops a road being drawn, and the keys are listed with the others", async ({ page }) => {

@@ -21,6 +21,7 @@ import {
   cellAt,
   cellShapesInChunk,
   cellsInChunk,
+  gridCells,
   gridClears,
   landValueAt,
   landValuesOfShapes,
@@ -28,6 +29,7 @@ import {
   lotMarksInChunk,
   prepareWaterMap,
   terrainOf,
+  roadCells,
   roadClears,
   roadIndexOf,
   type BuildingGround,
@@ -382,6 +384,21 @@ export class SimMirror {
   /** As `roadClears`, for a grid the sim has planned. */
   gridClears(plan: GridPlan): BuildingsInTheWay {
     return this.current ? gridClears(this.current, plan, (id) => this.buildingPeople(id)) : { ids: [], residents: 0 };
+  }
+
+  /**
+   * The cells a road the sim has planned would open on its own segments,
+   * as corners, eight numbers a cell, for the road tool's preview: the
+   * sim's `roadCells`, rehearsed on the copy and taken back. Empty until
+   * the first snapshot.
+   */
+  roadCells(plan: RoadPlan): Float64Array {
+    return this.current ? roadCells(this.current, plan) : new Float64Array(0);
+  }
+
+  /** As `roadCells`, for a grid the sim has planned. */
+  gridCells(plan: GridPlan): Float64Array {
+    return this.current ? gridCells(this.current, plan) : new Float64Array(0);
   }
 
   requestSnapshot(): void {

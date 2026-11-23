@@ -1,11 +1,13 @@
 // The overlays the player can choose (issue M3-18). One list, one entry per
 // overlay the dock and the keys offer, so M5 and M8 add theirs as entries.
 // Zoning is an overlay too, but it is not in the list: the zone tool turns
-// it on and off with itself. Only one overlay shows at a time.
+// it on and off with itself, and so do the road and grid tools, so the
+// player sees the cells a road would bring beside the ones already there.
+// Only one overlay shows at a time.
 
 import type { CellColouring } from "../render/cell-geometry";
 
-/** Every overlay: zoning, which comes with the zone tool, and those in `OVERLAYS`. */
+/** Every overlay: zoning, which comes with the zone, road and grid tools, and those in `OVERLAYS`. */
 export type OverlayId = "zoning" | "landValue";
 
 export interface OverlayEntry {
@@ -35,23 +37,35 @@ export function colouringOf(overlay: OverlayId | null): CellColouring {
   return OVERLAYS.find((o) => o.id === overlay)?.colouring ?? "zoning";
 }
 
+/** The tools that bring the zoning overlay with them. */
+const ZONING_TOOLS: readonly (string | null)[] = ["zone", "road", "grid"];
+
+/** Whether tool `tool` brings the zoning overlay with it. */
+export function bringsZoning(tool: string | null): boolean {
+  return ZONING_TOOLS.includes(tool);
+}
+
 /**
  * The overlay after the player turns `id` on or off, with `current`
- * showing. Turning one on puts any other away; turning it off goes back to
- * zoning while the zone tool is on, and to none otherwise.
+ * showing and `tool` on. Turning one on puts any other away; turning it
+ * off goes back to zoning while a tool that brings it is on, and to none
+ * otherwise.
  */
-export function toggledOverlay(current: OverlayId | null, id: OverlayEntry["id"], zoneToolOn: boolean): OverlayId | null {
+export function toggledOverlay(current: OverlayId | null, id: OverlayEntry["id"], tool: string | null): OverlayId | null {
   if (current !== id) return id;
-  return zoneToolOn ? "zoning" : null;
+  return bringsZoning(tool) ? "zoning" : null;
 }
 
 /**
  * The overlay after the tool changes from `before` to `now`. Picking the
- * zone tool brings zoning back, whatever showed; leaving it puts zoning
+ * zone tool brings zoning back, whatever showed. Picking the road or grid
+ * tool brings it when no overlay shows, and leaves another one, such as
+ * land value, as it was. Leaving the last tool that brings zoning puts it
  * away, and leaves any other overlay as it was.
  */
 export function overlayAfterTool(current: OverlayId | null, now: string | null, before: string | null): OverlayId | null {
   if (now === "zone" && before !== "zone") return "zoning";
-  if (before === "zone" && now !== "zone" && current === "zoning") return null;
+  if (bringsZoning(now) && current === null) return "zoning";
+  if (!bringsZoning(now) && current === "zoning") return null;
   return current;
 }
