@@ -1,6 +1,8 @@
-// Soak run: hosts the M1 scale city, 30,000 road segments, headless at 4x
-// for one hour of game time while roads are built, upgraded, bulldozed and
-// undone, and reports step time and memory. Run it with `pnpm soak`.
+// Soak run: hosts the scale city of 200,000 residents (M3-20), the M1
+// scale city's 30,000 road segments with homes, workplaces and pops in
+// them, headless at 4x for one hour of game time while roads are built,
+// upgraded, bulldozed and undone, and reports step time and memory. Run it
+// with `pnpm soak`.
 //
 // It drives the real SimHost, the same class the Web Worker runs, with no
 // worker and no page. The host reads its clock once at the start of each
@@ -45,9 +47,13 @@
 // sim's thread and names the ones that ran during each step over the budget
 // and each grower step over 5 ms (issue 166).
 //
-// At the end a replay of the full log from the
-// seed, the scale city's own commands included, must give the same state
-// hash as the live city.
+// Since M3-20 pops arrive, find work, leave and turn over all hour, on a
+// city that starts with 200,000 of them, and the report counts each.
+//
+// At the end a replay of the hour's log onto the city as it began must give
+// the same state hash as the live city. Its buildings and pops were placed
+// by the generator, not by commands, so a replay from the seed gives only
+// its roads and zoning; scale-city-50k.test.ts checks that part.
 //
 // The hour runs once, and two tests judge it (issue #231). "the replay and
 // the page agree with the live city" holds the hashes: a failure there means
@@ -67,6 +73,7 @@ import { PerformanceObserver, constants, performance } from "node:perf_hooks";
 import {
   CELLS_SYSTEM,
   GROWER_SYSTEM,
+  YEAR_COUNTS,
   LOG_LIVE_LIMIT,
   PROTOCOL_VERSION,
   SCALE_SEGMENTS,
@@ -76,12 +83,12 @@ import {
   budgetFigure,
   buildScaleCity,
   buildingCount,
-  cellsSettled,
   deserialize,
+  generateScaleCity,
   hashState,
   judgeBudget,
-  replay,
-  step,
+  replayFrom,
+  serialize,
   type FromSimMessage,
 } from "@city-council/sim";
 import { beforeAll, describe, expect, test } from "vitest";
@@ -284,7 +291,19 @@ interface SoakRun {
     autosaves: number;
     settleSteps: number;
     applied: Record<string, number>;
-    mostBuildings: number;
+    /** The most buildings standing at a sample, past those the hour began with. */
+    grown: number;
+  };
+  /** Pops at the start and end of the hour, and who arrived, left, was born and died in it. */
+  people: {
+    start: { population: number; pops: number; buildings: number };
+    end: { population: number; pops: number; buildings: number };
+    workersEmployed: number;
+    workersUnemployed: number;
+    births: number;
+    deaths: number;
+    arrivals: number;
+    departures: number;
   };
 }
 
@@ -307,23 +326,23 @@ async function soakHour(): Promise<SoakRun> {
     return offset + (performance.now() - pumpStart);
   };
   const { transport, inject, ask, received } = page;
-  // Every demand bar held at 100 (M3-07): the scale city has no residents,
-  // so with its own bars only houses would grow, at the pull from outside,
-  // and the soak would measure an idle grower. Held, every zone grows at
-  // its full rate, the busiest demand can ask for. The replay at the end
-  // runs in this thread, so it is held the same way.
+  // Every demand bar held at 100 (M3-07), so every zone grows and people
+  // arrive at the full rate, the busiest demand can ask for, however the
+  // hour goes. Held since the scale city had no residents; the city of
+  // 200,000 keeps it so the grower and arrivals stay busy all hour. The
+  // replay at the end runs in this thread, so it is held the same way.
+  // The generator lets the scale city's walk of about 4,200 ticks of
+  // zoning cells settle before it zones (M2 review, #147), so the hour
+  // starts on a settled city, as a player's would be. Generated before the
+  // bars are held, so it is the city the bench and the e2e tests open.
+  const scale = generateScaleCity(200_000, buildScaleCity());
   holdDemandBars(100);
-  const scale = buildScaleCity();
-  // The generator lays its grids faster than any player, and leaves a walk
-  // of about 4,200 ticks of zoning cells behind. The hour starts once that
-  // has settled, as a player's city would be: strokes sent into a walk that
-  // long wait for it (M2 review, #147), and the backlog would measure the
-  // generator, not play. No command is sent meanwhile, so a replay of the
-  // log from the seed steps through the same ticks.
-  while (!cellsSettled(scale.state)) step(scale.state);
   const startTick = scale.state.tick;
-  const SEED = scale.state.seed;
+  /** The city as the hour begins, which the replay at the end starts from. */
+  const startBytes = serialize(scale.state);
+  const startPeople = { population: scale.totals.population, pops: scale.totals.pops, buildings: scale.totals.buildings };
   const host = new SimHost(scale.state, transport, clock);
+  const startLogLength = host.fullLog.length;
   // The page asks for a snapshot as it starts; wait until it has one.
   let ready = false;
   for (let k = 0; k < 1000 && !ready; k++) {
@@ -573,9 +592,9 @@ async function soakHour(): Promise<SoakRun> {
   const fileMs = performance.now() - fileStart;
   const heapEnd = heapUsed();
 
-  // The live city and a replay of its full log from the seed must agree.
+  // The live city and a replay of the hour's log onto the city as it began must agree.
   const live = deserialize(host.snapshotBytes());
-  const replayed = replay(SEED, host.fullLog, host.tick);
+  const replayed = replayFrom(deserialize(startBytes).state, host.fullLog.slice(startLogLength), host.tick);
   const pageHashes = await ask<{ roads: string; cells: string; buildings: string; room: number | null } | null>({ q: "hashes" });
   await page.stop();
 
@@ -626,8 +645,21 @@ async function soakHour(): Promise<SoakRun> {
   const lastSave = host.startSave(0);
   const savePartsMatch = Buffer.from(finishSave(lastSave)).equals(Buffer.from(host.saveBytes(0).bytes));
   lastSave.release();
+  /** The pops' year counts over the hour: the year that ended in it, if one did, and the one running. */
+  const people = (() => {
+    const t = live.state.stats;
+    const counts = Object.fromEntries(YEAR_COUNTS.map((k) => [k, (t.year[k] ?? 0) + (t.lastYear[k] ?? 0)])) as Record<(typeof YEAR_COUNTS)[number], number>;
+    return {
+      start: startPeople,
+      end: { population: t.totals["population"] ?? 0, pops: t.totals["pops"] ?? 0, buildings: buildingCount(live.state.buildings) },
+      workersEmployed: t.totals["workersEmployed"] ?? 0,
+      workersUnemployed: t.totals["workersUnemployed"] ?? 0,
+      ...counts,
+    };
+  })();
   const report = {
-    seed: SEED,
+    seed: live.state.seed,
+    people,
     startSegments: scale.counts.segments,
     endSegments: (() => {
       let n = 0;
@@ -727,8 +759,9 @@ async function soakHour(): Promise<SoakRun> {
       autosaves: snapshotParts.length,
       settleSteps: settleSorted.length,
       applied: Object.fromEntries(Object.entries(byCommand).map(([type, c]) => [type, c.applied])),
-      mostBuildings: report.grower.mostBuildings,
+      grown: report.grower.mostBuildings - startPeople.buildings,
     },
+    people,
   };
 }
 
@@ -754,6 +787,16 @@ describe("soak: one hour of game time at 4x", () => {
     expect(h.page?.room, "the page's room").toBe(h.room);
   });
 
+  test("pops arrive, work, leave and turn over all hour", () => {
+    const p = run.people;
+    expect(p.start.population, "residents as the hour began").toBeGreaterThan(190_000);
+    expect(p.arrivals, "people who arrived").toBeGreaterThan(0);
+    expect(p.departures, "people who left").toBeGreaterThan(0);
+    expect(p.births, "births").toBeGreaterThan(0);
+    expect(p.deaths, "deaths").toBeGreaterThan(0);
+    expect(p.workersEmployed, "workers in a job at the end").toBeGreaterThan(0);
+  });
+
   test(`every source inside the ${BUDGET_MS} ms tick budget`, () => {
     const b = run.budgets;
     // Enough of each source ran for its count over the budget to mean
@@ -762,11 +805,15 @@ describe("soak: one hour of game time at 4x", () => {
     expect(b.autosaves, "autosaves taken").toBeGreaterThan(20);
     expect(b.settleSteps, "steps that walked a slice of zoning cells").toBeGreaterThan(20);
     for (const [type, applied] of Object.entries(b.applied)) expect(applied, `${type} applied`).toBeGreaterThan(20);
-    // The grower built a town on the zoning, and the clearing took some of it away again.
-    // Since M3-07 its pace follows demand: with every bar at 100 the zones add
-    // about 50 buildings a game day together, against up to 1,000 at the M2
-    // pace, and the hour's 360 game days grew about 2,800 (10,000 before).
-    expect(b.mostBuildings, "buildings grown").toBeGreaterThan(2_000);
+    // On the empty scale city the grower built a town of about 2,800
+    // buildings over the hour. On the city of 200,000 (M3-20) the homes
+    // stand part empty from the start, at 1.1 times the room, and empty
+    // further as the clearing and departures go on, so the grower holds
+    // new homes back (`emptyRoomShareMax`) and adds few: one run grew 15
+    // past the start while the clearing took about 15,000. The grower is
+    // timed at full size in scale-cities.bench.ts instead. #324
+    // tracks a soak that keeps the grower busy on a full city.
+    expect(b.grown, "buildings standing past the start at some sample").toBeGreaterThan(0);
     // The tick budget is an exit number. A part of an autosave runs in the
     // worker between two steps, so it holds up the next one and gets the
     // same budget as a step (issue #83).

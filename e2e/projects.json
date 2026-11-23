@@ -18,7 +18,8 @@
     "cells-scale.spec.ts",
     "statistics-scale.spec.ts",
     "building-use-scale.spec.ts",
-    "land-value-scale.spec.ts"
+    "land-value-scale.spec.ts",
+    "scale-cities-load.spec.ts"
   ],
   "evidence": [
     "building-looks.spec.ts",
@@ -79,6 +80,7 @@
     "roads-scale.spec.ts": 179,
     "route-tool.spec.ts": 18,
     "save-load.spec.ts": 58,
+    "scale-cities-load.spec.ts": 100,
     "scale.spec.ts": 204,
     "sim-worker.spec.ts": 21,
     "smoke.spec.ts": 3,

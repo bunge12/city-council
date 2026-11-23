@@ -31,7 +31,7 @@ export type { LogEntry } from "./log";
 export { TIME_BALANCE, gameDate, isMonthStart, isYearStart, yearDays } from "./calendar";
 export type { GameDate, TimeBalance } from "./calendar";
 export { fnv1a64, hashMirrored, hashState } from "./hash";
-export { replay } from "./replay";
+export { replay, replayFrom } from "./replay";
 export { BALANCE_STAMP, replaysUnderThisBalance } from "./balance-stamp";
 export { BUDGETS, BUDGET_INHERITED_UP_TO, BUDGET_INHERITED_WITHIN, BUDGET_WARN_BELOW_HEADROOM, budgetFigure, judgeBudget } from "./budgets";
 export type { BudgetFigure, BudgetRow, BudgetStatistic, BudgetTimings } from "./budgets";
@@ -327,7 +327,7 @@ export {
   reachesOutside,
 } from "./roads/connections";
 export type { ConnectionBalance, ConnectionSite } from "./roads/connections";
-export { SCALE_BUILDINGS, SCALE_PLAYER, SCALE_SEED, SCALE_SEGMENTS, buildScaleCity, growScaleCity } from "./scale";
-export type { ScaleCity, ScaleCounts, ScaleTown } from "./scale";
+export { SCALE_BUILDINGS, SCALE_CITY_RESIDENTS, SCALE_PLAYER, SCALE_SEED, SCALE_SEGMENTS, buildScaleCity, generateScaleCity, growScaleCity } from "./scale";
+export type { GeneratedScaleCity, ScaleCity, ScaleCityResidents, ScaleCityTotals, ScaleCounts, ScaleTown } from "./scale";
 export { BLOCK_MIN_AREA, blockById, blockIndexOf, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
 export type { Block, BlockIndex } from "./roads/blocks";

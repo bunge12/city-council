@@ -24,10 +24,25 @@ import { step } from "./step";
  * Stops early if the city is paused with no entry left to unpause it.
  */
 export function replay(seed: number, log: readonly LogEntry[], untilTick: number): SimState {
+  return replayOnto(createState(seed), log, untilTick);
+}
+
+/**
+ * `replay`, from `start` rather than a new city: applies `log`, entries
+ * recorded since `start` was taken, on a copy of it, which is left as it
+ * is. For a city whose state holds more than its log rebuilds, such as a
+ * generated scale city (M3-20), whose buildings and pops were placed
+ * directly: the soak replays its hour onto the city it began with.
+ */
+export function replayFrom(start: SimState, log: readonly LogEntry[], untilTick: number): SimState {
+  return replayOnto(cloneState(start), log, untilTick);
+}
+
+/** Replays `log` onto `state` itself, as `replay` says. */
+function replayOnto(state: SimState, log: readonly LogEntry[], untilTick: number): SimState {
   if (!Number.isSafeInteger(untilTick) || untilTick < 0) {
     throw new RangeError(`untilTick must be a non-negative integer, got ${untilTick}`);
   }
-  const state = createState(seed);
   let next = 0;
   while (state.tick < untilTick) {
     const tick = state.tick;
