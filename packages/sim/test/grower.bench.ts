@@ -10,9 +10,9 @@
 // - the first growing tick after a street through a grid, and after a grid
 //   at the cap over existing streets, which look again at the segments the
 //   change laid out and those a lot could reach from them;
-// - every draw landing on a cell with no lot, so the grower tries
-//   `growthTries` cells and adds nothing: the most lot finder calls a tick
-//   can make;
+// - no cell with a lot: the first tick tries every one and sets it aside
+//   (M3-25), as a load or a change of roads makes it do, and a tick after
+//   tries none;
 // - every cell C3, so each draw also looks across its block for a
 //   through-lot (M2-14), and the same with no two strips meeting, so every
 //   look fails;
@@ -44,7 +44,7 @@ import {
 } from "../src/index";
 import { loadScaleCity } from "./scale-fixture";
 import { buildingCount, removeBuilding } from "../src/buildings/buildings";
-import { forgetCandidates } from "../src/buildings/candidates";
+import { forgetCandidates, setAsideCount } from "../src/buildings/candidates";
 import { grow, growOne } from "../src/buildings/grower";
 import { keepBuildings } from "../src/buildings/upkeep";
 import { ROAD_BUILD } from "../src/roads/balance";
@@ -198,7 +198,7 @@ function takeBack(): void {
 test("the grower on the M1 scale network with every cell zoned", async ({ bench, annotate }) => {
   const runs = { iterations: 30, time: 0, warmupIterations: 2, warmupTime: 0 };
   const results: Record<string, { mean: number; p50: number; p99: number; max: number }> = {};
-  const time = async (name: string, hooks: { beforeEach?: () => void; afterEach?: () => void }) => {
+  const time = async (name: string, hooks: { beforeEach?: () => void; afterEach?: () => void }, how = runs) => {
     const file = `bench-results/grower-${name.replace(/[^a-z0-9]+/gi, "-")}.json`;
     collect();
     const r = await bench(
@@ -213,7 +213,7 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
         },
       },
       growOnce,
-    ).run(runs);
+    ).run(how);
     results[name] = { mean: r.latency.mean, p50: r.latency.p50, p99: r.latency.p99 ?? 0, max: r.latency.max };
   };
 
@@ -256,7 +256,11 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
       state.cells.density[slot] = 1;
     }
   }
-  await time(`a grower tick whose ${BUILDINGS_BALANCE.growthTries} draws all find no lot`, {});
+  // The first tick tries every cell once and sets it aside (M3-25), as a
+  // load or a change of roads makes it do; a tick after finds none to try.
+  await time("the first grower tick on a city where no cell has a lot, trying each once", { beforeEach: () => forgetCandidates(state) }, { iterations: 3, time: 0, warmupIterations: 0, warmupTime: 0 });
+  expect(setAsideCount(state)).toBeGreaterThan(50_000);
+  await time("a grower tick once every cell with no lot is set aside", {});
   expect(buildingCount(state.buildings)).toBe(0);
 
   // Every cell C3, so each draw looks for a through-lot across its block
@@ -330,7 +334,8 @@ test("the grower on the M1 scale network with every cell zoned", async ({ bench,
   // collection or pause of the runner landed in it (issue #231). A tick
   // that is slow every time moves the median with it.
   for (const [name, r] of Object.entries(results)) {
-    if (name.includes("from scratch")) continue;
+    // Neither is a tick's work in play: a load pays the one, and the other is a first pass over a whole city zoned at once, which no command can paint.
+    if (name.includes("from scratch") || name.includes("trying each once")) continue;
     hold("grower.tick", `${name}, median`, r);
     if (name.includes("growthPerDayMax") || name.includes("every bar at 100")) hold("grower.share", `${name}, mean`, r);
   }

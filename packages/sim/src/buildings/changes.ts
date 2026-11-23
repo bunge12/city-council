@@ -24,6 +24,12 @@ export function noteBuildingChanged(b: BuildingState, id: number): void {
   recorders.get(b)?.ids.add(id);
 }
 
+/** Notes that buildings `ids` were added or removed, finding the recorder once. */
+export function noteBuildingsChanged(b: BuildingState, ids: readonly number[]): void {
+  const set = recorders.get(b)?.ids;
+  if (set) for (const id of ids) set.add(id);
+}
+
 /** The ids that changed since the last drain, ascending, and whether the free list did. Null if none or nothing is recording. */
 export function drainBuildingChanges(b: BuildingState): { ids: number[]; free: boolean } | null {
   const rec = recorders.get(b);

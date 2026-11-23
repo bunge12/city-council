@@ -233,6 +233,40 @@ export interface MergedItem {
   /** The tick the sim built it on, and its model's height in metres above the ground, for a building under construction (construction.ts). */
   built?: number;
   height?: number;
+  /** Whether anyone uses it (issue M3-17): `IN_USE`, `VACANT` or `ABANDONED`. In use when left out. */
+  use?: number;
+}
+
+/**
+ * How a building is used, as its forms carry it (issue M3-17): in use,
+ * vacant or abandoned. The shaders dull a vacant building and darken and
+ * board up an abandoned one.
+ */
+export const IN_USE = 0;
+export const VACANT = 1;
+export const ABANDONED = 2;
+
+/** `IN_USE`, `VACANT` or `ABANDONED` for a building as the mirror has it. */
+export function useOf(b: { vacant: boolean; abandoned: boolean }): number {
+  return b.abandoned ? ABANDONED : b.vacant ? VACANT : IN_USE;
+}
+
+/**
+ * The simple form and boxes carry a building's use in the second number of
+ * each vertex's facade, its height in floors, as `USE_STRIDE` floors per
+ * step of use: no building is near that tall, so the floors and the use
+ * come apart again in the shader, and the window pattern, which reads the
+ * floors' fractions, is not moved. No new attribute, so a merged chunk
+ * costs no more memory, and a building's use is rewritten in place
+ * (`setMergedUse`) without building its chunk again. The flat form carries
+ * it in the alpha byte of its colour, which nothing else reads.
+ */
+export const USE_STRIDE = 1024;
+
+/** A facade's floors with any use taken out, and the use, from the number the simple form and boxes carry. */
+export function splitFacadeUse(up: number): { up: number; use: number } {
+  const use = Math.floor((up + USE_STRIDE / 2) / USE_STRIDE);
+  return { up: up - use * USE_STRIDE, use };
 }
 
 /** The colours no building tints, as sRGB hex. */
@@ -254,7 +288,9 @@ export const KINDS = 8;
  * holds where it is on its facade, in window bays from the start of its
  * face on the stretched lot and in floors up, as the full models' shader
  * works them out (theme/model.ts, `baysOn`). Normals are signed bytes, x, y, z and a
- * zero. The flat form has neither, and alpha 255.
+ * zero. The flat form has neither, and its alpha is the building's use
+ * (`IN_USE`, `VACANT`, `ABANDONED`). The simple form and boxes carry the use
+ * in their facades (`USE_STRIDE`).
  */
 export interface MergedArrays {
   positions: Float32Array;
@@ -352,7 +388,7 @@ export function mergeModels(items: readonly MergedItem[], fixed: FixedColours): 
       colours[(v + k) * 4 + 2] = colour[2];
       colours[(v + k) * 4 + 3] = (m.facades[k * 4 + 3] ?? 0) + KINDS * (item.look ?? 0);
       facades[(v + k) * 2] = (m.facades[k * 4] ?? 0) * baysOn(m, k, item.sx, item.sz);
-      facades[(v + k) * 2 + 1] = m.facades[k * 4 + 1] ?? 0;
+      facades[(v + k) * 2 + 1] = (m.facades[k * 4 + 1] ?? 0) + USE_STRIDE * (item.use ?? IN_USE);
     }
     for (let k = 0; k < m.indices.length; k++) indices[i + k] = v + (m.indices[k] ?? 0);
     v += n;
@@ -425,6 +461,7 @@ export function mergeBoxes(items: readonly MergedItem[]): MergedArrays {
         colours[(v + n) * 4 + 2] = colour[2];
         // Alpha is the facade pattern: none.
         colours[(v + n) * 4 + 3] = 0;
+        facades[(v + n) * 2 + 1] = USE_STRIDE * (item.use ?? IN_USE);
       }
       indices.set([v, v + 1, v + 2, v, v + 2, v + 3], i);
       v += 4;
@@ -456,6 +493,7 @@ export function mergeFlats(items: readonly MergedItem[]): MergedArrays {
     const cross = ((at[5] ?? 0) - (at[2] ?? 0)) * ((at[6] ?? 0) - (at[0] ?? 0)) - ((at[3] ?? 0) - (at[0] ?? 0)) * ((at[8] ?? 0) - (at[2] ?? 0));
     const order = cross >= 0 ? [0, 1, 2, 3] : [0, 3, 2, 1];
     const colour = rgbaOf(item.flat);
+    colour[3] = item.use ?? IN_USE;
     for (let n = 0; n < 4; n++) {
       const k = (order[n] ?? 0) * 3;
       positions.set([at[k] ?? 0, at[k + 1] ?? 0, at[k + 2] ?? 0], (v + n) * 3);
@@ -468,10 +506,42 @@ export function mergeFlats(items: readonly MergedItem[]): MergedArrays {
   return { positions, normals: null, colours, facades: null, indices, ...bounds(positions) };
 }
 
+/**
+ * Where each item's vertices start in a merged form's arrays, as `form`'s
+ * merge function wrote them for `items`, and past the last one where they
+ * end: `items.length + 1` numbers.
+ */
+export function vertexStarts(items: readonly MergedItem[], form: "simple" | "box" | "flat"): Int32Array {
+  const out = new Int32Array(items.length + 1);
+  for (let k = 0; k < items.length; k++) out[k + 1] = (out[k] ?? 0) + verticesOf(items[k] as MergedItem, form);
+  return out;
+}
+
+/**
+ * Writes `use` into vertices `start` to `end` of a merged form's arrays, as
+ * the merge functions write it: into the facades of the simple form and
+ * boxes, and the colours' alpha of the flat form. Returns the range of the
+ * array it wrote, in numbers, for the upload.
+ */
+export function setMergedUse(form: "simple" | "box" | "flat", arrays: { facades: Float32Array | null; colours: Uint8Array }, start: number, end: number, use: number): { from: number; count: number } {
+  if (form === "flat") {
+    for (let v = start; v < end; v++) arrays.colours[v * 4 + 3] = use;
+    return { from: start * 4, count: (end - start) * 4 };
+  }
+  const f = arrays.facades;
+  if (!f) return { from: 0, count: 0 };
+  for (let v = start; v < end; v++) f[v * 2 + 1] = splitFacadeUse(f[v * 2 + 1] ?? 0).up + USE_STRIDE * use;
+  return { from: start * 2, count: (end - start) * 2 };
+}
+
+/** Vertices a building's box and its flat block have in their merged meshes. */
+export const BOX_VERTICES = BOX_FACES.length * 4;
+export const FLAT_VERTICES = 4;
+
 /** Vertices a merged form gives each item, in the order the merge functions above write them. */
 function verticesOf(item: MergedItem, form: "simple" | "box" | "flat"): number {
   if (form === "simple") return item.model.surfaces.length;
-  return form === "box" ? BOX_FACES.length * 4 : 4;
+  return form === "box" ? BOX_VERTICES : FLAT_VERTICES;
 }
 
 /**

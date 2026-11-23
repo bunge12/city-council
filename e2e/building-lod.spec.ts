@@ -3,18 +3,18 @@ import { builtFixtureCity } from "./building-fixtures";
 import { attachCanvas, chunkAt, openFixture, setPose, stats, type Form, type Vec3 } from "./building-lod-helpers";
 import { settle, settleThroughFrames } from "./helpers";
 import { groundAt } from "./road-fixtures";
-import { ZONING_BALANCE } from "../packages/sim/src/index";
+import { homeRoom } from "../packages/sim/src/index";
 
 // Issue M2-13: buildings across the zoom bands. Full models near the camera
 // in the street band, simplified models merged per chunk within 2 km in the
 // street and district bands and boxes beyond, and flat blocks coloured by zone
 // in the city band. The
 // fixture city with every building type: the same district in all three
-// bands, screenshotted, at Balanced and at Low, and the top bar's homes
-// figure. The scale city's numbers are in building-lod-scale.spec.ts,
+// bands, screenshotted, at Balanced and at Low, and the top bar's population
+// and room. The scale city's numbers are in building-lod-scale.spec.ts,
 // building-lod-scale-balanced.spec.ts, building-lod-overlay.spec.ts and
 // building-lod-memory.spec.ts, in the perf project (issue #225), which does
-// not gate a merge: the forms each band draws and the homes count are held
+// not gate a merge: the forms each band draws and the population figure are held
 // here instead.
 
 declare const window: {
@@ -41,11 +41,12 @@ test.describe("the fixture city", () => {
     test(`the same district in all three bands, at ${preset}`, async ({ page }, testInfo) => {
       await openFixture(page, `webgl&debug&preset=${preset}`, "Built", fixture.bytes);
       const chunk = chunkAt(target[0], target[2]);
-      // The top bar's homes (M2-18): every residential building of the fixture.
-      const residential = ZONING_BALANCE.zones.findIndex((z) => z.id === "residential") + 1;
-      const homes = fixture.state.buildings.zone.reduce((n, zone, id) => n + (fixture.state.buildings.flags[id] && zone === residential ? 1 : 0), 0);
-      expect(homes).toBeGreaterThan(0);
-      await expect(page.locator("#homes-count")).toHaveText(homes.toLocaleString("en-US"));
+      // The top bar's population and the room the homes hold (M3-15), as the fixture has them.
+      const b = fixture.state.buildings;
+      const room = b.flags.reduce((n, _f, id) => n + homeRoom(b, id), 0);
+      expect(room).toBeGreaterThan(0);
+      await expect(page.locator("#population-count")).toHaveText((fixture.state.stats.totals["population"] ?? 0).toLocaleString("en-US"));
+      await expect(page.locator("#population-count")).toHaveAttribute("data-room", String(room));
       for (const { band, position, form } of BANDS) {
         await setPose(page, position, target);
         await settle(page);

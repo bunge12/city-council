@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "@city-council/sim";
 import { Matrix4, Quaternion, Vector3 } from "three";
-import { FLAT_GROUPS_PER_SIDE, FLAT_SLOTS, KINDS, chunkDistance, draws, fadeOf, flatGroupOf, flatSlotOf, flatSlots, formFor, isNear, mergeBoxes, mergeFlats, mergeModels, modelExtent, stepFade, type ChunkFade, type MergedItem } from "../src/render/building-lod";
+import { FLAT_GROUPS_PER_SIDE, FLAT_SLOTS, KINDS, chunkDistance, draws, fadeOf, flatGroupOf, flatSlotOf, flatSlots, formFor, isNear, mergeBoxes, mergeFlats, mergeModels, modelExtent, setMergedUse, splitFacadeUse, stepFade, useOf, vertexStarts, ABANDONED, IN_USE, VACANT, type ChunkFade, type MergedItem } from "../src/render/building-lod";
 import { LOOKS } from "../src/render/building-tint";
 import { FACADE, ModelBuilder, SURFACE, baysOn, simplify } from "../src/theme/model";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
@@ -256,7 +256,35 @@ describe("merged geometry", () => {
       const up = (p(1, 2) - p(0, 2)) * (p(2, 0) - p(0, 0)) - (p(1, 0) - p(0, 0)) * (p(2, 2) - p(0, 2));
       expect(up).toBeGreaterThan(0);
     }
-    expect([...a.colours.slice(0, 4)]).toEqual([0x77, 0x88, 0x99, 255]);
+    expect([...a.colours.slice(0, 4)]).toEqual([0x77, 0x88, 0x99, 0]);
     expect(a.radius).toBeGreaterThan(8);
+  });
+
+  it("carries each building's use where the shaders read it, and rewrites one building's in place (issue M3-17)", () => {
+    const items = [item(0.7), { ...item(0.7), use: ABANDONED }, { ...item(0.7), use: VACANT }];
+    const plain = mergeModels([item(0.7)], fixed);
+    for (const form of ["simple", "box", "flat"] as const) {
+      const a = form === "simple" ? mergeModels(items, fixed) : form === "box" ? mergeBoxes(items) : mergeFlats(items);
+      const starts = vertexStarts(items, form);
+      expect(starts[3]).toBe(a.colours.length / 4);
+      const useAt = (v: number) => (form === "flat" ? (a.colours[v * 4 + 3] ?? -1) : splitFacadeUse(a.facades?.[v * 2 + 1] ?? 0).use);
+      const usesOf = (k: number) => new Set(Array.from({ length: (starts[k + 1] ?? 0) - (starts[k] ?? 0) }, (_, v) => useAt((starts[k] ?? 0) + v)));
+      expect([0, 1, 2].map(usesOf)).toEqual([new Set([IN_USE]), new Set([ABANDONED]), new Set([VACANT])]);
+      // The second building back in use: its vertices alone change, and the range written is theirs.
+      const range = setMergedUse(form, a, starts[1] ?? 0, starts[2] ?? 0, IN_USE);
+      const per = form === "flat" ? 4 : 2;
+      expect(range).toEqual({ from: (starts[1] ?? 0) * per, count: ((starts[2] ?? 0) - (starts[1] ?? 0)) * per });
+      expect([0, 1, 2].map(usesOf)).toEqual([new Set([IN_USE]), new Set([IN_USE]), new Set([VACANT])]);
+    }
+    // The floors come back whole, so the window pattern is where it was.
+    const a = mergeModels(items, fixed);
+    const n = model.surfaces.length;
+    for (let v = 0; v < n; v++) expect(splitFacadeUse(a.facades?.[(n + v) * 2 + 1] ?? 0).up).toBeCloseTo(plain.facades?.[v * 2 + 1] ?? 0, 3);
+  });
+
+  it("names a building's use from the mirror's row", () => {
+    expect(useOf({ vacant: false, abandoned: false })).toBe(IN_USE);
+    expect(useOf({ vacant: true, abandoned: false })).toBe(VACANT);
+    expect(useOf({ vacant: false, abandoned: true })).toBe(ABANDONED);
   });
 });

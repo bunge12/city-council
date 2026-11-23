@@ -219,9 +219,9 @@ export async function writeReport(testInfo: TestInfo, title: string, file: strin
   await testInfo.attach(title, { body: json, contentType: "application/json" });
 }
 
-/** Opens the scale town at Low, small (see `WAIT_VIEWPORT`), and waits until every building is drawn. */
-export async function openTown(page: Page): Promise<void> {
-  const { town, bytes } = scaleCity();
+/** Opens the scale town at Low, small (see `WAIT_VIEWPORT`), and waits until every building is drawn. `bytes` is the town changed, with as many buildings. */
+export async function openTown(page: Page, bytes: Uint8Array = scaleCity().bytes): Promise<void> {
+  const { town } = scaleCity();
   await page.setViewportSize(WAIT_VIEWPORT);
   await openFixture(page, "webgl&preset=low", "Town", bytes);
   // Every chunk read from the mirror. Players see a snapshot fill in over

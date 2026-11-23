@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { ZONING_BALANCE } from "../packages/sim/src/index";
+import { homeRoom } from "../packages/sim/src/index";
 import { MEASURE_VIEWPORT, bandFigures, checkBands, fullSize, measureBands, openTown, scaleCity, writeReport } from "./building-lod-helpers";
 
 // Issue M2-13: the M1 scale city filled with buildings through commands and
 // the grower (growScaleCity). Frame time, draw calls, what each level of
 // detail drew and the tab's memory in each zoom band at Low, written to
 // test-results/building-lod-report.json for the pull request. Since M2-17 it
-// also checks the top bar's homes figure against the town and times a save
+// also checks the top bar's population figure (homes before M3-15) against the town and times a save
 // of it from the page, the snapshot and the write to IndexedDB together.
 // The same bands at Balanced are in building-lod-scale-balanced.spec.ts, and
 // the zoning overlay over the town in building-lod-overlay.spec.ts: each
@@ -34,10 +34,12 @@ test("frame time, draw calls and memory in each band, at Low", async ({ page }, 
   await fullSize(page);
   const backend = (await page.evaluate(() => window.cityCouncil.renderStatus()))?.backend ?? "none";
   const report: Record<string, unknown> = { backend, city: { ...city.counts, ...town, fileBytes: bytes.byteLength } };
-  // The top bar's homes (M2-18): every residential building of the town.
-  const residential = ZONING_BALANCE.zones.findIndex((z) => z.id === "residential") + 1;
-  const homes = city.state.buildings.zone.reduce((n, zone, id) => n + (city.state.buildings.flags[id] && zone === residential ? 1 : 0), 0);
-  await expect(page.locator("#homes-count")).toHaveText(homes.toLocaleString("en-US"));
+  // The top bar's population and the room the homes hold (M3-15), as the town has them.
+  const b = city.state.buildings;
+  const population = city.state.stats.totals["population"] ?? 0;
+  const room = b.flags.reduce((n, _f, id) => n + homeRoom(b, id), 0);
+  await expect(page.locator("#population-count")).toHaveText(population.toLocaleString("en-US"));
+  await expect(page.locator("#population-count")).toHaveAttribute("data-room", String(room));
   // A save of the whole town from the page: the snapshot in the worker and the write to IndexedDB. The first compiles the code.
   const saveMs: number[] = [];
   for (let i = 0; i < 3; i++) {
@@ -50,7 +52,8 @@ test("frame time, draw calls and memory in each band, at Low", async ({ page }, 
       }),
     );
   }
-  report["homes"] = homes;
+  report["population"] = population;
+  report["room"] = room;
   report["saveMs"] = saveMs;
   const low = await measureBands(page, testInfo, "low");
   report["low"] = low;

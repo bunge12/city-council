@@ -212,8 +212,12 @@ function markRoadNodes(tt: TravelTimes): number {
   const mark = tt.mark;
   mark.fill(0, 0, limit);
   const { segFlags, segNetwork, segA, segB } = net;
+  // Imported constants as locals: under the test runner, which the bench
+  // and the soak time, each read of an import is a property read (#306).
+  const alive = SEG_ALIVE;
+  const road = NETWORK_ROAD;
   for (let seg = 0; seg < segFlags.length; seg++) {
-    if (((segFlags[seg] ?? 0) & SEG_ALIVE) === 0 || segNetwork[seg] !== NETWORK_ROAD) continue;
+    if (((segFlags[seg] ?? 0) & alive) === 0 || segNetwork[seg] !== road) continue;
     mark[segA[seg] ?? 0] = 1;
     mark[segB[seg] ?? 0] = 1;
   }
@@ -224,13 +228,15 @@ function markRoadNodes(tt: TravelTimes): number {
 
 /** The zone a point is in, as `chunkAt` gives it: off-map points in the nearest edge zone. */
 function zoneAt(x: number, z: number): number {
-  let i = Math.floor(x / CHUNK_SIZE);
-  let j = Math.floor(z / CHUNK_SIZE);
+  const side = CHUNKS_PER_SIDE;
+  const size = CHUNK_SIZE;
+  let i = Math.floor(x / size);
+  let j = Math.floor(z / size);
   if (i < 0) i = 0;
-  else if (i >= CHUNKS_PER_SIDE) i = CHUNKS_PER_SIDE - 1;
+  else if (i >= side) i = side - 1;
   if (j < 0) j = 0;
-  else if (j >= CHUNKS_PER_SIDE) j = CHUNKS_PER_SIDE - 1;
-  return j * CHUNKS_PER_SIDE + i;
+  else if (j >= side) j = side - 1;
+  return j * side + i;
 }
 
 /** Each zone's source node, or NONE, and how many nodes have a road segment. From the roads alone. */
@@ -238,7 +244,10 @@ function findSources(tt: TravelTimes): { sources: Int32Array; nodes: number } {
   const net = tt.net;
   const nodes = markRoadNodes(tt);
   const mark = tt.mark;
-  const sources = new Int32Array(TRAVEL_ZONES).fill(NONE);
+  const none = NONE;
+  const side = CHUNKS_PER_SIDE;
+  const size = CHUNK_SIZE;
+  const sources = new Int32Array(TRAVEL_ZONES).fill(none);
   const best = new Float64Array(TRAVEL_ZONES);
   const limit = nodeIdLimit(net);
   const { nodeX, nodeZ } = net;
@@ -247,11 +256,11 @@ function findSources(tt: TravelTimes): { sources: Int32Array; nodes: number } {
     const x = nodeX[node] ?? 0;
     const z = nodeZ[node] ?? 0;
     const zone = zoneAt(x, z);
-    const dx = x - ((zone % CHUNKS_PER_SIDE) + 0.5) * CHUNK_SIZE;
-    const dz = z - (Math.floor(zone / CHUNKS_PER_SIDE) + 0.5) * CHUNK_SIZE;
+    const dx = x - ((zone % side) + 0.5) * size;
+    const dz = z - (Math.floor(zone / side) + 0.5) * size;
     const d = dx * dx + dz * dz;
     // Ascending ids, so a tie keeps the lower.
-    if (sources[zone] === NONE || d < (best[zone] ?? 0)) {
+    if (sources[zone] === none || d < (best[zone] ?? 0)) {
       sources[zone] = node;
       best[zone] = d;
     }
@@ -272,14 +281,14 @@ function rebuildTicks(tt: TravelTimes): number {
 
 /**
  * The road graph of `net` as it is now, compacted to the nodes a road
- * reaches, in ascending id, with each zone's source marked. Two passes
- * over the segments: one counts each node's edges, one files them. Into
- * buffers kept between rebuilds, so a rebuild makes no garbage.
+ * reaches, in ascending id, with each zone's source marked. Reads the
+ * nodes `findSources` has just marked, so the caller runs it first. Two
+ * passes over the segments: one counts each node's edges, one files them.
+ * Into buffers kept between rebuilds, so a rebuild makes no garbage.
  */
 function compact(tt: TravelTimes, sources: Int32Array): { graph: CompactGraph; compactSources: Int32Array } {
   const net = tt.net;
   const { edgeTime } = routingGraphOf(net);
-  markRoadNodes(tt);
   const mark = tt.mark;
   const limit = nodeIdLimit(net);
   tt.index = room(tt.index, limit, (n) => new Int32Array(n));
@@ -292,13 +301,17 @@ function compact(tt: TravelTimes, sources: Int32Array): { graph: CompactGraph; c
   const cursor = tt.cursor;
   first.fill(0, 0, n + 1);
   const { segFlags, segNetwork, segA, segB } = net;
+  // Imported constants as locals, as in `markRoadNodes`.
+  const alive = SEG_ALIVE;
+  const road = NETWORK_ROAD;
+  const noEdge = NO_EDGE;
   for (let seg = 0; seg < segFlags.length; seg++) {
-    if (((segFlags[seg] ?? 0) & SEG_ALIVE) === 0 || segNetwork[seg] !== NETWORK_ROAD) continue;
-    if ((edgeTime[2 * seg] ?? NO_EDGE) !== NO_EDGE) {
+    if (((segFlags[seg] ?? 0) & alive) === 0 || segNetwork[seg] !== road) continue;
+    if ((edgeTime[2 * seg] ?? noEdge) !== noEdge) {
       const i = (index[segA[seg] ?? 0] ?? 0) + 1;
       first[i] = (first[i] ?? 0) + 1;
     }
-    if ((edgeTime[2 * seg + 1] ?? NO_EDGE) !== NO_EDGE) {
+    if ((edgeTime[2 * seg + 1] ?? noEdge) !== noEdge) {
       const i = (index[segB[seg] ?? 0] ?? 0) + 1;
       first[i] = (first[i] ?? 0) + 1;
     }
@@ -313,18 +326,18 @@ function compact(tt: TravelTimes, sources: Int32Array): { graph: CompactGraph; c
   const to = tt.to;
   const time = tt.time;
   for (let seg = 0; seg < segFlags.length; seg++) {
-    if (((segFlags[seg] ?? 0) & SEG_ALIVE) === 0 || segNetwork[seg] !== NETWORK_ROAD) continue;
+    if (((segFlags[seg] ?? 0) & alive) === 0 || segNetwork[seg] !== road) continue;
     const a = index[segA[seg] ?? 0] ?? 0;
     const b = index[segB[seg] ?? 0] ?? 0;
-    const forward = edgeTime[2 * seg] ?? NO_EDGE;
-    if (forward !== NO_EDGE) {
+    const forward = edgeTime[2 * seg] ?? noEdge;
+    if (forward !== noEdge) {
       const e = cursor[a] ?? 0;
       cursor[a] = e + 1;
       to[e] = b;
       time[e] = forward;
     }
-    const back = edgeTime[2 * seg + 1] ?? NO_EDGE;
-    if (back !== NO_EDGE) {
+    const back = edgeTime[2 * seg + 1] ?? noEdge;
+    if (back !== noEdge) {
       const e = cursor[b] ?? 0;
       cursor[b] = e + 1;
       to[e] = a;
@@ -345,7 +358,9 @@ function compact(tt: TravelTimes, sources: Int32Array): { graph: CompactGraph; c
   return { graph: { size: n, first, to, time, zoneOf }, compactSources };
 }
 
-function startRebuild(tt: TravelTimes, sources: Int32Array): void {
+/** Finds the sources and compacts the graph for a rebuild from the roads as they are now, and starts it with no rows built. */
+function startRebuild(tt: TravelTimes): void {
+  const { sources } = findSources(tt);
   const { graph, compactSources } = compact(tt, sources);
   const rows: number[] = [];
   for (let zone = 0; zone < TRAVEL_ZONES; zone++) if ((compactSources[zone] ?? -1) >= 0) rows.push(zone);
@@ -447,10 +462,9 @@ function advance(tt: TravelTimes, count: number): void {
 
 /** Rebuilds the whole table now, from the roads as they are. */
 function rebuildNow(tt: TravelTimes): void {
-  const { sources } = findSources(tt);
   tt.changed = false;
   tt.waiting = false;
-  startRebuild(tt, sources);
+  startRebuild(tt);
   advance(tt, Infinity);
 }
 
@@ -506,7 +520,7 @@ export function stepTravel(state: SimState): void {
       // may have applied them over several paused steps.
       state.travelReadyAt = state.tick;
       if (kept) {
-        startRebuild(tt, findSources(tt).sources);
+        startRebuild(tt);
         advance(tt, Infinity);
       }
       return;
@@ -519,7 +533,7 @@ export function stepTravel(state: SimState): void {
   }
   const ticksLeft = state.travelReadyAt - state.tick;
   if (tt.waiting) {
-    startRebuild(tt, findSources(tt).sources);
+    startRebuild(tt);
     tt.waiting = false;
     // Compacting the graph is this step's share, unless it is the last.
     if (ticksLeft > 1) return;

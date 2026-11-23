@@ -224,7 +224,9 @@ test("hovering a building with no tool on reads it out", async ({ page }, testIn
   await expect(readout.locator(".what")).toHaveText("Single family home");
   const width = await readout.getAttribute("data-width");
   const depth = await readout.getAttribute("data-depth");
-  await expect(readout.locator(".detail")).toHaveText(`Residential R1 · lot ${width} × ${depth} cells · 3 residents`);
+  // Who lives there against its room (M3-17): two people in each house's room for three.
+  await expect(readout).toHaveAttribute("data-people", "2");
+  await expect(readout.locator(".detail")).toHaveText(`Residential R1 · lot ${width} × ${depth} cells · 2 residents, room for 3`);
   await attach(page, testInfo, "the readout over a house");
   // Off the houses, no readout.
   await moveTo(page, 4300, 4700);

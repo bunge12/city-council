@@ -72,7 +72,8 @@ describe("the pops balance", () => {
     expect(bad(["popSizeCap"], [5, 2.5, 100])).toEqual(["popSizeCap must list 3 whole numbers from 1 to 255, one per density"]);
     expect(bad(["popSizeCap"], [20, 5, 100])).toEqual(["popSizeCap must not fall as density rises"]);
     expect(bad(["newcomer", "education", "high"], 1.2)).toEqual(["newcomer.education.high must be a share from 0 to 1"]);
-    expect(bad(["newcomer", "wealth", "high"], 0.3)).toEqual([expect.stringMatching(/^newcomer\.wealth must add to 1/)]);
+    // Newcomers' wealth follows land value since M3-25, from landvalue.json.
+    expect(bad(["newcomer", "wealth"], { low: 0.3, medium: 0.5, high: 0.2 })).toEqual([expect.stringMatching(/newcomer.*wealth/)]);
     expect(bad(["newcomer", "childrenShare"], -0.1)).toEqual(["newcomer.childrenShare must be a share from 0 to 1"]);
     expect(bad(["workerShare", "withChildren"], 0.7)).toEqual(["workerShare.withChildren must not be above workerShare.withoutChildren"]);
     expect(bad(["workerShare", "withChildren"], 2)).toEqual(["workerShare.withChildren must be a number at least 0 and at most 1"]);

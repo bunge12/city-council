@@ -15,7 +15,8 @@ import { RoadReadout } from "./RoadReadout";
 import type { AppServices } from "./services";
 import { shortcutFor, toggledSpeed } from "./shortcuts";
 import { LandValueLegend, LandValueReadout } from "./LandValue";
-import { toggleDebug, toggleLog, toggleOverlay } from "./store";
+import { StatsPanel } from "./StatsPanel";
+import { toggleDebug, toggleLog, toggleOverlay, toggleStats } from "./store";
 import { TopBar } from "./TopBar";
 import { ZoneLegend } from "./ZoneLegend";
 import { ZoneReadout } from "./ZoneReadout";
@@ -59,6 +60,9 @@ function useShortcuts(): void {
           return;
         case "toggleLog":
           toggleLog();
+          return;
+        case "toggleStats":
+          toggleStats();
           return;
         case "roadTool":
           roadTool.toggle();
@@ -115,6 +119,7 @@ function Shell() {
         <CityMenu />
       </div>
       <div className="right-column">
+        <StatsPanel />
         <DebugPanel />
         <ActivityLog />
       </div>

@@ -19,8 +19,6 @@ export interface PopsBalance {
   newcomer: {
     /** The share of newcomers at each education level. */
     education: EducationShares;
-    /** The share of newcomers at each wealth level, low, medium and high like education. Adds to 1. */
-    wealth: EducationShares;
     /** The share of newcomers with children. */
     childrenShare: number;
     /** For a home of density 1, 2 and 3 in order: the least and most people in a newcomer household (M3-08). */
@@ -89,7 +87,7 @@ export function checkPopsBalance(data: unknown): string[] {
     const n = data["newcomer"];
     if (!isRecord(n)) errors.push("newcomer must be an object");
     else {
-      for (const key of ["education", "wealth"]) {
+      for (const key of ["education"]) {
         if (!(key in n)) errors.push(`newcomer.${key} is missing`);
         else errors.push(...shareProblems(n[key], EDUCATION_LEVELS, `newcomer.${key}`));
       }
@@ -100,7 +98,7 @@ export function checkPopsBalance(data: unknown): string[] {
       const s = n["satisfaction"];
       if (!("satisfaction" in n)) errors.push("newcomer.satisfaction is missing");
       else if (!Number.isSafeInteger(s) || (s as number) < 0 || (s as number) > 100) errors.push("newcomer.satisfaction must be a whole number from 0 to 100");
-      errors.push(...unknownKeys(n, ["education", "wealth", "childrenShare", "size", "satisfaction"], "newcomer"));
+      errors.push(...unknownKeys(n, ["education", "childrenShare", "size", "satisfaction"], "newcomer"));
     }
   }
 

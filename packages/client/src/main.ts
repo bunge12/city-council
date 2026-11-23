@@ -65,6 +65,7 @@ import { ZoneToolController, type ZoneHover, type ZonePreview } from "./tools/zo
 import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
+import type { Occupants } from "./ui/BuildingReadout";
 import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setLandValueHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
 import { colouringOf, overlayAfterTool } from "./ui/overlays";
 import { withNeighbours } from "./render/cell-meshes";
@@ -1121,6 +1122,19 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     }
     return land;
   };
+  // Who is in the building under the pointer (issue M3-17), looked up again when the copy changes, as people come and go every tick.
+  let occupantsKey = "";
+  let occupants: Occupants = { people: 0, filled: 0, why: null };
+  const occupantsOf = (id: number): Occupants => {
+    const key = `${id},${mirrorVersion}`;
+    if (key !== occupantsKey) {
+      occupantsKey = key;
+      const next = { people: mirror.buildingPeople(id), filled: mirror.jobsFilled(id), why: mirror.whyNoNewcomers(id) };
+      // The same object while nothing changed, so the readout is not drawn again every tick.
+      if (next.people !== occupants.people || next.filled !== occupants.filled || next.why !== occupants.why) occupants = next;
+    }
+    return occupants;
+  };
   let lotNoteKey = "";
   let lotNote: string | null = null;
   const lotNoteUnder = (cursor: { x: number; z: number } | null): string | null => {
@@ -1256,7 +1270,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     setLandValueHover(land && pointerNow ? { x: pointerNow.x, y: pointerNow.y, value: land.value, roadType: land.roadType } : null);
     document.body.dataset["landValueHover"] = land ? String(land.value.value) : "";
     const under = land ? null : buildingUnder(cursor);
-    setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under } : null);
+    setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under, occupants: occupantsOf(under.id) } : null);
     document.body.dataset["buildingHover"] = under ? String(under.id) : "";
     document.body.dataset["buildingsToClear"] = String((liveClears?.clears?.ids.length ?? 0) + (gridClearsNow?.clears?.ids.length ?? 0));
     buildingMarks.show(

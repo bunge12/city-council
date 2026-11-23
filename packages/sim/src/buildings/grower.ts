@@ -46,24 +46,25 @@
 // grower carries on once none is left. It asks once on a tick it would add
 // a building.
 //
-// For each building the grower draws a free zoned cell by the road of the
-// building's zone from the generator in state (candidates.ts; M3-25
-// replaces the draw with land value). It builds at an end of the free frontage that cell lies on, not
-// at the cell (issue 194): it asks the lot finder what fits at the nearer
-// end (`freeFrontage`, lots.ts), then at the farther, and only if neither
-// fits, at the cell drawn. A lot holding an end cell runs from it, so the
+// For each building the grower takes the free zoned cell by the road of the
+// building's zone with the highest land value, the lower cell of two the
+// same (candidates.ts and lot-order.ts, M3-25; until then a draw from the
+// generator). It builds at an end of the free frontage that cell lies on,
+// not at the cell (issue 194): it asks the lot finder what fits at the
+// nearer end (`freeFrontage`, lots.ts), then at the farther, and only if
+// neither fits, at the cell. A lot holding an end cell runs from it, so the
 // building stands against whatever ends the run, a junction, a neighbour
 // or other zoning, and the free ground it leaves stays in one piece. Built
-// around the cell drawn, a 3-wide building on a strip 7 wide left 2 cells
+// around the cell, a 3-wide building on a strip 7 wide left 2 cells
 // either side, too narrow for anything of its zone. At an end, each lot is
 // also narrowed, within its type's widths, until the frontage it leaves is
 // empty or as wide as the narrowest type of its zone and density, so a
 // 6-wide tower does not take a 7-wide O3 strip and leave one cell. A lot
 // that no width of its type leaves room beside drops out of the draw, unless
 // every one does. Through-lots keep their place: when the end has none but
-// one fits at the cell drawn, the grower builds that one there, as before,
-// and a through-lot is never narrowed. The draw then picks the type among
-// those left: the ones
+// one fits at the cell, the grower builds that one there, as before, and a
+// through-lot is never narrowed. A draw from the generator then picks the
+// type among those left: the ones
 // whose lot reaches the back of the free ground at the cell, or every one
 // if none does, each as likely, on its largest lot, narrowed as above. So a deep R2 strip grows apartments and a
 // shallow one townhomes, as the PRD says the lot's shape decides, while a
@@ -71,8 +72,10 @@
 // houses and plexes both and not plexes alone. Where a through-lot fits
 // (lots.ts, M2-14), the draw is among the through-lots alone, so a big
 // building takes the block before smaller ones fill both strips. When the
-// cell has no lot, as on an R3 strip under 4 x 4, the grower draws again,
-// up to `growthTries` cells, then gives that building up.
+// cell has no lot, as on an R3 strip under 4 x 4, the grower sets it aside
+// until its ground changes and takes the next (lot-order.ts). A try spends
+// nothing from the generator, so a city loaded from a save, with nothing
+// set aside, tries such a cell once more and lands the same buildings.
 //
 // Residents scale with lot area between the type's low and high figure,
 // rounded half up. The variant number, which the client
@@ -89,9 +92,9 @@ import { ZONING_BALANCE } from "../zoning/balance";
 import { cellSlotIn, cellsSettled, nextColumn, syncCells, type Column } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE, BUILDING_TYPES, typesFor, type BuildingType } from "./balance";
 import { addBuilding } from "./buildings";
-import { candidateAt, candidateCount } from "./candidates";
+import { bestCandidate, candidateCount, setAside } from "./candidates";
 import { freeFrontage, lotOptions, type Lot, type LotOptions } from "./lots";
-import { segmentBuildings } from "./where";
+import { pollutionGrid, segmentBuildings } from "./where";
 import { buildingReachesOutside, reachableRoom, type ReachableRoom } from "../pops/room";
 import { workplacesHeldBy, zoneJobs, type ZoneJobs } from "../pops/open-jobs";
 import { buildingJobs } from "./jobs";
@@ -244,26 +247,32 @@ function optionsFromEnd(state: SimState, ref: CellRef): { options: LotOptions; l
 }
 
 /**
- * Adds one building where the draw lands among the free cells of zone
- * number `zone`, or of every zone for 0, the default; or none after
- * `growthTries` cells with no lot. Returns the id or -1.
+ * Adds one building on the free cell of zone number `zone`, or of every
+ * zone for 0, the default, with the highest land value, as the header
+ * says; or none when no free cell has a lot. Returns the id or -1.
  */
 export function growOne(state: SimState, zone = 0): number {
-  for (let tries = 0; tries < BUILDINGS_BALANCE.growthTries; tries++) {
+  const grid = () => pollutionGrid(state);
+  for (;;) {
     const index = syncCells(state);
-    const onCell = () => segmentBuildings(state);
-    const count = candidateCount(state, index, onCell, zone);
-    if (count === 0) return -1;
-    const ref = candidateAt(state, index, onCell, nextInt(state.rng, count), zone);
+    const ref = bestCandidate(state, index, () => segmentBuildings(state), grid, zone);
+    if (!ref) return -1;
     const { options, leaving } = optionsFromEnd(state, ref);
-    if (!options.ok) continue;
+    if (!options.ok) {
+      setAside(state, ref, hasThroughLots(state, ref));
+      continue;
+    }
     const lot = chooseLot(state.rng, options.lots, options.free, leaving);
     const type = BUILDING_TYPES[lot.type] as BuildingType;
     const residents = residentsFor(type, lot.width, lot.depth);
     const variant = nextInt(state.rng, VARIANTS);
     return addBuilding(state, { ...lot, residents, variant });
   }
-  return -1;
+}
+
+/** Whether a try at the free front cell `ref` finds a lot, as `growOne` tries it. For tests: a cell set aside must find none. */
+export function tryFindsLot(state: SimState, ref: CellRef): boolean {
+  return optionsFromEnd(state, ref).options.ok;
 }
 
 /** The free zoned front cells of zone number `zone`, or of every zone for 0, the default: the grower's candidates. */
