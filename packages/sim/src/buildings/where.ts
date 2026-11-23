@@ -614,7 +614,7 @@ export function lotZonedFor(state: SimState, id: number): boolean {
 /**
  * The density building `id`'s ground is zoned up to, or 0 (M3-14): every
  * cell of its lot is there, open, of the zone it was built under and of one
- * density above the one it was built under. Redevelopment (redevelop.ts)
+ * density, higher than the one it was built under. Redevelopment (redevelop.ts)
  * replaces such a building. Reads the first cell first, so a building on
  * ground still zoned for it, nearly every one, costs one read.
  */
@@ -644,7 +644,7 @@ export function zonedUpTo(state: SimState, id: number): number {
 export interface BuildingGround {
   /**
    * "as-built": every cell is zoned as it was built. "zoned-up": every cell
-   * is zoned up to one higher density of its zone, so it may redevelop.
+   * is zoned up to a higher density of its zone, one density for every cell,, so it may redevelop.
    * "existing-use": anything else, so it stands as a permitted existing use
    * and the ground rebuilds under its zoning once it is abandoned.
    */

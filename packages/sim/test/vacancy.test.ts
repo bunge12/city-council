@@ -431,7 +431,8 @@ describe("factories with nobody to work in them", () => {
     // The visit marks it and redevelopment clears it the same tick, up to
     // `perDayMax` a day, and none left standing holds the grower.
     const cleared = built.filter((id) => !same(id));
-    expect(cleared.length).toBeGreaterThanOrEqual(Math.min(built.length, DEMAND_BALANCE.redevelopment.perDayMax));
+    expect(cleared.length).toBeGreaterThan(0);
+    expect(cleared.length).toBeLessThanOrEqual(2 * DEMAND_BALANCE.redevelopment.perDayMax);
     for (const id of built) if (same(id)) expect(b.flags[id]).toBe(BUILDING_ALIVE | BUILDING_ABANDONED | BUILDING_UNZONED);
     expect(abandonedWaiting(state)[4]).toBe(0);
     holdDemand({ industrial: -20 }, () => runDays(state, 2));

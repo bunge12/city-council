@@ -6,57 +6,57 @@
     "BuildRoad": {
       "sent": 150,
       "applied": 101,
-      "meanMs": 8.788,
-      "p50Ms": 7.384,
-      "maxMs": 26.399,
-      "overBudget": 3
+      "meanMs": 7.032,
+      "p50Ms": 6.37,
+      "maxMs": 16.289,
+      "overBudget": 0
     },
     "BuildRoadGrid": {
       "sent": 150,
       "applied": 28,
-      "meanMs": 4.873,
-      "p50Ms": 4.586,
-      "maxMs": 10.742,
+      "meanMs": 4.918,
+      "p50Ms": 4.49,
+      "maxMs": 10.44,
       "overBudget": 0
     },
     "UpgradeRoad": {
       "sent": 150,
       "applied": 113,
-      "meanMs": 3.546,
-      "p50Ms": 3.277,
-      "maxMs": 11.644,
+      "meanMs": 3.133,
+      "p50Ms": 2.968,
+      "maxMs": 5.139,
       "overBudget": 0
     },
     "BulldozeRoad": {
       "sent": 300,
       "applied": 300,
-      "meanMs": 3.113,
-      "p50Ms": 2.968,
-      "maxMs": 9.351,
+      "meanMs": 2.772,
+      "p50Ms": 2.696,
+      "maxMs": 4.415,
       "overBudget": 0
     },
     "Undo": {
       "sent": 150,
       "applied": 150,
-      "meanMs": 4.511,
-      "p50Ms": 4.088,
-      "maxMs": 12.319,
+      "meanMs": 4.215,
+      "p50Ms": 3.897,
+      "maxMs": 8.085,
       "overBudget": 0
     },
     "ZoneCells": {
       "sent": 600,
       "applied": 543,
-      "meanMs": 8.382,
-      "p50Ms": 7.839,
-      "maxMs": 48.825,
-      "overBudget": 4
+      "meanMs": 8.676,
+      "p50Ms": 8.339,
+      "maxMs": 27.274,
+      "overBudget": 1
     },
     "BulldozeBuilding": {
       "sent": 300,
       "applied": 300,
-      "meanMs": 5.205,
-      "p50Ms": 4.745,
-      "maxMs": 17.043,
+      "meanMs": 4.649,
+      "p50Ms": 4.492,
+      "maxMs": 8.11,
       "overBudget": 0
     }
   },
@@ -65,297 +65,239 @@
   "ticks": 40194,
   "stepsTimed": 36000,
   "realMinutesAtSpeed": 15,
-  "wallSeconds": 158.5,
+  "wallSeconds": 148,
   "logEntries": 12394,
   "stepMs": {
-    "mean": 4.125,
-    "p50": 4.281,
-    "p99": 9.657,
-    "max": 48.825,
+    "mean": 3.896,
+    "p50": 4.082,
+    "p99": 8.885,
+    "max": 59.686,
     "budget": 20,
-    "overBudget": 15
+    "overBudget": 5
   },
   "grower": {
     "steps": 36000,
-    "p50Ms": 0.203,
-    "p99Ms": 0.576,
-    "maxMs": 34.482,
-    "buildingsAtEnd": 44020,
-    "mostBuildings": 43984,
-    "homesAtEnd": 7407,
-    "mostHomes": 7368,
+    "p50Ms": 0.003,
+    "p99Ms": 2.66,
+    "maxMs": 28.64,
+    "buildingsAtEnd": 2710,
+    "mostBuildings": 2671,
+    "homesAtEnd": 1061,
+    "mostHomes": 1047,
     "homesMismatches": 0,
     "slowSteps": [
       {
-        "tick": 5958,
-        "ms": 11.923,
+        "tick": 4235,
+        "ms": 8.367,
         "gc": []
       },
       {
-        "tick": 6631,
+        "tick": 4355,
+        "ms": 9.811,
+        "gc": []
+      },
+      {
+        "tick": 4955,
+        "ms": 6.257,
+        "gc": []
+      },
+      {
+        "tick": 5900,
+        "ms": 7.054,
+        "gc": []
+      },
+      {
+        "tick": 5910,
+        "ms": 9.692,
+        "gc": [
+          "minor 1.464 ms"
+        ]
+      },
+      {
+        "tick": 5913,
+        "ms": 12.214,
+        "gc": []
+      },
+      {
+        "tick": 6650,
+        "ms": 8.214,
+        "gc": [
+          "minor 1.614 ms"
+        ]
+      },
+      {
+        "tick": 6755,
+        "ms": 5.407,
+        "gc": []
+      },
+      {
+        "tick": 7475,
+        "ms": 8.938,
+        "gc": []
+      },
+      {
+        "tick": 8434,
+        "ms": 6.764,
+        "gc": []
+      },
+      {
+        "tick": 8590,
+        "ms": 5.832,
+        "gc": [
+          "minor 1.446 ms"
+        ]
+      },
+      {
+        "tick": 9395,
+        "ms": 5.406,
+        "gc": []
+      },
+      {
+        "tick": 10755,
+        "ms": 5.103,
+        "gc": []
+      },
+      {
+        "tick": 10910,
+        "ms": 9.032,
+        "gc": [
+          "major 5.423 ms"
+        ]
+      },
+      {
+        "tick": 12360,
+        "ms": 7.33,
+        "gc": [
+          "major 6.942 ms"
+        ]
+      },
+      {
+        "tick": 12755,
+        "ms": 6.224,
+        "gc": []
+      },
+      {
+        "tick": 12875,
+        "ms": 6.001,
+        "gc": [
+          "minor 1.403 ms"
+        ]
+      },
+      {
+        "tick": 13555,
+        "ms": 5.039,
+        "gc": [
+          "major 4.254 ms"
+        ]
+      },
+      {
+        "tick": 13595,
+        "ms": 6.211,
+        "gc": []
+      },
+      {
+        "tick": 16367,
+        "ms": 5.185,
+        "gc": []
+      },
+      {
+        "tick": 16713,
+        "ms": 5.731,
+        "gc": []
+      },
+      {
+        "tick": 18513,
+        "ms": 5.586,
+        "gc": []
+      },
+      {
+        "tick": 19595,
+        "ms": 5.243,
+        "gc": []
+      },
+      {
+        "tick": 20434,
+        "ms": 6.523,
+        "gc": []
+      },
+      {
+        "tick": 21755,
+        "ms": 6.423,
+        "gc": []
+      },
+      {
+        "tick": 22034,
+        "ms": 6.281,
+        "gc": []
+      },
+      {
+        "tick": 22995,
+        "ms": 5.735,
+        "gc": []
+      },
+      {
+        "tick": 24634,
+        "ms": 5.145,
+        "gc": []
+      },
+      {
+        "tick": 24650,
+        "ms": 28.64,
+        "gc": []
+      },
+      {
+        "tick": 25355,
+        "ms": 6.414,
+        "gc": []
+      },
+      {
+        "tick": 29434,
+        "ms": 6.734,
+        "gc": []
+      },
+      {
+        "tick": 31713,
+        "ms": 5.441,
+        "gc": []
+      },
+      {
+        "tick": 33075,
         "ms": 5.178,
         "gc": []
       },
       {
-        "tick": 7643,
-        "ms": 6.011,
+        "tick": 33555,
+        "ms": 5.825,
         "gc": [
-          "minor 5.643 ms"
+          "minor 1.514 ms"
         ]
       },
       {
-        "tick": 7916,
-        "ms": 5.472,
-        "gc": [
-          "minor 5.103 ms"
-        ]
-      },
-      {
-        "tick": 8285,
-        "ms": 7.596,
-        "gc": [
-          "major 7.134 ms"
-        ]
-      },
-      {
-        "tick": 9115,
-        "ms": 6.675,
-        "gc": [
-          "major 6.237 ms"
-        ]
-      },
-      {
-        "tick": 9714,
-        "ms": 12.645,
-        "gc": [
-          "major 12.182 ms"
-        ]
-      },
-      {
-        "tick": 10142,
-        "ms": 5.254,
-        "gc": [
-          "minor 4.977 ms"
-        ]
-      },
-      {
-        "tick": 11308,
-        "ms": 7.303,
-        "gc": [
-          "major 6.953 ms"
-        ]
-      },
-      {
-        "tick": 11547,
-        "ms": 6.328,
-        "gc": [
-          "minor 6.082 ms"
-        ]
-      },
-      {
-        "tick": 13035,
-        "ms": 6.24,
-        "gc": [
-          "minor 6.049 ms"
-        ]
-      },
-      {
-        "tick": 16289,
-        "ms": 6.266,
-        "gc": [
-          "minor 5.736 ms"
-        ]
-      },
-      {
-        "tick": 17011,
-        "ms": 5.664,
-        "gc": [
-          "minor 5.428 ms"
-        ]
-      },
-      {
-        "tick": 17041,
-        "ms": 7.171,
-        "gc": [
-          "major 6.914 ms"
-        ]
-      },
-      {
-        "tick": 18538,
-        "ms": 8.424,
+        "tick": 37834,
+        "ms": 5.827,
         "gc": []
       },
       {
-        "tick": 19357,
-        "ms": 5.804,
+        "tick": 38313,
+        "ms": 6.521,
+        "gc": [
+          "minor 1.564 ms"
+        ]
+      },
+      {
+        "tick": 38434,
+        "ms": 6.184,
         "gc": []
       },
       {
-        "tick": 20283,
-        "ms": 8.376,
-        "gc": [
-          "major 7.986 ms"
-        ]
-      },
-      {
-        "tick": 21239,
-        "ms": 7.765,
-        "gc": [
-          "major 7.361 ms"
-        ]
-      },
-      {
-        "tick": 22348,
-        "ms": 9.516,
+        "tick": 39075,
+        "ms": 5.625,
         "gc": []
       },
       {
-        "tick": 24075,
-        "ms": 5.418,
-        "gc": [
-          "minor 5.123 ms"
-        ]
-      },
-      {
-        "tick": 24468,
-        "ms": 5.904,
+        "tick": 39275,
+        "ms": 6.714,
         "gc": []
-      },
-      {
-        "tick": 24469,
-        "ms": 7.376,
-        "gc": [
-          "major 6.861 ms"
-        ]
-      },
-      {
-        "tick": 25562,
-        "ms": 6.591,
-        "gc": [
-          "major 6.391 ms"
-        ]
-      },
-      {
-        "tick": 26639,
-        "ms": 9.686,
-        "gc": [
-          "major 9.314 ms"
-        ]
-      },
-      {
-        "tick": 28548,
-        "ms": 5.951,
-        "gc": []
-      },
-      {
-        "tick": 28557,
-        "ms": 8.436,
-        "gc": [
-          "major 8.168 ms"
-        ]
-      },
-      {
-        "tick": 30953,
-        "ms": 8.299,
-        "gc": [
-          "major 8.037 ms"
-        ]
-      },
-      {
-        "tick": 31295,
-        "ms": 5.704,
-        "gc": [
-          "minor 5.326 ms"
-        ]
-      },
-      {
-        "tick": 31827,
-        "ms": 10.405,
-        "gc": []
-      },
-      {
-        "tick": 32152,
-        "ms": 12.883,
-        "gc": [
-          "major 12.175 ms"
-        ]
-      },
-      {
-        "tick": 32932,
-        "ms": 5.69,
-        "gc": [
-          "minor 5.429 ms"
-        ]
-      },
-      {
-        "tick": 33247,
-        "ms": 16.593,
-        "gc": [
-          "major 16.222 ms"
-        ]
-      },
-      {
-        "tick": 33377,
-        "ms": 8.605,
-        "gc": [
-          "minor 8.396 ms"
-        ]
-      },
-      {
-        "tick": 33784,
-        "ms": 8.249,
-        "gc": [
-          "minor 7.966 ms"
-        ]
-      },
-      {
-        "tick": 33911,
-        "ms": 5.411,
-        "gc": [
-          "minor 4.949 ms"
-        ]
-      },
-      {
-        "tick": 34430,
-        "ms": 34.482,
-        "gc": [
-          "major 33.791 ms"
-        ]
-      },
-      {
-        "tick": 35517,
-        "ms": 10.275,
-        "gc": [
-          "major 9.818 ms"
-        ]
-      },
-      {
-        "tick": 36315,
-        "ms": 5.978,
-        "gc": [
-          "minor 5.452 ms"
-        ]
-      },
-      {
-        "tick": 37275,
-        "ms": 5.881,
-        "gc": [
-          "minor 5.592 ms"
-        ]
-      },
-      {
-        "tick": 38750,
-        "ms": 9.106,
-        "gc": [
-          "major 8.606 ms"
-        ]
-      },
-      {
-        "tick": 39587,
-        "ms": 11.615,
-        "gc": [
-          "major 11.062 ms"
-        ]
       }
     ],
     "buildingsOverTime": [
@@ -366,315 +308,178 @@
       },
       {
         "tick": 10200,
-        "buildings": 27242,
-        "homes": 4155
+        "buildings": 468,
+        "homes": 185
       },
       {
         "tick": 16200,
-        "buildings": 40193,
-        "homes": 6531
+        "buildings": 950,
+        "homes": 377
       },
       {
         "tick": 22200,
-        "buildings": 42126,
-        "homes": 7153
+        "buildings": 1432,
+        "homes": 582
       },
       {
         "tick": 28200,
-        "buildings": 42790,
-        "homes": 7214
+        "buildings": 1835,
+        "homes": 719
       },
       {
         "tick": 34200,
-        "buildings": 43478,
-        "homes": 7235
+        "buildings": 2286,
+        "homes": 899
       }
     ]
   },
   "settleSteps": {
-    "count": 42,
-    "p50": 6.495,
-    "p95": 11.84,
-    "max": 17.736,
+    "count": 41,
+    "p50": 5.592,
+    "p95": 11.581,
+    "max": 12.961,
     "overBudget": 0
   },
   "idleSteps": {
-    "count": 34423,
-    "p99": 8.321,
-    "max": 39.398,
-    "overBudget": 8
+    "count": 34424,
+    "p99": 7.412,
+    "max": 59.686,
+    "overBudget": 4
   },
   "slowSteps": [
-    {
-      "tick": 4221,
-      "command": "BuildRoad",
-      "ms": {
-        "buildings": 0.002,
-        "commands": 23.947,
-        "cells": 2.434,
-        "travel": 0.005,
-        "stats": 0.003,
-        "demand": 0.002,
-        "pops": 0.001,
-        "landValue": 0.001,
-        "grower": 0.004
-      },
-      "gc": []
-    },
-    {
-      "tick": 4222,
-      "command": null,
-      "ms": {
-        "buildings": 0.004,
-        "commands": 0.003,
-        "cells": 0.023,
-        "travel": 32.326,
-        "stats": 0.006,
-        "demand": 0.003,
-        "pops": 0.002,
-        "landValue": 0.002,
-        "grower": 0.008
-      },
-      "gc": []
-    },
     {
       "tick": 4231,
       "command": "ZoneCells",
       "ms": {
-        "buildings": 0.005,
-        "commands": 29.149,
-        "cells": 2.869,
-        "travel": 5.801,
-        "stats": 0.006,
-        "demand": 0.003,
-        "pops": 0.002,
-        "landValue": 0.002,
-        "grower": 0.008
-      },
-      "gc": [
-        "minor 1.595 ms"
-      ]
-    },
-    {
-      "tick": 5958,
-      "command": null,
-      "ms": {
-        "buildings": 0.002,
-        "commands": 0.002,
-        "cells": 0.003,
-        "travel": 23.972,
-        "stats": 0.005,
-        "demand": 0.002,
-        "pops": 0.001,
-        "landValue": 0.001,
-        "grower": 11.923
-      },
-      "gc": []
-    },
-    {
-      "tick": 6023,
-      "command": null,
-      "ms": {
-        "buildings": 0.002,
-        "commands": 0.002,
-        "cells": 0.005,
-        "travel": 38.824,
-        "stats": 0.007,
-        "demand": 0.004,
-        "pops": 0.001,
-        "landValue": 0.002,
-        "grower": 0.551
-      },
-      "gc": []
-    },
-    {
-      "tick": 6631,
-      "command": "ZoneCells",
-      "ms": {
-        "buildings": 0.009,
-        "commands": 22.31,
-        "cells": 11.053,
-        "travel": 10.258,
-        "stats": 0.005,
-        "demand": 0.003,
-        "pops": 0.005,
-        "landValue": 0.005,
-        "grower": 5.178
-      },
-      "gc": []
-    },
-    {
-      "tick": 9981,
-      "command": "BuildRoad",
-      "ms": {
-        "buildings": 0.002,
-        "commands": 22.258,
-        "cells": 0.742,
-        "travel": 0.003,
-        "stats": 0.003,
-        "demand": 0.002,
-        "pops": 0.001,
-        "landValue": 0.001,
-        "grower": 0.231
-      },
-      "gc": []
-    },
-    {
-      "tick": 19391,
-      "command": "ZoneCells",
-      "ms": {
-        "buildings": 0.004,
-        "commands": 4.274,
-        "cells": 0.628,
-        "travel": 15.941,
-        "stats": 0.004,
-        "demand": 0.002,
-        "pops": 0.001,
-        "landValue": 0.001,
-        "grower": 0.283
-      },
-      "gc": []
-    },
-    {
-      "tick": 21741,
-      "command": "BuildRoad",
-      "ms": {
         "buildings": 0.003,
-        "commands": 21.464,
-        "cells": 1.852,
-        "travel": 0.004,
-        "stats": 0.002,
-        "demand": 0.002,
+        "commands": 20.839,
+        "cells": 2.099,
+        "travel": 4.284,
+        "stats": 0.004,
+        "demand": 0.015,
         "pops": 0.001,
+        "displaced": 0.002,
+        "arrivals": 0.004,
+        "turnover": 0.003,
+        "jobs": 0.002,
+        "satisfaction": 0.003,
+        "vacancy": 0.001,
         "landValue": 0.001,
-        "grower": 0.252
+        "redevelop": 0.004,
+        "grower": 0.01
       },
-      "gc": [
-        "minor 4.224 ms"
-      ]
+      "gc": []
     },
     {
-      "tick": 22351,
-      "command": "ZoneCells",
-      "ms": {
-        "buildings": 0.004,
-        "commands": 20.173,
-        "cells": 1.286,
-        "travel": 16.526,
-        "stats": 0.006,
-        "demand": 0.002,
-        "pops": 0.001,
-        "landValue": 0.001,
-        "grower": 0.004
-      },
-      "gc": [
-        "major 11.484 ms"
-      ]
-    },
-    {
-      "tick": 32152,
+      "tick": 9349,
       "command": null,
       "ms": {
-        "buildings": 0.004,
-        "commands": 0.004,
-        "cells": 0.008,
-        "travel": 12.231,
-        "stats": 0.007,
-        "demand": 0.003,
+        "buildings": 0.002,
+        "commands": 0.008,
+        "cells": 0.004,
+        "travel": 21.876,
+        "stats": 0.004,
+        "demand": 0.012,
         "pops": 0.001,
-        "landValue": 0.002,
-        "grower": 12.883
+        "displaced": 0.002,
+        "arrivals": 0.021,
+        "turnover": 0.002,
+        "jobs": 0.001,
+        "satisfaction": 0.001,
+        "vacancy": 0.006,
+        "landValue": 0.001,
+        "redevelop": 0.006,
+        "grower": 0.003
       },
-      "gc": [
-        "major 12.175 ms"
-      ]
+      "gc": []
     },
     {
-      "tick": 33247,
+      "tick": 24650,
       "command": null,
       "ms": {
         "buildings": 0.002,
         "commands": 0.002,
         "cells": 0.004,
-        "travel": 3.87,
-        "stats": 0.003,
-        "demand": 0.001,
+        "travel": 7.578,
+        "stats": 0.004,
+        "demand": 0.014,
         "pops": 0.001,
+        "displaced": 0.002,
+        "arrivals": 0.003,
+        "turnover": 0.002,
+        "jobs": 0.001,
+        "satisfaction": 0.001,
+        "vacancy": 0.014,
         "landValue": 0.001,
-        "grower": 16.593
+        "redevelop": 0.009,
+        "grower": 28.64
       },
-      "gc": [
-        "major 16.222 ms"
-      ]
+      "gc": []
     },
     {
-      "tick": 34198,
+      "tick": 27895,
       "command": null,
       "ms": {
         "buildings": 0.002,
         "commands": 0.001,
-        "cells": 0.003,
-        "travel": 21.765,
-        "stats": 0.005,
-        "demand": 0.002,
-        "pops": 0.001,
-        "landValue": 0.001,
-        "grower": 0.136
+        "cells": 0.004,
+        "travel": 50.967,
+        "stats": 0.011,
+        "demand": 0.029,
+        "pops": 0.002,
+        "displaced": 0.004,
+        "arrivals": 0.005,
+        "turnover": 0.005,
+        "jobs": 0.002,
+        "satisfaction": 0.003,
+        "vacancy": 0.028,
+        "landValue": 0.002,
+        "redevelop": 0.016,
+        "grower": 0.541
       },
       "gc": []
     },
     {
-      "tick": 34430,
+      "tick": 34517,
       "command": null,
       "ms": {
         "buildings": 0.002,
-        "commands": 0.002,
-        "cells": 0.003,
-        "travel": 4.209,
-        "stats": 0.002,
-        "demand": 0.001,
-        "pops": 0.001,
-        "landValue": 0.001,
-        "grower": 34.482
-      },
-      "gc": [
-        "major 33.791 ms"
-      ]
-    },
-    {
-      "tick": 38747,
-      "command": null,
-      "ms": {
-        "buildings": 0.002,
-        "commands": 0.002,
+        "commands": 0.01,
         "cells": 0.004,
-        "travel": 20.402,
-        "stats": 0.015,
-        "demand": 0.002,
-        "pops": 0.001,
-        "landValue": 0.001,
-        "grower": 0.004
+        "travel": 58.85,
+        "stats": 0.01,
+        "demand": 0.026,
+        "pops": 0.002,
+        "displaced": 0.003,
+        "arrivals": 0.005,
+        "turnover": 0.004,
+        "jobs": 0.002,
+        "satisfaction": 0.003,
+        "vacancy": 0.025,
+        "landValue": 0.002,
+        "redevelop": 0.017,
+        "grower": 0.721
       },
       "gc": []
     }
   ],
   "gc": {
-    "minor": 288,
-    "major": 34,
-    "other": 33,
-    "majorMedianMs": 8.168,
-    "majorMaxMs": 44.183
+    "minor": 239,
+    "major": 23,
+    "other": 22,
+    "majorMedianMs": 3.522,
+    "majorMaxMs": 41.85
   },
   "checks": [
     {
       "figure": "soak.command-steps",
       "name": "BuildRoad steps",
       "steps": 101,
-      "overBudget": 3,
+      "overBudget": 0,
       "allowed": 2,
-      "medianMs": 7.384,
-      "maxMs": 26.399,
-      "pass": false,
+      "medianMs": 6.37,
+      "maxMs": 16.289,
+      "pass": true,
       "mode": "blocks"
     },
     {
@@ -683,8 +488,8 @@
       "steps": 28,
       "overBudget": 0,
       "allowed": 2,
-      "medianMs": 4.586,
-      "maxMs": 10.742,
+      "medianMs": 4.49,
+      "maxMs": 10.44,
       "pass": true,
       "mode": "blocks"
     },
@@ -694,8 +499,8 @@
       "steps": 113,
       "overBudget": 0,
       "allowed": 2,
-      "medianMs": 3.277,
-      "maxMs": 11.644,
+      "medianMs": 2.968,
+      "maxMs": 5.139,
       "pass": true,
       "mode": "blocks"
     },
@@ -705,8 +510,8 @@
       "steps": 300,
       "overBudget": 0,
       "allowed": 2,
-      "medianMs": 2.968,
-      "maxMs": 9.351,
+      "medianMs": 2.696,
+      "maxMs": 4.415,
       "pass": true,
       "mode": "blocks"
     },
@@ -716,8 +521,8 @@
       "steps": 150,
       "overBudget": 0,
       "allowed": 2,
-      "medianMs": 4.088,
-      "maxMs": 12.319,
+      "medianMs": 3.897,
+      "maxMs": 8.085,
       "pass": true,
       "mode": "blocks"
     },
@@ -725,11 +530,11 @@
       "figure": "soak.command-steps",
       "name": "ZoneCells steps",
       "steps": 543,
-      "overBudget": 4,
+      "overBudget": 1,
       "allowed": 2,
-      "medianMs": 7.839,
-      "maxMs": 48.825,
-      "pass": false,
+      "medianMs": 8.339,
+      "maxMs": 27.274,
+      "pass": true,
       "mode": "blocks"
     },
     {
@@ -738,30 +543,30 @@
       "steps": 300,
       "overBudget": 0,
       "allowed": 2,
-      "medianMs": 4.745,
-      "maxMs": 17.043,
+      "medianMs": 4.492,
+      "maxMs": 8.11,
       "pass": true,
       "mode": "blocks"
     },
     {
       "figure": "soak.settle-steps",
       "name": "zoning cell settle steps",
-      "steps": 42,
+      "steps": 41,
       "overBudget": 0,
       "allowed": 2,
-      "medianMs": 6.495,
-      "maxMs": 17.736,
+      "medianMs": 5.592,
+      "maxMs": 12.961,
       "pass": true,
       "mode": "blocks"
     },
     {
       "figure": "soak.idle-steps",
       "name": "idle steps",
-      "steps": 34423,
-      "overBudget": 8,
+      "steps": 34424,
+      "overBudget": 4,
       "allowed": 2,
-      "medianMs": 4.275,
-      "maxMs": 39.398,
+      "medianMs": 4.074,
+      "maxMs": 59.686,
       "pass": false,
       "mode": "blocks"
     },
@@ -769,46 +574,46 @@
       "figure": "soak.autosave-parts",
       "name": "autosaves' slowest parts",
       "steps": 30,
-      "overBudget": 3,
+      "overBudget": 0,
       "allowed": 3,
-      "medianMs": 13.978,
-      "maxMs": 33.321,
+      "medianMs": 11.349,
+      "maxMs": 19.531,
       "pass": true,
       "mode": "blocks"
     }
   ],
   "snapshot": {
     "count": 30,
-    "bytes": 20016040,
-    "medianMs": 42.778,
-    "maxMs": 67.094,
+    "bytes": 18340944,
+    "medianMs": 37.531,
+    "maxMs": 49.471,
     "partMaxMs": [
-      6.927,
-      33.321,
-      28.319,
-      8.65,
-      4.804,
-      1.34,
-      1.299,
-      1.666,
-      2.532,
-      2.938,
-      3.062,
-      2.945,
-      2.955,
-      2.861
+      4.724,
+      19.531,
+      15.805,
+      6.92,
+      1.248,
+      1.168,
+      1.144,
+      2.494,
+      1.927,
+      3.123,
+      2.944,
+      2.935,
+      2.854,
+      2.962
     ],
-    "slowestPartMs": 33.321,
-    "medianSlowestPartMs": 13.978,
+    "slowestPartMs": 19.531,
+    "medianSlowestPartMs": 11.349,
     "budget": 20,
-    "cityFileBytes": 25714408,
-    "cityFileMs": 150.579
+    "cityFileBytes": 24020928,
+    "cityFileMs": 158.568
   },
   "heapMb": {
-    "start": 67.7,
-    "end": 98.9,
-    "peakSampled": 118.3,
+    "start": 115.1,
+    "end": 140.8,
+    "peakSampled": 174.9,
     "gcBeforeReading": true
   },
-  "stateHash": "1d025ae7d3fdbe41"
+  "stateHash": "9fc6372fb4eefa14"
 }

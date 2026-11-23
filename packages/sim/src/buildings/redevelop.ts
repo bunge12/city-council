@@ -2,13 +2,15 @@
 // rebuilds on its own, sooner where the land is worth more.
 //
 // Once a game day the REDEVELOP system visits each building, a slice a
-// tick, as the vacancy check does (vacancy.ts): tick k of the day visits
-// the ids that leave k over `ticksPerDay`, so the visits follow from the
-// tick alone and a save mid-day carries on where it stopped. It runs after
-// the vacancy check, on the same slice, and before the grower.
+// tick, as the vacancy check does (vacancy.ts): tick k of day d visits the
+// ids that leave (k + d) mod `ticksPerDay` over `ticksPerDay`, so the visits
+// follow from the tick alone and a save mid-day carries on where it
+// stopped. The slices turn a place each day so that, when the cap below
+// runs out before the day does, the ids it leaves out are not the same ids
+// every day. It runs after the vacancy check and before the grower.
 //
 // - A building on ground zoned up, every cell of its lot of its own zone at
-//   one higher density (`zonedUpTo`, where.ts), is considered while its
+//   one density higher than its own (`zonedUpTo`, where.ts), is considered while its
 //   zone's bar is above zero, the grower's bar for it (`zoneBar`). Its
 //   owner draws from the generator in state, with a chance a day of
 //   `chancePerDay` times (land value - `valueFrom`) / (100 - `valueFrom`)
@@ -27,13 +29,17 @@
 //   shallow, stays.
 // - An abandoned building the vacancy check marked BUILDING_UNZONED, on
 //   ground zoned down or for another use, is cleared, and the grower builds
-//   on the ground under its zoning. One still in use, or vacant, stays as a
+//   on the ground under its zoning. One on ground zoned up is cleared only
+//   where a lot of the new zoning fits, or it would leave the ground bare. One still in use, or vacant, stays as a
 //   permitted existing use. An abandoned building on ground still zoned for
 //   it stays too, to come back into use (vacancy.ts).
 //
-// At most `perDayMax` buildings a game day are replaced or cleared
-// (`redevelopedToday` in state, reset on the day's first tick), so a rezoned
-// district changes over months and not in a day. The replaced buildings go
+// At most `perDayMax` buildings a game day are replaced or cleared, every
+// building a tower takes in counted (`redevelopedToday` in state, reset on
+// the day's first tick), so a rezoned district changes over months and not
+// in a day. The cap is spread over the day's ticks as the grower spreads
+// its quota: no new redevelopment starts on tick k once the day's count is
+// floor((k + 1) x perDayMax / ticksPerDay). The replaced buildings go
 // through `removeBuildings`, which displaces the pops of a home (M3-12) and
 // frees the jobs of a workplace. The new building is the type of the lot
 // it takes, with residents for its lot and a variant drawn, as the grower
@@ -182,10 +188,17 @@ export function checkRedevelopment(state: SimState): void {
   const most = DEMAND_BALANCE.redevelopment.perDayMax;
   const b = state.buildings;
   const unzoned = BUILDING_ALIVE | BUILDING_ABANDONED | BUILDING_UNZONED;
-  for (let id = state.tick % perDay; id < b.flags.length && state.redevelopedToday < most; id += perDay) {
+  const at = state.tick % perDay;
+  // The day's allowance so far, spread over its ticks as the grower spreads its quota.
+  const allowed = Math.floor(((at + 1) * most) / perDay);
+  // The slice turns a place each day, so a slice that comes after the allowance runs out one day comes before it on another.
+  const first = (at + Math.floor(state.tick / perDay)) % perDay;
+  for (let id = first; id < b.flags.length && state.redevelopedToday < allowed; id += perDay) {
     const flags = b.flags[id] ?? 0;
     if ((flags & BUILDING_ALIVE) === 0) continue;
     if (flags === unzoned) {
+      // On ground zoned up, only where a lot of the new zoning fits, or the ground would stand bare for good.
+      if (zonedUpTo(state, id) > 0 && !planRedevelopment(state, id)) continue;
       removeBuildings(state, [id]);
       state.redevelopedToday++;
       continue;
@@ -197,9 +210,10 @@ export function checkRedevelopment(state: SimState): void {
     if (!(bar > 0)) continue;
     if (!ownerRebuilds(state, buildingValue(state, id), bar)) continue;
     const plan = planRedevelopment(state, id, density);
-    if (!plan) continue;
+    // Every building it replaces counts toward the day's cap, so a tower that takes in eight houses counts eight.
+    if (!plan || state.redevelopedToday + plan.replaces.length > most) continue;
     redevelop(state, plan);
-    state.redevelopedToday++;
+    state.redevelopedToday += plan.replaces.length;
   }
 }
 

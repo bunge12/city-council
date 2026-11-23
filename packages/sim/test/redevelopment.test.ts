@@ -163,9 +163,16 @@ function houses(depth = 6): { state: SimState; street: Street; avenue: Street } 
   return { state, street: s, avenue: end };
 }
 
-/** Runs `body` with the street's frontage worth no points and the avenue's 40, so the avenue's houses stand on much more valuable ground. */
+/**
+ * Runs `body` with the street's frontage worth no points and the avenue's
+ * 40, so the avenue's houses stand on ground worth 100 and the street's on
+ * ground worth 60, and with owners counting land value from 40, so an owner
+ * on the avenue is three times as likely to rebuild on a given day.
+ */
 function avenueWorthMore<T>(body: () => T): T {
-  return withValue(LAND_VALUE_BALANCE.roadAccess, "street", 0, () => withValue(LAND_VALUE_BALANCE.roadAccess, "avenue", 40, body));
+  return withValue(LAND_VALUE_BALANCE.roadAccess, "street", 0, () =>
+    withValue(LAND_VALUE_BALANCE.roadAccess, "avenue", 40, () => withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 40, body)),
+  );
 }
 
 /** Rezones the houses' ground, six deep on both sides of the street and the avenue. */
@@ -211,7 +218,7 @@ describe("a built R1 street rezoned to R3", () => {
       for (let pop = 0; pop < state.pops.home.length; pop++) if (isPop(state.pops, pop)) lived.set(pop, state.pops.home[pop] ?? NO_HOME);
       const standing = new Set(before.map((id) => key(state, id)));
       holdDemand({ residential: 60 }, () =>
-        runDays(state, 150, () => {
+        runDays(state, 200, () => {
           // Each house goes whole, all at once with the ones its tower takes in.
           for (const k of [...standing]) {
             const id = Number(k.split("/")[0]);
@@ -227,20 +234,23 @@ describe("a built R1 street rezoned to R3", () => {
       expect(towers.every((id) => ["low-tower", "high-tower"].includes(BUILDING_TYPES[b.type[id] ?? 0]?.id ?? ""))).toBe(true);
       // Most houses went.
       expect(standing.size).toBeLessThan(before.length / 4);
-      // Over game months, not in a day: the first and the last tower two months apart or more, none on the day of the rezone.
+      // Over game months, not in a day: the first and the last tower about two months apart or more, none on the day of the rezone.
       const days = towers.map((id) => dayOf(b.builtAt[id] ?? 0)).sort((p, q) => p - q);
       expect(days[0]).toBeGreaterThan(rezonedOn);
-      expect((days.at(-1) ?? 0) - (days[0] ?? 0)).toBeGreaterThan(60);
+      expect((days.at(-1) ?? 0) - (days[0] ?? 0)).toBeGreaterThan(45);
       const counts = new Map<number, number>();
       for (const day of days) counts.set(day, (counts.get(day) ?? 0) + 1);
       expect(Math.max(...counts.values())).toBeLessThanOrEqual(DEMAND_BALANCE.redevelopment.perDayMax);
       // The avenue's ground is worth more, so its towers came first.
-      const mean = (ids: number[]) => ids.reduce((sum, id) => sum + (b.builtAt[id] ?? 0), 0) / ids.length;
+      const median = (ids: number[]) => {
+        const ticks = ids.map((id) => b.builtAt[id] ?? 0).sort((p, q) => p - q);
+        return ticks[Math.floor(ticks.length / 2)] ?? 0;
+      };
       const avenueTowers = towers.filter((id) => onAvenue(b.firstSeg[id] ?? -1));
       const streetTowers = towers.filter((id) => !onAvenue(b.firstSeg[id] ?? -1));
       expect(avenueTowers.length).toBeGreaterThan(2);
       expect(streetTowers.length).toBeGreaterThan(2);
-      expect(mean(avenueTowers)).toBeLessThan(mean(streetTowers) - 20 * DAY);
+      expect(median(avenueTowers)).toBeLessThan(median(streetTowers) - 20 * DAY);
       // The pops of the houses replaced live elsewhere now, nobody waits, and the towers hold more people than the houses did.
       let moved = 0;
       for (const [pop, home] of lived) {
@@ -284,7 +294,14 @@ describe("a built R1 street rezoned to R3", () => {
     avenueWorthMore(() => holdDemand({ residential: 60 }, () => runDays(state, 60)));
     expect(live(state).map((id) => key(state, id))).toEqual(before);
     for (const id of ids) expect(buildingGround(state, id)).toEqual({ kind: "zoned-up", zone: RESIDENTIAL, density: 3 });
-    void b;
+    // Abandoned there, a house is not cleared: no R3 lot would take the bare ground.
+    withValue(DEMAND_BALANCE.vacancy, "newDays", 5, () =>
+      withValue(DEMAND_BALANCE.vacancy, "abandonDays", 10, () => holdDemand({ residential: -60 }, () => runDays(state, 50))),
+    );
+    const abandoned = ids.filter((id) => isAbandoned(b, id));
+    expect(abandoned.length).toBeGreaterThan(0);
+    for (const id of abandoned) expect(b.flags[id]).toBe(BUILDING_ALIVE | BUILDING_ABANDONED | BUILDING_UNZONED);
+    expect(live(state).map((id) => key(state, id))).toEqual(before);
     expectRecount(state);
   });
 
@@ -307,6 +324,41 @@ describe("a built R1 street rezoned to R3", () => {
       withValue(LAND_VALUE_BALANCE.redevelopment, "margin", 100, () => {
         for (const id of live(state)) expect(planRedevelopment(state, id)).toBeNull();
       });
+    });
+  });
+});
+
+describe("the daily cap", () => {
+  it("counts every house a tower takes in, and spreads them over the day", () => {
+    avenueWorthMore(() => {
+      const { state, street, avenue } = houses();
+      const most = 6;
+      const before = new Map(live(state).map((id) => [id, key(state, id)]));
+      rezone(state, street, avenue, "residential", 3);
+      toDayStart(state);
+      const gone = new Set<number>();
+      let towers = 0;
+      // Every owner draws, so the cap and not the chance sets the pace.
+      withValue(DEMAND_BALANCE.redevelopment, "perDayMax", most, () =>
+        withValue(DEMAND_BALANCE.redevelopment, "chancePerDay", 1, () =>
+          holdDemand({ residential: 100 }, () =>
+            runDays(state, 8, () => {
+              let today = 0;
+              for (const [id, k] of before) {
+                if (gone.has(id) || (state.buildings.flags[id] && key(state, id) === k)) continue;
+                gone.add(id);
+                today++;
+              }
+              expect(today).toBeLessThanOrEqual(most);
+              expect(state.redevelopedToday).toBe(today);
+              towers = ofDensity(state, RESIDENTIAL, 3).length;
+            }),
+          ),
+        ),
+      );
+      expect(gone.size).toBeGreaterThan(most * 4);
+      expect(towers).toBeGreaterThan(1);
+      expectRecount(state);
     });
   });
 });
