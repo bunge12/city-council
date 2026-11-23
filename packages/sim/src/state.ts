@@ -17,7 +17,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 25;
+export const SNAPSHOT_VERSION = 26;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -121,6 +121,12 @@ export interface SimState {
    * recomputed from the running totals on each game day's first tick.
    */
   demand: DemandState;
+  /**
+   * Buildings redevelopment has replaced or cleared since the game day's
+   * first tick (buildings/redevelop.ts, M3-14), held to `perDayMax` in
+   * demand.json. Set to 0 on each day's first tick.
+   */
+  redevelopedToday: number;
 }
 
 /**
@@ -173,6 +179,7 @@ export function createBareState(seed: number): SimState {
     travelReadyAt: 0,
     // After it, where the version 20 migration puts it.
     demand: createDemand(),
+    redevelopedToday: 0,
   };
 }
 

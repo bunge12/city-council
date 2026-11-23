@@ -611,6 +611,86 @@ export function lotZonedFor(state: SimState, id: number): boolean {
   return true;
 }
 
+/**
+ * The density building `id`'s ground is zoned up to, or 0 (M3-14): every
+ * cell of its lot is there, open, of the zone it was built under and of one
+ * density above the one it was built under. Redevelopment (redevelop.ts)
+ * replaces such a building. Reads the first cell first, so a building on
+ * ground still zoned for it, nearly every one, costs one read.
+ */
+export function zonedUpTo(state: SimState, id: number): number {
+  const b = state.buildings;
+  const cells = state.cells;
+  const zone = b.zone[id] ?? 0;
+  const built = b.density[id] ?? 0;
+  const firstSeg = b.firstSeg[id] ?? 0;
+  const front = (cells.offset[firstSeg] ?? 0) + localIndex(b.firstSide[id] ?? 0, b.firstPlace[id] ?? 0, 0);
+  const up = cells.density[front] ?? 0;
+  if (cells.zone[front] !== zone || up <= built) return 0;
+  const cellIndex = syncCells(state);
+  const parts = lotParts(cellIndex, shapeOfBuilding(b, id));
+  if (!parts) return 0;
+  for (const { cols, depth } of parts) for (const col of cols) {
+    const start = (cells.offset[col.seg] ?? 0) + localIndex(col.side, col.place, 0);
+    for (let d = 0; d < depth; d++) {
+      if (columnStatus(cellIndex, col, d) !== CELL_OPEN) return 0;
+      if (cells.zone[start + d] !== zone || cells.density[start + d] !== up) return 0;
+    }
+  }
+  return up;
+}
+
+/** How a building's ground is zoned against what it was built under, for the readout (M3-14). */
+export interface BuildingGround {
+  /**
+   * "as-built": every cell is zoned as it was built. "zoned-up": every cell
+   * is zoned up to one higher density of its zone, so it may redevelop.
+   * "existing-use": anything else, so it stands as a permitted existing use
+   * and the ground rebuilds under its zoning once it is abandoned.
+   */
+  kind: "as-built" | "zoned-up" | "existing-use";
+  /** The zone number and density of the lot's first cell: what the ground would rebuild as. Zone 0 is no zone. */
+  zone: number;
+  density: number;
+}
+
+/** How building `id`'s ground is zoned, as `BuildingGround` says, or null if there is no such building or its lot is not there. */
+export function buildingGround(state: SimState, id: number): BuildingGround | null {
+  const b = state.buildings;
+  if (!Number.isInteger(id) || id < 0 || id >= b.flags.length || !isLive(b, id)) return null;
+  const cellIndex = syncCells(state);
+  const shape = shapeOfBuilding(b, id);
+  if (!lotParts(cellIndex, shape)) return null;
+  const cells = state.cells;
+  const front = (cells.offset[shape.first.seg] ?? 0) + localIndex(shape.first.side, shape.first.place, 0);
+  const zone = cells.zone[front] ?? 0;
+  const density = cells.density[front] ?? 0;
+  const kind = lotZonedFor(state, id) ? "as-built" : zonedUpTo(state, id) > 0 ? "zoned-up" : "existing-use";
+  return { kind, zone, density };
+}
+
+/**
+ * The slots in `state.cells` of every cell of the lot `shape` names, front
+ * strip then back, column by column from the road; or null if the strips
+ * do not hold it.
+ */
+export function lotSlots(state: SimState, shape: LotShape): number[] | null {
+  const parts = lotParts(syncCells(state), shape);
+  if (!parts) return null;
+  const offset = state.cells.offset;
+  const out: number[] = [];
+  for (const { cols, depth } of parts) for (const col of cols) {
+    const start = (offset[col.seg] ?? 0) + localIndex(col.side, col.place, 0);
+    for (let d = 0; d < depth; d++) out.push(start + d);
+  }
+  return out;
+}
+
+/** `lotSlots` of building `id`'s lot. */
+export function buildingSlots(state: SimState, id: number): number[] | null {
+  return lotSlots(state, shapeOfBuilding(state.buildings, id));
+}
+
 /** The current index, if there is one, without building or catching it up. */
 function current(state: SimState): BuildingIndex | null {
   return live.get(state.buildings) ?? null;

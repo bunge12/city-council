@@ -181,7 +181,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     });
   });
 
-  it("sends deltas only when something changed, carrying only tick, speed, the generator, the cell count, the city centre, the statistics and new log", async () => {
+  it("sends deltas only when something changed, carrying only tick, speed, the generator, the cell count, the city centre, the statistics, the day's redevelopments and new log", async () => {
     const { mirror, run, received } = setup();
     await mirror.sendCommand("SetSpeed", { speed: 0 });
     run(100);
@@ -190,7 +190,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["cellReads", "centre", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "demand", "timings", "travelReadyAt", "type", "v"].sort(),
+      ["cellReads", "centre", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "demand", "redevelopedToday", "timings", "travelReadyAt", "type", "v"].sort(),
     );
     // No month began since the last delta, so it carries no sample.
     expect(delta?.type === "delta" && delta.stats.samples.length).toBe(0);
@@ -199,7 +199,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "redevelop", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -274,6 +274,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       centre: { x: 0, z: 0, weight: 0, due: 0 },
       travelReadyAt: 0,
       demand: createDemand(),
+      redevelopedToday: 0,
       pending: [],
       steps: 1,
       timings: [],

@@ -159,6 +159,7 @@ export {
 export { nodeReachesOutside, prepareOutside, segmentReachesOutside, segmentsReachingOutside } from "./roads/outside";
 export { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_FLAG_VALUES, BUILDING_UNZONED, BUILDING_VACANT, buildingCount, buildingIdLimit, homeRoom, isAbandoned, isBuilding, isVacant, readBuilding } from "./buildings/buildings";
 export { VACANCY, VACANCY_SYSTEM, abandonedWaiting, buildingEmpty, checkVacancy, mayComeBack } from "./buildings/vacancy";
+export { REDEVELOP, REDEVELOP_SYSTEM, checkRedevelopment, planRedevelopment, type RedevelopmentPlan } from "./buildings/redevelop";
 export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
@@ -186,7 +187,7 @@ export {
   type YearCounts,
 } from "./stats/stats";
 export { LAND_VALUE_SYSTEM, falloff, findCentre, landValueAt, landValueAtPoint, nextMonth, type LandValue } from "./landvalue/land-value";
-export { NO_BUILDING, buildingInfo, buildingOnSlot, buildingsInChunk, buildingsOnSlots, cellBuildings } from "./buildings/where";
+export { NO_BUILDING, buildingGround, buildingInfo, buildingOnSlot, buildingsInChunk, buildingsOnSlots, cellBuildings, zonedUpTo, type BuildingGround } from "./buildings/where";
 export type { BuildingInfo } from "./buildings/where";
 export {
   BUILDING_CHANGED,

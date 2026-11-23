@@ -1,4 +1,4 @@
-import { BUILDING_TYPES, ZONING_BALANCE, type BuildingInfo } from "@city-council/sim";
+import { BUILDING_TYPES, ZONING_BALANCE, type BuildingGround, type BuildingInfo } from "@city-council/sim";
 import { useBuildingHover } from "./store";
 
 /** Offset of the readout from the pointer, CSS pixels. */
@@ -33,16 +33,33 @@ export function buildingLines(b: BuildingInfo, living?: number): { title: string
 }
 
 /**
+ * What the readout says of a building's ground when it is no longer zoned
+ * as it was built (M3-14), or null when it is: on ground zoned for
+ * something else it stands as a permitted existing use and the ground
+ * rebuilds under its zoning once it is abandoned; on ground zoned up its
+ * owner may redevelop.
+ */
+export function groundLine(ground: BuildingGround | null): string | null {
+  if (!ground || ground.kind === "as-built") return null;
+  const zone = ZONING_BALANCE.zones[ground.zone - 1];
+  const label = zone ? `${zone.name} ${zone.letter}${ground.density}` : null;
+  if (ground.kind === "zoned-up") return `Zoned up to ${label ?? "?"} · may redevelop`;
+  return label ? `Permitted existing use · rebuilds as ${label} once abandoned` : "Permitted existing use · its ground is no longer zoned";
+}
+
+/**
  * Next to the cursor over a building while no tool is on (issue M2-15): its
  * type, zone and density, lot size in cells and residents. The bulldozer
- * shows the same (issue 116). The numbers are on data attributes too, for
- * tests.
+ * shows the same (issue 116). When its ground is zoned for something else,
+ * or zoned up, a third line says so (M3-14). The numbers are on data
+ * attributes too, for tests.
  */
 export function BuildingReadout() {
   const hover = useBuildingHover((s) => s.hover);
   if (!hover) return null;
   const b = hover.building;
   const { title, detail } = buildingLines(b);
+  const ground = groundLine(hover.ground);
   return (
     <div
       className="road-readout building-readout"
@@ -55,10 +72,12 @@ export function BuildingReadout() {
       data-width={String(b.width)}
       data-depth={String(b.depth)}
       data-residents={String(b.residents)}
+      data-ground={hover.ground?.kind ?? ""}
       style={{ left: hover.x + OFFSET, top: hover.y + OFFSET }}
     >
       <div className="what">{title}</div>
       <div className="detail">{detail}</div>
+      {ground ? <div className="detail ground">{ground}</div> : null}
     </div>
   );
 }

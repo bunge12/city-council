@@ -4,7 +4,7 @@
 // `useSim` (hooks.ts) and change it only by sending commands.
 
 import { create } from "zustand";
-import type { BuildingInfo } from "@city-council/sim";
+import type { BuildingGround, BuildingInfo } from "@city-council/sim";
 import { DEFAULT_PRESET } from "../render/config";
 import type { Preset, PresetSource } from "../render/presets";
 import { DEFAULT_SOUND } from "../sound/config";
@@ -224,6 +224,8 @@ export interface BuildingHover {
   x: number;
   y: number;
   building: BuildingInfo;
+  /** How its ground is zoned against what it was built under (M3-14), or null when not known. */
+  ground: BuildingGround | null;
 }
 
 export const useBuildingHover = create<{ hover: BuildingHover | null }>(() => ({ hover: null }));
@@ -231,7 +233,7 @@ export const useBuildingHover = create<{ hover: BuildingHover | null }>(() => ({
 export function setBuildingHover(hover: BuildingHover | null): void {
   const current = useBuildingHover.getState().hover;
   if (current === hover) return;
-  if (current && hover && current.x === hover.x && current.y === hover.y && current.building === hover.building) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.building === hover.building && current.ground === hover.ground) return;
   useBuildingHover.setState({ hover });
 }
 

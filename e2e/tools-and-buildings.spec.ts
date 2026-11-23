@@ -231,6 +231,33 @@ test("hovering a building with no tool on reads it out", async ({ page }, testIn
   await expect(readout).toHaveCount(0);
 });
 
+test("the readout calls a house on C2 ground a permitted existing use (M3-14)", async ({ page }, testInfo) => {
+  const { state } = houseCity();
+  // The house at places 12 and 13 stands on ground rezoned C2, the one at 14 and 15 on ground zoned up to R3.
+  zone(state, [12, 14], 6, true, 2, 2);
+  zone(state, [14, 16], 6, true, 1, 3);
+  await openCity(page, state, { name: "Houses" });
+  await look(page, 4310, 4590, 120);
+  const readout = page.locator("#building-readout");
+  const [x, z] = cellCentre(12, 1, true);
+  await moveTo(page, x, z);
+  await expect(readout).toBeVisible();
+  await expect(readout).toHaveAttribute("data-type", "single-family-home");
+  await expect(readout).toHaveAttribute("data-ground", "existing-use");
+  await expect(readout.locator(".ground")).toHaveText("Permitted existing use · rebuilds as Commercial C2 once abandoned");
+  await attach(page, testInfo, "the readout over a house on C2 ground");
+  const [ux, uz] = cellCentre(14, 1, true);
+  await moveTo(page, ux, uz);
+  await expect(readout).toHaveAttribute("data-ground", "zoned-up");
+  await expect(readout.locator(".ground")).toHaveText("Zoned up to Residential R3 · may redevelop");
+  await attach(page, testInfo, "the readout over a house on ground zoned up to R3");
+  // A house on ground still zoned R1 says nothing of its ground.
+  const [rx, rz] = cellCentre(8, 1, true);
+  await moveTo(page, rx, rz);
+  await expect(readout).toHaveAttribute("data-ground", "as-built");
+  await expect(readout.locator(".ground")).toHaveCount(0);
+});
+
 test("an R3 strip of 3 x 6 is hatched, and the zone tool says why", async ({ page }, testInfo) => {
   const { state } = houseCity();
   await openCity(page, state, { name: "Houses" });

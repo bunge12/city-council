@@ -90,6 +90,7 @@ describe("building deltas in the mirror", () => {
         stats: encodeStatsDelta(state.stats, state.stats.next),
         travelReadyAt: state.travelReadyAt,
         demand: copyDemand(state.demand),
+        redevelopedToday: state.redevelopedToday,
         pending: [],
         steps: 0,
         timings: [],

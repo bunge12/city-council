@@ -411,6 +411,7 @@ export class SimHost {
       stats,
       travelReadyAt: this.state.travelReadyAt,
       demand: copyDemand(this.state.demand),
+      redevelopedToday: this.state.redevelopedToday,
       ...(queue !== this.sentQueue ? { pending: this.state.pending.map((c) => ({ ...c })) } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,

@@ -187,3 +187,22 @@ describe("view readout store", () => {
     expect(useViewReadout.getState()).toMatchObject({ cursor: "1, 2, 3 m", zoomBand: "city" });
   });
 });
+
+describe("the building readout's ground line (M3-14)", () => {
+  it("says nothing of ground zoned as the building was built", async () => {
+    const { groundLine } = await import("../src/ui/BuildingReadout");
+    expect(groundLine(null)).toBeNull();
+    expect(groundLine({ kind: "as-built", zone: 1, density: 1 })).toBeNull();
+  });
+
+  it("calls a house on C2 ground a permitted existing use, and says what the ground rebuilds as", async () => {
+    const { groundLine } = await import("../src/ui/BuildingReadout");
+    expect(groundLine({ kind: "existing-use", zone: 2, density: 2 })).toBe("Permitted existing use · rebuilds as Commercial C2 once abandoned");
+    expect(groundLine({ kind: "existing-use", zone: 0, density: 0 })).toBe("Permitted existing use · its ground is no longer zoned");
+  });
+
+  it("says a house on ground zoned up may redevelop", async () => {
+    const { groundLine } = await import("../src/ui/BuildingReadout");
+    expect(groundLine({ kind: "zoned-up", zone: 1, density: 3 })).toBe("Zoned up to Residential R3 · may redevelop");
+  });
+});

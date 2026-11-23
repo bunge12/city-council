@@ -122,6 +122,10 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 25 adds the queue of displaced pops (M3-12), empty: before it a
   // removed home took its pops with it, so nobody is waiting for a home.
   24: (old) => ({ ...old, version: 25, pops: { ...(old["pops"] as Record<string, unknown>), displaced: new Int32Array(0) } }),
+  // Version 26 adds `redevelopedToday`, the buildings redevelopment replaced
+  // or cleared since the day's first tick (M3-14). A city saved before it
+  // had no redevelopment, so none today.
+  25: (old) => ({ ...old, version: 26, redevelopedToday: 0 }),
 };
 
 /** A version 23 set of buildings with `statusSince`, each building's `builtAt`, after `builtAt` as a new state has it. */

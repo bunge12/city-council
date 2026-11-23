@@ -52,7 +52,8 @@ export const BUILDING_ABANDONED = 4;
 /**
  * Set in `flags` beside `BUILDING_ABANDONED` when the vacancy check last
  * found the building's ground no longer zoned for what it is, so it cannot
- * come back into use (M3-24, vacancy.ts). Issue 14 clears such buildings.
+ * come back into use (M3-24, vacancy.ts). Redevelopment clears such a
+ * building on that visit (redevelop.ts, M3-14).
  */
 export const BUILDING_UNZONED = 8;
 
