@@ -97,7 +97,7 @@ import { addBuilding } from "./buildings";
 import { bestCandidate, candidateCount, setAside } from "./candidates";
 import { freeFrontage, lotOptions, type Lot, type LotOptions } from "./lots";
 import { pollutionGrid, segmentBuildings } from "./where";
-import { buildingReachesOutside, reachableRoom, type ReachableRoom } from "../pops/room";
+import { buildingReachesOutside, homeUnfilled, newcomerRoomLeft, reachableRoom, type ReachableRoom } from "../pops/room";
 import { workplacesHeldBy, zoneJobs, type ZoneJobs } from "../pops/open-jobs";
 import { buildingJobs } from "./jobs";
 import { abandonedWaiting } from "./vacancy";
@@ -302,9 +302,10 @@ export function homesHeld(state: SimState): boolean {
 export function countNewHome(state: SimState, room: ReachableRoom, id: number): void {
   const residents = state.buildings.residents[id] ?? 0;
   if (residents <= 0 || !buildingReachesOutside(state, id)) return;
+  const left = newcomerRoomLeft(state, id);
   room.capacity += residents;
-  room.empty += residents;
-  room.unfilled++;
+  room.empty += left;
+  if (homeUnfilled(residents, left)) room.unfilled++;
 }
 
 /** The grower's work for one tick. */

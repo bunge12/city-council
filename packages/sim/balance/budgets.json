@@ -133,12 +133,12 @@
       "source": "M3-06"
     },
     "arrivals.tick": {
-      "name": "the arrivals system's worst tick on the scale town: people due at the cap, every home empty, so its pass over the buildings finds them all and weighs each by its land value; three twentieths of the tick, raised from a tenth when M3-25 weighted the draw",
+      "name": "the arrivals system's worst tick on the scale town: every home empty, so its pass over the buildings finds them all and weighs each by its land value, and since M3-21 the people due follow that empty room, about 300 households moving in on the tick; a fifth of the tick, raised from three twentieths when M3-21 made the people due follow the empty room, and from a tenth when M3-25 weighted the draw",
       "unit": "ms",
       "statistic": "mean",
-      "budget": 3,
+      "budget": 4,
       "mode": "blocks",
-      "source": "M3-08, M3-25"
+      "source": "M3-08, M3-25, M3-21"
     },
     "displaced.bulldoze-step": {
       "name": "the step that applies a BulldozeBuilding at its cap of occupied homes on the scale town, its pops displaced and the first slice placed, inside the tick",

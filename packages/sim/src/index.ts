@@ -130,7 +130,7 @@ export type { NewPop } from "./pops/pops";
 export { POPS_SYSTEM, popSlice } from "./pops/sweep";
 export { ARRIVALS, ARRIVALS_SYSTEM, dayArrivals, drawProfile, drawSize } from "./pops/arrivals";
 export { DISPLACED, DISPLACED_SYSTEM, placeDisplaced } from "./pops/displaced";
-export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homeUnfilled, homesWithRoom, leastNewcomers, newcomerRoomLeft, reachableRoom, whyNoNewcomers } from "./pops/room";
+export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homeUnfilled, homesAndEmptyRoom, homesWithRoom, leastNewcomers, newcomerRoomLeft, reachableRoom, whyNoNewcomers } from "./pops/room";
 export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/matching";
 export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
 export { TURNOVER, TURNOVER_SYSTEM, dayChances, turnOver, turnoverEvent } from "./pops/turnover";

@@ -155,11 +155,20 @@ export function reachableRoom(state: SimState): ReachableRoom {
  * reaches outside. One pass over the buildings.
  */
 export function homesWithRoom(state: SimState): number[] {
-  const out: number[] = [];
+  return homesAndEmptyRoom(state).homes;
+}
+
+/** `homesWithRoom` and the room they have left for households, `reachableRoom`'s `empty`, from one pass over the buildings, for arrivals (M3-21). */
+export function homesAndEmptyRoom(state: SimState): { homes: number[]; empty: number } {
+  const homes: number[] = [];
+  let empty = 0;
   eachReachableHome(state, (id, _, left) => {
-    if (left > 0) out.push(id);
+    if (left > 0) {
+      homes.push(id);
+      empty += left;
+    }
   });
-  return out;
+  return { homes, empty };
 }
 
 /**

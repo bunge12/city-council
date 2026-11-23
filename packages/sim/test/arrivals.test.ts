@@ -33,7 +33,8 @@ import {
   type Command,
   type SimState,
 } from "../src/index";
-import { seedRng } from "../src/rng";
+import { nextInt, seedRng } from "../src/rng";
+import { drawnAt } from "../src/pops/arrivals";
 import { submit } from "./seen-ends";
 import { holdDemand, type HeldBars } from "./demand-helper";
 
@@ -156,6 +157,23 @@ describe("the day's arrivals", () => {
     expect(dayArrivals(100, 5000)).toBe(Math.ceil(5000 / days));
     expect(dayArrivals(50, 5000)).toBe(Math.ceil(2500 / days));
     expect(dayArrivals(-1, 5000)).toBe(0);
+  });
+
+  it("draw a home from the weights' tree where a walk along the weights in id order lands (M3-21)", () => {
+    const rng = seedRng(11);
+    for (let run = 0; run < 200; run++) {
+      const n = 1 + nextInt(rng, 40);
+      const weights = Array.from({ length: n }, () => (nextInt(rng, 4) === 0 ? 0 : 1 + nextInt(rng, 80)));
+      weights[nextInt(rng, n)] = 1 + nextInt(rng, 80);
+      const tree = new Float64Array(n + 1);
+      for (let i = 0; i < n; i++) for (let j = i + 1; j <= n; j += j & -j) tree[j] = (tree[j] ?? 0) + (weights[i] ?? 0);
+      const total = weights.reduce((a, b) => a + b, 0);
+      for (let u = 0; u < total; u++) {
+        let at = 0;
+        for (let edge = weights[0] ?? 0; u >= edge; edge += weights[at] ?? 0) at++;
+        expect(drawnAt({ homes: weights, tree }, u), `run ${run}, u ${u}`).toBe(at);
+      }
+    }
   });
 
   it("draw a household's size within its density's range, the size cap and the room left", () => {
@@ -385,8 +403,16 @@ describe("the balance for arrivals", () => {
     const newcomer = (satisfaction: unknown) => ({ ...POPS_BALANCE, newcomer: { ...POPS_BALANCE.newcomer, satisfaction } });
     expect(checkPopsBalance(newcomer(101))).not.toEqual([]);
     expect(checkPopsBalance(newcomer(0.5))).not.toEqual([]);
-    expect(checkDemandBalance({ ...DEMAND_BALANCE, emptyRoomShareMax: 1.5 })).not.toEqual([]);
-    expect(checkDemandBalance({ ...DEMAND_BALANCE, emptyRoomShareMax: -0.1 })).not.toEqual([]);
+    // The numbers M3-21 added, each refused out of range by name, and the share M3-21 removed refused as unknown.
+    const bad = (key: string, value: unknown) => checkDemandBalance({ ...DEMAND_BALANCE, [key]: value }).join();
+    expect(bad("unfilledHomesMax", 0)).toContain("unfilledHomesMax");
+    expect(bad("unfilledHomesMax", 2.5)).toContain("unfilledHomesMax");
+    expect(bad("homeFullShare", 0)).toContain("homeFullShare");
+    expect(bad("homeFullShare", 1.2)).toContain("homeFullShare");
+    expect(bad("fillDays", 0)).toContain("fillDays");
+    expect(bad("openJobsMin", -1)).toContain("openJobsMin");
+    expect(bad("openJobsMin", 0.5)).toContain("openJobsMin");
+    expect(bad("emptyRoomShareMax", 0.1)).toContain("emptyRoomShareMax");
     expect(checkDemandBalance(DEMAND_BALANCE)).toEqual([]);
   });
 });

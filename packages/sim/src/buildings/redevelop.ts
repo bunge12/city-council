@@ -48,8 +48,9 @@
 //
 // A home is not replaced while the grower holds new homes back (M3-21,
 // grower.ts, `holdsHomes`): with `unfilledHomesMax` homes newcomers can
-// reach still filling, its owner waits, draws nothing and counts nothing,
-// as a new home on open ground would wait. Without the hold a district
+// reach still filling, an owner who draws to rebuild waits and counts
+// nothing, as a new home on open ground would wait. The owner draws first,
+// so the homes are counted only on a tick an owner would rebuild. Without the hold a district
 // zoned R3 rebuilt in a game year, and stood empty for years after. The
 // homes are counted on a tick that considers one, and again after each
 // home it replaces.
@@ -202,7 +203,7 @@ export function checkRedevelopment(state: SimState): void {
   const allowed = Math.floor(((at + 1) * most) / perDay);
   // The slice turns a place each day, so a slice that comes after the allowance runs out one day comes before it on another.
   const first = (at + Math.floor(state.tick / perDay)) % perDay;
-  // Counted on the first home the tick considers, then again after each it replaces.
+  // Counted for the first owner of a home the tick would let rebuild, then again after each home it replaces.
   let room: ReachableRoom | null = null;
   for (let id = first; id < b.flags.length && state.redevelopedToday < allowed; id += perDay) {
     const flags = b.flags[id] ?? 0;
@@ -219,11 +220,12 @@ export function checkRedevelopment(state: SimState): void {
     if (density === 0) continue;
     const bar = zoneBar(state.demand, ZONE_IDS[b.zone[id] ?? 0] ?? "");
     if (!(bar > 0)) continue;
+    if (!ownerRebuilds(state, buildingValue(state, id), bar)) continue;
+    // Asked only of an owner who would rebuild, so the pass over the buildings is not paid on the many days nobody draws.
     if ((b.residents[id] ?? 0) > 0) {
       room ??= reachableRoom(state);
       if (holdsHomes(room)) continue;
     }
-    if (!ownerRebuilds(state, buildingValue(state, id), bar)) continue;
     const plan = planRedevelopment(state, id, density);
     // Every building it replaces counts toward the day's cap, so a tower that takes in eight houses counts eight.
     if (!plan || state.redevelopedToday + plan.replaces.length > most) continue;
