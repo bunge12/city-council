@@ -161,10 +161,10 @@ test("hovering an occupied, a vacant, an abandoned and an empty house reads who 
   expect(await page.evaluate(async (ids) => Promise.all(ids.map(async (id) => (await window.cityCouncil.view).buildingUse(id))), ids)).toEqual([0, 1, 2, 0]);
   const readout = page.locator("#building-readout");
   const expected = [
-    { use: "inUse", people: "3", detail: "Residential R1 · lot 2 × 4 cells · 3 residents, room for 4", state: null },
-    { use: "vacant", people: "0", detail: "Residential R1 · lot 2 × 4 cells · nobody living here, room for 4", state: "Vacant · no road to an outside connection" },
-    { use: "abandoned", people: "0", detail: "Residential R1 · lot 2 × 4 cells · no room offered", state: "Abandoned" },
-    { use: "inUse", people: "0", detail: "Residential R1 · lot 2 × 4 cells · nobody living here, room for 4", state: "Empty · no road to an outside connection" },
+    { use: "inUse", people: "3", detail: "Residential R1 (2 × 4 lot) · 3/4 residents", state: null },
+    { use: "vacant", people: "0", detail: "Residential R1 (2 × 4 lot) · 0/4 residents", state: "Vacant · no road to an outside connection" },
+    { use: "abandoned", people: "0", detail: "Residential R1 (2 × 4 lot)", state: "Abandoned" },
+    { use: "inUse", people: "0", detail: "Residential R1 (2 × 4 lot) · 0/4 residents", state: "Empty · no road to an outside connection" },
   ];
   for (const [k, want] of expected.entries()) {
     const [hx, hz] = cellCentre(placeOf(k) + 1, 2);
@@ -193,7 +193,7 @@ test("hovering an occupied, a vacant, an abandoned and an empty house reads who 
   await expect(tag).toHaveAttribute("data-ids", String(ids[0]));
   await expect(tag).toHaveAttribute("data-use", "inUse");
   await expect(tag.locator(".state")).toHaveCount(0);
-  await expect(tag.locator(".detail")).toHaveText("Residential R1 · lot 2 × 4 cells · 3 residents, room for 4");
+  await expect(tag.locator(".detail")).toHaveText("Residential R1 (2 × 4 lot) · 3/4 residents");
 });
 
 const thirds = thirdsCity();
