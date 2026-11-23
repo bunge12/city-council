@@ -378,7 +378,12 @@ const SCALE_CITY_PLANS: Readonly<Record<ScaleCityResidents, ScaleCityPlan>> = {
   500_000: { densityShares: [0.25, 0.4, 0.35], jobShares: { commercial: 0.35, office: 0.43, industrial: 0.22 } },
 };
 
-/** Room in homes for every this many residents, so a few homes stand part empty, under the grower's `emptyRoomShareMax`. */
+/**
+ * Room in homes for every this many residents, so some homes stand part
+ * empty. On the city of 200,000 that leaves about 250 homes still filling,
+ * well past `unfilledHomesMax` (M3-21), so the grower holds new homes back
+ * there until they fill.
+ */
 const ROOM_PER_RESIDENT = 1.1;
 /** Of the room, the share in mixed buildings, shops below flats. */
 const MIXED_ROOM_SHARE = 0.08;

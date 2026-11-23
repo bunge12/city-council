@@ -83,13 +83,16 @@ import {
   budgetFigure,
   buildScaleCity,
   buildingCount,
+  buildingIdLimit,
   deserialize,
   generateScaleCity,
   hashState,
+  isBuilding,
   judgeBudget,
   replayFrom,
   serialize,
   type FromSimMessage,
+  type SimState,
 } from "@city-council/sim";
 import { beforeAll, describe, expect, test } from "vitest";
 import { holdDemandBars } from "../src/protocol/held-demand";
@@ -268,6 +271,13 @@ interface BudgetCheck {
 const mb = (bytes: number): number => Math.round((bytes / 1024 / 1024) * 10) / 10;
 const ms = (value: number): number => Math.round(value * 1000) / 1000;
 
+/** Buildings standing in `b` that went up after tick `since`: grown or rebuilt during the hour. */
+function builtSince(b: SimState["buildings"], since: number): number {
+  let built = 0;
+  for (let id = 0; id < buildingIdLimit(b); id++) if (isBuilding(b, id) && (b.builtAt[id] ?? 0) > since) built++;
+  return built;
+}
+
 /** What the hour leaves for the two tests to judge. */
 interface SoakRun {
   /** The live city, the replay of its log, and the page's copy, each hashed. */
@@ -291,8 +301,10 @@ interface SoakRun {
     autosaves: number;
     settleSteps: number;
     applied: Record<string, number>;
-    /** The most buildings standing at a sample, past those the hour began with. */
+    /** The most buildings standing at a sample, past those the hour began with. Reported, not checked. */
     grown: number;
+    /** Buildings standing at the end that went up during the hour, by the grower or redevelopment. */
+    built: number;
   };
   /** Pops at the start and end of the hour, and who arrived, left, was born and died in it. */
   people: {
@@ -760,6 +772,7 @@ async function soakHour(): Promise<SoakRun> {
       settleSteps: settleSorted.length,
       applied: Object.fromEntries(Object.entries(byCommand).map(([type, c]) => [type, c.applied])),
       grown: report.grower.mostBuildings - startPeople.buildings,
+      built: builtSince(live.state.buildings, startTick),
     },
     people,
   };
@@ -806,14 +819,15 @@ describe("soak: one hour of game time at 4x", () => {
     expect(b.settleSteps, "steps that walked a slice of zoning cells").toBeGreaterThan(20);
     for (const [type, applied] of Object.entries(b.applied)) expect(applied, `${type} applied`).toBeGreaterThan(20);
     // On the empty scale city the grower built a town of about 2,800
-    // buildings over the hour. On the city of 200,000 (M3-20) the homes
-    // stand part empty from the start, at 1.1 times the room, and empty
-    // further as the clearing and departures go on, so the grower holds
-    // new homes back (`emptyRoomShareMax`) and adds few: one run grew 15
-    // past the start while the clearing took about 15,000. The grower is
-    // timed at full size in scale-cities.bench.ts instead. #324
-    // tracks a soak that keeps the grower busy on a full city.
-    expect(b.grown, "buildings standing past the start at some sample").toBeGreaterThan(0);
+    // buildings over the hour. On the city of 200,000 (M3-20) about 250
+    // homes stand part empty from the start, past `unfilledHomesMax`
+    // (M3-21), so the grower adds no home all hour, and the clearing takes
+    // about 15,000 buildings: fewer stand at every sample than at the start
+    // (`grown`, 97 short on seed 2026). Workplaces and redevelopment still
+    // build, about 570 an hour, so that is what is checked. The grower is
+    // timed at full size in scale-cities.bench.ts instead. #324 tracks a
+    // soak that keeps the grower busy on a full city.
+    expect(b.built, "buildings standing at the end that went up during the hour").toBeGreaterThan(0);
     // The tick budget is an exit number. A part of an autosave runs in the
     // worker between two steps, so it holds up the next one and gets the
     // same budget as a step (issue #83).
