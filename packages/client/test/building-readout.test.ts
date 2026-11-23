@@ -70,7 +70,7 @@ describe("the building readout's lines (issue M3-17)", () => {
 
   it("says an abandoned home is abandoned, whatever reason the mirror gives", () => {
     const lines = buildingLines(row("single-family-home", { abandoned: true }), { people: 0, why: "abandoned" });
-    expect(lines.detail).toBe("Residential R1 · lot 2 × 4 cells · nobody living here, room for 4");
+    expect(lines.detail).toBe("Residential R1 · lot 2 × 4 cells · no room offered");
     expect(lines.state).toBe("Abandoned");
   });
 
@@ -91,6 +91,9 @@ describe("the building readout's lines (issue M3-17)", () => {
     expect(mixed).toBeDefined();
     const b = row(mixed?.id ?? "", { residents: 40, jobs: 6 });
     expect(buildingLines(b, { people: 12, filled: 2 }).detail).toMatch(/· 12 residents, room for 40 · 2 of 6 jobs filled$/);
+    // Nobody living there but people at work: not empty.
+    expect(buildingLines(b, { people: 0, filled: 2, why: "noRoute" }).state).toBeNull();
+    expect(buildingLines(b, { people: 0, filled: 0, why: "noRoute" }).state).toBe("Empty · no road to an outside connection");
   });
 
   it("gives a home's room alone, and a workplace's jobs, where who is in it is not known", () => {

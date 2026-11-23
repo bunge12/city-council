@@ -163,7 +163,7 @@ test("hovering an occupied, a vacant, an abandoned and an empty house reads who 
   const expected = [
     { use: "inUse", people: "3", detail: "Residential R1 · lot 2 × 4 cells · 3 residents, room for 4", state: null },
     { use: "vacant", people: "0", detail: "Residential R1 · lot 2 × 4 cells · nobody living here, room for 4", state: "Vacant · no road to an outside connection" },
-    { use: "abandoned", people: "0", detail: "Residential R1 · lot 2 × 4 cells · nobody living here, room for 4", state: "Abandoned" },
+    { use: "abandoned", people: "0", detail: "Residential R1 · lot 2 × 4 cells · no room offered", state: "Abandoned" },
     { use: "inUse", people: "0", detail: "Residential R1 · lot 2 × 4 cells · nobody living here, room for 4", state: "Empty · no road to an outside connection" },
   ];
   for (const [k, want] of expected.entries()) {

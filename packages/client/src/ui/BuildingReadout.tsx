@@ -33,7 +33,10 @@ function residentsOf(n: number): string {
 }
 
 /** The people line for a home: who lives there against its room, or its room alone when `people` is not known. */
-function homeLine(room: number, people: number | undefined): string {
+function homeLine(b: BuildingInfo, people: number | undefined): string {
+  const room = b.residents;
+  // An abandoned home offers no room (M3-24), though its lot holds it.
+  if (b.abandoned) return "no room offered";
   if (people === undefined) return residentsOf(room);
   return people === 0 ? `nobody living here, room for ${count(room)}` : `${residentsOf(people)}, room for ${count(room)}`;
 }
@@ -62,20 +65,21 @@ export function buildingLines(b: BuildingInfo, occupants?: Occupants): { title: 
   const home = (type?.residents[1] ?? 0) > 0;
   // A workplace by its type, so an abandoned one, which offers no jobs, still says it is one.
   const work = (type?.jobsPerCell ?? 0) > 0;
-  const people = [home ? homeLine(b.residents, occupants?.people) : null, work ? jobsLine(b, occupants?.filled) : null].filter((s) => s !== null);
+  const people = [home ? homeLine(b, occupants?.people) : null, work ? jobsLine(b, occupants?.filled) : null].filter((s) => s !== null);
   return {
     title: type?.name ?? "Building",
     detail: `${zone?.name ?? "?"} ${zone?.letter ?? "?"}${b.density} · ${lot} · ${people.length > 0 ? people.join(" · ") : "no residents"}`,
-    state: stateLine(b, home, occupants),
+    state: stateLine(b, home, work, occupants),
   };
 }
 
 /** The state line, or null for a building in ordinary use. */
-function stateLine(b: BuildingInfo, home: boolean, occupants: Occupants | undefined): string | null {
+function stateLine(b: BuildingInfo, home: boolean, work: boolean, occupants: Occupants | undefined): string | null {
   if (b.abandoned) return "Abandoned";
   const why = home && occupants?.why && occupants.why !== "abandoned" ? WHY[occupants.why] : null;
   if (b.vacant) return why ? `Vacant · ${why}` : "Vacant";
-  if (home && occupants?.people === 0 && why) return `Empty · ${why}`;
+  // A mixed building with people at work in it is not empty, though nobody lives there.
+  if (home && occupants?.people === 0 && why && !(work && (occupants.filled ?? 0) > 0)) return `Empty · ${why}`;
   return null;
 }
 

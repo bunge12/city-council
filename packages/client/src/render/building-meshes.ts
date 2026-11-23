@@ -1363,6 +1363,8 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     const k = ids ? ids.indexOf(id) : -1;
     if (k < 0) return;
     const starts = mesh.userData["starts"] as Int32Array | undefined;
+    // The simple form's buildings differ in vertices, so its meshes carry where each starts.
+    if (form === "simple" && !starts) throw new Error("a simple buildings mesh has no vertex starts");
     const per = form === "box" ? BOX_VERTICES : FLAT_VERTICES;
     const start = starts ? (starts[k] ?? 0) : k * per;
     const end = starts ? (starts[k + 1] ?? 0) : start + per;
