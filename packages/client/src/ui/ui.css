@@ -867,6 +867,11 @@ kbd {
   color: var(--ink-soft);
 }
 
+/* A building nobody uses, and why a home stands empty (issue M3-17). */
+.road-readout .state {
+  font-weight: 600;
+}
+
 /* A building on ground zoned for something else, or zoned up (M3-14): wraps inside the readout. */
 .building-readout .ground {
   white-space: normal;
@@ -974,4 +979,36 @@ kbd {
 /* The buildings a road takes with it, in the orange they are marked in. */
 .bulldoze-tag .clears {
   color: #b35a00;
+}
+
+/* The overlay buttons (issue M3-18): beside the dock, level with its buttons, outside its row. */
+.build-bar .overlay-dock {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: -1px;
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* The land value overlay's legend (issue M3-18): one bar, its stops' values under it. */
+.land-value-legend {
+  width: 220px;
+}
+
+.land-value-legend .scale {
+  height: 14px;
+  border-radius: 2px;
+}
+
+.land-value-legend .ticks {
+  position: relative;
+  height: 16px;
+  margin: 2px 6px 0;
+}
+
+.land-value-legend .ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--ink-soft);
 }

@@ -579,6 +579,32 @@ export const CELLS = {
   runSag: 0.25,
 } as const;
 
+/** One stop on the land value overlay's scale: the colour, as sRGB hex, of land worth `value`. */
+export interface LandValueStop {
+  value: number;
+  colour: number;
+}
+
+/**
+ * The land value overlay's colour scale (issue M3-18): one hue, violet,
+ * light for land worth little and dark for land worth a lot, mixed in a
+ * straight line between the stops. Violet, so it reads against the blue of
+ * the water and the greens and browns of the ground, and against none of
+ * the zones' colours. The steps were checked with the dataviz skill's
+ * palette validator as an ordinal ramp: lightness falls at every step,
+ * each gap is visible, and the hue spreads by 10°. The legend shows the
+ * stops. Presentation only, so not balance data.
+ */
+export const LAND_VALUE_SCALE = {
+  stops: [
+    { value: 0, colour: 0xa99cee },
+    { value: 25, colour: 0x8577e6 },
+    { value: 50, colour: 0x6250d6 },
+    { value: 75, colour: 0x4535b5 },
+    { value: 100, colour: 0x2a1d7a },
+  ] as readonly LandValueStop[],
+} as const;
+
 /**
  * Buildings on screen (issues M2-12 and M2-13). `buildBudgetMs` is how long
  * a frame may spend reading chunks of buildings from the mirror, writing
@@ -620,6 +646,19 @@ export const BUILDINGS = {
    * and the glass gives off `reflection` of the sky's colour whatever light falls on the wall.
    */
   glass: { variation: 0.3, skyMix: 0.35, reflection: 0.16 },
+  /**
+   * How a building nobody uses looks (issue M3-17), in every form: its
+   * colours move `grey` of the way to their own grey and are scaled by
+   * `dark`, and its glass gives off `glass` of its usual reflection. An
+   * abandoned building's panes are boarded, in `boards` (sRGB), which
+   * are not dulled, so they stand out against its darkened walls. Every tint dulls the same way, so the look holds
+   * whatever colours a building's id gave it. Presentation only.
+   */
+  disuse: {
+    vacant: { grey: 0.6, dark: 0.78, glass: 0.25 },
+    abandoned: { grey: 0.8, dark: 0.5, glass: 0 },
+    boards: 0x8c7a5b,
+  },
   /**
    * Metres round a building's lot kept clear of trees, so no crown pokes
    * through a wall or a roof (issue #137): the widest crown, 0.3 of the

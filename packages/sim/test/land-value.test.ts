@@ -10,6 +10,10 @@ import {
   ZONING_BALANCE,
   buildingJobs,
   cellAt,
+  cellShapesInChunk,
+  cellsInChunk,
+  CHUNK_SIZE,
+  CHUNKS_PER_SIDE,
   cellsSettled,
   checkLandValueBalance,
   createState,
@@ -20,6 +24,7 @@ import {
   hashState,
   landValueAt,
   landValueAtPoint,
+  landValuesOfShapes,
   nextMonth,
   replay,
   serialize,
@@ -245,6 +250,32 @@ describe("land value inputs, each alone", () => {
     // And comes back when it goes.
     removeBuilding(state, id);
     expect(landValueAt(state, near)).toEqual(before.near);
+  });
+});
+
+describe("a chunk's values at once", () => {
+  it("are each cell's value as landValueAt gives it, on two road types beside a factory", () => {
+    const state = createState(SEED);
+    road(state, 4600, "street", 48);
+    road(state, 4700, "avenue", 48);
+    zoneSouth(state, "industrial", 1, 30, 8, 6);
+    const lot = findLot(state, ref(cellAt(state, 4200 + CELL * 32, 4612) as CellInfo));
+    if (!lot.ok) throw new Error(lot.reason);
+    addBuilding(state, { ...lot.lot, residents: 0, variant: 0 });
+    const chunk = Math.floor(4600 / CHUNK_SIZE) * CHUNKS_PER_SIDE + Math.floor(4400 / CHUNK_SIZE);
+    const shapes = cellShapesInChunk(state, chunk);
+    const cells = cellsInChunk(state, chunk);
+    expect(shapes.slots.length).toBeGreaterThan(100);
+    const values = landValuesOfShapes(state, shapes);
+    expect(values.length).toBe(shapes.slots.length);
+    const seen = new Set<number>();
+    cells.forEach((c, k) => {
+      expect(c.index).toBe(shapes.slots[k]);
+      expect(values[k], `cell ${k}`).toBe(value(state, c));
+      seen.add(values[k] ?? 0);
+    });
+    // Polluted street cells, clean street cells and avenue cells at least.
+    expect(seen.size).toBeGreaterThan(2);
   });
 });
 

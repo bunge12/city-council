@@ -14,8 +14,9 @@ import { Notes } from "./Notes";
 import { RoadReadout } from "./RoadReadout";
 import type { AppServices } from "./services";
 import { shortcutFor, toggledSpeed } from "./shortcuts";
+import { LandValueLegend, LandValueReadout } from "./LandValue";
 import { StatsPanel } from "./StatsPanel";
-import { toggleDebug, toggleLog, toggleStats } from "./store";
+import { toggleDebug, toggleLog, toggleOverlay, toggleStats } from "./store";
 import { TopBar } from "./TopBar";
 import { ZoneLegend } from "./ZoneLegend";
 import { ZoneReadout } from "./ZoneReadout";
@@ -81,6 +82,9 @@ function useShortcuts(): void {
         case "zoneTool":
           zoneTool.toggle();
           return;
+        case "overlay":
+          toggleOverlay(action.id);
+          return;
         case "zoneDepth":
           if (zoneTool.active()) zoneTool.stepDepth(action.by);
           return;
@@ -121,11 +125,13 @@ function Shell() {
       </div>
       <BuildBar />
       <ZoneLegend />
+      <LandValueLegend />
       <RoadReadout />
       <EditReadout />
       <BulldozeTag />
       <ZoneReadout />
       <BuildingReadout />
+      <LandValueReadout />
     </>
   );
 }
