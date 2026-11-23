@@ -8,7 +8,8 @@
 // neighbouring buildings of one type use different models.
 
 import { BUILDING_TYPES, CELL_OPEN, ZONING_BALANCE, buildingCount, cellStatuses, serialize, syncCells, typesFor, type SimState } from "../packages/sim/src/index";
-import { addBuilding } from "../packages/sim/src/buildings/buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_VACANT, addBuilding } from "../packages/sim/src/buildings/buildings";
+import { countBuilding } from "../packages/sim/src/stats/stats";
 import { lotProblem } from "../packages/sim/src/buildings/where";
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { fixtureCity } from "./road-fixtures";
@@ -121,4 +122,18 @@ export function downtownFixtureCity(): { bytes: Buffer; state: SimState; counts:
   finishConstruction(state);
   state.speed = 0;
   return { bytes: Buffer.from(serialize(state)), state, counts, buildings: buildingCount(state.buildings) };
+}
+
+/**
+ * Sets live building `id` vacant or abandoned, or back in use, as of the
+ * state's tick, the way the vacancy check does (M3-24): out of the running
+ * totals as it was and back in as it is, so an abandoned building's room
+ * and jobs leave them and a loaded save's recount agrees. Nobody may live
+ * or work in it.
+ */
+export function setBuildingUse(state: SimState, id: number, use: "inUse" | "vacant" | "abandoned"): void {
+  countBuilding(state, id, -1);
+  state.buildings.flags[id] = BUILDING_ALIVE | (use === "vacant" ? BUILDING_VACANT : use === "abandoned" ? BUILDING_ABANDONED : 0);
+  state.buildings.statusSince[id] = state.tick;
+  countBuilding(state, id, 1);
 }

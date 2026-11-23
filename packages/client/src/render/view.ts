@@ -128,6 +128,8 @@ export interface View {
   setGameTick(tick: number | null): void;
   /** The colours building `id` is drawn in, as sRGB hex, or null. For tests. */
   buildingTint(id: number): { wall: number; roof: number; trim: number } | null;
+  /** Building `id`'s use as drawn (building-lod.ts, `IN_USE`, `VACANT`, `ABANDONED`), or null if it is not drawn (issue M3-17). */
+  buildingUse(id: number): number | null;
   /** Switches the lighting to a graphics preset once its shaders are compiled. */
   setPreset(preset: Preset): Promise<void>;
   /** The lighting on screen: its preset and its shadows. */
@@ -518,6 +520,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
     },
     buildingForm: (chunk) => terrainRoot?.buildings?.formOf(chunk) ?? null,
     buildingTint: (id) => terrainRoot?.buildings?.tintOf(id) ?? null,
+    buildingUse: (id) => terrainRoot?.buildings?.useOf(id) ?? null,
     pickBuilding: (ray, limit) => terrainRoot?.buildings?.pick(ray, limit) ?? -1,
     buildingFormVersion: () => terrainRoot?.buildings?.formVersion() ?? 0,
     buildingTop: (id) => terrainRoot?.buildings?.topOf(id) ?? null,

@@ -7,6 +7,7 @@ import { create } from "zustand";
 import type { BuildingInfo } from "@city-council/sim";
 import type { StatRange } from "./stat-series";
 import { DEFAULT_PRESET } from "../render/config";
+import type { Occupants } from "./BuildingReadout";
 import type { Preset, PresetSource } from "../render/presets";
 import { DEFAULT_SOUND } from "../sound/config";
 import type { SoundSettings } from "../sound/settings";
@@ -245,6 +246,8 @@ export interface BuildingHover {
   x: number;
   y: number;
   building: BuildingInfo;
+  /** Who is in it, from the mirror (issue M3-17). */
+  occupants: Occupants;
 }
 
 export const useBuildingHover = create<{ hover: BuildingHover | null }>(() => ({ hover: null }));
@@ -252,7 +255,7 @@ export const useBuildingHover = create<{ hover: BuildingHover | null }>(() => ({
 export function setBuildingHover(hover: BuildingHover | null): void {
   const current = useBuildingHover.getState().hover;
   if (current === hover) return;
-  if (current && hover && current.x === hover.x && current.y === hover.y && current.building === hover.building) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.building === hover.building && current.occupants === hover.occupants) return;
   useBuildingHover.setState({ hover });
 }
 

@@ -867,6 +867,11 @@ kbd {
   color: var(--ink-soft);
 }
 
+/* A building nobody uses, and why a home stands empty (issue M3-17). */
+.road-readout .state {
+  font-weight: 600;
+}
+
 /* The buildings a road or grid would clear (issue M2-15), in the red of their marks on the map. */
 .road-readout .clears,
 #grid-clears {
