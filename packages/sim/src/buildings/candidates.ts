@@ -45,6 +45,7 @@ import {
   bringBackThrough,
   createLotOrder,
   dropSegment,
+  fileWaiting,
   isSetAside,
   notePollution as notePollutionIn,
   removeCandidate,
@@ -344,7 +345,7 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
   let c = live.get(state.buildings);
   // Nearly every call, from a grower draw: nothing noted since the last, so nothing to allocate (issue 166).
   const watch = index.watch;
-  if (c && c.index === index && c.segs.size === 0 && c.fronts.length === 0 && (!watch || (watch.segs.size === 0 && watch.nodes.size === 0 && watch.fronts.size === 0 && watch.columns.size === 0))) return settleOrder(c);
+  if (c && c.index === index && c.segs.size === 0 && c.fronts.length === 0 && (!watch || (watch.segs.size === 0 && watch.nodes.size === 0 && watch.fronts.size === 0 && watch.columns.size === 0))) return capNotes(c, state);
   let found: readonly (Int32Array | null)[] | null = null;
   const onCell = (): readonly (Int32Array | null)[] => (found ??= ask());
   if (!c || c.index !== index) {
@@ -372,7 +373,7 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
     if (watch.fronts.size > 0) watch.fronts = new Set();
     if (watch.columns.size > 0) watch.columns = new Set();
   }
-  if (c.segs.size === 0 && c.fronts.length === 0) return settleOrder(c);
+  if (c.segs.size === 0 && c.fronts.length === 0) return capNotes(c, state);
   fit(c, index.segs.length);
   for (const seg of c.segs) {
     refreshSegment(c, state, onCell, seg);
@@ -391,16 +392,31 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
   if (c.segs.size > 0) c.segs = new Set();
   c.fronts.length = 0;
   c.frontsCap = MOST_FRONTS;
-  return settleOrder(c);
+  return capNotes(c, state);
 }
 
-/** Brings set-aside cells back as the changes noted since the last read ask (lot-order.ts), once the candidates are current. */
-function settleOrder(c: Candidates): Candidates {
+/** Most change notes kept for the order before they are worked through without waiting for the grower's ask. */
+const MOST_NOTES = 1 << 20;
+
+/** `c`, working its change notes through only if they have piled up past `MOST_NOTES`, as a city whose grower never asks would. */
+function capNotes(c: Candidates, state: SimState): Candidates {
+  return c.changed.length + c.added.length > MOST_NOTES ? settleOrder(c, state) : c;
+}
+
+/**
+ * Brings set-aside cells back as the changes noted since the last ask
+ * require (lot-order.ts), with the candidates current. Only the grower's ask
+ * needs it, so it waits for that: a command that frees thousands of cells
+ * does not pay for it in its own step. The walks read the cells as they are
+ * then, which is enough: a try reads only the cells as they are, and every
+ * column changed since is noted.
+ */
+function settleOrder(c: Candidates, state: SimState): Candidates {
   const order = c.order;
   if (order) {
     if (c.roadsChanged) bringBackThrough(order);
-    bringBackNear(order, c.index, c.changed, false);
-    bringBackNear(order, c.index, c.added, true);
+    bringBackNear(order, c.index, state.roads, c.changed, false);
+    bringBackNear(order, c.index, state.roads, c.added, true);
   }
   c.roadsChanged = false;
   c.added.length = 0;
@@ -427,9 +443,9 @@ function orderOf(c: Candidates, state: SimState): LotOrder {
  * does not build.
  */
 export function bestCandidate(state: SimState, index: CellIndex, onCell: OnCell, grid: () => Int32Array, zone = 0): CellRef | null {
-  const c = candidatesOf(state, index, onCell);
+  const c = settleOrder(candidatesOf(state, index, onCell), state);
   if ((c.count[zone] ?? 0) === 0) return null;
-  const key = bestInOrder(orderOf(c, state), state, zone, grid());
+  const key = bestInOrder(orderOf(c, state), state, index, zone, grid());
   if (key < 0) return null;
   const seg = Math.floor(key / CELL_KEY_STRIDE);
   const col = key - seg * CELL_KEY_STRIDE;
@@ -448,7 +464,9 @@ export function setAside(state: SimState, ref: CellRef, through: boolean): void 
 
 /** Whether the candidate at column `col` of segment `seg` is set aside. For tests. */
 export function isCandidateSetAside(state: SimState, seg: number, col: number): boolean {
-  const order = live.get(state.buildings)?.order;
+  const c = live.get(state.buildings);
+  if (c) settleOrder(c, state);
+  const order = c?.order;
   return order ? isSetAside(order, seg, col) : false;
 }
 
@@ -459,7 +477,8 @@ export function setAsideCount(state: SimState): number {
 
 /** Builds the candidates and their land value order now if they are not, so a host's load pays for it and not a tick. */
 export function prepareCandidates(state: SimState, index: CellIndex, onCell: OnCell): void {
-  orderOf(candidatesOf(state, index, onCell), state);
+  const c = settleOrder(candidatesOf(state, index, onCell), state);
+  fileWaiting(orderOf(c, state), state, c.index);
 }
 
 /**

@@ -1946,16 +1946,16 @@ export function cellCorners(state: SimState, ref: CellRef): number[] | null {
 
 /**
  * The corners of the front cell of column `col` (`place * 2 + side`) of
- * segment `seg` as `index` has it, as `cellCorners` gives them, or null.
+ * segment `seg` as `index` has it, as `cellCorners` gives them, or null,
+ * written into `out` when given.
  * Reads the index as it is and settles nothing, for derived data kept
  * inside a step (buildings/lot-order.ts, M3-25).
  */
-export function frontCellCornersIn(index: CellIndex, seg: number, col: number): Float64Array | null {
+export function frontCellCornersIn(index: CellIndex, seg: number, col: number, out: Float64Array = new Float64Array(8)): Float64Array | null {
   const s = index.segs[seg];
   if (!s?.status || !Number.isInteger(col) || col < 0 || col >= s.places * 2) return null;
-  const q = new Float64Array(8);
-  cellQuad(s, col * DEPTH, q);
-  return q;
+  cellQuad(s, col * DEPTH, out);
+  return out;
 }
 
 /**

@@ -129,7 +129,7 @@ function valueWith(state: SimState, terrain: Terrain, grid: Int32Array, x: numbe
 export function buildingValues(state: SimState, ids: readonly number[], into?: Float64Array): Float64Array {
   const lv = LAND_VALUE_BALANCE;
   const grid = pollutionGrid(state);
-  const { x, z, water: waterPoints, value: kept, valueCentre } = lotCentres(state);
+  const { x, z, water: waterPoints, value: kept, valueCentre, valueChunk, valueEpoch, chunkEpoch } = lotCentres(state);
   const b = state.buildings;
   const segType = state.roads.segType;
   const road = ROAD_TYPES.map((t) => lv.roadAccess[t.id] ?? 0);
@@ -148,7 +148,8 @@ export function buildingValues(state: SimState, ids: readonly number[], into?: F
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i] as number;
     // Nearly every home, nearly every tick: a value kept is one for a live building whose lot is there.
-    const known = id >= 0 && id < n ? (kept[id] as number) : -1;
+    // Good while pollution has not changed within reach of its chunk since.
+    const known = id >= 0 && id < n && valueEpoch[id] === chunkEpoch[valueChunk[id] as number] ? (kept[id] as number) : -1;
     if (known >= 0) {
       out[i] = known;
       continue;
@@ -170,6 +171,7 @@ export function buildingValues(state: SimState, ids: readonly number[], into?: F
     const points = road[segType[b.firstSeg[id] ?? 0] ?? 0] ?? 0;
     const v = Math.min(LAND_VALUE_MAX, Math.max(0, lv.base + points + water + centre - pollution));
     kept[id] = v;
+    valueEpoch[id] = chunkEpoch[valueChunk[id] as number] as number;
     out[i] = v;
   }
   return out;

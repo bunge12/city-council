@@ -95,6 +95,11 @@ interface BuildingIndex {
    */
   value: Float64Array;
   valueCentre: { x: number; z: number; weight: number };
+  /** By building id: the 500 m chunk its lot's centre is in, and that chunk's `chunkEpoch` when its value was kept. */
+  valueChunk: Int32Array;
+  valueEpoch: Int32Array;
+  /** By chunk: bumped when pollution changes within reach of it, which makes every value kept for a building in it stale. */
+  chunkEpoch: Int32Array;
   /** By building id: the industrial density it was filed with (landvalue/pollution.ts), or 0. */
   source: number[];
   /**
@@ -277,6 +282,7 @@ function file(bi: BuildingIndex, b: BuildingState, id: number): boolean {
   bi.x[id] = x;
   bi.z[id] = z;
   bi.water[id] = falloff(LAND_VALUE_BALANCE.water, waterDistanceAt(index.terrain, x, z));
+  bi.valueChunk[id] = chunk;
   let set = bi.byChunk.get(chunk);
   if (!set) bi.byChunk.set(chunk, (set = new Set()));
   set.add(id);
@@ -317,7 +323,8 @@ function addSums(sums: Float64Array, x: number, z: number, jobs: number, room: n
  * or went: the grower's candidates look again there, and the land values
  * kept for buildings within reach are worked out again. A value reads the
  * pollution square its lot's centre is in, so the reach takes in a square
- * more than the stamp's radius.
+ * more than the stamp's radius. The chunks in reach move to a new epoch,
+ * so a pass costs nine numbers however many buildings stand there.
  */
 function pollutionMoved(bi: BuildingIndex, x: number, z: number, density: number): void {
   const radius = LAND_VALUE_BALANCE.industry[density - 1]?.radius ?? 0;
@@ -327,10 +334,7 @@ function pollutionMoved(bi: BuildingIndex, x: number, z: number, density: number
   const c1 = chunkAt(x + r, z + r);
   const side = CHUNKS_PER_SIDE;
   for (let cz = Math.floor(c0 / side); cz <= Math.floor(c1 / side); cz++) {
-    for (let cx = c0 % side; cx <= c1 % side; cx++) {
-      const ids = bi.byChunk.get(cz * side + cx);
-      if (ids) for (const id of ids) bi.value[id] = -1;
-    }
+    for (let cx = c0 % side; cx <= c1 % side; cx++) bi.chunkEpoch[cz * side + cx] = (bi.chunkEpoch[cz * side + cx] ?? 0) + 1;
   }
 }
 
@@ -347,6 +351,13 @@ function fitPlaces(bi: BuildingIndex, id: number): void {
   bi.z = grow(bi.z, 0);
   bi.water = grow(bi.water, -1);
   bi.value = grow(bi.value, -1);
+  const growInt = (a: Int32Array) => {
+    const out = new Int32Array(size);
+    out.set(a);
+    return out;
+  };
+  bi.valueChunk = growInt(bi.valueChunk);
+  bi.valueEpoch = growInt(bi.valueEpoch);
 }
 
 /** Takes building `id`'s pollution off the grid, and its jobs and room off the sums, from where it was filed. */
@@ -406,6 +417,9 @@ function build(b: BuildingState, cellIndex: CellIndex): BuildingIndex {
     water: new Float64Array(0),
     value: new Float64Array(0),
     valueCentre: { x: 0, z: 0, weight: 0 },
+    valueChunk: new Int32Array(0),
+    valueEpoch: new Int32Array(0),
+    chunkEpoch: new Int32Array(CHUNKS_PER_SIDE * CHUNKS_PER_SIDE),
     source: [],
     pollution: null,
     jobs: [],
@@ -891,10 +905,19 @@ export function forPlacedBuildings(state: SimState, visit: (id: number, x: numbe
  * For land value (landvalue/land-value.ts, M3-25), which reads many at once
  * and alone writes `value` and `valueCentre`.
  */
-export function lotCentres(state: SimState): { x: Float64Array; z: Float64Array; water: Float64Array; value: Float64Array; valueCentre: { x: number; z: number; weight: number } } {
+export function lotCentres(state: SimState): {
+  x: Float64Array;
+  z: Float64Array;
+  water: Float64Array;
+  value: Float64Array;
+  valueCentre: { x: number; z: number; weight: number };
+  valueChunk: Int32Array;
+  valueEpoch: Int32Array;
+  chunkEpoch: Int32Array;
+} {
   // As for the pollution grid: filing follows the segment shapes alone.
   const { bi } = indexOf(state, false);
-  return { x: bi.x, z: bi.z, water: bi.water, value: bi.value, valueCentre: bi.valueCentre };
+  return { x: bi.x, z: bi.z, water: bi.water, value: bi.value, valueCentre: bi.valueCentre, valueChunk: bi.valueChunk, valueEpoch: bi.valueEpoch, chunkEpoch: bi.chunkEpoch };
 }
 
 /** The 500 m chunk building `id`'s lot centre is in, or NO_BUILDING for no such building. */

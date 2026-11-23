@@ -50,6 +50,7 @@ import { pollutionAt } from "../landvalue/pollution";
 import { waterDistanceAt } from "../landvalue/water";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { frontCellCornersIn, nextColumnInto, type CellIndex, type Column } from "../zoning/cell-index";
+import type { RoadNetwork } from "../roads/network";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { WIDEST_LOT } from "./balance";
 import { FRONTAGE_REACH } from "./lots";
@@ -111,10 +112,18 @@ export interface LotOrder {
   asideThrough: number[];
   /** Cells tried and set aside, ever: for tests that count the grower's tries. */
   setAsideCount: number;
+  /**
+   * Candidates added since the grower last asked, as keys, not yet filed in
+   * a square: working out where each is and its points waits for the
+   * grower's next ask (`fileWaiting`), so a command that frees thousands of
+   * cells does not pay for it in its own step. A key may be listed twice, or
+   * after it stopped being a candidate; its columns say.
+   */
+  waiting: number[];
 }
 
 export function createLotOrder(): LotOrder {
-  return { tiles: Array.from({ length: ZONES + 1 }, () => new Map<number, Tile>()), segs: [], epoch: 0, cx: 0, cz: 0, cw: 0, asideCount: 0, asideThrough: [], setAsideCount: 0 };
+  return { tiles: Array.from({ length: ZONES + 1 }, () => new Map<number, Tile>()), segs: [], epoch: 0, cx: 0, cz: 0, cw: 0, asideCount: 0, asideThrough: [], setAsideCount: 0, waiting: [] };
 }
 
 /** Makes room in the order for a segment with `columns` columns, dropping whatever it held. Its candidates must be taken out first. */
@@ -150,17 +159,44 @@ function staticPoints(state: SimState, x: number, z: number, roadType: number): 
   return lv.base + road + falloff(lv.water, waterDistanceAt(terrainOf(state.seed), x, z));
 }
 
-/** Adds the candidate at column `col` of `seg`, of zone `zone`, to the order. */
+/** Scratch for a cell's corners, one call at a time. */
+const quad = new Float64Array(8);
+
+/** Most keys `waiting` holds before they are filed without waiting for the grower, so a city that never grows does not gather them forever. */
+const MOST_WAITING = 1 << 20;
+
+/** Adds the candidate at column `col` of `seg`, of zone `zone`, to the order, to be filed on the grower's next ask. */
 export function addCandidate(order: LotOrder, state: SimState, index: CellIndex, seg: number, col: number, zone: number): void {
   const cols = order.segs[seg];
   if (!cols) throw new Error(`segment ${seg} has no columns in the lot order`);
-  const q = frontCellCornersIn(index, seg, col);
+  cols.zone[col] = zone;
+  cols.aside[col] = 0;
+  order.waiting.push(seg * CELL_KEY_STRIDE + col);
+  if (order.waiting.length > MOST_WAITING) fileWaiting(order, state, index);
+}
+
+/** Files every candidate waiting, as the header of `waiting` says. */
+export function fileWaiting(order: LotOrder, state: SimState, index: CellIndex): void {
+  const waiting = order.waiting;
+  if (waiting.length === 0) return;
+  order.waiting = [];
+  for (const key of waiting) {
+    const seg = Math.floor(key / CELL_KEY_STRIDE);
+    const col = key - seg * CELL_KEY_STRIDE;
+    const cols = order.segs[seg];
+    if (!cols || (cols.zone[col] ?? 0) === 0 || cols.tile[col] !== NO_TILE || cols.aside[col] === 1) continue;
+    place(order, state, index, seg, col);
+  }
+}
+
+/** Works out where candidate `col` of `seg` is and its road and water points, and files it. */
+function place(order: LotOrder, state: SimState, index: CellIndex, seg: number, col: number): void {
+  const cols = order.segs[seg] as SegColumns;
+  const q = frontCellCornersIn(index, seg, col, quad);
   if (!q) throw new Error(`no cell at column ${col} of segment ${seg}`);
   // As `landValueAt` measures a cell: at the mean of its corners.
   const x = ((q[0] ?? 0) + (q[2] ?? 0) + (q[4] ?? 0) + (q[6] ?? 0)) / 4;
   const z = ((q[1] ?? 0) + (q[3] ?? 0) + (q[5] ?? 0) + (q[7] ?? 0)) / 4;
-  cols.zone[col] = zone;
-  cols.aside[col] = 0;
   cols.s[col] = staticPoints(state, x, z, state.roads.segType[seg] ?? 0);
   cols.x[col] = x;
   cols.z[col] = z;
@@ -271,6 +307,9 @@ const WALK_REACH = FRONTAGE_REACH + 2;
  */
 const THROUGH_REACH = (WALK_REACH + 2 * WIDEST_LOT) * ZONING_BALANCE.cellSize;
 
+/** How far a segment's front cells may lie from its curve: a road's half width and a cell, with room to spare. */
+const SEGMENT_SLACK = 64;
+
 /**
  * Brings back the set-aside candidates a change at each column of `keys`
  * could let a lot fit at (header): the column itself, and from it each way
@@ -283,10 +322,10 @@ const THROUGH_REACH = (WALK_REACH + 2 * WIDEST_LOT) * ZONING_BALANCE.cellSize;
  * buildings were added, which cannot make a lot fit, those within
  * `THROUGH_REACH` of a change come back as well.
  */
-export function bringBackNear(order: LotOrder, index: CellIndex, keys: readonly number[], added: boolean): void {
+export function bringBackNear(order: LotOrder, index: CellIndex, net: RoadNetwork, keys: readonly number[], added: boolean): void {
   if (order.asideCount === 0 || keys.length === 0) return;
   const batch = new Set(keys);
-  if (!added && order.asideThrough.length > 0) bringBackThroughNear(order, index, batch);
+  if (!added && order.asideThrough.length > 0) bringBackThroughNear(order, net, batch);
   for (const key of batch) {
     const seg = Math.floor(key / CELL_KEY_STRIDE);
     const col = key - seg * CELL_KEY_STRIDE;
@@ -306,23 +345,36 @@ export function bringBackNear(order: LotOrder, index: CellIndex, keys: readonly 
   }
 }
 
-/** Brings back the set-aside cells that grow through-lots within `THROUGH_REACH` of the box round the columns `keys` name. */
-function bringBackThroughNear(order: LotOrder, index: CellIndex, keys: ReadonlySet<number>): void {
+/**
+ * Brings back the set-aside cells that grow through-lots within
+ * `THROUGH_REACH` of the box round the segments of the columns `keys` name.
+ * A segment is a curve inside the box of its ends and its control point,
+ * and its cells lie within `SEGMENT_SLACK` of the curve, so the box costs
+ * a look per segment rather than a cell's corners per column.
+ */
+function bringBackThroughNear(order: LotOrder, net: RoadNetwork, keys: ReadonlySet<number>): void {
   let x0 = Infinity;
   let z0 = Infinity;
   let x1 = -Infinity;
   let z1 = -Infinity;
+  const take = (x: number, z: number) => {
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    z0 = Math.min(z0, z);
+    z1 = Math.max(z1, z);
+  };
+  const seen = new Set<number>();
   for (const key of keys) {
     const seg = Math.floor(key / CELL_KEY_STRIDE);
-    const q = frontCellCornersIn(index, seg, key - seg * CELL_KEY_STRIDE);
-    if (!q) continue;
-    for (let k = 0; k < 8; k += 2) {
-      x0 = Math.min(x0, q[k] ?? 0);
-      x1 = Math.max(x1, q[k] ?? 0);
-      z0 = Math.min(z0, q[k + 1] ?? 0);
-      z1 = Math.max(z1, q[k + 1] ?? 0);
-    }
+    if (seen.has(seg)) continue;
+    seen.add(seg);
+    const a = net.segA[seg] ?? -1;
+    const b = net.segB[seg] ?? -1;
+    take(net.nodeX[a] ?? 0, net.nodeZ[a] ?? 0);
+    take(net.nodeX[b] ?? 0, net.nodeZ[b] ?? 0);
+    take(net.segCX[seg] ?? 0, net.segCZ[seg] ?? 0);
   }
+  const reach = THROUGH_REACH + SEGMENT_SLACK;
   const kept: number[] = [];
   for (const key of order.asideThrough) {
     const seg = Math.floor(key / CELL_KEY_STRIDE);
@@ -331,7 +383,7 @@ function bringBackThroughNear(order: LotOrder, index: CellIndex, keys: ReadonlyS
     if (!cols || cols.aside[col] !== 1) continue;
     const x = cols.x[col] ?? 0;
     const z = cols.z[col] ?? 0;
-    if (x >= x0 - THROUGH_REACH && x <= x1 + THROUGH_REACH && z >= z0 - THROUGH_REACH && z <= z1 + THROUGH_REACH) bringBack(order, seg, col);
+    if (x >= x0 - reach && x <= x1 + reach && z >= z0 - reach && z <= z1 + reach) bringBack(order, seg, col);
     else kept.push(key);
   }
   order.asideThrough = kept;
@@ -411,7 +463,8 @@ const staleBound: number[] = [];
  * with the highest land value, the lower key of two the same; or -1 for
  * none. `grid` is the pollution grid (buildings/where.ts).
  */
-export function bestCandidate(order: LotOrder, state: SimState, zone: number, grid: Int32Array): number {
+export function bestCandidate(order: LotOrder, state: SimState, index: CellIndex, zone: number, grid: Int32Array): number {
+  fileWaiting(order, state, index);
   followCentre(order, state);
   let bestValue = -1;
   let bestKey = Infinity;
