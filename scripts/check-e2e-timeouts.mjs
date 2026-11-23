@@ -11,10 +11,11 @@
 // A time limit stops a test that hangs. It does not hold a test's speed,
 // since a shared runner is up to twice as slow as another (issue #319):
 //
-// - Every perf spec takes the one limit in e2e/projects.json's `perfLimit`
-//   and sets no number of its own, and that limit is at least `timesSeconds`
-//   times the longest perf file's measured seconds. The weekly timings
-//   change then fails here when a spec has grown, before it times out.
+// - Every perf test has the one limit in e2e/projects.json's `perfLimit`,
+//   which playwright.config.ts gives the perf project. No perf spec sets a
+//   limit, and the one limit is at least `timesSeconds` times the longest
+//   perf file's measured seconds. The weekly timings change then fails
+//   here when a spec has grown, before it times out.
 // - Each Vitest config sets `testTimeout` to a minute or more, not Vitest's
 //   default of 5 s.
 //
@@ -32,7 +33,7 @@
 // Run by `pnpm lint`.
 
 import { readFileSync, readdirSync } from "node:fs";
-import { PERF_LIMIT_NAME, attemptsOf, configTimeoutMs, namedLimits, timeouts } from "./e2e-limits.mjs";
+import { attemptsOf, configTimeoutMs, perfLimitMs, timeouts } from "./e2e-limits.mjs";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
@@ -86,10 +87,10 @@ function perfMinutes(workflow) {
  * Every test limit in a file over its share of `minutes`, as a message: a
  * third for a test that is tried twice, a half for one tried once.
  */
-function violations(file, source, defaultMs, minutes, jobs, attempts = 2, named = {}) {
+function violations(file, source, defaultMs, minutes, jobs, attempts = 2) {
   const capMs = (minutes * 60_000) / (attempts + 1);
   const share = attempts === 1 ? "half" : "a third";
-  return timeouts(source, defaultMs, named).flatMap(({ line, ms, text }) => {
+  return timeouts(source, defaultMs).flatMap(({ line, ms, text }) => {
     if (ms === null) {
       return [`${file}:${line}: ${text} cannot be checked. Give test.setTimeout a number above 0, or a const set to one in the file.`];
     }
@@ -101,11 +102,18 @@ function violations(file, source, defaultMs, minutes, jobs, attempts = 2, named 
   });
 }
 
-/** A perf spec's limits that are not the project's one, as messages. */
+/** Every limit a perf spec sets, as messages: the project has one for all of them. */
 function ownPerfLimits(file, source, defaultMs) {
-  return timeouts(source, defaultMs)
-    .filter(({ text }) => !new RegExp(`\\.setTimeout\\(\\s*${PERF_LIMIT_NAME}\\s*\\)`).test(text))
-    .map(({ line, text }) => `${file}:${line}: ${text} sets a limit of its own. A perf spec takes test.setTimeout(${PERF_LIMIT_NAME}) from ./measure and no other (perfLimit in e2e/projects.json).`);
+  return timeouts(source, defaultMs).map(
+    ({ line, text }) => `${file}:${line}: ${text} sets a limit of its own. Every perf test has the one limit in e2e/projects.json's perfLimit: take this out.`,
+  );
+}
+
+/** playwright.config.ts gives the perf project the limit in e2e/projects.json, or a message. */
+function perfConfigProblems(config) {
+  const perf = /name: "perf",[\s\S]*?\n {4}\},\n/.exec(config)?.[0] ?? "";
+  if (/\btimeout: projectFiles\.perfLimit\.testMinutes \* 60_000,/.test(perf)) return [];
+  return ["playwright.config.ts: the perf project needs `timeout: projectFiles.perfLimit.testMinutes * 60_000,`, the one limit of its tests"];
 }
 
 /** The perf limit against the longest perf file's measured seconds, as messages. */
@@ -155,16 +163,16 @@ function selfTest() {
   const fail = (what) => {
     throw new Error(`check-e2e-timeouts self-test: ${what}`);
   };
-  const named = { [PERF_LIMIT_NAME]: 2_400_000 };
-  const perfSpec = `test.setTimeout(${PERF_LIMIT_NAME});`;
-  // One attempt may take half of its job, and the named limit is read.
-  if (violations("x.spec.ts", perfSpec, 60_000, 90, "a job", 1, named).length !== 0) fail("40 minutes of a 90 minute job with no retry was refused");
-  if (violations("x.spec.ts", perfSpec, 60_000, 70, "a job", 1, named).length !== 1) fail("40 minutes of a 70 minute job with no retry passed");
-  if (violations("x.spec.ts", perfSpec, 60_000, 90, "a job", 2, named).length !== 1) fail("40 minutes of a 90 minute job with a retry passed");
-  if (violations("x.spec.ts", perfSpec, 60_000, 90, "a job", 1).length !== 1) fail("a limit by a name nobody gave was read");
-  if (ownPerfLimits("x.spec.ts", perfSpec, 60_000).length !== 0) fail("a perf spec with the project's limit was refused");
-  if (ownPerfLimits("x.spec.ts", "test.setTimeout(900_000);", 60_000).length !== 1) fail("a perf spec with a limit of its own passed");
-  if (ownPerfLimits("x.spec.ts", `${perfSpec}\n  test.slow();`, 60_000).length !== 1) fail("a perf spec with test.slow() passed");
+  // One attempt may take half of its job.
+  if (violations("x.spec.ts", "test.setTimeout(2_400_000);", 60_000, 90, "a job", 1).length !== 0) fail("40 minutes of a 90 minute job with no retry was refused");
+  if (violations("x.spec.ts", "test.setTimeout(2_400_000);", 60_000, 70, "a job", 1).length !== 1) fail("40 minutes of a 70 minute job with no retry passed");
+  if (ownPerfLimits("x.spec.ts", "const x = 1;", 2_400_000).length !== 0) fail("a perf spec with no limit of its own was refused");
+  if (ownPerfLimits("x.spec.ts", "test.setTimeout(900_000);", 2_400_000).length !== 1) fail("a perf spec with a limit of its own passed");
+  if (ownPerfLimits("x.spec.ts", "  test.slow();", 2_400_000).length !== 1) fail("a perf spec with test.slow() passed");
+  const perfProject = (line) => `    {\n      name: "perf",\n      retries: 0,\n${line}      use: {},\n    },\n    {\n      name: "evidence",\n      timeout: projectFiles.perfLimit.testMinutes * 60_000,\n    },\n`;
+  if (perfConfigProblems(perfProject("      timeout: projectFiles.perfLimit.testMinutes * 60_000,\n")).length !== 0) fail("a perf project with the limit was refused");
+  if (perfConfigProblems(perfProject("")).length !== 1) fail("a perf project without the limit passed");
+  if (perfConfigProblems(perfProject("      timeout: 900_000,\n")).length !== 1) fail("a perf project with another limit passed");
   const limit = (testMinutes, seconds) => perfLimitProblems({ perfLimit: { testMinutes, timesSeconds: 2.5 }, perf: ["a.spec.ts", "b.spec.ts"], seconds: { "a.spec.ts": 60, "b.spec.ts": seconds } }).length;
   if (limit(40, 960) !== 0) fail("a perf limit of 2.5 times its longest file was refused");
   if (limit(40, 961) !== 1) fail("a perf limit under 2.5 times its longest file passed");
@@ -195,8 +203,12 @@ function main() {
   /** Whether a ci.yml runner runs the file. */
   const runs = (runner, file, source) => runner.project === projectOf(file) && (runner.grep === null || source.includes(runner.grep));
 
-  const named = namedLimits(projects);
-  const problems = [...perfLimitProblems(projects)];
+  const perfMs = perfLimitMs(projects);
+  const problems = [...perfLimitProblems(projects), ...perfConfigProblems(read("playwright.config.ts"))];
+  // The perf project does not retry, so its one limit may take half of its job.
+  if (perfMs > (perf * 60_000) / (attemptsOf("perf") + 1)) {
+    problems.push(`e2e/projects.json: perfLimit.testMinutes of ${perfMs / 60_000} is over half of the ${perf} minutes of perf.yml's e2e job`);
+  }
   for (const pkg of readdirSync(new URL("packages/", root))) {
     for (const name of readdirSync(new URL(`packages/${pkg}/`, root)).filter((f) => /^vitest(\.\w+)?\.config\.ts$/.test(f))) {
       problems.push(...vitestProblems(`packages/${pkg}/${name}`, read(`packages/${pkg}/${name}`)));
@@ -216,8 +228,8 @@ function main() {
     }
     const minutes = Math.min(...jobs.map((j) => j.minutes));
     const names = jobs.length > 3 ? `${jobs[0]?.id} and the other ${jobs[0]?.id.replace(/-\d+$/, "")} runners` : jobs.map((j) => j.id).join(", ");
-    problems.push(...violations(`e2e/${file}`, source, defaultMs, minutes, names, attemptsOf(project), named));
-    if (project === "perf") problems.push(...ownPerfLimits(`e2e/${file}`, source, defaultMs));
+    if (project === "perf") problems.push(...ownPerfLimits(`e2e/${file}`, source, perfMs));
+    else problems.push(...violations(`e2e/${file}`, source, defaultMs, minutes, names, attemptsOf(project)));
   }
 
   for (const r of runners) {
@@ -228,7 +240,7 @@ function main() {
     }
     const longest = Math.max(
       defaultMs,
-      ...[...sources].filter(([f, s]) => runs(r, f, s)).flatMap(([, s]) => timeouts(s, defaultMs, named).map((t) => t.ms ?? 0)),
+      ...[...sources].filter(([f, s]) => runs(r, f, s)).flatMap(([, s]) => timeouts(s, defaultMs).map((t) => t.ms ?? 0)),
     );
     const needMs = attemptsOf(r.project) * longest + 2 * 60_000;
     if (r.limit * 60_000 < needMs) {

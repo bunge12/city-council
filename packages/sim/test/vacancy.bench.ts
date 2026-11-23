@@ -102,7 +102,10 @@ test("vacancy and abandonment on the M2 scale town", async ({ bench, annotate })
   };
   await annotate(JSON.stringify(report, null, 2), "M3-24 vacancy");
 
-  const worst = (meanMs[abandon] ?? 0) >= (meanMs[comeBack] ?? 0) ? abandon : comeBack;
-  hold("vacancy.tick", worst, { mean: meanMs[worst] ?? 0, max: maxMs[worst] ?? 0 });
+  // Both worst days, each under its own name. Holding only the slower of
+  // the two named the case by which one won, and a change measured against
+  // the commit before it then found no figure there when the other had
+  // (issue #319).
+  for (const day of [abandon, comeBack]) hold("vacancy.tick", day, { mean: meanMs[day] ?? 0, max: maxMs[day] ?? 0 });
   hold("vacancy.waiting", waiting, { mean: meanMs[waiting] ?? 0, max: maxMs[waiting] ?? 0 });
 }, 600_000);

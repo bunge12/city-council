@@ -22,10 +22,8 @@ export function configTimeoutMs(config) {
  * `const` set to one in the same file, a timeout of 0 (none at all), or one
  * set through `test.describe.configure`. `test.slow()` in any form triples
  * the timeout in force, which is counted as the file's longest other limit.
- * `named` gives the milliseconds of constants a spec may import, by name:
- * the perf project's `PERF_TEST_TIMEOUT` (`namedLimits`).
  */
-export function timeouts(source, defaultMs, named = {}) {
+export function timeouts(source, defaultMs) {
   const found = [];
   const slows = [];
   source.split("\n").forEach((line, i) => {
@@ -33,8 +31,7 @@ export function timeouts(source, defaultMs, named = {}) {
     for (const m of line.matchAll(/\b(?!window\b|globalThis\b|self\b)\w+\.setTimeout\(([^)]*)\)?/g)) {
       const arg = m[1] ?? "";
       let ms = literal(arg);
-      if (ms === null && Object.hasOwn(named, arg.trim())) ms = named[arg.trim()];
-      else if (ms === null && /^\s*[A-Za-z_$][\w$]*\s*$/.test(arg)) {
+      if (ms === null && /^\s*[A-Za-z_$][\w$]*\s*$/.test(arg)) {
         const def = new RegExp(`\\bconst ${arg.trim()}\\s*(?::\\s*number\\s*)?=\\s*([^;]+);`).exec(source);
         ms = def ? literal(def[1] ?? "") : null;
       }
@@ -53,15 +50,16 @@ export function timeouts(source, defaultMs, named = {}) {
 }
 
 /** The longest any one test in the file may run, in milliseconds, or Infinity when a limit cannot be read. */
-export function longestTestMs(source, defaultMs, named = {}) {
-  return Math.max(defaultMs, ...timeouts(source, defaultMs, named).map((t) => t.ms ?? Infinity));
+export function longestTestMs(source, defaultMs) {
+  return Math.max(defaultMs, ...timeouts(source, defaultMs).map((t) => t.ms ?? Infinity));
 }
 
-/** The name the perf specs give their one time limit (e2e/measure.ts). */
-export const PERF_LIMIT_NAME = "PERF_TEST_TIMEOUT";
-
-/** The limits a spec may name rather than write, from e2e/projects.json, for `timeouts`. */
-export const namedLimits = (projects) => ({ [PERF_LIMIT_NAME]: projects.perfLimit.testMinutes * 60_000 });
+/**
+ * The limit of every test in the perf project, in milliseconds: `perfLimit`
+ * in e2e/projects.json, which playwright.config.ts gives the project. A
+ * perf spec sets none of its own (scripts/check-e2e-timeouts.mjs).
+ */
+export const perfLimitMs = (projects) => projects.perfLimit.testMinutes * 60_000;
 
 /**
  * The --global-timeout for a runner planned at `plannedSeconds`, whose

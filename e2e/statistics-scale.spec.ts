@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { HISTORY_LENGTH, STAT_TOTALS, deserialize, sampleCount, serialize } from "../packages/sim/src/index";
 import { writeReport, openFixture, scaleCity } from "./building-lod-helpers";
-import { PERF_TEST_TIMEOUT, perfFigures } from "./measure";
+import { perfFigures } from "./measure";
 
 // Issue M3-16: opening the statistics panel on the scale town, about 54,000
 // buildings, with every total's history full at 1,200 samples and wrapped,
@@ -32,7 +32,6 @@ declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Building the town takes about half a minute, and loading it into software WebGL a few more, as in zone-open-scale.spec.ts.
-test.setTimeout(PERF_TEST_TIMEOUT);
 
 /** The issue's budget for opening the panel. */
 const OPEN_MS = 100;

@@ -69,7 +69,7 @@ Divide the runner's minutes by its plan, from the `e2e-summary` table. Then comp
 
 For the soak and bench, a missed budget is already run a second time inside the job (issue #231), and the job fails only when the second attempt misses too.
 
-The bench job also runs the bench on the commit before your change first, on the same runner, and its table has that figure in the "Before" column (issue #319). A figure over its budget fails your change when your change put it there or made it more than 1.15 times slower. One that was over already is marked "over, as before" and does not fail: the runner is slow, or an earlier change left it over, and the issue titled "A time budget is over on main" tracks that. So a red bench now means your change: compare "Measured" with "Before". The soak has no base, and its counts of slow steps already allow for a runner's pauses.
+The bench job also runs the bench on the commit before your change first, on the same runner, and its table has that figure in the "Before" column (issue #319). A figure over its budget fails your change when it is more than 1.15 times what it was before, more than 1.5 times its budget, or new. One within both is marked "over, as before" and does not fail: the runner is slow, or an earlier change left it at its budget, and the issue titled "A time budget is over on main" tracks that. So a red bench nearly always means your change: compare "Measured" with "Before". The exception is a run whose summary says it has no figures from the commit before, where every budget was held as an absolute number. The soak has no base, and its counts of slow steps already allow for a runner's pauses.
 
 ### When a re-run is worth it
 

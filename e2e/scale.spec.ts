@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { buildScaleCity, createState, heightAt, generateTerrain, serialize } from "../packages/sim/src/index";
 import { canvasShot, openCity, settle } from "./helpers";
-import { PERF_TEST_TIMEOUT, frameTime, memory, perfFigures } from "./measure";
+import { frameTime, memory, perfFigures } from "./measure";
 
 // The M1 scale check in the browser (issue M1-17): the city `buildScaleCity`
 // makes through commands, 30,000 road segments of street grids, curves and
@@ -35,10 +35,9 @@ test.use({ viewport: { width: 1280, height: 800 } });
 
 // Two cities, three bands each, drawn in software on a CI runner at about
 // 2 fps. On main it took 294.7 s of the old 300 s (run 43548591694), so the
-// wait for the graphics preset (issue M2-02) tipped it over. The limit is
-// the perf project's one (issue #319), which only stops a test that hangs:
-// the frame-time asserts catch a real slowdown.
-test.setTimeout(PERF_TEST_TIMEOUT);
+// wait for the graphics preset (issue M2-02) tipped it over. The
+// perf project's limit only stops a test that hangs (issue #319): the
+// frame-time asserts catch a real slowdown.
 
 const scale = buildScaleCity();
 const terrain = generateTerrain(scale.state.seed);

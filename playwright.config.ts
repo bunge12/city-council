@@ -125,6 +125,9 @@ export default defineConfig({
       // A perf test that timed out on a slow runner times out again on its
       // retry, and its figures come from a runner that was already slow.
       retries: 0,
+      // One limit for every perf test, and no spec sets its own (issue #319,
+      // `perfLimit` in e2e/projects.json, scripts/check-e2e-timeouts.mjs).
+      timeout: projectFiles.perfLimit.testMinutes * 60_000,
       testMatch: process.env["SCALE_WEBGPU"] ? projectFiles.perf.filter((f) => f !== "scale.spec.ts") : projectFiles.perf,
       dependencies: remoteBase ? [] : ["walkthrough"],
       // Every frame drawn at the real settings, and no autosave in a measurement (issue #226).

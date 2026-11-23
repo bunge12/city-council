@@ -156,9 +156,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # The bench runs on the code before the change and then on the change,
-    # and a missed budget runs it once more (issue #231), so a job can take
-    # three times one bench and still pass.
+    # The bench runs once on the code before the change and then on the
+    # change, where a missed budget runs it once more (issue #231), so a job
+    # can take three times one bench and still pass. One bench takes about
+    # 3 minutes, and up to 5 on the slowest runners.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -193,8 +194,9 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
           cd "$RUNNER_TEMP/base"
           pnpm install --frozen-lockfile
-          # Its own misses are its own: only its figures are wanted.
-          env -u GITHUB_STEP_SUMMARY pnpm bench || echo "The base's bench did not pass."
+          # Its own misses are its own: only its figures are wanted, from
+          # one attempt, and nothing of it in this job's summary.
+          BUDGET_NO_RETRY=1 env -u GITHUB_STEP_SUMMARY pnpm bench || echo "The base's bench did not pass."
           cat packages/*/budget-rows/attempt-*.jsonl > "$RUNNER_TEMP/base-rows.jsonl"
           echo "$(wc -l < "$RUNNER_TEMP/base-rows.jsonl") base figures from $(git rev-parse HEAD)"
       # A bench file that misses a budget runs once more, and the job fails
@@ -265,7 +267,7 @@ jobs:
             const fs = require("fs");
             const rows = process.argv.slice(1).flatMap((f) => fs.readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
             for (const r of rows.filter((r) => r.inherited)) console.log(`- \`${r.figure}\`, ${r.case}: ${r.statistic} ${Number(r.measured.toPrecision(3))} against ${r.budget} on ${r.cpu}`);
-          ' "${files[@]}")
+          ' "${files[@]}") || over=""
           if [ -n "$over" ]; then
             echo "Over budget, as before this push:"
             echo "$over"

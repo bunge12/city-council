@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { BUDGETS, BUDGET_INHERITED_WITHIN, BUDGET_WARN_BELOW_HEADROOM, budgetFigure, judgeBudget } from "../src/index";
+import { BUDGETS, BUDGET_INHERITED_UP_TO, BUDGET_INHERITED_WITHIN, BUDGET_WARN_BELOW_HEADROOM, budgetFigure, judgeBudget } from "../src/index";
 
 describe("budgets.json", () => {
   test("every figure is held by a bench or the soak", () => {
@@ -62,6 +62,20 @@ describe("judgeBudget", () => {
     expect(judgeBudget("town.step", "a step", { mean: over }, over / BUDGET_INHERITED_WITHIN)).toMatchObject({ pass: false, inherited: true });
     expect(judgeBudget("town.step", "a step", { mean: over }, over / (BUDGET_INHERITED_WITHIN * 1.01)).inherited).toBe(false);
     expect(judgeBudget("town.step", "a step", { mean: over }, budget * 0.5).inherited).toBe(false);
+  });
+
+  test("a base just under the budget still makes a small miss inherited, and a large one is not", () => {
+    const { budget } = budgetFigure("town.step");
+    expect(judgeBudget("town.step", "a step", { mean: budget * 1.05 }, budget * 0.95).inherited).toBe(true);
+    expect(judgeBudget("town.step", "a step", { mean: budget * 1.2 }, budget * 0.95).inherited).toBe(false);
+  });
+
+  test("past its ceiling a miss fails whatever the base took", () => {
+    const { budget } = budgetFigure("town.step");
+    const under = budget * BUDGET_INHERITED_UP_TO * 0.99;
+    const past = budget * BUDGET_INHERITED_UP_TO * 1.01;
+    expect(judgeBudget("town.step", "a step", { mean: under }, under).inherited).toBe(true);
+    expect(judgeBudget("town.step", "a step", { mean: past }, past).inherited).toBe(false);
   });
 
   test("a figure inside its budget is not inherited, whatever the base", () => {

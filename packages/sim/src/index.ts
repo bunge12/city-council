@@ -33,7 +33,7 @@ export type { GameDate, TimeBalance } from "./calendar";
 export { fnv1a64, hashMirrored, hashState } from "./hash";
 export { replay } from "./replay";
 export { BALANCE_STAMP, replaysUnderThisBalance } from "./balance-stamp";
-export { BUDGETS, BUDGET_INHERITED_WITHIN, BUDGET_WARN_BELOW_HEADROOM, budgetFigure, judgeBudget } from "./budgets";
+export { BUDGETS, BUDGET_INHERITED_UP_TO, BUDGET_INHERITED_WITHIN, BUDGET_WARN_BELOW_HEADROOM, budgetFigure, judgeBudget } from "./budgets";
 export type { BudgetFigure, BudgetRow, BudgetStatistic, BudgetTimings } from "./budgets";
 export { migrateState } from "./migrate";
 export {

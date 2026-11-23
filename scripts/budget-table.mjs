@@ -99,6 +99,10 @@ if (sorted.length === 0) {
       `| ${mark} | \`${cell(r.figure)}\` | ${cell(r.case)} | ${r.statistic} | ${num(r.measured)}${unitOf(r)} | ${before} | ${num(r.budget)}${unitOf(r)} | ${headroom(r)} | ${cell(cpu)} | ${r.mode}${attempts.size > 1 ? ` | ${r.attempt}` : ""} |`,
     );
   }
+  // Without the base's figures every budget is absolute, and a miss may be the runner.
+  if (process.env["GITHUB_ACTIONS"] && title === "Bench" && sorted.every((r) => typeof r.base !== "number")) {
+    lines.push("", "**No figures from the commit before this change**, so every budget here was held as an absolute number. Look at the \"Bench the code before the change\" step.");
+  }
   lines.push("");
 }
 const table = lines.join("\n");

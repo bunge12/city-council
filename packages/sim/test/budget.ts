@@ -3,7 +3,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
-import { judgeBudget, type BudgetRow, type BudgetTimings } from "../src/index";
+import { budgetFigure, judgeBudget, type BudgetRow, type BudgetTimings } from "../src/index";
 
 /**
  * The message for a check that holds a time to a budget. The mark tells
@@ -17,7 +17,10 @@ export const budget = (name: string): string => `[budget] ${name}`;
  * the rows of the base's bench, which CI runs on the same machine first
  * and names in `BUDGET_BASE` (a JSON lines file, issue #319). The smallest
  * of a case's rows, so a pause in the base's run does not widen what the
- * change may take. Empty without `BUDGET_BASE`, as on a developer's machine.
+ * change may take. A row that held another statistic or unit than the
+ * figure does now is left out: the change moved what the figure measures,
+ * and the two numbers are not the same thing. Empty without `BUDGET_BASE`,
+ * as on a developer's machine.
  */
 let baseRows: Map<string, number> | undefined;
 function baseOf(id: string, caseName: string): number | undefined {
@@ -29,12 +32,13 @@ function baseOf(id: string, caseName: string): number | undefined {
         if (line.trim() === "") continue;
         const row = JSON.parse(line) as Partial<BudgetRow>;
         if (typeof row.figure !== "string" || typeof row.case !== "string" || typeof row.measured !== "number") continue;
-        const key = `${row.figure}\u0000${row.case}`;
+        const key = `${row.figure}\u0000${row.case}\u0000${row.statistic}\u0000${row.unit}`;
         baseRows.set(key, Math.min(baseRows.get(key) ?? Infinity, row.measured));
       }
     }
   }
-  return baseRows.get(`${id}\u0000${caseName}`);
+  const figure = budgetFigure(id);
+  return baseRows.get(`${id}\u0000${caseName}\u0000${figure.statistic}\u0000${figure.unit}`);
 }
 
 /**

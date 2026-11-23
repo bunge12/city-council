@@ -16,6 +16,7 @@
 //
 // The log, and the GitHub job summary when there is one, say which attempt
 // failed and with what. The child sees `BUDGET_ATTEMPT` set to 1 or 2.
+// With `BUDGET_NO_RETRY=1` there is one attempt, whatever failed.
 //
 // The child also sees `BUDGET_ROWS`, the package's `budget-rows/`, emptied
 // before the first attempt. Each held figure appends its row there, one
@@ -110,6 +111,12 @@ function keepAside() {
 
 const first = attempt(1, []);
 if (first.status === 0) process.exit(0);
+// CI's bench of the commit before a change wants its figures and not its
+// verdict, so it is not run again (issue #319).
+if (process.env["BUDGET_NO_RETRY"] === "1") {
+  console.log("budget-retry: attempt 1 failed, and BUDGET_NO_RETRY is set, so nothing is run again");
+  process.exit(first.status);
+}
 if (!first.report) {
   console.error("budget-retry: attempt 1 failed and left no report, so it is not run again");
   process.exit(first.status);

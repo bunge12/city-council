@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { deserialize, generateTerrain, heightAt } from "../packages/sim/src/index";
 import { frames, openCity } from "./helpers";
-import { PERF_TEST_TIMEOUT, perfFigures } from "./measure";
+import { perfFigures } from "./measure";
 import { SEED, groundAt, scaleCity } from "./road-fixtures";
 
 // Issue M1-19 at scale: drawing in a network of 30,000 segments with the
@@ -102,9 +102,7 @@ test("drawing in a network of 30,000 segments keeps its frame time with the guid
   // takes 1.2 s ran past five minutes (issue #152). Since sidewalks and
   // street lights (#279, #264) a frame takes 1.1 to 1.4 s and the test 4.6 to
   // 5.7 minutes on most runners, and 1.6 s and 8.2 minutes on an AMD EPYC
-  // 7763 (issue #289), then 11.2 to past 12 there (issue #317). The limit
-  // is the perf project's one (issue #319).
-  test.setTimeout(PERF_TEST_TIMEOUT);
+  // 7763 (issue #289), then 11.2 to past 12 there (issue #317).
   const bytes = scaleCity(30_000);
   const at = busySpot(bytes, 150);
   await openCity(page, bytes, { name: "Thirty thousand" });
