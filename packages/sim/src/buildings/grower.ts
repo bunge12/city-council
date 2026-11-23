@@ -270,6 +270,31 @@ export function growOne(state: SimState, zone = 0): number {
   }
 }
 
+/**
+ * Tries, for each zone, the free cells at the top of its land value order
+ * that find no lot, and sets them aside, down to the first that finds one;
+ * as `growOne` would on the zone's next building, without building it. A
+ * host calls it at load (derived.ts), so a city loaded from a save, with
+ * nothing set aside, pays for those tries there and not in its first ticks
+ * (issue #324): the 500,000 scale city has about 2,500 such cells, and its
+ * first grower tick after the load took 50 to 80 ms trying them. Set
+ * aside is not state and a try spends nothing from the generator, so the
+ * buildings land as they would without it. Nothing while a change of roads
+ * is settling, as the grower adds nothing then.
+ */
+export function setAsideCellsWithNoLot(state: SimState): void {
+  if (!cellsSettled(state)) return;
+  const grid = () => pollutionGrid(state);
+  for (let zone = 1; zone <= ZONING_BALANCE.zones.length; zone++) {
+    for (;;) {
+      const index = syncCells(state);
+      const ref = bestCandidate(state, index, () => segmentBuildings(state), grid, zone);
+      if (!ref || optionsFromEnd(state, ref).options.ok) break;
+      setAside(state, ref, hasThroughLots(state, ref));
+    }
+  }
+}
+
 /** Whether a try at the free front cell `ref` finds a lot, as `growOne` tries it. For tests: a cell set aside must find none. */
 export function tryFindsLot(state: SimState, ref: CellRef): boolean {
   return optionsFromEnd(state, ref).options.ok;

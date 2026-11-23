@@ -317,6 +317,10 @@ describe("job matching", () => {
     expect(shops()).toBeGreaterThan(1);
     const jobs = zoneJobs(state);
     expect(jobs.open[COMMERCIAL]).toBeLessThanOrEqual((jobs.jobs[COMMERCIAL] ?? 0) * DEMAND_BALANCE.openJobsShareMax + 48);
+    // zoneJobs works each building's jobs out inline (issue #324): the same sums as buildingJobs, building by building.
+    const offered = workplaces(state).reduce((sum, id) => sum + buildingJobs(state.buildings, id), 0);
+    expect(offered).toBeGreaterThan(0);
+    expect(jobs.jobs[COMMERCIAL]).toBe(offered);
     expectRecount(state);
   });
 
