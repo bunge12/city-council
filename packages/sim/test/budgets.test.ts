@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { BUDGETS, BUDGET_WARN_BELOW_HEADROOM, budgetFigure, judgeBudget } from "../src/index";
+import { BUDGETS, BUDGET_INHERITED_UP_TO, BUDGET_INHERITED_WITHIN, BUDGET_WARN_BELOW_HEADROOM, budgetFigure, judgeBudget } from "../src/index";
 
 describe("budgets.json", () => {
   test("every figure is held by a bench or the soak", () => {
@@ -52,6 +52,44 @@ describe("judgeBudget", () => {
     expect(judgeBudget("soak.idle-steps", "idle steps", budget).pass).toBe(true);
     expect(judgeBudget("soak.idle-steps", "idle steps", budget + 1).pass).toBe(false);
     expect(judgeBudget("soak.idle-steps", "idle steps", 0).headroom).toBeNull();
+  });
+
+  test("a miss the base already had on this machine is inherited, and one the change made is not", () => {
+    const { budget } = budgetFigure("town.step");
+    const over = budget * 1.05;
+    expect(judgeBudget("town.step", "a step", { mean: over })).toMatchObject({ pass: false, inherited: false, base: null });
+    expect(judgeBudget("town.step", "a step", { mean: over }, over)).toMatchObject({ pass: false, inherited: true, base: over });
+    expect(judgeBudget("town.step", "a step", { mean: over }, over / BUDGET_INHERITED_WITHIN)).toMatchObject({ pass: false, inherited: true });
+    expect(judgeBudget("town.step", "a step", { mean: over }, over / (BUDGET_INHERITED_WITHIN * 1.01)).inherited).toBe(false);
+    expect(judgeBudget("town.step", "a step", { mean: over }, budget * 0.5).inherited).toBe(false);
+  });
+
+  test("a base just under the budget still makes a small miss inherited, and a large one is not", () => {
+    const { budget } = budgetFigure("town.step");
+    expect(judgeBudget("town.step", "a step", { mean: budget * 1.05 }, budget * 0.95).inherited).toBe(true);
+    expect(judgeBudget("town.step", "a step", { mean: budget * 1.2 }, budget * 0.95).inherited).toBe(false);
+  });
+
+  test("past its ceiling a miss fails whatever the base took", () => {
+    const { budget } = budgetFigure("town.step");
+    const under = budget * BUDGET_INHERITED_UP_TO * 0.99;
+    const past = budget * BUDGET_INHERITED_UP_TO * 1.01;
+    expect(judgeBudget("town.step", "a step", { mean: under }, under).inherited).toBe(true);
+    expect(judgeBudget("town.step", "a step", { mean: past }, past).inherited).toBe(false);
+  });
+
+  test("a figure inside its budget is not inherited, whatever the base", () => {
+    const { budget } = budgetFigure("town.step");
+    expect(judgeBudget("town.step", "a step", { mean: budget * 0.5 }, budget * 2)).toMatchObject({ pass: true, inherited: false });
+  });
+
+  test("a count of steps is never inherited, and a base of nothing is no base", () => {
+    const { budget } = budgetFigure("soak.idle-steps");
+    expect(judgeBudget("soak.idle-steps", "idle steps", budget + 1, budget + 1)).toMatchObject({ pass: false, inherited: false });
+    const step = budgetFigure("town.step").budget;
+    for (const base of [0, -1, Number.NaN, Infinity]) {
+      expect(judgeBudget("town.step", "a step", { mean: step * 2 }, base)).toMatchObject({ inherited: false, base: null });
+    }
   });
 
   test("refuses a measurement of the wrong kind", () => {

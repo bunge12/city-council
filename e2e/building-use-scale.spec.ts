@@ -16,7 +16,6 @@ declare const window: { cityCouncil: { renderStatus(): { backend: string } | nul
 
 test.use({ viewport: MEASURE_VIEWPORT });
 // As building-lod-scale.spec.ts: about 4 minutes on a fast CI runner and up to 8 on a slow one.
-test.setTimeout(900_000);
 
 /** The scale town with every tenth building abandoned, made once. */
 let built: { bytes: Uint8Array; abandoned: number[] } | null = null;

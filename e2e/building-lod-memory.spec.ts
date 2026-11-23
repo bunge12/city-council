@@ -13,7 +13,6 @@ declare const window: { cityCouncil: { view: Promise<{ renderer: { info: { memor
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: { width: 1280, height: 800 } });
-test.setTimeout(900_000);
 
 test("flying a loop twice ends with no more memory than flying it once", async ({ page }, testInfo) => {
   const { city, terrain, bytes } = scaleCity();

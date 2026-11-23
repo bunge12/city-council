@@ -38,16 +38,27 @@ export interface BudgetRow {
   /** Budget over measured; null when nothing was measured past zero. */
   headroom: number | null;
   mode: BudgetFigure["mode"];
+  /** Within the budget. */
   pass: boolean;
+  /** The same case measured on the code before the change, on the same machine in the same job; null when it was not. */
+  base: number | null;
+  /**
+   * Over the budget, but no slower than `base` allows: the miss was there
+   * before the change, on this machine, so it is shown and does not fail
+   * the change (issue #319).
+   */
+  inherited: boolean;
 }
 
 const STATISTICS: readonly BudgetStatistic[] = ["mean", "p50", "p99", "max", "ratio", "count over"];
 const UNITS: readonly BudgetFigure["unit"][] = ["ms", "ratio", "steps"];
 
 /** The budgets file, checked when the module loads. */
-function check(raw: unknown): { warnBelowHeadroom: number; figures: Readonly<Record<string, BudgetFigure>> } {
-  const f = raw as { warnBelowHeadroom?: unknown; figures?: Record<string, Partial<BudgetFigure>> };
+function check(raw: unknown): { warnBelowHeadroom: number; inheritedWithin: number; inheritedUpTo: number; figures: Readonly<Record<string, BudgetFigure>> } {
+  const f = raw as { warnBelowHeadroom?: unknown; inheritedWithin?: unknown; inheritedUpTo?: unknown; figures?: Record<string, Partial<BudgetFigure>> };
   if (typeof f.warnBelowHeadroom !== "number" || !(f.warnBelowHeadroom > 1)) throw new Error("budgets.json: warnBelowHeadroom must be a number over 1");
+  if (typeof f.inheritedWithin !== "number" || !(f.inheritedWithin >= 1)) throw new Error("budgets.json: inheritedWithin must be a number of 1 or more");
+  if (typeof f.inheritedUpTo !== "number" || !(f.inheritedUpTo >= 1)) throw new Error("budgets.json: inheritedUpTo must be a number of 1 or more");
   if (typeof f.figures !== "object" || f.figures === null) throw new Error("budgets.json: no figures");
   for (const [id, b] of Object.entries(f.figures)) {
     const bad = (why: string) => new Error(`budgets.json: ${id}: ${why}`);
@@ -61,7 +72,7 @@ function check(raw: unknown): { warnBelowHeadroom: number; figures: Readonly<Rec
     if (b.statistic === "count over" && (b.unit !== "steps" || !Number.isInteger(b.budget))) throw bad("count over counts whole steps");
     if (b.statistic === "ratio" && b.unit !== "ratio") throw bad("a ratio's unit is ratio");
   }
-  return { warnBelowHeadroom: f.warnBelowHeadroom, figures: f.figures as Record<string, BudgetFigure> };
+  return { warnBelowHeadroom: f.warnBelowHeadroom, inheritedWithin: f.inheritedWithin, inheritedUpTo: f.inheritedUpTo, figures: f.figures as Record<string, BudgetFigure> };
 }
 
 const BUDGETS_FILE = check(file);
@@ -71,6 +82,20 @@ export const BUDGETS: Readonly<Record<string, BudgetFigure>> = BUDGETS_FILE.figu
 
 /** Headroom under which CI warns about a figure. */
 export const BUDGET_WARN_BELOW_HEADROOM: number = BUDGETS_FILE.warnBelowHeadroom;
+
+/**
+ * How many times its base figure a case over its budget may measure and
+ * still count as inherited: the room two runs of the same code on one
+ * machine need.
+ */
+export const BUDGET_INHERITED_WITHIN: number = BUDGETS_FILE.inheritedWithin;
+
+/**
+ * How many times its budget a case may measure and still count as
+ * inherited. Past it the miss fails whatever the base took, which stops a
+ * figure from drifting up a little with each change for ever.
+ */
+export const BUDGET_INHERITED_UP_TO: number = BUDGETS_FILE.inheritedUpTo;
 
 /** The figure with this id. Throws for one the file does not list, so a typo fails the bench. */
 export function budgetFigure(id: string): BudgetFigure {
@@ -87,8 +112,24 @@ export type BudgetTimings = { readonly [K in "mean" | "p50" | "p99" | "max"]?: n
  * from which the figure's statistic is taken, or the number itself for a
  * ratio or a count. A time or a ratio passes under the budget, a count at
  * or under it.
+ *
+ * `base` is the same statistic of the same case, measured on the code
+ * before the change, on the same machine in the same job. A shared CI
+ * runner is up to twice as slow as another, so a figure near its budget
+ * misses on the slow ones whatever the change under test did. With a base,
+ * a time or ratio over its budget that is within `BUDGET_INHERITED_WITHIN`
+ * times the base, and within `BUDGET_INHERITED_UP_TO` times the budget, is
+ * `inherited`: over, but no slower than before by more than two runs of
+ * the same code differ. The base need not be over the budget itself: a
+ * figure just under it passes one run and misses the next on the same
+ * machine, and asking for a base over the budget would fail whichever
+ * change drew the second. So a change may take a figure from just under
+ * its budget to just over without failing; main's run then reports it
+ * (ci.yml's budget-history job). A count of steps is never inherited,
+ * since it already allows for pauses. Without a base the budget is
+ * absolute, as on a developer's machine.
  */
-export function judgeBudget(id: string, caseName: string, measured: number | BudgetTimings): BudgetRow {
+export function judgeBudget(id: string, caseName: string, measured: number | BudgetTimings, base?: number): BudgetRow {
   const figure = budgetFigure(id);
   let value: number | undefined;
   if (typeof measured === "number") {
@@ -100,6 +141,8 @@ export function judgeBudget(id: string, caseName: string, measured: number | Bud
   }
   if (value === undefined || !Number.isFinite(value)) throw new Error(`${id}: ${caseName} has no ${figure.statistic}`);
   const pass = figure.statistic === "count over" ? value <= figure.budget : value < figure.budget;
+  const known = base !== undefined && Number.isFinite(base) && base > 0 ? base : null;
+  const inherited = !pass && figure.statistic !== "count over" && known !== null && value <= known * BUDGET_INHERITED_WITHIN && value <= figure.budget * BUDGET_INHERITED_UP_TO;
   return {
     figure: id,
     case: caseName,
@@ -110,5 +153,7 @@ export function judgeBudget(id: string, caseName: string, measured: number | Bud
     headroom: value > 0 ? figure.budget / value : null,
     mode: figure.mode,
     pass,
+    base: known,
+    inherited,
   };
 }

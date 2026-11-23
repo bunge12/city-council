@@ -14,9 +14,14 @@ name: e2e timings
 # A pull request opened with the workflow's own token starts no workflow,
 # so CI does not run on it until someone closes and reopens it. Save a
 # fine-grained token with contents and pull requests write access as the
-# E2E_TIMINGS_TOKEN secret and CI runs on it as on any other. Either way the
-# repository has to allow GitHub Actions to create pull requests (Settings,
-# Actions, General).
+# E2E_TIMINGS_TOKEN secret and CI runs on it as on any other.
+#
+# Without that secret the repository has to allow GitHub Actions to create
+# pull requests (Settings, Actions, General). When it does not, the run
+# still pushes the branch, and opens or updates an issue titled "e2e
+# timings are ready" with a link that opens the pull request in one click
+# (issue #319). The first run, on 23 November 2026, failed there and its
+# figures reached nobody.
 
 on:
   schedule:
@@ -91,6 +96,8 @@ jobs:
           GH_TOKEN: ${{ secrets.E2E_TIMINGS_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # The workflow's own token, for the issue when no pull request can be opened.
+          ISSUE_TOKEN: ${{ github.token }}
         run: |
           if git diff --quiet e2e/projects.json; then
             echo "The seconds in e2e/projects.json are as they were."
@@ -115,8 +122,25 @@ jobs:
           open=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
           if [ -n "$open" ]; then
             gh pr edit "$open" --body-file pr-body.md
-          else
-            gh pr create --base main --head "$branch" --title "e2e: spec seconds from the last week of CI runs" --body-file pr-body.md
+          elif ! gh pr create --base main --head "$branch" --title "e2e: spec seconds from the last week of CI runs" --body-file pr-body.md; then
+            # The branch is pushed. An issue needs only this job's own
+            # `issues: write`, so the figures still reach someone.
+            title="e2e timings are ready"
+            {
+              echo "The weekly e2e timings run pushed new figures for \`e2e/projects.json\` to \`$branch\` and could not open the pull request itself."
+              echo
+              echo "[Open the pull request](${GITHUB_SERVER_URL}/${GH_REPO}/compare/main...${branch}?expand=1), and close this issue when it merges."
+              echo
+              echo "To have the run open it, allow GitHub Actions to create pull requests (Settings, Actions, General), or save a token as the \`E2E_TIMINGS_TOKEN\` secret."
+              echo
+              echo "Run: $RUN_URL"
+            } > issue-body.md
+            issue=$(GH_TOKEN="$ISSUE_TOKEN" gh issue list --state open --search "\"$title\" in:title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)
+            if [ -n "$issue" ]; then
+              GH_TOKEN="$ISSUE_TOKEN" gh issue edit "$issue" --body-file issue-body.md
+            else
+              GH_TOKEN="$ISSUE_TOKEN" gh issue create --title "$title" --body-file issue-body.md
+            fi
           fi
       # Even when the pull request could not be opened.
       - name: Update the flaky tests issue

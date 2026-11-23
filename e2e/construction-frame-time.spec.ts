@@ -20,7 +20,6 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Two page loads of a street under scaffolding at Balanced, drawn in software.
-test.setTimeout(480_000);
 
 const T = CONSTRUCTION.ticks;
 

@@ -36,7 +36,7 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { attemptsOf, configTimeoutMs, globalTimeoutMs, longestTestMs } from "./e2e-limits.mjs";
+import { attemptsOf, configTimeoutMs, globalTimeoutMs, longestTestMs, perfLimitMs } from "./e2e-limits.mjs";
 import { countTestList, dealtProjects, deal, plan, readProjects, root, specFiles } from "./e2e-plan.mjs";
 
 const projects = readProjects();
@@ -107,7 +107,8 @@ if (arg === "--list") {
   if (globalTimeout) {
     // A roads item is `file › titles`; the limits are set per file.
     const files = [...new Set(mine.items.map((i) => i.split(" › ")[0]))];
-    const defaultMs = configTimeoutMs(readFileSync(new URL("playwright.config.ts", root), "utf8"));
+    // The perf project has one limit for every test, in place of the config's default.
+    const defaultMs = project === "perf" ? perfLimitMs(projects) : configTimeoutMs(readFileSync(new URL("playwright.config.ts", root), "utf8"));
     const longest = Math.max(...files.map((f) => longestTestMs(readFileSync(new URL(`e2e/${f}`, root), "utf8"), defaultMs)));
     if (!Number.isFinite(longest)) {
       console.error("a spec file sets a time limit that cannot be read: run node scripts/check-e2e-timeouts.mjs");

@@ -34,7 +34,6 @@ test.use({ viewport: { width: 1280, height: 800 } });
 // Times the page's own work and stubs out drawing: every frame at the real settings (issue #226).
 test.use({ storageState: MEASURE_STATE });
 // Building the town takes about half a minute, and loading it into software WebGL a few more, as in zone-open-scale.spec.ts.
-test.setTimeout(600_000);
 
 /** The issue's budget for any one frame while the overlay turns on. */
 const FRAME_MS = 100;

@@ -96,14 +96,17 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.plan.outputs.playwright }}-noble
       options: --ipc=host
-    # Planned at about ten minutes a runner; a slow runner takes twice that.
-    # The perf project does not retry; evidence does. Playwright stops the run
-    # at three times its plan (--global-timeout below), so a run that hangs
-    # still ends with its report. scripts/check-e2e-timeouts.mjs, in `pnpm
-    # lint`, reads this limit and fails on a test allowed more than a third
-    # of it (issue #228). 54, so cells-scale.spec.ts can have 18 on an AMD
-    # EPYC 7763 (issue #294).
-    timeout-minutes: 54
+    # Planned at about twelve minutes a runner; a slow runner takes twice
+    # that. The perf project does not retry; evidence does. Playwright stops
+    # the run at three times its plan, and never before its plan plus its
+    # longest test's limit (--global-timeout below), so a run that hangs
+    # still ends with its report. Every perf test has the one limit in
+    # e2e/projects.json's perfLimit, 40 minutes, which stops a test that
+    # hangs and holds no speed (issue #319). scripts/check-e2e-timeouts.mjs,
+    # in `pnpm lint`, reads this limit and fails on a perf test allowed more
+    # than half of it, or an evidence test more than a third (issue #228).
+    # A run takes its usual 15 to 30 minutes; only a hang uses the rest.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -246,10 +249,12 @@ jobs:
         run: |
           title="Perf or evidence run failed on main"
           body=$(printf 'The perf and evidence run (%s) failed on `main` at %s.\n\nRun: %s\n\nThese tests do not gate a merge (issue #225). Look at which test failed and whether a runner was only slow before fixing anything.' "$EVENT" "$SHA" "$RUN_URL")
-          # The same label as ci.yml's issue, for whoever triages them.
-          # --force makes the call a no-op when the label is already there.
-          label="CI Failure"
-          gh label create "$label" --color B60205 --description "CI failed on main" --force
+          # A label of its own, as deploy.yml's and nightly.yml's have: `CI
+          # Failure` means main is broken and nothing merges until it is
+          # fixed, and this run blocks nothing (issue #319). --force makes
+          # the call a no-op when the label is already there.
+          label="Perf Failure"
+          gh label create "$label" --color FBCA04 --description "The perf or evidence run failed on main; blocks no merge" --force
           open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
           if [ -n "$open" ]; then
             gh issue comment "$open" --body "$body"

@@ -55,6 +55,13 @@ export function longestTestMs(source, defaultMs) {
 }
 
 /**
+ * The limit of every test in the perf project, in milliseconds: `perfLimit`
+ * in e2e/projects.json, which playwright.config.ts gives the project. A
+ * perf spec sets none of its own (scripts/check-e2e-timeouts.mjs).
+ */
+export const perfLimitMs = (projects) => projects.perfLimit.testMinutes * 60_000;
+
+/**
  * The --global-timeout for a runner planned at `plannedSeconds`, whose
  * longest test may run `longestMs` and is tried `attempts` times: `timesPlan`
  * times its plan, no less than `minMinutes`, and no less than its plan plus

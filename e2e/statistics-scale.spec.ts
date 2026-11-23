@@ -32,7 +32,6 @@ declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Building the town takes about half a minute, and loading it into software WebGL a few more, as in zone-open-scale.spec.ts.
-test.setTimeout(600_000);
 
 /** The issue's budget for opening the panel. */
 const OPEN_MS = 100;
