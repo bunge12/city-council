@@ -20,7 +20,7 @@
 // On 1 January the running year becomes the last one and starts again at 0.
 
 import { BUILDING_TYPES, JOB_KINDS, type JobKind } from "../buildings/balance";
-import { BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
+import { BUILDING_ALIVE, OFFERS_JOBS, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByKind, type JobsByKind } from "../buildings/jobs";
 import { isMonthStart, isYearStart } from "../calendar";
 import { NO_HOME, NO_WORK, POP_ALIVE, POP_LEVELS, workersFor, type PopState } from "../pops/pops";
@@ -50,8 +50,6 @@ const RESIDENTS_BY_WEALTH = LEVELS.map((l) => `residentsWealth${l}`);
 const JOBS_BY_KIND = JOB_KINDS.map((k) => `jobs${KIND_NAMES[k]}`);
 /** Jobs filled, in `JOB_KINDS` order. */
 const FILLED_BY_KIND = JOB_KINDS.map((k) => `filled${KIND_NAMES[k]}`);
-/** By type index: 1 for a type that offers jobs. */
-const OFFERS_JOBS = Uint8Array.from(BUILDING_TYPES, (t) => (t.jobsPerCell > 0 ? 1 : 0));
 /** Buildings by zone number less 1, then density less 1: `buildingsR1` to `buildingsM3`. */
 const BUILDINGS_BY_ZONE = ZONING_BALANCE.zones.map((zone) => ZONING_BALANCE.densities.map((d) => `buildings${zone.letter}${d.level}`));
 

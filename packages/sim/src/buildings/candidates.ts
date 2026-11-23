@@ -335,11 +335,11 @@ function catchUp(c: Candidates, state: SimState, onCell: OnCell): void {
       if (zone !== NO_ZONE) {
         // Asked for only here, as `isCandidate` does.
         if (onSeg === undefined) onSeg = (held ??= onCell())[seg] ?? null;
-        if ((onSeg ? (onSeg[at] as number) : NO_BUILDING) === NO_BUILDING) now = zone;
+        if ((onSeg?.[at] ?? NO_BUILDING) === NO_BUILDING) now = zone;
       }
     }
     let bits = c.bits[seg] ?? null;
-    const was = bits ? (bits[col] as number) : 0;
+    const was = bits?.[col] ?? 0;
     if (was === now) continue;
     if (!bits) c.bits[seg] = bits = new Uint8Array(columns);
     bits[col] = now;

@@ -110,7 +110,7 @@ export interface BuildingState {
 }
 
 /** By type index: 1 for a type that offers jobs, as `jobsForLot` has it (jobs.ts). */
-const OFFERS_JOBS = Uint8Array.from(BUILDING_TYPES, (t) => (t.jobsPerCell > 0 ? 1 : 0));
+export const OFFERS_JOBS = Uint8Array.from(BUILDING_TYPES, (t) => (t.jobsPerCell > 0 ? 1 : 0));
 
 /** The per-building arrays, in the order a new state has them. */
 export const BUILDING_ARRAYS = [
