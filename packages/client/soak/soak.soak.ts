@@ -115,8 +115,14 @@ const ZONE_EVERY = 40;
 const ZONE_OFFSET = 30;
 const ZONE_CYCLE = ["ZoneCells", "ZoneCells", "BulldozeBuilding"] as const;
 const ZONES = ZONING_BALANCE.zones.map((z) => z.id);
-/** Buildings one BulldozeBuilding of the soak names. */
-const CLEAR_COUNT = 50;
+/**
+ * Buildings one BulldozeBuilding of the soak names: 1,500 over the hour, about
+ * 5% of the city of 200,000. It was 50, which cleared about 15,000, half the
+ * city, so the hour ended on a city of about 90,000 residents and measured
+ * less than it was meant to (#326). The step that applies one at its cap is
+ * held to the tick by the bench (#162).
+ */
+const CLEAR_COUNT = 5;
 /** The player the zoning cycle sends as, apart from the road cycle's, so the road cycle's Undo takes back a road change. */
 const ZONING_PLAYER = "soak-zoning";
 /** Grid lines of the scale city and of a grid at the cap: 7 lines each way, 96 m apart. */
@@ -808,9 +814,10 @@ describe("soak: one hour of game time at 4x", () => {
     // On the empty scale city the grower built a town of about 2,800
     // buildings over the hour. On the city of 200,000 (M3-20) the homes
     // stand part empty from the start, at 1.1 times the room, and empty
-    // further as the clearing and departures go on, so the grower holds
-    // new homes back (`emptyRoomShareMax`) and adds few: one run grew 15
-    // past the start while the clearing took about 15,000. The grower is
+    // further as departures go on, so the grower holds new homes back
+    // (`emptyRoomShareMax`) and adds few: one run grew 361 past the start
+    // while the clearing took about 1,500 (15 while it took about 15,000,
+    // before #326). The grower is
     // timed at full size in scale-cities.bench.ts instead. #324
     // tracks a soak that keeps the grower busy on a full city.
     expect(b.grown, "buildings standing past the start at some sample").toBeGreaterThan(0);
