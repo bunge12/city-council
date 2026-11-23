@@ -17,6 +17,7 @@
     "guides-scale.spec.ts",
     "roads-scale.spec.ts",
     "cells-scale.spec.ts",
+    "land-value-scale.spec.ts",
     "statistics-scale.spec.ts"
   ],
   "evidence": [
@@ -60,7 +61,10 @@
     "grower.spec.ts": 44,
     "guides-scale.spec.ts": 153,
     "guides.spec.ts": 29,
+    "homes.spec.ts": 105,
     "land-value-order.spec.ts": 60,
+    "land-value-scale.spec.ts": 180,
+    "land-value.spec.ts": 60,
     "levels.spec.ts": 36,
     "population.spec.ts": 160,
     "presets-forest.spec.ts": 184,

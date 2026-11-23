@@ -27,15 +27,24 @@
 // with diagonal stripes in the street and district bands. The marks come
 // from the sim's `lotMarksInChunk` on the mirror, built with the chunk.
 //
+// The same meshes draw the land value overlay (issue M3-18): only the colour
+// each quad carries changes, from what its cell is zoned for to what its
+// land is worth (`setColouring`), and the hatch is turned off. A change of
+// colouring, or of values alone, as when the city centre moves or a
+// factory goes up next door, writes the colours of the chunks it touches
+// again in place, a few chunks a frame within the same budget, and builds
+// no geometry and no lot marks. In the city band every run of a chunk takes
+// the colour of the chunk's mean value.
+//
 // The material is unlit: it takes no light, casts no shadow and takes none,
 // so the colours are the same at every graphics preset and match the legend.
 // The renderer reads the mirror; it never writes it.
 
-import { attribute, cameraPosition, float, fract, fwidth, max, min, mix, positionLocal, sRGBTransferEOTF, step, vec3, vec4 } from "three/tsl";
+import { attribute, cameraPosition, float, fract, fwidth, max, min, mix, positionLocal, sRGBTransferEOTF, step, uniform, vec3, vec4 } from "three/tsl";
 import { BufferAttribute, BufferGeometry, DoubleSide, Group, Mesh, MeshBasicNodeMaterial, type Object3D } from "three/webgpu";
 import { CHUNKS_PER_SIDE, CHUNK_SIZE, type ChunkCellShapes } from "@city-council/sim";
 import type { ZoomBand } from "../camera/zoom-band";
-import { buildCellChunk, buildCityCells, type CellArrays, type CityCellArrays } from "./cell-geometry";
+import { buildCellChunk, buildCityCells, paintCells, paintCity, type CellArrays, type CellColouring, type CityCellArrays } from "./cell-geometry";
 import { CELLS } from "./config";
 
 /** Where the overlay reads cells from: the mirror's copy of state. */
@@ -48,12 +57,15 @@ export interface CellSource {
   built?(shapes: ChunkCellShapes): ArrayLike<number> | null;
   /** By the order of `shapes`, which `shapes(chunk)` just gave, 1 for a cell where no building type fits, hatched. Null for none. */
   marks?(chunk: number, shapes: ChunkCellShapes): ArrayLike<number> | null;
+  /** By the order of `shapes`, each cell's land value, for the land value overlay (issue M3-18). Null for none. */
+  values?(shapes: ChunkCellShapes): ArrayLike<number> | null;
 }
 
 /** What the overlay reports, for the debug panel and tests. */
 export interface CellStats {
-  /** Whether the overlay is on. */
+  /** Whether the overlay is on, and what it colours cells by. */
   visible: boolean;
+  colouring: CellColouring;
   /** Chunks with a cell mesh. */
   chunks: number;
   /** Cells drawn filled, and as outlines only. */
@@ -64,8 +76,10 @@ export interface CellStats {
   /** The city band's quads, each a run of zoned cells, and its meshes, each a group of chunks. */
   cityRuns: number;
   cityGroups: number;
-  /** Chunks waiting to be built. */
+  /** Chunks waiting to be built or coloured again. */
   pending: number;
+  /** Chunks coloured again in place since the layer was made, without being built (issue M3-18). */
+  totalRecoloured: number;
   /**
    * Chunks the last change rebuilt, counted from when chunks started
    * waiting until none were left, and every chunk built since the layer
@@ -97,6 +111,17 @@ export interface CellLayer {
   /** Marks the chunks a delta changed, as the mirror numbers them, to build. */
   apply(chunks: readonly number[]): void;
   /**
+   * What the cells are coloured by. A change colours every chunk built
+   * already again, in place, over the next frames.
+   */
+  setColouring(colouring: CellColouring): void;
+  /**
+   * The land values of these chunks may have changed, or of every chunk
+   * with no list, though their cells did not. While the overlay colours by
+   * land value, they are coloured again in place; otherwise nothing.
+   */
+  revalue(chunks?: readonly number[]): void;
+  /**
    * Called once a frame: builds waiting chunks, nearest the camera at
    * (x, z) first, for about `budgetMs`, so a big change spreads over
    * frames instead of stopping one.
@@ -120,8 +145,12 @@ const CORNER_UVS = [0, 0, 255, 0, 255, 255, 0, 255];
 /** Furthest a vertex moves in the shader, in metres, so frustum culling allows for it. */
 const SHADER_REACH = 20;
 
-/** The overlay's material in the street and district bands, with each cell's lines. */
-function overlayMaterial(): MeshBasicNodeMaterial {
+/**
+ * The overlay's material in the street and district bands, with each
+ * cell's lines, and the uniform that turns the hatch on (1) or off (0).
+ */
+function overlayMaterial(): { material: MeshBasicNodeMaterial; hatching: { value: number } } {
+  const hatching = uniform(1);
   const m = new MeshBasicNodeMaterial();
   m.name = "zoning cells";
   const distance = cameraPosition.distance(positionLocal);
@@ -142,14 +171,14 @@ function overlayMaterial(): MeshBasicNodeMaterial {
   const mark = attribute<"float">("cellMark", "float");
   const stripe = step(fract(positionLocal.x.add(positionLocal.z).div(CELLS.noLot.stripeMetres)), float(CELLS.noLot.stripeShare));
   const hatch = sRGBTransferEOTF(vec3(...hexRgb(CELLS.noLot.colour))) as unknown as typeof fill.rgb;
-  const colour = mix(shaded, hatch, stripe.mul(mark).mul(line.oneMinus()));
+  const colour = mix(shaded, hatch, stripe.mul(mark).mul(line.oneMinus()).mul(hatching));
   m.colorNode = vec4(colour, max(zoned, line));
   m.alphaTest = 0.5;
   m.side = DoubleSide;
   m.polygonOffset = true;
   m.polygonOffsetFactor = -1;
   m.polygonOffsetUnits = -1;
-  return m;
+  return { material: m, hatching };
 }
 
 /** The overlay's material in the city band: flat colour, lifted as the detailed cells are. */
@@ -215,6 +244,14 @@ function cityGeometryOf(parts: readonly CityCellArrays[]): BufferGeometry | null
   return g;
 }
 
+/** Whether two reads of a chunk's cells hold the same cells, where they are and open or not, whatever their slots. */
+function sameCells(a: ChunkCellShapes, b: ChunkCellShapes): boolean {
+  if (a.slots.length !== b.slots.length) return false;
+  for (let k = 0; k < a.statuses.length; k++) if (a.statuses[k] !== b.statuses[k]) return false;
+  for (let k = 0; k < a.corners.length; k++) if (a.corners[k] !== b.corners[k]) return false;
+  return true;
+}
+
 /** Chunk `c` and the up to eight chunks around it. */
 export function withNeighbours(c: number): number[] {
   const ci = c % CHUNKS_PER_SIDE;
@@ -246,6 +283,11 @@ function geometryOf(a: CellArrays): BufferGeometry | null {
 
 interface ChunkMesh {
   mesh: Mesh;
+  /** The cells it was built from, and by quad which of them each quad draws, to colour them again (`paint`). */
+  shapes: ChunkCellShapes;
+  cells: Int32Array;
+  /** Whether its lot marks were looked up. Not while it was built for land value, which shows none. */
+  hasMarks: boolean;
   zoned: number;
   unzoned: number;
   marked: number;
@@ -263,7 +305,8 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
   city.name = "zoning cells, city band";
   city.visible = false;
   root.add(detail, city);
-  const material = overlayMaterial();
+  const { material, hatching } = overlayMaterial();
+  let colouring: CellColouring = "zoning";
   const coarse = cityMaterial();
   const chunks: (ChunkMesh | null)[] = new Array<ChunkMesh | null>(CHUNKS_PER_SIDE * CHUNKS_PER_SIDE).fill(null);
   /** Each chunk's city band runs, kept to join into its group's mesh. */
@@ -273,7 +316,9 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
   const cityDirty = new Set<number>();
   /** Chunks that changed while the overlay was hidden, or every chunk before it was first built. */
   const dirty = new Set<number>(chunks.keys());
-  let stats: CellStats = { visible: false, chunks: 0, zoned: 0, unzoned: 0, marked: 0, cityRuns: 0, cityGroups: 0, pending: dirty.size, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0, firstMarksMs: 0, firstFrameMs: 0, slowestMarksMs: 0, slowestFrameMs: 0 };
+  /** Chunks built already whose colours are to be written again, in place (issue M3-18). Never one in `dirty`. */
+  const stale = new Set<number>();
+  let stats: CellStats = { visible: false, colouring, totalRecoloured: 0, chunks: 0, zoned: 0, unzoned: 0, marked: 0, cityRuns: 0, cityGroups: 0, pending: dirty.size, lastRebuilt: 0, totalRebuilt: 0, lastBuildMs: 0, firstMarksMs: 0, firstFrameMs: 0, slowestMarksMs: 0, slowestFrameMs: 0 };
 
   function clear(c: number): void {
     if (cityParts[c]) cityDirty.add(cityGroupOf(c));
@@ -330,12 +375,17 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
       cityParts[c] = runs;
       cityDirty.add(cityGroupOf(c));
     }
-    const marksStart = performance.now();
-    const marks = source.marks?.(c, shapes) ?? null;
-    const marksMs = performance.now() - marksStart;
-    if (firstMarks) stats = { ...stats, firstMarksMs: marksMs };
-    else if (marksMs > stats.slowestMarksMs) stats = { ...stats, slowestMarksMs: marksMs };
-    firstMarks = false;
+    // Land value shows no hatch, so a chunk built for it skips the lot finder, the dearest part of a build (issue #164).
+    const hasMarks = colouring === "zoning";
+    let marks: ArrayLike<number> | null = null;
+    if (hasMarks) {
+      const marksStart = performance.now();
+      marks = source.marks?.(c, shapes) ?? null;
+      const marksMs = performance.now() - marksStart;
+      if (firstMarks) stats = { ...stats, firstMarksMs: marksMs };
+      else if (marksMs > stats.slowestMarksMs) stats = { ...stats, slowestMarksMs: marksMs };
+      firstMarks = false;
+    }
     const arrays = buildCellChunk(shapes, cells.zone, cells.density, height, built, marks);
     const geometry = geometryOf(arrays);
     if (!geometry) return;
@@ -347,7 +397,37 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     detail.add(mesh);
-    chunks[c] = { mesh, zoned: arrays.zoned, unzoned: arrays.unzoned, marked: arrays.marked };
+    chunks[c] = { mesh, shapes, cells: arrays.cells, hasMarks, zoned: arrays.zoned, unzoned: arrays.unzoned, marked: arrays.marked };
+    if (colouring !== "zoning") paint(c);
+  }
+
+  /**
+   * Writes chunk `c`'s colours again for the colouring now, in its mesh and
+   * its city band runs, building nothing. The chunk's cells are read again
+   * first: a delta that lays out a segment elsewhere moves the slots of every
+   * segment after it without naming this chunk, so slots kept from the build
+   * can point at other cells. If the cells themselves differ, the chunk is
+   * built again instead.
+   */
+  function paint(c: number): void {
+    const m = chunks[c];
+    const cells = source.cells();
+    if (!m || !cells) return;
+    const now = source.shapes(c);
+    if (!now || !sameCells(now, m.shapes)) {
+      dirty.add(c);
+      return;
+    }
+    m.shapes = now;
+    const values = colouring === "landValue" ? (source.values?.(m.shapes) ?? null) : null;
+    const fill = m.mesh.geometry.getAttribute("cellFill") as BufferAttribute;
+    const mean = paintCells(fill.array as Uint8Array, m.cells, m.shapes, cells.zone, cells.density, colouring, values);
+    fill.needsUpdate = true;
+    const run = cityParts[c];
+    if (run) {
+      paintCity(run, m.shapes, cells.zone, cells.density, colouring, mean);
+      cityDirty.add(cityGroupOf(c));
+    }
   }
 
   /** Chunks built since the dirty set was last empty, and the milliseconds they took. */
@@ -389,20 +469,34 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
       shown = false;
       return;
     }
-    if (!root.visible || dirty.size === 0) return;
+    if (!root.visible || dirty.size + stale.size === 0) return;
     const start = performance.now();
     const centre = (c: number) => {
       const ci = c % CHUNKS_PER_SIDE;
       const cj = (c - ci) / CHUNKS_PER_SIDE;
       return Math.hypot((ci + 0.5) * CHUNK_SIZE - camera.x, (cj + 0.5) * CHUNK_SIZE - camera.z);
     };
-    const list = [...dirty].map((c) => ({ c, d: centre(c) })).sort((a, b) => a.d - b.d || a.c - b.c);
+    const nearestFirst = (set: Set<number>) => [...set].map((c) => ({ c, d: centre(c) })).sort((a, b) => a.d - b.d || a.c - b.c);
     let built = 0;
-    for (const { c } of list) {
-      if (built > 0 && performance.now() - start >= budgetMs) break;
+    let painted = 0;
+    let over = false;
+    for (const { c } of nearestFirst(dirty)) {
+      if (built > 0 && performance.now() - start >= budgetMs) {
+        over = true;
+        break;
+      }
       dirty.delete(c);
       build(c);
       built++;
+    }
+    // Then colours written again in place, which cost a small share of a build.
+    if (!over) {
+      for (const { c } of nearestFirst(stale)) {
+        if (built + painted > 0 && performance.now() - start >= budgetMs) break;
+        stale.delete(c);
+        paint(c);
+        painted++;
+      }
     }
     // Joining a group's runs is cheap beside reading a chunk: every group a built chunk touched is joined again in the same frame, so the two bands never disagree.
     for (const g of cityDirty) buildGroup(g);
@@ -412,8 +506,8 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     batchMs += frameMs;
     const times = firstFrame ? { firstFrameMs: frameMs } : { slowestFrameMs: Math.max(stats.slowestFrameMs, frameMs) };
     firstFrame = false;
-    stats = { ...stats, ...count(), ...times, pending: dirty.size, totalRebuilt: stats.totalRebuilt + built };
-    if (dirty.size === 0) {
+    stats = { ...stats, ...count(), ...times, pending: dirty.size + stale.size, totalRebuilt: stats.totalRebuilt + built, totalRecoloured: stats.totalRecoloured + painted };
+    if (dirty.size + stale.size === 0) {
       stats = { ...stats, lastRebuilt: batch, lastBuildMs: batchMs };
       batch = 0;
       batchMs = 0;
@@ -426,7 +520,18 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     firstFrame = true;
     stats = { ...stats, firstMarksMs: 0, firstFrameMs: 0, slowestMarksMs: 0, slowestFrameMs: 0 };
     for (let c = 0; c < chunks.length; c++) dirty.add(c);
+    stale.clear();
     stats = { ...stats, pending: dirty.size };
+  }
+
+  /** Queues built chunk `c` to be coloured again, or built again if it needs lot marks it skipped. */
+  function restale(c: number): void {
+    const m = chunks[c];
+    if (!m || dirty.has(c)) return;
+    if (colouring === "zoning" && !m.hasMarks) {
+      dirty.add(c);
+      stale.delete(c);
+    } else stale.add(c);
   }
 
   return {
@@ -439,8 +544,26 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     apply(changed) {
       // A lot mark follows from the ground a lot could take, which can cross
       // into the chunk next door, so the neighbours are drawn again too.
-      for (const c of changed) for (const n of withNeighbours(c)) dirty.add(n);
-      stats = { ...stats, pending: dirty.size };
+      for (const c of changed) {
+        for (const n of withNeighbours(c)) {
+          dirty.add(n);
+          stale.delete(n);
+        }
+      }
+      stats = { ...stats, pending: dirty.size + stale.size };
+    },
+    setColouring(next) {
+      if (next === colouring) return;
+      colouring = next;
+      hatching.value = next === "zoning" ? 1 : 0;
+      for (let c = 0; c < chunks.length; c++) restale(c);
+      stats = { ...stats, colouring, pending: dirty.size + stale.size };
+    },
+    revalue(list) {
+      if (colouring !== "landValue") return;
+      if (list) for (const c of list) restale(c);
+      else for (let c = 0; c < chunks.length; c++) restale(c);
+      stats = { ...stats, pending: dirty.size + stale.size };
     },
     update,
     setBand(band) {
@@ -456,12 +579,13 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
         corners: Uint8Array.from(CORNER_UVS),
         marks: new Float32Array(4),
         indices: Uint16Array.of(0, 1, 2, 0, 2, 3),
+        cells: new Int32Array(1),
         zoned: 0,
         unzoned: 1,
         marked: 0,
       });
       // And one city band run, for the coarse material.
-      const run = cityGeometryOf([{ positions: new Float32Array(12), fills: new Uint8Array(16), indices: Uint32Array.of(0, 1, 2, 0, 2, 3), runs: 1, cells: 1 }]);
+      const run = cityGeometryOf([{ positions: new Float32Array(12), fills: new Uint8Array(16), indices: Uint32Array.of(0, 1, 2, 0, 2, 3), firsts: new Int32Array(1), runs: 1, cells: 1 }]);
       const stands = [geometry && new Mesh(geometry, material), run && new Mesh(run, coarse)].flatMap((m) => m ?? []);
       try {
         for (const stand of stands) {
