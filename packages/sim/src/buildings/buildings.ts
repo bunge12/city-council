@@ -36,11 +36,11 @@ import { syncCells, type Column } from "../zoning/cell-index";
 import { CELL_LEFT, CELL_RIGHT, placesAlong } from "../zoning/cells";
 import { BUILDING_TYPES } from "./balance";
 import { noteColumns } from "./candidates";
-import { noteBuildingChanged } from "./changes";
+import { noteBuildingChanged, noteBuildingsChanged } from "./changes";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { displaceBuildingPops } from "../pops/pops";
 import { noteOpening } from "../pops/opening-changes";
-import { countBuilding } from "../stats/stats";
+import { countBuilding, countBuildings } from "../stats/stats";
 import { fileBuilding, lotColumns, lotProblem, lotShapeOf, unfileBuildings } from "./where";
 
 /** Set in `flags` for a live building. */
@@ -108,6 +108,9 @@ export interface BuildingState {
   /** Removed ids, the next one to reuse last. */
   free: Int32Array;
 }
+
+/** By type index: 1 for a type that offers jobs, as `jobsForLot` has it (jobs.ts). */
+export const OFFERS_JOBS = Uint8Array.from(BUILDING_TYPES, (t) => (t.jobsPerCell > 0 ? 1 : 0));
 
 /** The per-building arrays, in the order a new state has them. */
 export const BUILDING_ARRAYS = [
@@ -396,17 +399,18 @@ export function removeBuildings(state: SimState, ids: readonly number[]): void {
   // The columns each was filed on, which a lot a change of roads took may
   // no longer walk to from its row.
   unfileBuildings(state, ids);
+  countBuildings(state, ids, -1);
+  // Only a workplace was ever among the openings (pops/openings.ts), so
+  // only one needs looking at again there: a bulldoze is mostly homes.
+  const p = state.pops;
   for (const id of ids) {
-    countBuilding(state, id, -1);
+    if ((OFFERS_JOBS[b.type[id] as number] as number) === 1) noteOpening(p, id);
     clearRow(b, id);
   }
   const free = resized(b.free, b.free.length + ids.length);
   free.set(ids, b.free.length);
   b.free = free;
-  for (const id of ids) {
-    noteBuildingChanged(b, id);
-    noteOpening(state.pops, id);
-  }
+  noteBuildingsChanged(b, ids);
 }
 
 /**
