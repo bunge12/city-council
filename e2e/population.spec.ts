@@ -172,7 +172,7 @@ test("the top bar shows the population rising with its arrow up, and the residen
   const { state, street } = streetCity(true);
   await openCity(page, state, { name: "Gateway Street" });
 
-  await test.step("a city with nobody in it shows 0 and no arrow, and four demand bars beside it", async () => {
+  await test.step("a city with nobody in it shows 0, and four demand bars beside it", async () => {
     await setSpeed(page, 0);
     await expect(page.locator("#population-count")).toHaveText("0");
     expect(await page.locator("#game-date + #population + #demand").count()).toBe(1);

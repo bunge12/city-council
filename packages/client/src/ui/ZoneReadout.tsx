@@ -53,7 +53,7 @@ export function ZoneReadout() {
           Nothing to change here
         </div>
       )}
-      {preview.ok && preview.zone === "mixed" && (
+      {preview.zone === "mixed" && (
         <div className="lot-note" id="zone-mixed-note">
           {MIXED_NOTE}
         </div>
