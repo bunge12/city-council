@@ -59,6 +59,13 @@ const DEPTH = ZONING_BALANCE.zoneDepthCells;
 const ZONES = ZONING_BALANCE.zones.length;
 /** As where.ts has it. Not imported, to keep this module free of the building index. */
 const NO_BUILDING = -1;
+// Imported constants the loops below read, copied: under the test runner,
+// which the benches time, each read of an import is a property read on a
+// module object, and a bulldoze of thousands of buildings reads them per
+// column (issue #306).
+const STRIDE = CELL_KEY_STRIDE;
+const OPEN = CELL_OPEN;
+const NO_ZONE = ZONE_NONE;
 
 interface Candidates {
   /** The cell index this was built from. */
@@ -190,10 +197,10 @@ export function notePollution(buildings: BuildingState, x: number, z: number, ra
 /** The zone number of column `col` of segment `seg` if it is a candidate, with the cells as they are now, else 0. */
 function isCandidate(state: SimState, index: CellIndex, onCell: OnCell, seg: number, col: number): number {
   const status = index.segs[seg]?.status;
-  if (!status || status[col * DEPTH] !== CELL_OPEN) return 0;
+  if (!status || status[col * DEPTH] !== OPEN) return 0;
   const slot = (state.cells.offset[seg] ?? 0) + col * DEPTH;
-  const zone = state.cells.zone[slot] ?? ZONE_NONE;
-  return zone !== ZONE_NONE && (onCell()[seg]?.[col * DEPTH] ?? NO_BUILDING) === NO_BUILDING ? zone : 0;
+  const zone = state.cells.zone[slot] ?? NO_ZONE;
+  return zone !== NO_ZONE && (onCell()[seg]?.[col * DEPTH] ?? NO_BUILDING) === NO_BUILDING ? zone : 0;
 }
 
 /** Makes room for segment ids below `limit`. */
@@ -245,25 +252,6 @@ function refreshSegment(c: Candidates, state: SimState, onCell: OnCell, seg: num
     if (order) addCandidate(order, state, c.index, seg, col, zone);
   }
   c.bits[seg] = bits;
-}
-
-/** Looks at one column again. */
-function refreshColumn(c: Candidates, state: SimState, onCell: OnCell, seg: number, col: number): void {
-  const columns = (c.index.segs[seg]?.places ?? 0) * 2;
-  if (col >= columns) return;
-  const now = isCandidate(state, c.index, onCell, seg, col);
-  let bits = c.bits[seg] ?? null;
-  const was = bits?.[col] ?? 0;
-  if (was === now) return;
-  if (!bits) c.bits[seg] = bits = new Uint8Array(columns);
-  bits[col] = now;
-  if (was !== 0) addCount(c, seg, was, -1);
-  if (now !== 0) addCount(c, seg, now, 1);
-  const order = c.order;
-  if (order) {
-    if (was !== 0) removeCandidate(order, seg, col);
-    if (now !== 0) addCandidate(order, state, c.index, seg, col, now);
-  }
 }
 
 /**
@@ -374,25 +362,84 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
     if (watch.columns.size > 0) watch.columns = new Set();
   }
   if (c.segs.size === 0 && c.fronts.length === 0) return capNotes(c, state);
-  fit(c, index.segs.length);
+  catchUp(c, state, onCell);
+  return capNotes(c, state);
+}
+
+/**
+ * Looks again at what was noted since the last catch-up. Kept out of
+ * `candidatesOf`, which a grower draw calls thousands of times a tick with
+ * nothing noted: compiled with this inside it, the engine threw that code
+ * away each time a bulldoze took this path, and ran the loop slowly
+ * (issue #306).
+ */
+function catchUp(c: Candidates, state: SimState, onCell: OnCell): void {
+  fit(c, c.index.segs.length);
   for (const seg of c.segs) {
     refreshSegment(c, state, onCell, seg);
     // Its own cells are new to the order, with none set aside; the runs that carry on past its ends come back.
     const places = c.index.segs[seg]?.places ?? 0;
-    if (c.order && places > 0) for (const col of [0, 1, places * 2 - 2, places * 2 - 1]) c.changed.push(seg * CELL_KEY_STRIDE + col);
+    if (c.order && places > 0) for (const col of [0, 1, places * 2 - 2, places * 2 - 1]) c.changed.push(seg * STRIDE + col);
   }
   // In key order, so each segment's columns are looked at together, and once.
   const keys = Float64Array.from(c.fronts).sort();
+  const whole = c.segs.size > 0 ? c.segs : null;
+  const order = c.order;
+  // Each key's column looked at again, with what a segment's keys share
+  // read once a segment: the keys are in segment order, and a bulldoze of
+  // thousands of buildings notes tens of thousands.
+  const shapes = c.index.segs;
+  const { offset, zone: zones } = state.cells;
+  let held: readonly (Int32Array | null)[] | null = null;
+  let seg = -1;
+  let skip = true;
+  let columns = 0;
+  let status: Uint8Array | null = null;
+  let first = 0;
+  /** The buildings on `seg`'s cells, undefined until asked for. */
+  let onSeg: Int32Array | null | undefined;
   for (let i = 0; i < keys.length; i++) {
-    const key = keys[i] ?? 0;
+    const key = keys[i] as number;
     if (i > 0 && key === keys[i - 1]) continue;
-    const seg = Math.floor(key / CELL_KEY_STRIDE);
-    if (!c.segs.has(seg)) refreshColumn(c, state, onCell, seg, key - seg * CELL_KEY_STRIDE);
+    const s = Math.floor(key / STRIDE);
+    if (s !== seg) {
+      seg = s;
+      skip = whole !== null && whole.has(seg);
+      const shape = shapes[seg];
+      columns = (shape?.places ?? 0) * 2;
+      status = shape?.status ?? null;
+      first = offset[seg] ?? 0;
+      onSeg = undefined;
+    }
+    const col = key - seg * STRIDE;
+    if (skip || col >= columns) continue;
+    // `isCandidate`.
+    const at = col * DEPTH;
+    let now = 0;
+    if (status && status[at] === OPEN) {
+      const zone = zones[first + at] ?? NO_ZONE;
+      if (zone !== NO_ZONE) {
+        // Asked for only here, as `isCandidate` does.
+        if (onSeg === undefined) onSeg = (held ??= onCell())[seg] ?? null;
+        if ((onSeg?.[at] ?? NO_BUILDING) === NO_BUILDING) now = zone;
+      }
+    }
+    let bits = c.bits[seg] ?? null;
+    const was = bits?.[col] ?? 0;
+    if (was === now) continue;
+    if (!bits) c.bits[seg] = bits = new Uint8Array(columns);
+    bits[col] = now;
+    if (was !== 0) addCount(c, seg, was, -1);
+    if (now !== 0) addCount(c, seg, now, 1);
+    // The land value order follows (lot-order.ts): a new candidate waits there to be filed, so this stays a few writes.
+    if (order) {
+      if (was !== 0) removeCandidate(order, seg, col);
+      if (now !== 0) addCandidate(order, state, c.index, seg, col, now);
+    }
   }
-  if (c.segs.size > 0) c.segs = new Set();
+  if (whole) c.segs = new Set();
   c.fronts.length = 0;
   c.frontsCap = MOST_FRONTS;
-  return capNotes(c, state);
 }
 
 /** Most change notes kept for the order before they are worked through without waiting for the grower's ask. */

@@ -571,6 +571,7 @@ describe("buildings in state", () => {
     ok(state, command("ZoneCells", { zone: "commercial", density: 2, rects: [{ from: { x: 4204, z: 4610 }, to: { x: 4388, z: 4610 }, width: 12 }] }));
     const rng = seedRng(104);
     const slots = Array.from(state.cells.zone.keys());
+    const chunks = new Set<number>();
     for (let i = 0; i < 60; i++) {
       const live = Array.from(state.buildings.flags.keys()).filter((id) => isBuilding(state.buildings, id));
       if (live.length > 0 && nextInt(rng, 3) === 0) {
@@ -588,7 +589,16 @@ describe("buildings in state", () => {
       expect(Array.from(buildingsOnSlots(state, asked))).toEqual(Array.from(asked, (slot) => all[slot]));
       expect(Array.from(buildingsOnSlots(state, Int32Array.of(-1, all.length)))).toEqual([NO_BUILDING, NO_BUILDING]);
       for (let id = 0; id < state.buildings.flags.length; id++) expect(buildingInfo(state, id)).toEqual(buildingInfo(fresh, id));
+      // Asked of `state` from the first step, so its buildings by chunk are
+      // kept as buildings come and go; the fresh copy's are built on asking
+      // (issue #306). Every chunk a building has been in, gone or not.
+      for (let id = 0; id < state.buildings.flags.length; id++) {
+        const chunk = buildingInfo(state, id)?.chunk ?? NO_BUILDING;
+        if (chunk !== NO_BUILDING) chunks.add(chunk);
+      }
+      for (const chunk of chunks) expect(buildingsInChunk(state, chunk)).toEqual(buildingsInChunk(fresh, chunk));
     }
+    expect(chunks.size).toBeGreaterThan(0);
     expect(state.buildings.free.length).toBeGreaterThan(0);
     expect(state.buildings.flags.length - state.buildings.free.length).toBeGreaterThan(2);
   });

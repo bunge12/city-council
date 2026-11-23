@@ -62,6 +62,8 @@ import { waterDistanceAt } from "../landvalue/water";
 import { CHUNKS_PER_SIDE } from "../chunks";
 
 const DEPTH = ZONING_BALANCE.zoneDepthCells;
+/** Copied, as candidates.ts copies it: under the test runner each read of an import costs a property read (issue #306). */
+const STRIDE = CELL_KEY_STRIDE;
 
 /** No building on a cell, or no chunk for a building whose lot is not there. */
 export const NO_BUILDING = -1;
@@ -75,8 +77,13 @@ interface BuildingIndex {
   segCells: (Int32Array | null)[];
   /** By building id: the chunk its lot's centre is in, or NO_BUILDING. */
   chunk: number[];
-  /** Building ids by chunk. */
-  byChunk: Map<number, Set<number>>;
+  /**
+   * Building ids by chunk, for `buildingsInChunk`. Built from `chunk` on its
+   * first call and kept current after; null until then. Only a view asks,
+   * so the sim, which never does, does not pay for it on a bulldoze of
+   * thousands (issue #306).
+   */
+  byChunk: Map<number, Set<number>> | null;
   /** By building id: its lot's centre, where `chunk` is not NO_BUILDING. Typed, so a pass over many homes reads them fast (M3-25). */
   x: Float64Array;
   z: Float64Array;
@@ -145,9 +152,10 @@ export function lotColumns(index: CellIndex, first: Column, width: number): Colu
   return cols;
 }
 
-/** The column whose front cell is at `local` in segment `seg`'s run. */
-function columnOfFront(seg: number, local: number): Column {
-  const rest = local / DEPTH;
+/** The column a front cell key names, as `segment * CELL_KEY_STRIDE + column` (`unfile`). */
+function columnOfKey(key: number): Column {
+  const seg = Math.floor(key / STRIDE);
+  const rest = key - seg * STRIDE;
   return { seg, side: rest & 1, place: rest >> 1, dir: 0 };
 }
 
@@ -283,9 +291,7 @@ function file(bi: BuildingIndex, b: BuildingState, id: number): boolean {
   bi.z[id] = z;
   bi.water[id] = falloff(LAND_VALUE_BALANCE.water, waterDistanceAt(index.terrain, x, z));
   bi.valueChunk[id] = chunk;
-  let set = bi.byChunk.get(chunk);
-  if (!set) bi.byChunk.set(chunk, (set = new Set()));
-  set.add(id);
+  if (bi.byChunk) addToChunk(bi.byChunk, chunk, id);
   // The lot's jobs and room, abandoned or not (M3-24): the building is
   // filed at different times on a city that ran and on one loaded from its
   // save, and the middles the city centre is worked out from must agree.
@@ -376,32 +382,36 @@ function unstamp(bi: BuildingIndex, id: number): void {
 
 /**
  * Takes building `id` off the cells it was filed on, from what `file`
- * kept, so it works whatever the row or the roads say now. Adds to `fronts`
- * the front cells it held, as segment and place in the run, and returns it.
+ * kept, so it works whatever the row or the roads say now. Adds to `keys`
+ * the columns it held, as `segment * CELL_KEY_STRIDE + column`, and
+ * returns it.
  */
-function unfile(bi: BuildingIndex, id: number, fronts: number[] = []): number[] {
+function unfile(bi: BuildingIndex, id: number, keys: number[] = []): number[] {
   const rec = bi.filed[id];
   if (rec) {
+    const segCells = bi.segCells;
     for (let i = 0; i < rec.length; i += 3) {
-      const seg = rec[i] ?? 0;
-      const start = rec[i + 1] ?? 0;
-      const depth = rec[i + 2] ?? 0;
-      fronts.push(seg, start);
-      const cells = bi.segCells[seg];
+      const seg = rec[i] as number;
+      const start = rec[i + 1] as number;
+      const depth = rec[i + 2] as number;
+      // A column's front cell is at a multiple of DEPTH in the run.
+      keys.push(seg * STRIDE + start / DEPTH);
+      const cells = segCells[seg];
       if (!cells) continue;
-      for (let d = 0; d < depth && d < DEPTH && start + d < cells.length; d++) if (cells[start + d] === id) cells[start + d] = NO_BUILDING;
+      const end = Math.min(start + Math.min(depth, DEPTH), cells.length);
+      for (let k = start; k < end; k++) if (cells[k] === id) cells[k] = NO_BUILDING;
     }
   }
   bi.filed[id] = null;
   unstamp(bi, id);
   const chunk = bi.chunk[id] ?? NO_BUILDING;
-  if (chunk !== NO_BUILDING) bi.byChunk.get(chunk)?.delete(id);
+  if (chunk !== NO_BUILDING) bi.byChunk?.get(chunk)?.delete(id);
   bi.chunk[id] = NO_BUILDING;
   if (id < bi.water.length) {
     bi.water[id] = -1;
     bi.value[id] = -1;
   }
-  return fronts;
+  return keys;
 }
 
 /** A building index for `cellIndex`, every live building filed in id order. */
@@ -411,7 +421,7 @@ function build(b: BuildingState, cellIndex: CellIndex): BuildingIndex {
     buildings: b,
     segCells: new Array<Int32Array | null>(cellIndex.segs.length).fill(null),
     chunk: [],
-    byChunk: new Map(),
+    byChunk: null,
     x: new Float64Array(0),
     z: new Float64Array(0),
     water: new Float64Array(0),
@@ -461,8 +471,7 @@ function catchUp(state: SimState, bi: BuildingIndex): void {
   // candidates would not otherwise look at again.
   const held: Column[] = [];
   for (const id of ids) {
-    const fronts = unfile(bi, id);
-    for (let i = 0; i < fronts.length; i += 2) held.push(columnOfFront(fronts[i] ?? 0, fronts[i + 1] ?? 0));
+    for (const key of unfile(bi, id)) held.push(columnOfKey(key));
   }
   noteColumns(state, held);
   bi.segCells.length = index.segs.length;
@@ -624,9 +633,8 @@ export function unfileBuilding(state: SimState, id: number): Column[] {
   const { bi } = indexOf(state, false);
   bi.toCheck.delete(id);
   bi.lost.delete(id);
-  const fronts = unfile(bi, id);
   const cols: Column[] = [];
-  for (let i = 0; i < fronts.length; i += 2) cols.push(columnOfFront(fronts[i] ?? 0, fronts[i + 1] ?? 0));
+  for (const key of unfile(bi, id)) cols.push(columnOfKey(key));
   return cols;
 }
 
@@ -639,14 +647,15 @@ export function unfileBuilding(state: SimState, id: number): Column[] {
 export function unfileBuildings(state: SimState, ids: readonly number[]): void {
   if (!current(state)) return;
   const { bi } = indexOf(state, false);
-  const fronts: number[] = [];
-  for (const id of ids) {
-    bi.toCheck.delete(id);
-    bi.lost.delete(id);
-    unfile(bi, id, fronts);
-  }
   const keys: number[] = [];
-  for (let i = 0; i < fronts.length; i += 2) keys.push((fronts[i] ?? 0) * CELL_KEY_STRIDE + (fronts[i + 1] ?? 0) / DEPTH);
+  // Both are empty nearly always: a building waits in them only until the cells settle.
+  const toCheck = bi.toCheck.size > 0 ? bi.toCheck : null;
+  const lost = bi.lost.size > 0 ? bi.lost : null;
+  for (const id of ids) {
+    toCheck?.delete(id);
+    lost?.delete(id);
+    unfile(bi, id, keys);
+  }
   noteFrontColumns(state, keys);
 }
 
@@ -941,7 +950,20 @@ export function buildingChunks(state: SimState): readonly number[] {
 /** The ids of the buildings whose lot's centre is in 500 m chunk `chunk`, ascending. */
 export function buildingsInChunk(state: SimState, chunk: number): number[] {
   const { bi } = indexOf(state);
+  if (!bi.byChunk) {
+    bi.byChunk = new Map();
+    for (let id = 0; id < bi.chunk.length; id++) {
+      const at = bi.chunk[id] ?? NO_BUILDING;
+      if (at !== NO_BUILDING) addToChunk(bi.byChunk, at, id);
+    }
+  }
   return [...(bi.byChunk.get(chunk) ?? [])].sort((p, q) => p - q);
+}
+
+function addToChunk(byChunk: Map<number, Set<number>>, chunk: number, id: number): void {
+  let set = byChunk.get(chunk);
+  if (!set) byChunk.set(chunk, (set = new Set()));
+  set.add(id);
 }
 
 /** One building as a view draws it: its row and the four corners of its lot. */
