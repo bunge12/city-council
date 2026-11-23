@@ -6,6 +6,7 @@
 // which job matching reads (M3-09), `departuresPerYearAtFullDemand`, which
 // satisfaction reads to send people away while the residential bar is below
 // zero (M3-10), `vacancy`, which the vacancy check reads (M3-24),
+// `redevelopment`, which redevelopment reads (M3-14),
 // and `buildingsPerDayAtFullDemand`, which the grower reads (M3-07).
 
 import balance from "../../balance/demand.json" with { type: "json" };
@@ -48,6 +49,12 @@ export interface DemandBalance {
    * use before it can be vacant, and game days vacant before it is abandoned.
    */
   vacancy: { newDays: number; abandonDays: number };
+  /**
+   * How soon a building on ground zoned up redevelops (M3-14): its owner's chance a game day is `chancePerDay` times
+   * (land value - `valueFrom`) / (100 - `valueFrom`), at least 0, times the zone's bar over 100. At most `perDayMax`
+   * buildings a game day are replaced or cleared.
+   */
+  redevelopment: { chancePerDay: number; valueFrom: number; perDayMax: number };
   /** By zone id: buildings the grower adds a game day with the zone's bar at 100 (M3-07). */
   buildingsPerDayAtFullDemand: Record<string, number>;
 }
@@ -83,7 +90,7 @@ const TOP: Readonly<Record<string, NumberRule>> = {
 export function checkDemandBalance(data: unknown): string[] {
   if (!isRecord(data)) return ["the demand balance is not an object"];
   const errors: string[] = [];
-  const others = ["spendingByWealth", "outsidePull", "jobMatching", "vacancy", "buildingsPerDayAtFullDemand"];
+  const others = ["spendingByWealth", "outsidePull", "jobMatching", "vacancy", "redevelopment", "buildingsPerDayAtFullDemand"];
   for (const key of [...Object.keys(BARS), ...others]) if (!(key in data)) errors.push(`${key} is missing`);
   for (const [key, rule] of Object.entries(TOP)) {
     const problem = numberProblem(data, key, rule, "");
@@ -105,6 +112,10 @@ export function checkDemandBalance(data: unknown): string[] {
   if ("vacancy" in data) {
     const days = { min: 0, max: 3600, whole: true };
     errors.push(...numberProblems(data["vacancy"], { newDays: days, abandonDays: { ...days, min: 1 } }, "vacancy"));
+  }
+  if ("redevelopment" in data) {
+    const rules = { chancePerDay: { min: 0, max: 1 }, valueFrom: { min: 0, max: 99, whole: true }, perDayMax: { min: 0, max: 1000, whole: true } };
+    errors.push(...numberProblems(data["redevelopment"], rules, "redevelopment"));
   }
   if ("buildingsPerDayAtFullDemand" in data) {
     const rules = Object.fromEntries(ZONING_BALANCE.zones.map((zone) => [zone.id, { min: 0, whole: true }]));

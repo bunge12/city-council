@@ -29,7 +29,8 @@
 //   its lot is still zoned for what it is and no change of roads is
 //   settling. One whose ground was rezoned stands abandoned with
 //   BUILDING_UNZONED beside it, which the visit sets and clears as it finds
-//   the ground; issue 14 clears such buildings.
+//   the ground; redevelopment clears such a building on the same visit
+//   (redevelop.ts, M3-14), and the grower builds on its ground.
 //
 // A vacant building still offers its room and jobs, so people move in and
 // the next visit finds it in use. The grower adds no building to a zone

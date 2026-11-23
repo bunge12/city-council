@@ -13,6 +13,7 @@ import {
   terrainOf,
   ZONING_BALANCE,
   type Block,
+  type BuildingGround,
   type BuildingInfo,
   type LandValue,
   type CommandResult,
@@ -1101,11 +1102,14 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   // looked up again only when the ground under the pointer or the city changes.
   let hoverKey = "";
   let hoverBuilding: BuildingInfo | null = null;
+  let hoverGround: BuildingGround | null = null;
   const buildingUnder = (cursor: { x: number; z: number } | null): BuildingInfo | null => {
     const key = useUi.getState().tool === null && cursor ? `${cursor.x.toFixed(1)},${cursor.z.toFixed(1)},${worldVersion}` : "";
     if (key !== hoverKey) {
       hoverKey = key;
       hoverBuilding = key === "" || !cursor ? null : mirror.buildingAt(cursor.x, cursor.z);
+      // Whether it stands as a permitted existing use, and what its ground would rebuild as (M3-14).
+      hoverGround = hoverBuilding ? mirror.buildingGround(hoverBuilding.id) : null;
     }
     return hoverBuilding;
   };
@@ -1270,7 +1274,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     setLandValueHover(land && pointerNow ? { x: pointerNow.x, y: pointerNow.y, value: land.value, roadType: land.roadType } : null);
     document.body.dataset["landValueHover"] = land ? String(land.value.value) : "";
     const under = land ? null : buildingUnder(cursor);
-    setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under, occupants: occupantsOf(under.id) } : null);
+    setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under, occupants: occupantsOf(under.id), ground: hoverGround } : null);
     document.body.dataset["buildingHover"] = under ? String(under.id) : "";
     document.body.dataset["buildingsToClear"] = String((liveClears?.clears?.ids.length ?? 0) + (gridClearsNow?.clears?.ids.length ?? 0));
     buildingMarks.show(

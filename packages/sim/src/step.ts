@@ -9,6 +9,7 @@ import { STATS } from "./stats/stats";
 import { DEMAND } from "./demand/demand";
 import { keepBuildings } from "./buildings/upkeep";
 import { VACANCY } from "./buildings/vacancy";
+import { REDEVELOP } from "./buildings/redevelop";
 import { LAND_VALUE } from "./landvalue/land-value";
 import { applyPending, type DroppedCommand } from "./commands";
 import { catchUpDerived } from "./derived";
@@ -42,9 +43,13 @@ export interface System {
  * grower, which builds nothing in a zone while an abandoned building of it
  * could come back into use. Land value
  * keeps the city centre before the grower builds, so a building grown on
- * the first tick of a month sees the month's centre.
+ * the first tick of a month sees the month's centre. Redevelopment comes
+ * after both and before the grower (M3-14): it visits the vacancy check's
+ * slice, so a building marked unzoned on today's visit is cleared on it,
+ * it reads the month's centre, and the grower builds on the ground it
+ * clears. The pops of a home it replaces find homes on the next tick.
  */
-export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, DISPLACED, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, GROWER];
+export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, DISPLACED, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, REDEVELOP, GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";

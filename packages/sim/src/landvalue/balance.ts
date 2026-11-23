@@ -50,6 +50,18 @@ export interface LandValueBalance {
   squareSize: number;
   /** How land value shapes who moves in (M3-25). */
   newcomers: NewcomerValue;
+  /** What a building is worth to its owner, for redevelopment (M3-14). */
+  redevelopment: RedevelopmentWorth;
+}
+
+/**
+ * A building's worth to its owner (M3-14): its land value times its lot's
+ * cells times `worthByDensity[density - 1]`. A replacement must be worth at
+ * least 1 + `margin` times what it replaces.
+ */
+export interface RedevelopmentWorth {
+  worthByDensity: number[];
+  margin: number;
 }
 
 /** `f.points` within `f.near` of `distance`, none from `f.far` on, a straight line between, rounded down. */
@@ -83,7 +95,7 @@ function falloffProblems(value: unknown, where: string, farMax: number): string[
 export function checkLandValueBalance(data: unknown): string[] {
   if (!isRecord(data)) return ["the land value balance is not an object"];
   const errors: string[] = [];
-  const others = ["roadAccess", "water", "centre", "industry", "newcomers"];
+  const others = ["roadAccess", "water", "centre", "industry", "newcomers", "redevelopment"];
   for (const key of others) if (!(key in data)) errors.push(`${key} is missing`);
   for (const [key, rule] of Object.entries(TOP)) {
     const problem = numberProblem(data, key, rule, "");
@@ -106,6 +118,19 @@ export function checkLandValueBalance(data: unknown): string[] {
     }
   }
   if ("newcomers" in data) errors.push(...newcomerProblems(data["newcomers"]));
+  if ("redevelopment" in data) errors.push(...worthProblems(data["redevelopment"]));
+  return errors;
+}
+
+function worthProblems(r: unknown): string[] {
+  if (!isRecord(r)) return ["redevelopment must be an object"];
+  const errors = unknownKeys(r, ["worthByDensity", "margin"], "redevelopment");
+  const margin = numberProblem(r, "margin", { min: 0, max: 10 }, "redevelopment");
+  if (margin) errors.push(margin);
+  const by = r["worthByDensity"];
+  if (!Array.isArray(by) || by.length !== 3 || !by.every((w) => typeof w === "number" && Number.isFinite(w) && w > 0)) {
+    errors.push("redevelopment.worthByDensity must list a worth above 0 for each density, 1 to 3");
+  } else if (!(by[0] < by[1] && by[1] < by[2])) errors.push("redevelopment.worthByDensity must rise with density");
   return errors;
 }
 

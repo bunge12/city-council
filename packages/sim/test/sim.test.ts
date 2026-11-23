@@ -12,6 +12,7 @@ import {
   TURNOVER_SYSTEM,
   SATISFACTION_SYSTEM,
   VACANCY_SYSTEM,
+  REDEVELOP_SYSTEM,
   STATS_SYSTEM,
   DEMAND_SYSTEM,
   LAND_VALUE_SYSTEM,
@@ -108,6 +109,8 @@ describe("step", () => {
       `end ${VACANCY_SYSTEM}`,
       `start ${LAND_VALUE_SYSTEM}`,
       `end ${LAND_VALUE_SYSTEM}`,
+      `start ${REDEVELOP_SYSTEM}`,
+      `end ${REDEVELOP_SYSTEM}`,
       `start ${GROWER_SYSTEM}`,
       `end ${GROWER_SYSTEM}`,
     ]);

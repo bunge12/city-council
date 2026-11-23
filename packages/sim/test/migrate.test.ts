@@ -35,6 +35,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 18) gone.push("stats");
   if (version < 19) gone.push("travelReadyAt");
   if (version < 20) gone.push("demand");
+  if (version < 26) gone.push("redevelopedToday");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
   // Before version 14 a ZoneCells left no undo record and no record held zoning.
   if (version < 14 && Array.isArray(kept["undo"])) {
@@ -83,6 +84,7 @@ function asMigrated(state: SimState): SimState {
     centre: { x: 0, z: 0, weight: 0, due: state.tick },
     stats: statsFor(state),
     demand: createDemand(),
+    redevelopedToday: 0,
   };
 }
 
@@ -114,7 +116,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(25);
+    expect(SNAPSHOT_VERSION).toBe(26);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -134,6 +136,7 @@ describe("migrateState", () => {
       stats: createStats(),
       travelReadyAt: 0,
       demand: createDemand(),
+      redevelopedToday: 0,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -158,6 +161,7 @@ describe("migrateState", () => {
       stats: createStats(),
       travelReadyAt: 0,
       demand: createDemand(),
+      redevelopedToday: 0,
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -525,7 +529,7 @@ describe("migrateState", () => {
     const migrated = migrateState(v16);
     const { growth, ...kept } = v16;
     void growth;
-    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand() });
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0 });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 

@@ -13,6 +13,7 @@ import {
   applyRoadDelta,
   applyUndoDelta,
   blockIndexOf,
+  buildingGround,
   buildingInfo,
   buildingOnSlot,
   buildingsInChunk,
@@ -29,6 +30,7 @@ import {
   terrainOf,
   roadClears,
   roadIndexOf,
+  type BuildingGround,
   type BuildingInfo,
   type BuildingsInTheWay,
   type GridPlan,
@@ -264,6 +266,16 @@ export class SimMirror {
     return this.current ? buildingInfo(this.current, id) : null;
   }
 
+  /**
+   * How building `id`'s ground is zoned against what it was built under
+   * (M3-14): as built, zoned up so it may redevelop, or for something else
+   * so it stands as a permitted existing use. Null if there is no such
+   * building.
+   */
+  buildingGround(id: number): BuildingGround | null {
+    return this.current ? buildingGround(this.current, id) : null;
+  }
+
   /** The chunk building `id`'s lot's centre is in, or -1 if there is none. */
   buildingChunk(id: number): number {
     return this.current ? (buildingInfo(this.current, id)?.chunk ?? -1) : -1;
@@ -492,6 +504,7 @@ export class SimMirror {
     state.cellReads = delta.cellReads;
     state.travelReadyAt = delta.travelReadyAt;
     state.demand = copyDemand(delta.demand);
+    state.redevelopedToday = delta.redevelopedToday;
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
     state.centre = { ...delta.centre };

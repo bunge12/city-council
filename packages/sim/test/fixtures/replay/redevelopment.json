@@ -1,0 +1,119 @@
+{
+  "description": "Redevelopment on seed 2026 (M3-14). p1 builds a street from the first outside connection's stub and zones R1 six deep along its north side, p2 along its south side. Every bar is held at 40, so houses grow and people move in. On day 20 both rezone their side R3. Over the next hundred game days owners rebuild, a few at a time: each tower takes in the houses beside it whose ground was zoned up too, and their people move into the towers. 120 game days.",
+  "seed": 2026,
+  "untilTick": 12000,
+  "heldDemand": 40,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 200,
+          "z": 3608
+        },
+        "to": {
+          "x": 392,
+          "z": 3608
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3637
+            },
+            "to": {
+              "x": 390,
+              "z": 3637
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 3,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3579
+            },
+            "to": {
+              "x": 390,
+              "z": 3579
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2000,
+      "seq": 4,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 3,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3637
+            },
+            "to": {
+              "x": 390,
+              "z": 3637
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2001,
+      "seq": 5,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 3,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3579
+            },
+            "to": {
+              "x": 390,
+              "z": 3579
+            },
+            "width": 44
+          }
+        ]
+      }
+    }
+  ],
+  "balance": "585b8492d993bf9e",
+  "hash": "55957e18ad5ae4e2"
+}

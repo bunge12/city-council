@@ -343,8 +343,10 @@ export function findLot(state: SimState, ref: CellRef): LotResult {
  * largest lot holding the cell that it takes, or why none does. `findLot`
  * takes the largest of these; the grower draws among them (grower.ts).
  * Settles cells as `findLot` does, with the same caution for systems.
+ * Given `free`, a cell under a building it says yes to counts as free, so
+ * redevelopment can fit a lot over the buildings it would replace.
  */
-export function lotOptions(state: SimState, ref: CellRef, explain = true): LotOptions {
+export function lotOptions(state: SimState, ref: CellRef, explain = true, free?: (id: number) => boolean): LotOptions {
   const index = syncCells(state);
   const cells = state.cells;
   const slot = cellSlotIn(index, cells, ref.segment, ref.side, ref.place, ref.depth);
@@ -355,7 +357,11 @@ export function lotOptions(state: SimState, ref: CellRef, explain = true): LotOp
   const density = cells.density[slot] ?? 0;
   if (zone === ZONE_NONE) return refuseIf(explain, "unzoned", "The ground is not zoned");
   const onCell = segmentBuildings(state);
-  const builtOn = (col: Column, depth: number): boolean => (onCell[col.seg]?.[localIndex(col.side, col.place, depth)] ?? NO_BUILDING) !== NO_BUILDING;
+  // Redevelopment (redevelop.ts, M3-14) asks with some buildings counted as free ground.
+  const builtOn = (col: Column, depth: number): boolean => {
+    const id = onCell[col.seg]?.[localIndex(col.side, col.place, depth)] ?? NO_BUILDING;
+    return id !== NO_BUILDING && !(free !== undefined && free(id));
+  };
   if (builtOn(start, ref.depth)) return refuseIf(explain, "built", "A building stands here");
   const types = typesFor(zone, density);
   if (types.length === 0) return refuseIf(explain, "no-types", explain ? `Nothing grows in ${zoneLabel(zone, density)}` : "");

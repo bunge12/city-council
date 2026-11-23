@@ -406,12 +406,14 @@ describe("factories with nobody to work in them", () => {
     expectRecount(state);
   });
 
-  it("leaves a factory whose ground was rezoned abandoned, and holds no new factory back for it", () => {
+  it("clears a factory whose ground was rezoned once it is abandoned, and holds no new factory back for it (M3-14)", () => {
     const state = factories();
     const b = state.buildings;
     holdDemand({ industrial: -20 }, () => runDays(state, newDays + abandonDays + 2));
     const built = workplaces(state);
     for (const id of built) expect(isAbandoned(b, id)).toBe(true);
+    const seen = new Map(built.map((id) => [id, `${b.firstSeg[id]}/${b.firstPlace[id]}/${b.builtAt[id]}`]));
+    const same = (id: number) => b.flags[id] !== 0 && `${b.firstSeg[id]}/${b.firstPlace[id]}/${b.builtAt[id]}` === seen.get(id);
     // Rezone both sides commercial: the factories stand on ground no longer zoned for them.
     const r = state.roads;
     const edge = state.connections[0] ?? NONE;
@@ -426,17 +428,15 @@ describe("factories with nobody to work in them", () => {
     // the two strokes took.
     expect(abandonedWaiting(state)[4]).toBeGreaterThan(built.length - 3);
     holdDemand({ industrial: -20 }, () => runDays(state, 1));
-    // The visit marks it, and none holds the grower.
-    for (const id of built) expect(b.flags[id]).toBe(BUILDING_ALIVE | BUILDING_ABANDONED | BUILDING_UNZONED);
+    // The visit marks it and redevelopment clears it the same tick, up to
+    // `perDayMax` a day, and none left standing holds the grower.
+    const cleared = built.filter((id) => !same(id));
+    expect(cleared.length).toBeGreaterThan(0);
+    expect(cleared.length).toBeLessThanOrEqual(2 * DEMAND_BALANCE.redevelopment.perDayMax);
+    for (const id of built) if (same(id)) expect(b.flags[id]).toBe(BUILDING_ALIVE | BUILDING_ABANDONED | BUILDING_UNZONED);
     expect(abandonedWaiting(state)[4]).toBe(0);
-    // With the bar above zero, none may come back.
-    holdDemand({ industrial: 20 }, () => runDays(state, 2));
-    for (const id of built) expect(isAbandoned(b, id)).toBe(true);
-    // Zoned industrial again, the next visit brings them back.
-    zone(state, s, "industrial", 1, 0, 24, 6, 1);
-    zone(state, s, "industrial", 1, 0, 24, 6, -1);
-    holdDemand({ industrial: 20 }, () => withValue(DEMAND_BALANCE, "openJobsShareMax", 1, () => runDays(state, 1)));
-    for (const id of built) expect(b.flags[id]).toBe(BUILDING_ALIVE);
+    holdDemand({ industrial: -20 }, () => runDays(state, 2));
+    for (const id of built) expect(same(id)).toBe(false);
     expectRecount(state);
   });
 });
