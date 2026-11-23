@@ -22,7 +22,8 @@ test.setTimeout(900_000);
 let built: { bytes: Uint8Array; abandoned: number[] } | null = null;
 function abandonedTown(): { bytes: Uint8Array; abandoned: number[] } {
   if (built) return built;
-  const { state, pagedLog } = deserialize(scaleCity().bytes);
+  // A copy at offset 0: the town's bytes are a Node Buffer, which the reader does not take as it is.
+  const { state, pagedLog } = deserialize(new Uint8Array(scaleCity().bytes));
   const abandoned: number[] = [];
   state.buildings.flags.forEach((f, id) => {
     if ((f & 1) === 0 || id % 10 !== 0) return;
