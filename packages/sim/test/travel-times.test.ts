@@ -25,7 +25,7 @@ import { NONE, addNode, addSegment, isNode, isSegment, nodeIdLimit, removeSegmen
 import { ROUTING_BALANCE, findRoute, findRouteBetween, routingGraphOf } from "../src/roads/routing";
 import { nextFloat, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
-import { markRoadsChanged, prepareTravelTimes, travelRebuildSize, travelZoneSources } from "../src/travel-times";
+import { markRoadsChanged, prepareTravelTimes, travelRebuildSize, travelStepSettled, travelZoneSources } from "../src/travel-times";
 import { chunkAt } from "../src/zoning/cell-index";
 import { runFixture } from "./replay-helper";
 import { submit } from "./seen-ends";
@@ -268,8 +268,38 @@ describe("keeping the table current", () => {
       const { nodes, zones } = travelRebuildSize(state);
       expect(nodes).toBe(176);
       expect(state.travelReadyAt - state.tick).toBe(Math.ceil((zones * nodes) / 40) + 1);
-      stepUntilReady(state);
+      // No step settles more than its share, the last one included, which
+      // finishes what is left: the ticks were given for every row at a share a tick.
+      const settled: number[] = [];
+      while (!travelTimesReady(state)) {
+        step(state);
+        settled.push(travelStepSettled(state));
+      }
+      expect(Math.max(...settled)).toBeLessThanOrEqual(40);
+      expect(settled.filter((n) => n === 40).length).toBeGreaterThan(zones * 4);
       expect(allAnswers(state)).toEqual(allAnswers(cloneState(state)));
+    });
+  });
+
+  it("opens a row from a small island of road for the nodes it reaches, and still matches a fresh city (#326)", () => {
+    // The grid and a dozen short streets apart from it, each its own zone:
+    // most rows reach two nodes, and the table must still be the fresh one.
+    withSettlesPerTick(40, () => {
+      const state = createBareState(1);
+      const net = state.roads;
+      grid(net, 1010, 1010, 16, 11, 100);
+      prepareTravelTimes(state);
+      for (let k = 0; k < 12; k++) {
+        const x = 3000 + (k % 6) * CHUNK_SIZE;
+        const z = 4000 + Math.floor(k / 6) * CHUNK_SIZE;
+        addSegment(net, addNode(net, x, z, 0), addNode(net, x + 100, z, 0), { type: STREET });
+      }
+      markRoadsChanged(state);
+      step(state);
+      stepUntilReady(state);
+      const fresh = cloneState(state);
+      expect(allAnswers(state)).toEqual(allAnswers(fresh));
+      expect(travelZoneSources(state)).toEqual(travelZoneSources(fresh));
     });
   });
 

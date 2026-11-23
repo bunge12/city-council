@@ -82,6 +82,8 @@ interface Rebuild {
   heapSize: number;
   /** Sources the open row's search has still to settle. */
   left: number;
+  /** Nodes the last row's search reached, at the start of `reached`: the only ones whose `dist` is not Infinity. */
+  reachedCount: number;
   readonly table: Uint16Array;
 }
 
@@ -129,6 +131,10 @@ interface TravelTimes {
   time: Float64Array;
   zoneOf: Int32Array;
   dist: Float64Array;
+  /** The nodes a row's search reached, so the next row resets only those and not the whole of `dist` (#326). */
+  reached: Int32Array;
+  /** Nodes the last step's share settled. For tests. */
+  stepSettled: number;
   heapTime: Float64Array;
   heapNode: Int32Array;
 }
@@ -159,6 +165,8 @@ function watched(net: RoadNetwork): TravelTimes {
       time: new Float64Array(0),
       zoneOf: new Int32Array(0),
       dist: new Float64Array(0),
+      reached: new Int32Array(0),
+      stepSettled: 0,
       heapTime: new Float64Array(64),
       heapNode: new Int32Array(64),
     };
@@ -377,19 +385,32 @@ function startRebuild(tt: TravelTimes): void {
   const rows: number[] = [];
   for (let zone = 0; zone < TRAVEL_ZONES; zone++) if ((compactSources[zone] ?? -1) >= 0) rows.push(zone);
   tt.dist = room(tt.dist, graph.size, (k) => new Float64Array(k));
+  tt.reached = room(tt.reached, graph.size, (k) => new Int32Array(k));
+  // Once a rebuild, in the step that compacts the graph. Each row after
+  // resets only the nodes the row before it reached.
+  tt.dist.fill(Infinity, 0, graph.size);
   // Built in place over the table in use: nothing reads it until the rebuild is done (`tableOf`).
   tt.table ??= new Uint16Array(TRAVEL_ZONES * TRAVEL_ZONES);
   tt.sources = null;
-  tt.rebuild = { graph, sources, compactSources, rows: Int32Array.from(rows), done: 0, open: false, heapSize: 0, left: 0, table: tt.table };
+  tt.rebuild = { graph, sources, compactSources, rows: Int32Array.from(rows), done: 0, open: false, heapSize: 0, left: 0, reachedCount: 0, table: tt.table };
 }
 
-/** Starts the search for row `done` of the rebuild: its source pushed, every other node unreached, its part of the table cleared. */
+/**
+ * Starts the search for row `done` of the rebuild: its source pushed,
+ * every other node unreached, its part of the table cleared. Resets only
+ * the nodes the row before it reached, so a row costs what its search
+ * does: a row from a small island of road opens in a few writes, not one
+ * for every node in the city.
+ */
 function openRow(tt: TravelTimes, r: Rebuild): void {
   const zone = r.rows[r.done] ?? 0;
   const dist = tt.dist;
-  dist.fill(Infinity, 0, r.graph.size);
+  const reached = tt.reached;
+  for (let k = 0; k < r.reachedCount; k++) dist[reached[k] ?? 0] = Infinity;
   const start = r.compactSources[zone] ?? -1;
   dist[start] = 0;
+  reached[0] = start;
+  r.reachedCount = 1;
   tt.heapTime[0] = 0;
   tt.heapNode[0] = start;
   r.heapSize = 1;
@@ -410,6 +431,8 @@ function openRow(tt: TravelTimes, r: Rebuild): void {
 function searchRow(tt: TravelTimes, r: Rebuild, budget: number): number {
   const { first, to, time, zoneOf } = r.graph;
   const dist = tt.dist;
+  const reached = tt.reached;
+  let reachedCount = r.reachedCount;
   let heapTime = tt.heapTime;
   let heapNode = tt.heapNode;
   let heapSize = r.heapSize;
@@ -451,7 +474,9 @@ function searchRow(tt: TravelTimes, r: Rebuild, budget: number): number {
       const v = to[e] ?? 0;
       const nt = t + (time[e] ?? 0);
       // A settled node holds -1 minus its time, below any time.
-      if (!(nt < (dist[v] ?? 0))) continue;
+      const was = dist[v] ?? 0;
+      if (!(nt < was)) continue;
+      if (was === Infinity) reached[reachedCount++] = v;
       dist[v] = nt;
       if (heapSize === heapTime.length) {
         const grownTime = new Float64Array(heapSize * 2);
@@ -475,6 +500,7 @@ function searchRow(tt: TravelTimes, r: Rebuild, budget: number): number {
   }
   r.heapSize = heapSize;
   r.left = left;
+  r.reachedCount = reachedCount;
   if (heapSize === 0 || left === 0) {
     r.open = false;
     r.done++;
@@ -488,12 +514,14 @@ function searchRow(tt: TravelTimes, r: Rebuild, budget: number): number {
  */
 function advance(tt: TravelTimes, budget: number): void {
   const r = tt.rebuild;
+  tt.stepSettled = 0;
   if (!r) return;
   let settled = 0;
   while (r.done < r.rows.length && settled < budget) {
     if (!r.open) openRow(tt, r);
     settled += searchRow(tt, r, budget - settled);
   }
+  tt.stepSettled = settled;
   if (r.done < r.rows.length) return;
   tt.table = r.table;
   tt.sources = r.sources;
@@ -547,6 +575,7 @@ export function markRoadsChanged(state: SimState): void {
  */
 export function stepTravel(state: SimState): void {
   const tt = watched(state.roads);
+  tt.stepSettled = 0;
   const kept = tt.table !== null;
   if (tt.changed) {
     tt.changed = false;
@@ -681,10 +710,15 @@ export function travelRebuildSize(state: SimState): { nodes: number; zones: numb
   return { nodes: tt.roadNodes, zones: tt.roadZones };
 }
 
+/** Nodes the last step's share of a rebuild settled, 0 for a step that built no rows. For tests. */
+export function travelStepSettled(state: SimState): number {
+  return watched(state.roads).stepSettled;
+}
+
 /** Bytes the table holds, and the buffers kept for rebuilding it. For the bench. */
 export function travelTimesBytes(state: SimState): { table: number; buffers: number } {
   const tt = live.get(state.roads);
   if (!tt) return { table: 0, buffers: 0 };
-  const buffers = [tt.mark, tt.index, tt.first, tt.cursor, tt.to, tt.time, tt.zoneOf, tt.dist, tt.heapTime, tt.heapNode];
+  const buffers = [tt.mark, tt.index, tt.first, tt.cursor, tt.to, tt.time, tt.zoneOf, tt.dist, tt.reached, tt.heapTime, tt.heapNode];
   return { table: (tt.table?.byteLength ?? 0) + (tt.sources?.byteLength ?? 0), buffers: buffers.reduce((sum, a) => sum + a.byteLength, 0) };
 }
