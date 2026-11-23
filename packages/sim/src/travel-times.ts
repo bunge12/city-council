@@ -17,10 +17,12 @@
 // roads gives it the tick by which the table is rebuilt, from the size of
 // the work: zones with a source times road nodes, over
 // `rebuildSettlesPerTick`. Small cities rebuild at once. A big one
-// compacts the road graph on the next step, then rebuilds a slice a step
-// over that many ticks, and the step whose tick is last before the
-// ready tick finishes it, so the table is whole on that tick on every
-// machine (CLAUDE.md rule 5). A change while one rebuilds starts it again.
+// compacts the road graph on the next step, then settles up to
+// `rebuildSettlesPerTick` nodes a step over that many ticks, stopping a
+// row's search part way when the share runs out and carrying it on in the
+// next step, and the step whose tick is last before the ready tick
+// finishes it, so the table is whole on that tick on every machine
+// (CLAUDE.md rule 5). A change while one rebuilds starts it again.
 //
 // Nothing in the sim may read the table before the ready tick
 // (`travelTimesReady`). The table it would read is the one from before the
@@ -59,7 +61,11 @@ interface CompactGraph {
   readonly zoneOf: Int32Array;
 }
 
-/** A rebuild of the table, a row at a time. */
+/**
+ * A rebuild of the table, a row at a time. A row's search may stop part way
+ * at the end of a step and carry on in the next, so a step settles no more
+ * nodes than its share whatever the size of a row (#326).
+ */
 interface Rebuild {
   readonly graph: CompactGraph;
   /** Each zone's source node, or NONE. */
@@ -70,6 +76,12 @@ interface Rebuild {
   readonly rows: Int32Array;
   /** How many of `rows` are built. */
   done: number;
+  /** Row `done` has its search under way: its start pushed and its part of the table cleared. */
+  open: boolean;
+  /** Entries in the open row's heap (`heapTime`, `heapNode`). */
+  heapSize: number;
+  /** Sources the open row's search has still to settle. */
+  left: number;
   readonly table: Uint16Array;
 }
 
@@ -368,30 +380,44 @@ function startRebuild(tt: TravelTimes): void {
   // Built in place over the table in use: nothing reads it until the rebuild is done (`tableOf`).
   tt.table ??= new Uint16Array(TRAVEL_ZONES * TRAVEL_ZONES);
   tt.sources = null;
-  tt.rebuild = { graph, sources, compactSources, rows: Int32Array.from(rows), done: 0, table: tt.table };
+  tt.rebuild = { graph, sources, compactSources, rows: Int32Array.from(rows), done: 0, open: false, heapSize: 0, left: 0, table: tt.table };
+}
+
+/** Starts the search for row `done` of the rebuild: its source pushed, every other node unreached, its part of the table cleared. */
+function openRow(tt: TravelTimes, r: Rebuild): void {
+  const zone = r.rows[r.done] ?? 0;
+  const dist = tt.dist;
+  dist.fill(Infinity, 0, r.graph.size);
+  const start = r.compactSources[zone] ?? -1;
+  dist[start] = 0;
+  tt.heapTime[0] = 0;
+  tt.heapNode[0] = start;
+  r.heapSize = 1;
+  r.left = r.rows.length;
+  const row = zone * TRAVEL_ZONES;
+  r.table.fill(UNREACHED, row, row + TRAVEL_ZONES);
+  r.open = true;
 }
 
 /**
- * Builds row `zone` of the rebuild: one search from its source over the
- * compacted graph, until every other source is settled or nothing more can
- * be reached. Ties need no rule: only times are kept, and the quickest time
- * to a node is the same whichever way reaches it first.
+ * Carries on the search for the open row, one search from its source over
+ * the compacted graph, until every source is settled, nothing more can be
+ * reached or `budget` nodes are settled. Returns the nodes it settled.
+ * Closes the row when its search is done. Ties need no rule: only times are
+ * kept, and the quickest time to a node is the same whichever way reaches
+ * it first, so where a step stops changes nothing in the table.
  */
-function buildRow(tt: TravelTimes, r: Rebuild, zone: number): void {
-  const { first, to, time, zoneOf, size } = r.graph;
+function searchRow(tt: TravelTimes, r: Rebuild, budget: number): number {
+  const { first, to, time, zoneOf } = r.graph;
   const dist = tt.dist;
-  dist.fill(Infinity, 0, size);
   let heapTime = tt.heapTime;
   let heapNode = tt.heapNode;
-  const start = r.compactSources[zone] ?? -1;
-  dist[start] = 0;
-  heapTime[0] = 0;
-  heapNode[0] = start;
-  let heapSize = 1;
-  const row = zone * TRAVEL_ZONES;
-  r.table.fill(UNREACHED, row, row + TRAVEL_ZONES);
-  let left = r.rows.length;
-  while (heapSize > 0) {
+  let heapSize = r.heapSize;
+  let left = r.left;
+  const row = (r.rows[r.done] ?? 0) * TRAVEL_ZONES;
+  const table = r.table;
+  let settled = 0;
+  while (heapSize > 0 && left > 0 && settled < budget) {
     const t = heapTime[0] ?? 0;
     const u = heapNode[0] ?? 0;
     // Pop: move the last entry down from the top.
@@ -413,10 +439,11 @@ function buildRow(tt: TravelTimes, r: Rebuild, zone: number): void {
     // A stale entry: the node was reached sooner since it was pushed, or settled.
     if (t !== dist[u]) continue;
     dist[u] = -1 - t;
+    settled++;
     const target = zoneOf[u] ?? -1;
     if (target >= 0) {
       const seconds = Math.floor(t + 0.5);
-      r.table[row + target] = seconds > LONGEST ? LONGEST : seconds;
+      table[row + target] = seconds > LONGEST ? LONGEST : seconds;
       if (--left === 0) break;
     }
     const end = first[u + 1] ?? 0;
@@ -446,14 +473,27 @@ function buildRow(tt: TravelTimes, r: Rebuild, zone: number): void {
       heapNode[j] = v;
     }
   }
+  r.heapSize = heapSize;
+  r.left = left;
+  if (heapSize === 0 || left === 0) {
+    r.open = false;
+    r.done++;
+  }
+  return settled;
 }
 
-/** Builds up to `count` more rows of the rebuild, and puts the table in place once every row is built. */
-function advance(tt: TravelTimes, count: number): void {
+/**
+ * Builds more of the rebuild, row after row, until `budget` nodes are
+ * settled, and puts the table in place once every row is built.
+ */
+function advance(tt: TravelTimes, budget: number): void {
   const r = tt.rebuild;
   if (!r) return;
-  const end = Math.min(r.rows.length, r.done + count);
-  for (; r.done < end; r.done++) buildRow(tt, r, r.rows[r.done] ?? 0);
+  let settled = 0;
+  while (r.done < r.rows.length && settled < budget) {
+    if (!r.open) openRow(tt, r);
+    settled += searchRow(tt, r, budget - settled);
+  }
   if (r.done < r.rows.length) return;
   tt.table = r.table;
   tt.sources = r.sources;
@@ -500,9 +540,9 @@ export function markRoadsChanged(state: SimState): void {
  * Once a step, paused or not, after the commands. If the roads changed,
  * gives `state.travelReadyAt` the tick the table is rebuilt by: a small
  * rebuild is done at once, and a bigger one compacts the road graph on the
- * next step and builds rows from the one after. Otherwise builds one slice
- * of a rebuild under way, or all that is left on the step before the
- * ready tick. The table is kept current only once
+ * next step and builds rows from the one after. Otherwise settles one
+ * share of the nodes of a rebuild under way, or all that is left on the
+ * step before the ready tick. The table is kept current only once
  * something has built it: a city that never asked has nothing to keep.
  */
 export function stepTravel(state: SimState): void {
@@ -544,8 +584,10 @@ export function stepTravel(state: SimState): void {
     advance(tt, Infinity);
     return;
   }
-  const left = r.rows.length - r.done;
-  advance(tt, Math.floor((left + ticksLeft - 1) / ticksLeft));
+  // A step's share: no row settles more nodes than a road reaches, and the
+  // ticks were given at one share a tick for every row, so the rows are
+  // done by the last step and it has at most a share left (#326).
+  advance(tt, ROUTING_BALANCE.travelTimes.rebuildSettlesPerTick);
 }
 
 /**
