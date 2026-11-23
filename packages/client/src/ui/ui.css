@@ -728,6 +728,16 @@ kbd {
   color: #b35a00;
 }
 
+/* The overlay buttons (issue M3-18): beside the dock, level with its buttons, outside its row. */
+.build-bar .overlay-dock {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: -1px;
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 /* The land value overlay's legend (issue M3-18): one bar, its stops' values under it. */
 .land-value-legend {
   width: 220px;

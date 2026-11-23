@@ -210,6 +210,47 @@ describe("the land value overlay on the zoning overlay's meshes", () => {
     layer.dispose();
   });
 
+  it("reads a chunk's slots again before it colours it, since a layout elsewhere can move them", () => {
+    // The same ten cells, at slots moved up by 5, as after a lower segment was laid out again; zoning moves with them.
+    const shapes = row(0, 10, 100, 100);
+    const moved = row(5, 10, 100, 100);
+    let now = shapes;
+    const zone = new Uint8Array(15);
+    const density = new Uint8Array(15);
+    zone.fill(1, 0, 5);
+    density.fill(1, 0, 5);
+    const source: CellSource = {
+      shapes: (c) => (c === 0 ? now : { slots: new Int32Array(0), statuses: new Uint8Array(0), corners: new Float64Array(0) }),
+      cells: () => ({ zone, density }),
+      values: (s) => new Uint8Array(s.slots.length),
+    };
+    const scene = new Scene();
+    const layer = createCellLayer(scene, source, () => 0);
+    layer.setVisible(true);
+    layer.update(camera, Infinity);
+    layer.update(camera, Infinity);
+    const [mesh] = meshes(scene, "cells ");
+    if (!mesh) throw new Error("no chunk mesh");
+    const before = Uint8Array.from(fillOf(mesh));
+    now = moved;
+    zone.fill(0).fill(1, 5, 10);
+    density.fill(0).fill(1, 5, 10);
+    layer.setColouring("landValue");
+    layer.update(camera, Infinity);
+    layer.setColouring("zoning");
+    layer.update(camera, Infinity);
+    expect([...fillOf(mesh)]).toEqual([...before]);
+    // Cells that differ are built again, not coloured.
+    const built = layer.stats().totalRebuilt;
+    now = row(5, 9, 100, 100);
+    layer.setColouring("landValue");
+    // The frame that finds them different queues the build; the next builds it.
+    layer.update(camera, Infinity);
+    layer.update(camera, Infinity);
+    expect(layer.stats().totalRebuilt).toBe(built + 1);
+    layer.dispose();
+  });
+
   it("gives the city band one colour per chunk, its cells' mean value", () => {
     const { scene, layer } = setup();
     layer.setVisible(true);

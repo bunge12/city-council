@@ -1114,7 +1114,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const ui = useUi.getState();
     const c = mirror.state?.centre;
     // The centre moves on a tick that changes no road or building, so it is part of the key.
-    const key = ui.overlay === "landValue" && ui.tool === null && cursor ? `${cursor.x.toFixed(1)},${cursor.z.toFixed(1)},${worldVersion},${c?.x},${c?.z}` : "";
+    const key = ui.overlay === "landValue" && ui.tool === null && cursor ? `${cursor.x.toFixed(1)},${cursor.z.toFixed(1)},${worldVersion},${c?.x},${c?.z},${c?.weight}` : "";
     if (key !== landKey) {
       landKey = key;
       land = key === "" || !cursor ? null : mirror.landValueAt(cursor.x, cursor.z);

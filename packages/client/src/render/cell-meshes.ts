@@ -244,6 +244,14 @@ function cityGeometryOf(parts: readonly CityCellArrays[]): BufferGeometry | null
   return g;
 }
 
+/** Whether two reads of a chunk's cells hold the same cells, where they are and open or not, whatever their slots. */
+function sameCells(a: ChunkCellShapes, b: ChunkCellShapes): boolean {
+  if (a.slots.length !== b.slots.length) return false;
+  for (let k = 0; k < a.statuses.length; k++) if (a.statuses[k] !== b.statuses[k]) return false;
+  for (let k = 0; k < a.corners.length; k++) if (a.corners[k] !== b.corners[k]) return false;
+  return true;
+}
+
 /** Chunk `c` and the up to eight chunks around it. */
 export function withNeighbours(c: number): number[] {
   const ci = c % CHUNKS_PER_SIDE;
@@ -393,11 +401,24 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     if (colouring !== "zoning") paint(c);
   }
 
-  /** Writes chunk `c`'s colours again for the colouring now, in its mesh and its city band runs, building nothing. */
+  /**
+   * Writes chunk `c`'s colours again for the colouring now, in its mesh and
+   * its city band runs, building nothing. The chunk's cells are read again
+   * first: a delta that lays out a segment elsewhere moves the slots of every
+   * segment after it without naming this chunk, so slots kept from the build
+   * can point at other cells. If the cells themselves differ, the chunk is
+   * built again instead.
+   */
   function paint(c: number): void {
     const m = chunks[c];
     const cells = source.cells();
     if (!m || !cells) return;
+    const now = source.shapes(c);
+    if (!now || !sameCells(now, m.shapes)) {
+      dirty.add(c);
+      return;
+    }
+    m.shapes = now;
     const values = colouring === "landValue" ? (source.values?.(m.shapes) ?? null) : null;
     const fill = m.mesh.geometry.getAttribute("cellFill") as BufferAttribute;
     const mean = paintCells(fill.array as Uint8Array, m.cells, m.shapes, cells.zone, cells.density, colouring, values);
