@@ -1,7 +1,7 @@
 // The statistics panel's series reader and axis (issue M3-16).
 import { describe, expect, it } from "vitest";
-import { HISTORY_LENGTH, STAT_TOTALS, createStats, historyOf, type StatsState } from "@city-council/sim";
-import { STAT_RANGES, STAT_SERIES, axisNumber, lastSamples, niceTicks, rangeMonths, seriesById } from "../src/ui/stat-series";
+import { HISTORY_LENGTH, STAT_TOTALS, TIME_BALANCE, createState, createStats, historyOf, sampleCount, step, yearDays, type StatsState } from "@city-council/sim";
+import { STAT_RANGES, STAT_SERIES, axisNumber, lastSamples, newestMonth, niceTicks, rangeMonths, sampleDate, seriesById } from "../src/ui/stat-series";
 
 /** Statistics whose population history holds `months` samples, sample m being 1000 + m, written as the sim writes them. */
 function statsAfter(months: number): StatsState {
@@ -111,5 +111,31 @@ describe("the graph's axis", () => {
     [1_500_000, "1.5M"],
   ])("writes %d as %s", (value, text) => {
     expect(axisNumber(value)).toBe(text);
+  });
+});
+
+describe("the date of the newest sample", () => {
+  const DAY = TIME_BALANCE.ticksPerDay;
+  const YEAR = yearDays() * DAY;
+
+  it.each([
+    // A copy at a month's first tick has not taken that month's sample yet.
+    [0, "1 Jan, Year 1"],
+    [1, "1 Jan, Year 1"],
+    [31 * DAY, "1 Jan, Year 1"],
+    [31 * DAY + 1, "1 Feb, Year 1"],
+    [50 * YEAR, "1 Dec, Year 50"],
+    [50 * YEAR + 1, "1 Jan, Year 51"],
+    [50 * YEAR + 100 * DAY, "1 Apr, Year 51"],
+  ])("at tick %d is %s", (tick, date) => {
+    expect(sampleDate(newestMonth(tick))).toBe(date);
+  });
+
+  it("counts one sample for every month up to and including the newest, as the sim takes them", () => {
+    const state = createState(7);
+    for (const until of [1, 31 * DAY, 31 * DAY + 1, 59 * DAY + 1]) {
+      while (state.tick < until) step(state);
+      expect(sampleCount(state.stats), `tick ${until}`).toBe(newestMonth(state.tick) + 1);
+    }
   });
 });

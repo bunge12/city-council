@@ -107,7 +107,8 @@ test("the statistics panel graphs fifty years of population, lists the year's pe
     if (!box) throw new Error("no graph");
     // The plot ends 44 of the graph's 336 units from its right edge, at the newest month.
     await page.mouse.move(box.x + (box.width * 290) / 336, box.y + box.height / 2);
-    await expect(page.locator("#stats-tooltip")).toContainText(`${(population.at(-1) ?? 0).toLocaleString("en-US")} people`);
+    // The fixture stops on 11 April, Year 51: the newest sample is April's.
+    await expect(page.locator("#stats-tooltip")).toHaveText(`1 Apr, Year 51: ${(population.at(-1) ?? 0).toLocaleString("en-US")} people`);
     await attach(page, testInfo, "pointing at the newest month");
     await page.mouse.move(640, 20);
     await expect(page.locator("#stats-tooltip")).toHaveCount(0);

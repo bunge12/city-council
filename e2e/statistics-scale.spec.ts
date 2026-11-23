@@ -8,7 +8,9 @@ import { perfFigures } from "./measure";
 // takes under 100 ms. The time is from the click on the top bar's button
 // until the panel is laid out with its graph drawn at 100 years, the
 // longest range: React's render and commit, which it runs in a microtask
-// the click queues, then style and layout, read back with a forced layout. Drawing the city is stopped while it measures,
+// the click queues, style and layout, read back with a forced layout, and
+// the next frame, which paints the panel and its 1,200-point line. The time
+// to layout alone is reported beside it. Drawing the city is stopped while it measures,
 // since in software WebGL one frame of the town is a task of about half a
 // second of its own, which is the map's cost and not the panel's.
 //
@@ -26,6 +28,7 @@ interface PageElement {
 }
 declare const document: { querySelector(selector: string): PageElement | null };
 declare const performance: { now(): number };
+declare function requestAnimationFrame(callback: () => void): number;
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Building the town takes about half a minute, and loading it into software WebGL a few more, as in zone-open-scale.spec.ts.
@@ -33,7 +36,7 @@ test.setTimeout(600_000);
 
 /** The issue's budget for opening the panel. */
 const OPEN_MS = 100;
-/** Times the panel is opened; the slowest is held to the budget. */
+/** Times the panel is opened; the slowest, to the frame that paints it, is held to the budget. */
 const RUNS = 5;
 
 function townWithFullHistory(): Uint8Array {
@@ -67,7 +70,9 @@ test("opening the statistics panel on the scale town with a full history takes u
   await toggle.click();
   await expect(page.locator("#stats-panel")).toBeHidden();
 
+  /** Click to the next frame painted, and click to layout. */
   const times: number[] = [];
+  const layouts: number[] = [];
   for (let run = 0; run < RUNS; run++) {
     const ms = await page.evaluate(async () => {
       const button = document.querySelector("#stats-toggle");
@@ -79,11 +84,15 @@ test("opening the statistics panel on the scale town with a full history takes u
       if (document.querySelector("#stats-graph")?.getAttribute("data-samples") !== "1200") throw new Error("the graph did not draw");
       // Reading a size lays the page out.
       document.querySelector("#stats-panel")?.getBoundingClientRect();
-      const ms = performance.now() - t0;
+      const laidOut = performance.now() - t0;
+      // And the next frame paints it, the 1,200-point line included.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+      const painted = performance.now() - t0;
       button.click();
-      return ms;
+      return { laidOut, painted };
     });
-    times.push(ms);
+    times.push(ms.painted);
+    layouts.push(ms.laidOut);
     await expect(page.locator("#stats-panel")).toBeHidden();
     await page.waitForTimeout(200);
   }
@@ -92,7 +101,8 @@ test("opening the statistics panel on the scale town with a full history takes u
   await writeReport(testInfo, "M3-16 statistics panel opening on the scale town", "statistics-open-report.json", {
     buildings: town.buildings,
     samples: HISTORY_LENGTH,
-    runsMs: times.map((t) => Math.round(t * 10) / 10),
+    runsToPaintMs: times.map((t) => Math.round(t * 10) / 10),
+    runsToLayoutMs: layouts.map((t) => Math.round(t * 10) / 10),
     medianMs: Math.round(median * 10) / 10,
     slowestMs: Math.round(slowest * 10) / 10,
   });

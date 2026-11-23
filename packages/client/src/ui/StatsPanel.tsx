@@ -1,7 +1,7 @@
 import { useMemo, useState, type PointerEvent } from "react";
 import { STAT_TOTALS, TIME_BALANCE, YEAR_COUNTS, gameDate, type YearCount } from "@city-council/sim";
-import { useServices, useSim, type MirrorState } from "./hooks";
-import { STAT_GROUPS, STAT_RANGES, STAT_SERIES, axisNumber, lastSamples, niceTicks, rangeMonths, seriesById, type StatRange, type StatSeries } from "./stat-series";
+import { useSim, type MirrorState } from "./hooks";
+import { STAT_GROUPS, STAT_RANGES, STAT_SERIES, axisNumber, lastSamples, monthShort, newestMonth, niceTicks, rangeMonths, sampleDate, seriesById, steppedTick, type StatRange, type StatSeries } from "./stat-series";
 import { setStatsRange, setStatsSeries, toggleStats, useUi } from "./store";
 
 // The statistics panel (issue M3-16, PRD "City statistics"): a graph of one
@@ -9,7 +9,6 @@ import { setStatsRange, setStatsSeries, toggleStats, useUi } from "./store";
 // from the running totals, and the year's births, deaths, arrivals and
 // departures. Read from the mirror; it sends nothing.
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const YEAR_LABELS: Record<YearCount, string> = { births: "Births", deaths: "Deaths", arrivals: "Arrivals", departures: "Departures" };
 
 /** The graph's size in SVG units; it scales to the panel's width. */
@@ -30,20 +29,10 @@ const RANGE_LABELS: Record<StatRange, string> = { 1: "1 year", 10: "10 years", 1
 function statsKey(s: MirrorState): string {
   if (!s) return "";
   const st = s.stats;
-  const parts: number[] = [st.next, st.history["population"]?.length ?? 0, gameDate(s.tick).month];
+  const parts: number[] = [st.next, st.history["population"]?.length ?? 0, newestMonth(s.tick)];
   for (const name of STAT_TOTALS) parts.push(st.totals[name] ?? 0);
   for (const what of YEAR_COUNTS) parts.push(st.year[what], st.lastYear[what]);
   return parts.join(",");
-}
-
-/** Months since 1 January of year 1 for the month `tick` falls in: the month of the newest sample. */
-function monthOf(tick: number): number {
-  const d = gameDate(tick);
-  return (d.year - TIME_BALANCE.firstYear) * 12 + d.month - 1;
-}
-
-function monthName(month: number): string {
-  return `${MONTHS[month % 12] ?? "?"}, Year ${Math.floor(month / 12) + TIME_BALANCE.firstYear}`;
 }
 
 interface Plot {
@@ -76,7 +65,7 @@ function plotOf(samples: number[], newest: number, months: number, range: StatRa
   const xTicks: { x: number; label: string }[] = [];
   for (let m = Math.ceil(Math.max(0, first) / step) * step; m <= newest; m += step) {
     const x = PAD.left + PLOT_W * (1 - (newest - m) / slots);
-    xTicks.push({ x, label: m % 12 === 0 ? `Year ${m / 12 + TIME_BALANCE.firstYear}` : (MONTHS[m % 12] ?? "") });
+    xTicks.push({ x, label: m % 12 === 0 ? `Year ${m / 12 + TIME_BALANCE.firstYear}` : monthShort(m) });
   }
   return { samples, newest, path, xOf, yOf, yTicks, xTicks };
 }
@@ -138,7 +127,7 @@ function Graph({ series, plot }: { series: StatSeries; plot: Plot }) {
           onPointerLeave={() => setHover(null)}
         />
       </svg>
-      {n === 0 && <p className="hint stats-empty">No history yet. The first sample is taken on the 1st of next month.</p>}
+      {n === 0 && <p className="hint stats-empty">No history yet. The first sample is taken as the clock starts.</p>}
       {at !== null && atValue !== null && (
         <div
           className="stats-tooltip"
@@ -146,7 +135,7 @@ function Graph({ series, plot }: { series: StatSeries; plot: Plot }) {
           role="status"
           style={{ left: `${(plot.xOf(at) / W) * 100}%`, transform: plot.xOf(at) > W / 2 ? "translateX(-100%)" : undefined }}
         >
-          <span className="stats-tooltip-date">1 {monthName(plot.newest - (n - 1 - at))}:</span>{" "}
+          <span className="stats-tooltip-date">{sampleDate(plot.newest - (n - 1 - at))}:</span>{" "}
           <span><span className="stats-key" style={{ background: series.color }} />{series.format(atValue)}</span>
         </div>
       )}
@@ -194,7 +183,7 @@ function Breakdowns({ s, plotted }: { s: NonNullable<MirrorState>; plotted: stri
 }
 
 function YearTable({ s }: { s: NonNullable<MirrorState> }) {
-  const year = gameDate(s.tick).year;
+  const year = gameDate(steppedTick(s.tick)).year;
   return (
     <section className="stats-group" aria-label="The year">
       <h3>People in and out</h3>
@@ -221,10 +210,9 @@ function YearTable({ s }: { s: NonNullable<MirrorState> }) {
 }
 
 function StatsBody() {
-  const { mirror } = useServices();
-  // Re-renders when anything shown changes; the state itself is read below.
+  // Re-renders when anything shown changes, and when a snapshot replaces the copy.
   useSim(statsKey);
-  const s = mirror.state;
+  const s = useSim((state) => state);
   const seriesId = useUi((u) => u.statsSeries);
   const range = useUi((u) => u.statsRange);
   const series = seriesById(seriesId);
@@ -232,7 +220,7 @@ function StatsBody() {
   const months = rangeMonths(range);
   const next = s?.stats.next ?? 0;
   const count = ring?.values.length ?? 0;
-  const newest = s ? monthOf(s.tick) : 0;
+  const newest = s ? newestMonth(s.tick) : 0;
   // The line changes only when a sample is taken, a snapshot lands, or the choice changes.
   const plot = useMemo(
     () => plotOf(ring ? lastSamples(ring, months) : [], newest, months, range),

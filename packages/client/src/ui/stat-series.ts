@@ -7,7 +7,7 @@
 // samples one range of the graph shows, oldest first. Display only: nothing
 // here writes state.
 
-import { HISTORY_LENGTH, JOB_KINDS, ZONING_BALANCE, type StatsState } from "@city-council/sim";
+import { HISTORY_LENGTH, JOB_KINDS, TIME_BALANCE, ZONING_BALANCE, gameDate, type StatsState } from "@city-council/sim";
 
 /**
  * A history as the sim keeps it: `values` grows by one sample a month until
@@ -124,6 +124,34 @@ export function seriesById(id: string): StatSeries {
   const found = STAT_SERIES.find((s) => s.id === id) ?? STAT_SERIES[0];
   if (!found) throw new Error("no statistics series");
   return found;
+}
+
+/**
+ * The tick whose date the panel shows: the last tick the sim has stepped.
+ * A step runs its systems at `tick` and then moves the clock on, so a copy
+ * at the first tick of a month has not yet taken that month's sample, and
+ * on 1 January the year has not yet rolled.
+ */
+export function steppedTick(tick: number): number {
+  return Math.max(0, tick - 1);
+}
+
+/** Months since January of the first year for the month of the newest sample in a copy at `tick`. */
+export function newestMonth(tick: number): number {
+  const d = gameDate(steppedTick(tick));
+  return (d.year - TIME_BALANCE.firstYear) * 12 + d.month - 1;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** The short name of month number `month`, counted as `newestMonth` counts. */
+export function monthShort(month: number): string {
+  return MONTHS[month % 12] ?? "?";
+}
+
+/** When the sample of month number `month` was taken, such as "1 Apr, Year 51". */
+export function sampleDate(month: number): string {
+  return `1 ${monthShort(month)}, Year ${Math.floor(month / 12) + TIME_BALANCE.firstYear}`;
 }
 
 /** A tick value for the graph's axis: in full under 10,000, compact above (10K, 1.5M). */
