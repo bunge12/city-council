@@ -4,7 +4,7 @@ import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { buildingCount, serialize } from "../packages/sim/src/index";
 import { builtFixtureCity } from "./building-fixtures";
 import { buildingsDrawn, canvasShot, openCity, settle } from "./helpers";
-import { frameTime, perfFigures } from "./measure";
+import { PERF_TEST_TIMEOUT, frameTime, perfFigures } from "./measure";
 import { groundAt } from "./road-fixtures";
 
 // Issue 136: the frame time with a few hundred buildings under construction
@@ -20,7 +20,7 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 
 test.use({ viewport: { width: 1280, height: 800 } });
 // Two page loads of a street under scaffolding at Balanced, drawn in software.
-test.setTimeout(480_000);
+test.setTimeout(PERF_TEST_TIMEOUT);
 
 const T = CONSTRUCTION.ticks;
 

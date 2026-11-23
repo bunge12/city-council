@@ -1,6 +1,7 @@
 {
   "_about": "Every time budget the benches and the soak hold (issue #232). Each figure has a name, a budget, the statistic it holds, and whether a miss blocks a merge or only reports. `budget` is milliseconds for the ms figures, a share for `ratio`, and a count of steps for `count over`, where `overMs` is the time a step must pass to count. Headroom is budget over measured; a figure under `warnBelowHeadroom` gets a warning on CI. The budgets are absolute and are not scaled by any calibration run (PRD, Testing). They are not game balance, so the balance stamp leaves this file out. No prices here, so no source years.",
   "warnBelowHeadroom": 1.5,
+  "inheritedWithin": 1.15,
   "figures": {
     "spatial.nearest-segment": {
       "name": "one nearest-segment query on 30,000 segments",

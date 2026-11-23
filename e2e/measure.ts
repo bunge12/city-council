@@ -3,6 +3,15 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
+import projects from "./projects.json" with { type: "json" };
+
+/**
+ * The time limit of every perf test, in ms: `perfLimit` in
+ * e2e/projects.json, which says why there is one for all of them. Each perf
+ * spec passes it to `test.setTimeout`, and lint fails one that sets its own
+ * (scripts/check-e2e-timeouts.mjs, issue #319).
+ */
+export const PERF_TEST_TIMEOUT = projects.perfLimit.testMinutes * 60_000;
 
 declare const performance: { now(): number };
 declare function requestAnimationFrame(callback: () => void): number;

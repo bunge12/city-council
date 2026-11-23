@@ -23,6 +23,11 @@
     "presets-forest.spec.ts",
     "through-lots.spec.ts"
   ],
+  "perfLimit": {
+    "_about": "The one time limit of every test in the perf project, in minutes (issue #319). A perf test draws 30,000 segments in software at a frame every 1 to 4 seconds, so its time is the runner's speed: cells-scale.spec.ts took 4.2 minutes on a fast runner and 15.9 on an AMD EPYC 7763. The limits were raised by hand three times in four days (#257, #290, #295), each to just past the last slow run, and #318 proposed a fourth. The limit only has to stop a test that hangs, so there is one, well past the slowest run, and no spec sets its own: e2e/measure.ts exports it as PERF_TEST_TIMEOUT. scripts/check-e2e-timeouts.mjs fails when a perf spec sets another, when the limit is under timesSeconds times the longest perf file's `seconds` above, and when perf.yml's job cannot hold it. When that check fails after the weekly timings change, split or cheapen the spec that grew before raising testMinutes.",
+    "testMinutes": 40,
+    "timesSeconds": 2.5
+  },
   "globalTimeout": {
     "_about": "Each CI runner's Playwright run stops at timesPlan times its planned minutes, and at no less than minMinutes, with --global-timeout from scripts/e2e-shard.mjs (issue #228). Playwright then fails the run and writes its report, where GitHub's job limit would stop the job with no report. A runner's plan is the sum of its files' seconds, or for a runner without files the plan its matrix entry gives. In the 156 chromium runners of the last 25 CI runs, first attempts took 1.33 times their files' seconds at the median, 2.17 at the 90th percentile and 2.68 at the 95th, and 1.6 at the median on an EPYC 7763. At 1.5 times, as the issue first asked, about four runners in ten that passed would have been stopped. minMinutes covers starting the servers and the production build. A runner also never gets less than its plan plus every attempt of its longest test (scripts/e2e-limits.mjs), so a test that times out still gets its retry.",
     "timesPlan": 3,

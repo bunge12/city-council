@@ -10,6 +10,10 @@
 // one row a held case (`hold` in packages/sim/test/budget.ts). A case run
 // twice is shown from its last attempt. A figure under the headroom in
 // packages/sim/balance/budgets.json gets a warning annotation on GitHub.
+// "Before" is the same case on the code before the change, which CI's bench
+// job measures first on the same runner. A case over its budget and no
+// slower than before is marked "over, as before": it does not fail the
+// change (issue #319), and its annotation says so.
 //
 // `--out` writes the same rows as JSON lines with the commit, the run and
 // the CPU on each, for the budget history on the data branch.
@@ -85,13 +89,14 @@ if (sorted.length === 0) {
   lines.push(
     `Headroom is the budget over the measured figure; a timed figure under ${warnBelow}x is marked. Budgets and statistics are in \`packages/sim/balance/budgets.json\`.`,
     "",
-    `| | Figure | Case | Statistic | Measured | Budget | Headroom | CPU | Mode${attempts.size > 1 ? " | Attempt" : ""} |`,
-    `|---|---|---|---|---:|---:|---:|---|---${attempts.size > 1 ? "|---:" : ""}|`,
+    `| | Figure | Case | Statistic | Measured | Before | Budget | Headroom | CPU | Mode${attempts.size > 1 ? " | Attempt" : ""} |`,
+    `|---|---|---|---|---:|---:|---:|---:|---|---${attempts.size > 1 ? "|---:" : ""}|`,
   );
   for (const r of sorted) {
-    const mark = !r.pass ? "**over**" : low(r) ? "**low**" : "ok";
+    const mark = r.inherited ? "**over, as before**" : !r.pass ? "**over**" : low(r) ? "**low**" : "ok";
+    const before = typeof r.base === "number" ? `${num(r.base)}${unitOf(r)}` : "-";
     lines.push(
-      `| ${mark} | \`${cell(r.figure)}\` | ${cell(r.case)} | ${r.statistic} | ${num(r.measured)}${unitOf(r)} | ${num(r.budget)}${unitOf(r)} | ${headroom(r)} | ${cell(cpu)} | ${r.mode}${attempts.size > 1 ? ` | ${r.attempt}` : ""} |`,
+      `| ${mark} | \`${cell(r.figure)}\` | ${cell(r.case)} | ${r.statistic} | ${num(r.measured)}${unitOf(r)} | ${before} | ${num(r.budget)}${unitOf(r)} | ${headroom(r)} | ${cell(cpu)} | ${r.mode}${attempts.size > 1 ? ` | ${r.attempt}` : ""} |`,
     );
   }
   lines.push("");
@@ -107,7 +112,8 @@ if (process.env["GITHUB_ACTIONS"]) {
   const escape = (s) => s.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
   for (const r of sorted.filter(low)) {
     const what = `${r.case} (${r.figure}): ${r.statistic} ${num(r.measured)}${unitOf(r)} against ${num(r.budget)}${unitOf(r)}, ${num(r.headroom)}x headroom on ${cpu}`;
-    console.log(`::warning title=${escape(`${title}: ${r.pass ? "low headroom" : "over budget"}`)}::${escape(what)}`);
+    const state = r.inherited ? "over budget before this change too" : r.pass ? "low headroom" : "over budget";
+    console.log(`::warning title=${escape(`${title}: ${state}`)}::${escape(what)}`);
   }
 }
 

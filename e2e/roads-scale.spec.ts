@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { canvasShot, openCity, settle } from "./helpers";
-import { frameTime, perfFigures } from "./measure";
+import { PERF_TEST_TIMEOUT, frameTime, perfFigures } from "./measure";
 import { scaleCity } from "./road-fixtures";
 
 // Issue M1-06 at scale: a 30,000 segment network in the city band, against
@@ -46,7 +46,7 @@ async function attach(testInfo: TestInfo, name: string, body: Buffer): Promise<v
 }
 
 test("a 30,000 segment network in the city band", async ({ page }, testInfo: TestInfo) => {
-  test.setTimeout(300_000);
+  test.setTimeout(PERF_TEST_TIMEOUT);
   const whole: { position: Vec3; target: Vec3 } = { position: [6000, 8400, 15_800], target: [6000, 0, 5600] };
   const query = "?webgl";
 

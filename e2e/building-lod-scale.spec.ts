@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { homeRoom } from "../packages/sim/src/index";
 import { MEASURE_VIEWPORT, bandFigures, checkBands, fullSize, measureBands, openTown, scaleCity, writeReport } from "./building-lod-helpers";
+import { PERF_TEST_TIMEOUT } from "./measure";
 
 // Issue M2-13: the M1 scale city filled with buildings through commands and
 // the grower (growScaleCity). Frame time, draw calls, what each level of
@@ -23,9 +24,9 @@ declare const window: {
 declare const performance: { now(): number };
 
 test.use({ viewport: MEASURE_VIEWPORT });
-// About 4 minutes on a fast CI runner and up to 8 on a slow one (issue #217). 15 is under a third of the perf job's
-// 54 minutes (issue #228, scripts/check-e2e-timeouts.mjs), and the perf project does not retry.
-test.setTimeout(900_000);
+// About 4 minutes on a fast CI runner and up to 8 on a slow one (issue #217). The limit is the perf project's
+// one (issue #319), and the perf project does not retry.
+test.setTimeout(PERF_TEST_TIMEOUT);
 
 test("frame time, draw calls and memory in each band, at Low", async ({ page }, testInfo) => {
   const { city, town, bytes } = scaleCity();

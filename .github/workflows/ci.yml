@@ -156,11 +156,16 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # A missed budget runs the bench once more (issue #231), so a job can
-    # take twice its usual time and still pass.
-    timeout-minutes: 15
+    # The bench runs on the code before the change and then on the change,
+    # and a missed budget runs it once more (issue #231), so a job can take
+    # three times one bench and still pass.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit under test and its first parent: main as it stood for
+          # a pull request's merge commit, the commit before for a push.
+          fetch-depth: 2
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -172,10 +177,30 @@ jobs:
       # soak hold steps to the 20 ms tick (issue #154).
       - run: |
           node -e "const os = require('os'); const c = os.cpus(); console.log('machine: ' + c.length + ' x ' + c[0].model + ', ' + Math.round(os.totalmem() / 2 ** 30) + ' GB')"
+      # The same bench on the code before the change, on this runner (issue
+      # #319). Runners differ by a factor of two, so a figure near its
+      # budget misses on the slow ones whatever the change did: from 22 to
+      # 23 November 2026 jobs.tick failed five pull requests that had not
+      # touched it. With the base's figures beside it, a case over its
+      # budget fails the change only when the change made it slower
+      # (`judgeBudget`); one that was over already is a warning. This step
+      # never fails the job: with no base figures every budget is absolute,
+      # as before.
+      - name: Bench the code before the change
+        continue-on-error: true
+        run: |
+          : > "$RUNNER_TEMP/base-rows.jsonl"
+          git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
+          cd "$RUNNER_TEMP/base"
+          pnpm install --frozen-lockfile
+          # Its own misses are its own: only its figures are wanted.
+          env -u GITHUB_STEP_SUMMARY pnpm bench || echo "The base's bench did not pass."
+          cat packages/*/budget-rows/attempt-*.jsonl > "$RUNNER_TEMP/base-rows.jsonl"
+          echo "$(wc -l < "$RUNNER_TEMP/base-rows.jsonl") base figures from $(git rev-parse HEAD)"
       # A bench file that misses a budget runs once more, and the job fails
       # only when it misses again (scripts/budget-retry.mjs, issue #231).
       # The first attempt's results are kept in bench-results/attempt-1/.
-      - run: pnpm bench
+      - run: BUDGET_BASE="$RUNNER_TEMP/base-rows.jsonl" pnpm bench
       # As in the soak job: every held figure and its headroom (issue #232).
       - if: always()
         run: node scripts/budget-table.mjs --title Bench --out budget-table.jsonl packages/sim/budget-rows packages/client/budget-rows
@@ -211,6 +236,7 @@ jobs:
     permissions:
       contents: write
       actions: read
+      issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - env:
@@ -218,6 +244,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # This run's rows. A run whose jobs wrote none has no such
           # artifact, and says so; any other failure to download fails here.
@@ -230,6 +257,28 @@ jobs:
             exit 1
           fi
           files=(rows/*/budget-table.jsonl)
+          # A figure over its budget that the push did not slow fails no
+          # run (issue #319), so it gets one open issue instead: opened
+          # when there is none, and left alone when there is, so a slow
+          # runner does not write a comment a push. It blocks nothing.
+          over=$(node -e '
+            const fs = require("fs");
+            const rows = process.argv.slice(1).flatMap((f) => fs.readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+            for (const r of rows.filter((r) => r.inherited)) console.log(`- \`${r.figure}\`, ${r.case}: ${r.statistic} ${Number(r.measured.toPrecision(3))} against ${r.budget} on ${r.cpu}`);
+          ' "${files[@]}")
+          if [ -n "$over" ]; then
+            echo "Over budget, as before this push:"
+            echo "$over"
+            title="A time budget is over on main"
+            # None of this may stop the rows below from being kept.
+            open=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty' || echo unknown)
+            if [ -z "$open" ]; then
+              gh label create "Budget" --color D93F0B --description "A held time budget is over on main" --force || true
+              gh issue create --title "$title" --label "Budget" --body "$(printf 'At %s these figures were over their budgets in `packages/sim/balance/budgets.json`, and no slower than on the commit before, so the run passed (issue #319).\n\n%s\n\nRun: %s\n\nThis blocks no merge. Make the code faster or move the budget, and close this when the bench job summary on `main` shows none marked "over, as before". The `budget-history` branch has every figure over time for each CPU.' "$SHA" "$over" "$RUN_URL")" || echo "Could not open the issue."
+            else
+              echo "Issue #$open is already open for it."
+            fi
+          fi
           branch=budget-history
           url="https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git"
           for try in 1 2 3 4; do

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { heightAt } from "../packages/sim/src/index";
 import { openFixture, scaleCity, setPose, stats } from "./building-lod-helpers";
 import { settle } from "./helpers";
-import { memory, perfFigures } from "./measure";
+import { PERF_TEST_TIMEOUT, memory, perfFigures } from "./measure";
 
 // Issue M2-13: flying across the map does not grow memory without bound.
 // The scale city filled with buildings, flown round a loop at street height
@@ -13,7 +13,7 @@ declare const window: { cityCouncil: { view: Promise<{ renderer: { info: { memor
 declare const document: { body: { dataset: Record<string, string | undefined> } };
 
 test.use({ viewport: { width: 1280, height: 800 } });
-test.setTimeout(900_000);
+test.setTimeout(PERF_TEST_TIMEOUT);
 
 test("flying a loop twice ends with no more memory than flying it once", async ({ page }, testInfo) => {
   const { city, terrain, bytes } = scaleCity();

@@ -1,5 +1,6 @@
 import { test } from "@playwright/test";
 import { MEASURE_VIEWPORT, bandFigures, checkBands, measureBands, openTown, writeReport } from "./building-lod-helpers";
+import { PERF_TEST_TIMEOUT } from "./measure";
 
 // Issue M2-13: building-lod-scale.spec.ts at the Balanced preset, with
 // shadows. A file of its own so CI deals it to another runner (issue #217),
@@ -10,7 +11,7 @@ declare const window: { cityCouncil: { renderStatus(): { backend: string } | nul
 test.use({ viewport: MEASURE_VIEWPORT });
 // About 4 minutes on a fast CI runner and up to 8 on a slow one (issue #217). 15 is under a third of the perf job's
 // 54 minutes (issue #228, scripts/check-e2e-timeouts.mjs), and the perf project does not retry.
-test.setTimeout(900_000);
+test.setTimeout(PERF_TEST_TIMEOUT);
 
 test("frame time, draw calls and memory in each band, at Balanced", async ({ page }, testInfo) => {
   await openTown(page);
