@@ -1,0 +1,72 @@
+{
+  "description": "Vacancy on seed 2026 (M3-24). p1 builds a street three cells short of the first outside connection's stub, joined to nothing, and zones R1 along its north side, p2 along its south side. The pull from outside holds the residential bar above zero, so houses grow in the first days, but nobody can reach them. Each stands in use for a game month, then vacant. With the bar above zero none is abandoned: it would come straight back. 135 game days.",
+  "seed": 2026,
+  "untilTick": 13500,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 1,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 224,
+          "z": 3608
+        },
+        "to": {
+          "x": 352,
+          "z": 3608
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 2,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 226,
+              "z": 3637
+            },
+            "to": {
+              "x": 350,
+              "z": 3637
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 3,
+      "playerId": "p2",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 226,
+              "z": 3579
+            },
+            "to": {
+              "x": 350,
+              "z": 3579
+            },
+            "width": 44
+          }
+        ]
+      }
+    }
+  ],
+  "balance": "9095ef77f1543543",
+  "hash": "2d8568bc45e99e31"
+}

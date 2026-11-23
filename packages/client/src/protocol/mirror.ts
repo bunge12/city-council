@@ -178,12 +178,13 @@ export class SimMirror {
 
   /**
    * Why no newcomer would move into home `id` today, as the sim's
-   * `whyNoNewcomers` says (M3-08): `noRoute` when its road reaches no outside
+   * `whyNoNewcomers` says (M3-08): `abandoned` while it is abandoned (M3-24),
+   * `noRoute` when its road reaches no outside
    * connection, `noDemand` when the residential bar is at or below zero, or
    * null. Null before the first snapshot. Read with `buildingPeople` to say
    * why a home stands empty.
    */
-  whyNoNewcomers(id: number): "noRoute" | "noDemand" | null {
+  whyNoNewcomers(id: number): "abandoned" | "noRoute" | "noDemand" | null {
     return this.current ? whyNoNewcomers(this.current, id) : null;
   }
 

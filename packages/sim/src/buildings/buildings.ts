@@ -22,6 +22,13 @@
 // grower (grower.ts, issue 10) adds them. `BulldozeBuilding` (bulldoze.ts)
 // removes the ones a player names, and the upkeep after a change of roads
 // (upkeep.ts) the ones whose ground went or was blocked.
+//
+// A live building is in use, vacant or abandoned (M3-24, vacancy.ts), as
+// bits of `flags` say, and `statusSince` holds the tick it became so:
+// the tick it was built or came back into use while it is in use. An
+// abandoned building offers no jobs (jobs.ts, `buildingJobs`) and no room
+// (`homeRoom`), so the running totals and everything that looks for room
+// or work leave it out.
 
 import { isSegment, resized, segmentIdLimit, type AnyTypedArray, type RoadNetwork } from "../roads/network";
 import type { SimState } from "../state";
@@ -38,10 +45,29 @@ import { fileBuilding, lotColumns, lotProblem, lotShapeOf, unfileBuildings } fro
 
 /** Set in `flags` for a live building. */
 export const BUILDING_ALIVE = 1;
+/** Set in `flags`, beside `BUILDING_ALIVE`, for a building that stands vacant (M3-24). */
+export const BUILDING_VACANT = 2;
+/** Set in `flags`, beside `BUILDING_ALIVE`, for an abandoned building, which offers no room and no jobs (M3-24). */
+export const BUILDING_ABANDONED = 4;
+/**
+ * Set in `flags` beside `BUILDING_ABANDONED` when the vacancy check last
+ * found the building's ground no longer zoned for what it is, so it cannot
+ * come back into use (M3-24, vacancy.ts). Issue 14 clears such buildings.
+ */
+export const BUILDING_UNZONED = 8;
+
+/** Every value `flags` may hold: free, in use, vacant, abandoned, and abandoned on ground zoned for something else. */
+export const BUILDING_FLAG_VALUES: readonly number[] = [
+  0,
+  BUILDING_ALIVE,
+  BUILDING_ALIVE | BUILDING_VACANT,
+  BUILDING_ALIVE | BUILDING_ABANDONED,
+  BUILDING_ALIVE | BUILDING_ABANDONED | BUILDING_UNZONED,
+];
 
 /** Every building. Plain typed arrays only (CLAUDE.md rule 7). */
 export interface BuildingState {
-  /** BUILDING_ALIVE for a live id, 0 for a free one. */
+  /** BUILDING_ALIVE for a live id, with BUILDING_VACANT or BUILDING_ABANDONED beside it when it is so; 0 for a free one. */
   flags: Uint8Array;
   /** The segment of the lot's first cell: the column it starts from, at the road. */
   firstSeg: Int32Array;
@@ -77,6 +103,8 @@ export interface BuildingState {
   variant: Uint8Array;
   /** The tick it was built on. */
   builtAt: Float64Array;
+  /** The tick it became vacant or abandoned, as `flags` says it is; while it is in use, the tick it was built or came back into use (M3-24). */
+  statusSince: Float64Array;
   /** Removed ids, the next one to reuse last. */
   free: Int32Array;
 }
@@ -101,6 +129,7 @@ export const BUILDING_ARRAYS = [
   "residents",
   "variant",
   "builtAt",
+  "statusSince",
 ] as const;
 
 export type BuildingKey = (typeof BUILDING_ARRAYS)[number];
@@ -124,6 +153,7 @@ const ARRAY_TYPES: Readonly<Record<keyof BuildingState, new (n: number) => AnyTy
   residents: Int32Array,
   variant: Uint8Array,
   builtAt: Float64Array,
+  statusSince: Float64Array,
   free: Int32Array,
 };
 
@@ -148,6 +178,7 @@ export function createBuildings(): BuildingState {
     residents: new Int32Array(0),
     variant: new Uint8Array(0),
     builtAt: new Float64Array(0),
+    statusSince: new Float64Array(0),
     free: new Int32Array(0),
   };
 }
@@ -159,6 +190,22 @@ export function buildingIdLimit(b: BuildingState): number {
 
 export function isBuilding(b: BuildingState, id: number): boolean {
   return Number.isInteger(id) && id >= 0 && id < b.flags.length && ((b.flags[id] ?? 0) & BUILDING_ALIVE) !== 0;
+}
+
+/** Whether building `id` stands vacant (M3-24). */
+export function isVacant(b: Pick<BuildingState, "flags">, id: number): boolean {
+  return ((b.flags[id] ?? 0) & BUILDING_VACANT) !== 0;
+}
+
+/** Whether building `id` is abandoned (M3-24). */
+export function isAbandoned(b: Pick<BuildingState, "flags">, id: number): boolean {
+  return ((b.flags[id] ?? 0) & BUILDING_ABANDONED) !== 0;
+}
+
+/** The people building `id` holds room for: its `residents`, or none while it is abandoned (M3-24) or for a free id. */
+export function homeRoom(b: Pick<BuildingState, "flags" | "residents">, id: number): number {
+  const flags = b.flags[id] ?? 0;
+  return (flags & BUILDING_ALIVE) === 0 || (flags & BUILDING_ABANDONED) !== 0 ? 0 : (b.residents[id] ?? 0);
 }
 
 /** Live buildings. */
@@ -195,6 +242,10 @@ export interface BuildingRow extends NewBuilding {
   zone: number;
   density: number;
   builtAt: number;
+  /** Whether it stands vacant, and whether it is abandoned (M3-24). */
+  vacant: boolean;
+  abandoned: boolean;
+  statusSince: number;
 }
 
 /** The row of building `id`. Throws if there is no such building. */
@@ -219,6 +270,9 @@ export function readBuilding(b: BuildingState, id: number): BuildingRow {
     residents: b.residents[id] ?? 0,
     variant: b.variant[id] ?? 0,
     builtAt: b.builtAt[id] ?? 0,
+    vacant: isVacant(b, id),
+    abandoned: isAbandoned(b, id),
+    statusSince: b.statusSince[id] ?? 0,
   };
 }
 
@@ -275,6 +329,7 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   b.residents[id] = spec.residents;
   b.variant[id] = spec.variant;
   b.builtAt[id] = state.tick;
+  b.statusSince[id] = state.tick;
   countBuilding(state, id, 1);
   noteBuildingChanged(b, id);
   noteOpening(state.pops, id);
@@ -356,7 +411,7 @@ export function removeBuildings(state: SimState, ids: readonly number[]): void {
 
 /**
  * Sets every field of row `id` to 0. Written out field by field, not as a
- * loop over `BUILDING_ARRAYS`: one store into eighteen kinds of typed array
+ * loop over `BUILDING_ARRAYS`: one store into nineteen kinds of typed array
  * is slow, and a clear of thousands pays it on each (issue #162). A test
  * checks the list here against `BUILDING_ARRAYS`.
  */
@@ -379,13 +434,15 @@ function clearRow(b: BuildingState, id: number): void {
   b.residents[id] = 0;
   b.variant[id] = 0;
   b.builtAt[id] = 0;
+  b.statusSince[id] = 0;
 }
 
 /**
  * Why `value` is not a well-formed set of buildings on network `net`, or
  * null if it is. For loading a save: every id live or free, never both, a
  * free id's row all zeros, and every live building of a known type, on a
- * lot that type takes, starting at a cell its segment has. Whether the lot's
+ * lot that type takes, in use, vacant or abandoned since a tick from when it
+ * was built to now, starting at a cell its segment has. Whether the lot's
  * cells are all there is not checked: that needs the derived cells.
  */
 export function checkBuildings(value: unknown, net: RoadNetwork, tick: number): string | null {
@@ -407,7 +464,7 @@ export function checkBuildings(value: unknown, net: RoadNetwork, tick: number): 
   const segs = segmentIdLimit(net);
   for (let id = 0; id < limit; id++) {
     const flags = b.flags[id] ?? 0;
-    if (flags !== 0 && flags !== BUILDING_ALIVE) return `building ${id} has unknown flags`;
+    if (!BUILDING_FLAG_VALUES.includes(flags)) return `building ${id} has unknown flags`;
     if (flags === 0) {
       if (!seen[id]) return `id ${id} is neither live nor free`;
       if (BUILDING_ARRAYS.some((key) => b[key][id] !== 0)) return `free id ${id} has a row`;
@@ -438,6 +495,8 @@ export function checkBuildings(value: unknown, net: RoadNetwork, tick: number): 
     }
     const built = b.builtAt[id] ?? 0;
     if (!Number.isSafeInteger(built) || built < 0 || built > tick) return `building ${id} was built on a bad tick`;
+    const since = b.statusSince[id] ?? 0;
+    if (!Number.isSafeInteger(since) || since < built || since > tick) return `building ${id} became what it is on a bad tick`;
     if ((b.residents[id] ?? 0) < 0) return `building ${id} has fewer than no residents`;
   }
   return null;

@@ -2,13 +2,15 @@
 // looked, as whole rows a client copies into its own read-only copy, like
 // road rows (roads/delta.ts). A removed id arrives as a row of zeros. Rows
 // are read when the delta is built, so a building added and removed between
-// two deltas goes out once, as what its id holds now.
+// two deltas goes out once, as what its id holds now. A building that
+// becomes vacant or abandoned, or comes back into use, goes out as its whole
+// row too, its flags and `statusSince` with it (M3-24).
 
 import { resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { BUILDING_TYPES } from "./balance";
-import { BUILDING_ALIVE, BUILDING_ARRAYS, type BuildingKey, type BuildingState } from "./buildings";
+import { BUILDING_ALIVE, BUILDING_ARRAYS, BUILDING_FLAG_VALUES, type BuildingKey, type BuildingState } from "./buildings";
 import { drainBuildingChanges, recordBuildingChangesOf } from "./changes";
 import { NO_BUILDING, filedChunk, fileBuilding, hasBuildingIndex, unfileBuilding } from "./where";
 
@@ -63,7 +65,9 @@ function deltaProblem(b: BuildingState, delta: BuildingDelta): string | null {
   for (let i = 0; i < ids.length; i++) {
     if ((rows.flags[i] ?? 0) === 0) continue;
     const type = BUILDING_TYPES[rows.type[i] ?? 0];
-    if ((rows.flags[i] ?? 0) !== BUILDING_ALIVE || !type) return `building ${ids[i]} has an unknown type`;
+    const flags = rows.flags[i] ?? 0;
+    if ((flags & BUILDING_ALIVE) === 0 || !BUILDING_FLAG_VALUES.includes(flags)) return `building ${ids[i]} has unknown flags`;
+    if (!type) return `building ${ids[i]} has an unknown type`;
     if ((rows.zone[i] ?? 0) > ZONING_BALANCE.zones.length) return `building ${ids[i]} has an unknown zone`;
   }
   if (delta.free && !delta.free.every((id) => id >= 0 && id < limit)) return "the free list names ids past the limit";

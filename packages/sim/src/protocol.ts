@@ -16,7 +16,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 19;
+export const PROTOCOL_VERSION = 20;
 
 // ---- Client to sim ----
 
@@ -84,7 +84,11 @@ export interface DeltaMessage {
    * again. Left out when no cell changed. Applied after `roads`.
    */
   cells?: CellDelta;
-  /** Buildings added or removed, as whole rows. Left out when none was. Applied after `cells`. */
+  /**
+   * Buildings added, removed, or become vacant, abandoned or back in use
+   * (M3-24, protocol version 20), as whole rows. Left out when none was.
+   * Applied after `cells`.
+   */
   buildings?: BuildingDelta;
   /**
    * The people and jobs filled of every building whose numbers changed,

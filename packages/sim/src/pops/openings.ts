@@ -27,7 +27,7 @@
 // the tests.
 
 import { BUILDING_TYPES } from "../buildings/balance";
-import { BUILDING_ALIVE } from "../buildings/buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE } from "../buildings/buildings";
 import { NO_BUILDING, buildingChunks } from "../buildings/where";
 import { NETWORK_ROAD, observeNetwork, type RoadNetwork } from "../roads/network";
 import { outsideReachByNode } from "../roads/outside";
@@ -178,7 +178,8 @@ function unfile(o: Openings, id: number): void {
 function refile(state: SimState, o: Openings, id: number, reach: Uint8Array, chunks: readonly number[], filled: Int32Array): void {
   fit(o, id + 1);
   const b = state.buildings;
-  if (id >= b.flags.length || ((b.flags[id] as number) & BUILDING_ALIVE) === 0) return unfile(o, id);
+  // An abandoned workplace offers no jobs (M3-24).
+  if (id >= b.flags.length || ((b.flags[id] as number) & BUILDING_ALIVE) === 0 || ((b.flags[id] as number) & BUILDING_ABANDONED) !== 0) return unfile(o, id);
   const t = b.type[id] as number;
   const rate = JOBS_PER_CELL[t] ?? 0;
   if (rate <= 0) return unfile(o, id);

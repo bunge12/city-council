@@ -38,6 +38,14 @@
 // it adds such a building, adds each one it builds, and leaves out
 // workplaces on a street joined to nothing.
 //
+// Abandoned buildings come back before new ones are built (M3-24): the
+// grower adds no building to a zone while it has an abandoned building
+// whose ground the vacancy check last found still zoned for it
+// (buildings/vacancy.ts, `abandonedWaiting`). With the zone's bar above
+// zero the check brings every such building back within the day, and the
+// grower carries on once none is left. It asks once on a tick it would add
+// a building.
+//
 // For each building the grower draws a free zoned cell by the road of the
 // building's zone from the generator in state (candidates.ts; M3-25
 // replaces the draw with land value). It builds at an end of the free frontage that cell lies on, not
@@ -87,6 +95,7 @@ import { segmentBuildings } from "./where";
 import { buildingReachesOutside, reachableRoom, type ReachableRoom } from "../pops/room";
 import { workplacesHeldBy, zoneJobs, type ZoneJobs } from "../pops/open-jobs";
 import { buildingJobs } from "./jobs";
+import { abandonedWaiting } from "./vacancy";
 
 /** Name the timer hook reports for the grower. */
 export const GROWER_SYSTEM = "grower";
@@ -285,10 +294,15 @@ export function grow(state: SimState): void {
   // Each worked out on the first building of its kind the tick may add, then kept as it adds them.
   let room: ReachableRoom | null = null;
   let jobs: ZoneJobs | null = null;
+  let waiting: Int32Array | null = null;
   for (let zone = 1; zone < quotas.length; zone++) {
     const due = growthOnTick(state.tick, quotas[zone] ?? 0);
     const homes = HOME_ZONES.has(zone);
     const work = WORK_ZONES.has(zone);
+    if (due > 0) {
+      waiting ??= abandonedWaiting(state);
+      if ((waiting[zone] ?? 0) > 0) continue;
+    }
     for (let i = 0; i < due; i++) {
       if (homes) {
         room ??= reachableRoom(state);

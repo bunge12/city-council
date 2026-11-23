@@ -50,6 +50,8 @@ function housesGoingUp(): { state: SimState; houses: number } {
   buildEverySide(state);
   state.tick = 1000;
   state.buildings.builtAt.fill(state.tick);
+  // In use since it was built (M3-24): a save checks it is no earlier.
+  state.buildings.statusSince.fill(state.tick);
   state.cells.zone.fill(0);
   state.cells.density.fill(0);
   state.speed = 0;
@@ -93,6 +95,8 @@ function keepEvidence(name: string, value: unknown): void {
 test("the wind grows from street to city zoom, and nothing plays with the ambience volume at zero", async ({ page }, testInfo) => {
   const { state } = housesGoingUp();
   state.buildings.builtAt.fill(0);
+  // In use since it was built (M3-24): a save checks it is no earlier.
+  state.buildings.statusSince.fill(0);
   await openCity(page, serialize(state), { name: "Wind" });
   await look(page, STREET[0], STREET[2], 150);
   expect(await ambience(page)).toMatchObject({ blocked: "locked", wind: { playing: false } });

@@ -36,7 +36,7 @@
 import { BUILDING_ALIVE, BUILDING_ARRAYS, type BuildingState } from "./buildings";
 import { noteColumns, noteFrontColumns, segmentsNear } from "./candidates";
 import { noteBuildingChanged } from "./changes";
-import { buildingJobs } from "./jobs";
+import { buildingJobs, lotJobs } from "./jobs";
 import type { SimState } from "../state";
 import {
   CELL_OPEN,
@@ -256,7 +256,10 @@ function file(bi: BuildingIndex, b: BuildingState, id: number): boolean {
   let set = bi.byChunk.get(chunk);
   if (!set) bi.byChunk.set(chunk, (set = new Set()));
   set.add(id);
-  const jobs = buildingJobs(b, id);
+  // The lot's jobs and room, abandoned or not (M3-24): the building is
+  // filed at different times on a city that ran and on one loaded from its
+  // save, and the middles the city centre is worked out from must agree.
+  const jobs = lotJobs(b, id);
   const room = b.residents[id] ?? 0;
   bi.jobs[id] = jobs;
   bi.room[id] = room;
@@ -488,6 +491,29 @@ function stands(cellIndex: CellIndex, b: BuildingState, id: number): boolean {
   const parts = lotParts(cellIndex, shapeOfBuilding(b, id));
   if (!parts) return false;
   for (const { cols, depth } of parts) for (const col of cols) for (let d = 0; d < depth; d++) if (columnStatus(cellIndex, col, d) !== CELL_OPEN) return false;
+  return true;
+}
+
+/**
+ * Whether every cell of building `id`'s lot is there, open and zoned for
+ * the zone and density it was built under, with the cells as they are now:
+ * whether an abandoned building may come back into use (M3-24).
+ */
+export function lotZonedFor(state: SimState, id: number): boolean {
+  const b = state.buildings;
+  const cellIndex = syncCells(state);
+  const parts = lotParts(cellIndex, shapeOfBuilding(b, id));
+  if (!parts) return false;
+  const cells = state.cells;
+  const zone = b.zone[id] ?? 0;
+  const density = b.density[id] ?? 0;
+  for (const { cols, depth } of parts) for (const col of cols) {
+    const start = (cells.offset[col.seg] ?? 0) + localIndex(col.side, col.place, 0);
+    for (let d = 0; d < depth; d++) {
+      if (columnStatus(cellIndex, col, d) !== CELL_OPEN) return false;
+      if (cells.zone[start + d] !== zone || cells.density[start + d] !== density) return false;
+    }
+  }
   return true;
 }
 

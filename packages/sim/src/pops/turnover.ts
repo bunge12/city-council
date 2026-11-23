@@ -55,6 +55,7 @@ import { noteYear } from "../stats/stats";
 import { drawProfile, drawSize } from "./arrivals";
 import { POPS_BALANCE } from "./balance";
 import { BUILDING_TYPES } from "../buildings/balance";
+import { homeRoom } from "../buildings/buildings";
 import { partThatFits } from "./matching";
 import { jobsProblem, openJobsFor } from "./open-jobs";
 import { NO_WORK, POP_ALIVE, addPop, popSizeCap, removePop, setPopHousehold, setPopSize, setPopWork, workersFor } from "./pops";
@@ -166,7 +167,7 @@ function roomForBirth(state: SimState, id: number): boolean {
   const b = state.buildings;
   const size = p.size[id] ?? 0;
   if (size >= popSizeCap(b.density[home] ?? 1)) return false;
-  return (popIndexOf(state).people[home] ?? 0) < (b.residents[home] ?? 0);
+  return (popIndexOf(state).people[home] ?? 0) < homeRoom(b, home);
 }
 
 /** The turnover system's work for one tick, as the header says. */

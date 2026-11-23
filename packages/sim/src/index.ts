@@ -97,7 +97,7 @@ export type { CellDelta } from "./zoning/delta";
 export { ZONE_CLEAR, planZoneCells } from "./zoning/zone";
 export { BUILDINGS_BALANCE, BUILDING_TYPES, EDUCATION_LEVELS, JOB_KINDS, checkBuildingsBalance, typesFor } from "./buildings/balance";
 export type { BuildingType, BuildingTypeBalance, BuildingsBalance, EducationLevel, EducationShares, JobKind } from "./buildings/balance";
-export { buildingJobs, jobsByEducation, jobsByKind, jobsForLot } from "./buildings/jobs";
+export { buildingJobs, jobsByEducation, jobsByKind, jobsForLot, lotJobs } from "./buildings/jobs";
 export type { JobsByEducation, JobsByKind } from "./buildings/jobs";
 export { POPS_BALANCE, checkPopsBalance } from "./pops/balance";
 export type { PopsBalance } from "./pops/balance";
@@ -155,7 +155,8 @@ export {
   type DemandTargets,
 } from "./demand/demand";
 export { nodeReachesOutside, prepareOutside, segmentReachesOutside, segmentsReachingOutside } from "./roads/outside";
-export { BUILDING_ALIVE, buildingCount, buildingIdLimit, isBuilding, readBuilding } from "./buildings/buildings";
+export { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_FLAG_VALUES, BUILDING_UNZONED, BUILDING_VACANT, buildingCount, buildingIdLimit, homeRoom, isAbandoned, isBuilding, isVacant, readBuilding } from "./buildings/buildings";
+export { VACANCY, VACANCY_SYSTEM, abandonedWaiting, buildingEmpty, checkVacancy, mayComeBack } from "./buildings/vacancy";
 export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";

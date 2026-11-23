@@ -115,7 +115,22 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // residential bar gains its satisfaction part at 0, which takes its
   // first step on the next day's first tick.
   22: (old) => ({ ...old, version: 23, pops: popsWithDaysLow(old["pops"]), stats: statsWithSatisfaction(old), demand: demandWithSatisfaction(old["demand"]) }),
+  // Version 24 (M3-24) gives every building the tick it became what it is.
+  // No building was vacant or abandoned before it, so each is in use since
+  // the tick it was built, and its flags stay as they are.
+  23: (old) => ({ ...old, version: 24, buildings: withStatusSince(old["buildings"]) }),
 };
+
+/** A version 23 set of buildings with `statusSince`, each building's `builtAt`, after `builtAt` as a new state has it. */
+function withStatusSince(value: unknown): Record<string, unknown> {
+  const b = value as Record<string, unknown> & { builtAt: Float64Array };
+  const out: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(b)) {
+    out[key] = field;
+    if (key === "builtAt") out["statusSince"] = b.builtAt.slice();
+  }
+  return out;
+}
 
 /** A version 22 set of pops with the version 23 fields, in the order a new state has them: no days low, and no plan of departures. */
 function popsWithDaysLow(value: unknown): Record<string, unknown> {

@@ -42,6 +42,8 @@ function newCity(age = 0): { bytes: Buffer; tick: number; buildings: number } {
   const { state } = builtFixtureCity();
   state.tick = 1000;
   state.buildings.builtAt.fill(state.tick - age);
+  // In use since it was built (M3-24): a save checks it is no earlier.
+  state.buildings.statusSince.fill(state.tick - age);
   // No zoning left, so the grower builds nothing new while the city runs and
   // every building under construction is one of the fixture's. Buildings
   // stay when their cells are unzoned.
