@@ -182,35 +182,83 @@ describe("a street of houses joined to nothing", () => {
     return state;
   }
 
-  it("stands in use for a game month, vacant for three, then abandoned, then comes back with the bar above zero", () => {
+  /** For each of `built`, the ticks it went vacant, was abandoned and came back, as `statusSince` says, -1 for not yet. */
+  function watch(built: number[]): Map<number, { vacant: number; abandoned: number; back: number }> {
+    const seen = new Map<number, { vacant: number; abandoned: number; back: number }>();
+    for (const id of built) seen.set(id, { vacant: -1, abandoned: -1, back: -1 });
+    return seen;
+  }
+
+  function note(state: SimState, seen: ReturnType<typeof watch>): void {
+    const b = state.buildings;
+    for (const [id, at] of seen) {
+      if (isVacant(b, id) && at.vacant < 0) at.vacant = b.statusSince[id] ?? 0;
+      if (isAbandoned(b, id) && at.abandoned < 0) at.abandoned = b.statusSince[id] ?? 0;
+      if (at.abandoned >= 0 && !isAbandoned(b, id) && at.back < 0) at.back = b.statusSince[id] ?? 0;
+    }
+  }
+
+  it("stands in use for a game month, then vacant, and never abandoned while the bar is above zero", () => {
     const state = unreachable();
     runDays(state, 8);
     const built = homes(state);
     expect(built.length).toBeGreaterThan(5);
     const b = state.buildings;
-    const seen = new Map<number, { vacant: number; abandoned: number; back: number }>();
-    for (const id of built) seen.set(id, { vacant: -1, abandoned: -1, back: -1 });
-    runDays(state, 125, () => {
+    const seen = watch(built);
+    runDays(state, 130, () => {
       expect(state.demand.residential.value).toBeGreaterThan(0);
-      for (const id of built) {
-        const at = seen.get(id) as { vacant: number; abandoned: number; back: number };
-        if (isVacant(b, id) && at.vacant < 0) at.vacant = b.statusSince[id] ?? 0;
-        if (isAbandoned(b, id) && at.abandoned < 0) at.abandoned = b.statusSince[id] ?? 0;
-        if (at.abandoned >= 0 && !isAbandoned(b, id) && at.back < 0) at.back = b.statusSince[id] ?? 0;
-      }
+      note(state, seen);
     });
-    for (const id of built) {
-      const at = seen.get(id) as { vacant: number; abandoned: number; back: number };
+    for (const [id, at] of seen) {
       const builtAt = b.builtAt[id] ?? 0;
       // Not vacant before it had stood a game month, and on the first visit after.
       expect(at.vacant - builtAt).toBeGreaterThanOrEqual(newDays * DAY);
       expect(at.vacant - builtAt).toBeLessThan((newDays + 1) * DAY);
+      // Vacant past three months, but with demand above zero it would only
+      // come straight back, and hold new homes back for a day: it waits.
+      expect(at.abandoned).toBe(-1);
+      expect(isVacant(b, id)).toBe(true);
+    }
+    expect(abandonedWaiting(state)[1]).toBe(0);
+    expectRecount(state);
+  });
+
+  it("is abandoned three game months after it went vacant once the bar falls to zero, and comes back the day it rises", () => {
+    const state = unreachable();
+    runDays(state, 8);
+    const built = homes(state);
+    const seen = watch(built);
+    holdDemand({ residential: 0 }, () => runDays(state, newDays + abandonDays + 2, () => note(state, seen)));
+    holdDemand({ residential: 10 }, () => runDays(state, 2, () => note(state, seen)));
+    for (const [, at] of seen) {
       // Abandoned exactly `abandonDays` after it went vacant: the visit falls on the same tick of the day.
       expect(at.abandoned - at.vacant).toBe(abandonDays * DAY);
-      // And back in use on the next visit, the bar being above zero and the ground still zoned for it.
-      expect(at.back - at.abandoned).toBe(DAY);
+      // And back in use on the first visit with the bar above zero, the ground still zoned for it.
+      expect(at.back).toBeGreaterThan(at.abandoned);
+      expect(at.back - (state.tick - 2 * DAY)).toBeLessThan(DAY);
     }
     expectRecount(state);
+  });
+
+  it.each([3_456, 9_050, 12_150, 12_250])("hashes the same saved and loaded at tick %d, part way to abandonment", (at) => {
+    // Built, then the bar held at zero from day 8, so the homes go vacant and then abandoned along the way.
+    const run = (saveAt: number): SimState => {
+      // The same command numbers each run, since the log is in the hash.
+      seq = 0;
+      let state = unreachable();
+      runDays(state, 8);
+      holdDemand({ residential: 0 }, () => {
+        while (state.tick < 12_400) {
+          if (state.tick === saveAt) state = deserialize(serialize(state)).state;
+          step(state);
+        }
+      });
+      return state;
+    };
+    const straight = run(-1);
+    const b = straight.buildings;
+    expect(homes(straight).some((id) => isAbandoned(b, id))).toBe(true);
+    expect(hashState(run(at))).toBe(hashState(straight));
   });
 
   it("offers no room while abandoned, so newcomers would pass it by", () => {
@@ -404,7 +452,7 @@ describe("in the delta and the save", () => {
     drainBuildingDelta(state);
     const changed = new Set<number>();
     const flagsSeen = new Set<number>();
-    runDays(state, newDays + abandonDays + 4, () => {
+    const each = () => {
       const delta = drainBuildingDelta(state);
       if (!delta) return;
       delta.ids.forEach((id, i) => {
@@ -412,7 +460,10 @@ describe("in the delta and the save", () => {
         flagsSeen.add(delta.rows.flags[i] ?? 0);
       });
       expect(applyBuildingDelta(copy, delta)).not.toEqual(expect.any(String));
-    });
+    };
+    // Vacant, then abandoned with the bar at zero, then back with it above.
+    holdDemand({ residential: 0 }, () => runDays(state, newDays + abandonDays + 4, each));
+    holdDemand({ residential: 10 }, () => runDays(state, 2, each));
     expect(flagsSeen).toContain(BUILDING_ALIVE | BUILDING_VACANT);
     expect(flagsSeen).toContain(BUILDING_ALIVE | BUILDING_ABANDONED);
     expect(flagsSeen).toContain(BUILDING_ALIVE);
@@ -462,19 +513,17 @@ describe("in the delta and the save", () => {
 describe("replay fixture vacancy", () => {
   const fixture = fixtureJson as unknown as ReplayFixture;
 
-  it("replays to its recorded hash, with homes vacant, abandoned and back in use along the way", () => {
+  it("replays to its recorded hash, with every home vacant and none abandoned while the bar is above zero", () => {
     const state = expectReplay(fixture);
     expect(homes(state).length).toBeGreaterThan(5);
+    for (const id of homes(state)) expect(isVacant(state.buildings, id)).toBe(true);
     expectRecount(state);
-    // Part way through, some homes are vacant and later some abandoned.
-    const mid = replayFixture(fixture, 9_000);
-    expect(homes(mid).some((id) => isVacant(mid.buildings, id))).toBe(true);
-    const late = replayFixture(fixture, 12_250);
-    expect(homes(late).some((id) => isAbandoned(late.buildings, id))).toBe(true);
-    expect(homes(late).some((id) => !isAbandoned(late.buildings, id))).toBe(true);
+    // In use for the first game month.
+    const early = replayFixture(fixture, 2_000);
+    for (const id of homes(early)) expect(early.buildings.flags[id]).toBe(BUILDING_ALIVE);
   });
 
-  it.each([3_456, 9_050, 12_150, 12_250])("hashes the same saved and loaded at tick %d, part way to abandonment", (at) => {
+  it.each([2_000, 3_456, 9_050, 12_250])("hashes the same saved and loaded at tick %d", (at) => {
     let state = createState(fixture.seed);
     let next = 0;
     while (state.tick < fixture.untilTick) {

@@ -17,7 +17,9 @@
 //   days since it was built or came back into use (demand.json), becomes
 //   vacant. A building just built is not vacant before anyone could move in.
 // - A vacant building that is no longer empty is back in use. One that has
-//   stood vacant `vacancy.abandonDays` game days is abandoned: it offers no
+//   stood vacant `vacancy.abandonDays` game days, with its zone's bar at or
+//   below zero, is abandoned; while the bar is above zero it stands vacant,
+//   since it would come straight back. An abandoned building offers no
 //   jobs (jobs.ts) and no room (buildings.ts, `homeRoom`), and its jobs
 //   leave the running totals, so the bars do not read a dead district as
 //   open jobs and spare room. Nobody lives or works in it as it goes, since
@@ -122,7 +124,10 @@ function visit(state: SimState, id: number, newTicks: number, abandonTicks: numb
   const empty = buildingEmpty(state, id);
   if ((flags & BUILDING_VACANT) !== 0) {
     if (!empty) setStatus(state, id, 0);
-    else if (since >= abandonTicks) setStatus(state, id, BUILDING_ABANDONED);
+    // Not while its zone's bar is above zero: it would come back on the next
+    // visit, and hold the grower back for nothing (M3-24 review). A home on
+    // a street joined to nothing stands vacant while demand lasts.
+    else if (since >= abandonTicks && !(barOf(state, id) > 0)) setStatus(state, id, BUILDING_ABANDONED);
     return;
   }
   if (empty && since >= newTicks) setStatus(state, id, BUILDING_VACANT);
