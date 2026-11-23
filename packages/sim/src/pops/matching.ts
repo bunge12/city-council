@@ -167,16 +167,32 @@ function drawWorkplace(m: Matcher, home: number, education: number): number {
   return drawByScan(m, home, education);
 }
 
-/** `drawWorkplace` by weighing every zone in turn: one draw, or none when nothing it can reach is open. */
+/**
+ * `drawWorkplace` by weighing every zone in turn: one draw, or none when
+ * nothing it can reach is open. `weightBetween` is written out in the loop,
+ * with the home zone's row of the table read once: a tenth of the scale
+ * town's pops come here, each over every zone, and the scan was a fifth of
+ * the tick (issue #314). The weights and the order they are added in are
+ * the same, so the totals are too.
+ */
 function drawByScan(m: Matcher, home: number, education: number): number {
-  const { zones, running } = m;
+  const { zones, running, table, sources, bySecond, sameZone } = m;
   const open = m.openings.open;
   const levels = POP_LEVELS;
+  const row = home * TRAVEL_ZONES;
   let total = 0;
   for (let i = 0; i < zones.length; i++) {
     const zone = zones[i] as number;
     const jobs = open[zone * levels + education] as number;
-    if (jobs > 0) total += weightBetween(m, home, zone) * jobs;
+    if (jobs > 0) {
+      let weight = 0;
+      if (zone === home) weight = sameZone;
+      else if (sources[zone] !== NONE) {
+        const seconds = table[row + zone] as number;
+        if (seconds !== NO_ROUTE_SECONDS) weight = bySecond[seconds] as number;
+      }
+      total += weight * jobs;
+    }
     running[i] = total;
   }
   if (!(total > 0)) return -1;

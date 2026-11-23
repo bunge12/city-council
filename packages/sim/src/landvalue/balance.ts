@@ -2,7 +2,8 @@
 // loads (M3-13, PRD "Land value"). land-value.ts reads them.
 
 import balance from "../../balance/landvalue.json" with { type: "json" };
-import { isRecord, numberProblem, numberProblems, unknownKeys, type NumberRule } from "../balance-fields";
+import { isRecord, numberProblem, numberProblems, shareProblems, unknownKeys, type NumberRule } from "../balance-fields";
+import { EDUCATION_LEVELS, type EducationShares } from "../buildings/balance";
 import { ROAD_TYPES } from "../roads/balance";
 
 /** Points within `near` metres, none from `far` on, a straight line between. */
@@ -20,6 +21,19 @@ export interface IndustrySource {
   radius: number;
 }
 
+/** The wealth mix of newcomers to homes worth `from` points or more, up to the next band's `from` (M3-25). */
+export interface WealthBand extends EducationShares {
+  from: number;
+}
+
+/** How land value shapes who moves in (M3-25). */
+export interface NewcomerValue {
+  /** A home's weight in the draw of newcomers' homes is its value less this, and at least 1. */
+  homeWeightFrom: number;
+  /** By value, lowest first, the first from 0: the share of newcomers at each wealth level. */
+  wealth: WealthBand[];
+}
+
 /** The land value balance file. */
 export interface LandValueBalance {
   /** Points every cell starts from. */
@@ -34,6 +48,15 @@ export interface LandValueBalance {
   maxPollution: number;
   /** Side of the squares pollution is counted on, metres. */
   squareSize: number;
+  /** How land value shapes who moves in (M3-25). */
+  newcomers: NewcomerValue;
+}
+
+/** `f.points` within `f.near` of `distance`, none from `f.far` on, a straight line between, rounded down. */
+export function falloff(f: Falloff, distance: number): number {
+  if (distance <= f.near) return f.points;
+  if (distance >= f.far) return 0;
+  return Math.floor((f.points * (f.far - distance)) / (f.far - f.near));
 }
 
 /** A value is held between 0 and this. */
@@ -60,7 +83,7 @@ function falloffProblems(value: unknown, where: string, farMax: number): string[
 export function checkLandValueBalance(data: unknown): string[] {
   if (!isRecord(data)) return ["the land value balance is not an object"];
   const errors: string[] = [];
-  const others = ["roadAccess", "water", "centre", "industry"];
+  const others = ["roadAccess", "water", "centre", "industry", "newcomers"];
   for (const key of others) if (!(key in data)) errors.push(`${key} is missing`);
   for (const [key, rule] of Object.entries(TOP)) {
     const problem = numberProblem(data, key, rule, "");
@@ -82,7 +105,38 @@ export function checkLandValueBalance(data: unknown): string[] {
       });
     }
   }
+  if ("newcomers" in data) errors.push(...newcomerProblems(data["newcomers"]));
   return errors;
+}
+
+function newcomerProblems(n: unknown): string[] {
+  if (!isRecord(n)) return ["newcomers must be an object"];
+  const errors = unknownKeys(n, ["homeWeightFrom", "wealth"], "newcomers");
+  const from = numberProblem(n, "homeWeightFrom", POINTS, "newcomers");
+  if (from) errors.push(from);
+  const bands = n["wealth"];
+  if (!Array.isArray(bands) || bands.length === 0) return [...errors, "newcomers.wealth must list at least one band"];
+  bands.forEach((band, i) => {
+    const where = `newcomers.wealth[${i}]`;
+    if (!isRecord(band)) {
+      errors.push(`${where} must be an object`);
+      return;
+    }
+    const { from: start, ...shares } = band;
+    if (!Number.isSafeInteger(start) || (start as number) < 0 || (start as number) > LAND_VALUE_MAX) errors.push(`${where}.from must be a whole number of points from 0 to ${LAND_VALUE_MAX}`);
+    else if (i === 0 && start !== 0) errors.push("newcomers.wealth[0].from must be 0");
+    else if (i > 0 && (start as number) <= ((bands[i - 1] as { from?: number })?.from ?? -1)) errors.push(`${where}.from must be above the band before`);
+    errors.push(...shareProblems(shares, EDUCATION_LEVELS, where));
+  });
+  return errors;
+}
+
+/** The wealth mix of a newcomer to a home worth `value` points: the last band that starts at or below it. */
+export function wealthMixAt(value: number): EducationShares {
+  const bands = LAND_VALUE_BALANCE.newcomers.wealth;
+  let mix = bands[0] as WealthBand;
+  for (const band of bands) if (band.from <= value) mix = band;
+  return mix;
 }
 
 /** Checks a land value balance and returns it. Throws listing every problem. */

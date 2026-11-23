@@ -91,7 +91,8 @@ declare const window: {
     advance(steps: number): Promise<number>;
     releaseClock(): Promise<number>;
     mirror: {
-      state: ({ tick: number; log: LogEntry[]; roads: Arrays; cells: Arrays; buildings: Arrays } & Record<string, unknown>) | null;
+      state: ({ tick: number; log: LogEntry[]; roads: Arrays; cells: Arrays; buildings: Arrays; stats: { totals: Record<string, number> } } & Record<string, unknown>) | null;
+      room: number | null;
       cellAt(x: number, z: number): CellInfo | null;
       buildingAt(x: number, z: number): { id: number } | null;
     };
@@ -477,16 +478,24 @@ async function segmentNear(page: Page, x: number, z: number): Promise<number> {
   );
 }
 
-/** The figure the top bar shows for homes. */
-async function homesShown(page: Page): Promise<number> {
-  const text = (await page.locator("#homes-count").textContent()) ?? "";
-  return Number(text.replace(/,/g, ""));
+/** The top bar's population (M3-15), and the room the homes hold from its tooltip's data. */
+async function figuresShown(page: Page): Promise<{ population: number; room: number }> {
+  const count = page.locator("#population-count");
+  const text = (await count.textContent()) ?? "";
+  return { population: Number(text.replace(/,/g, "")), room: Number(await count.getAttribute("data-room")) };
 }
 
-/** Residential buildings standing in the copy: the homes the top bar counts. */
-async function homesCounted(page: Page): Promise<number> {
-  const r = zoneNumber("residential");
-  return (await buildings(page)).filter((b) => b.zone === r).length;
+/** The same from the copy: its population total, and the residents every building that is not abandoned holds room for. */
+async function figuresCounted(page: Page): Promise<{ population: number; room: number }> {
+  return page.evaluate(() => {
+    const s = window.cityCouncil.mirror.state;
+    if (!s) return { population: NaN, room: NaN };
+    const flags = s.buildings["flags"] ?? [];
+    let room = 0;
+    // BUILDING_ALIVE is 1 and BUILDING_ABANDONED 4, as the sim's homeRoom reads them.
+    for (let id = 0; id < flags.length; id++) if (((flags[id] ?? 0) & 5) === 1) room += s.buildings["residents"]?.[id] ?? 0;
+    return { population: s.stats.totals["population"] ?? 0, room };
+  });
 }
 
 async function tints(page: Page, ids: number[]): Promise<(Tint | null)[]> {
@@ -561,15 +570,15 @@ for (const variant of [
     await expect(speedButton(page, "Pause")).toHaveAttribute("aria-pressed", "true");
     expect(await buildings(page)).toEqual([]);
     await page.locator("#view").focus();
-    /** The homes figure at each point the walkthrough checks it, for step 14. */
-    const homes: { when: string; shown: number; counted: number }[] = [];
+    /** The population figure and the room behind it at each point the walkthrough checks them, for step 14. */
+    const homes: { when: string; shown: { population: number; room: number }; counted: { population: number; room: number } }[] = [];
     const noteHomes = async (when: string) => {
-      const counted = await homesCounted(page);
-      await expect.poll(() => homesShown(page)).toBe(counted);
-      homes.push({ when, shown: await homesShown(page), counted });
+      const counted = await figuresCounted(page);
+      await expect.poll(() => figuresShown(page)).toEqual(counted);
+      homes.push({ when, shown: await figuresShown(page), counted });
     };
     await noteHomes("before any zoning");
-    expect(homes[0]?.shown).toBe(0);
+    expect(homes[0]?.shown).toEqual({ population: 0, room: 0 });
 
     await test.step("1. open the zone tool: cells along both sides of every street, six deep, none on water, steep ground or another road", async () => {
       await look(page, 4400, 4570, 420);
@@ -700,7 +709,8 @@ for (const variant of [
       const onStrip = async () => (await buildings(page)).filter((b) => b.strip === strip);
       const first = await growUntil(page, "a house on the R1 strip", onStrip, (b) => b.length >= 1);
       const firstTick = await page.evaluate(() => window.cityCouncil.mirror.state?.tick ?? 0);
-      const grown = await growUntil(page, "two single family homes on the R1 strip", onStrip, (b) => b.filter((h) => h.type === home).length >= 2);
+      // More than were there at first too: since M3-25 the best ground fills first, and the first look can already find both houses.
+      const grown = await growUntil(page, "two single family homes on the R1 strip, and more buildings than at first", onStrip, (b) => b.filter((h) => h.type === home).length >= 2 && b.length > first.length);
       // Over time: more stood later than at first, on a later tick.
       expect(grown.length).toBeGreaterThan(first.length);
       expect(await page.evaluate(() => window.cityCouncil.mirror.state?.tick ?? 0)).toBeGreaterThan(firstTick);
@@ -714,7 +724,7 @@ for (const variant of [
       expect(new Set(colours).size, colours.join("\n")).toBeGreaterThan(1);
       await shot(page, info, dir, "3-houses-in-two-colours");
       await noteHomes("houses grew on the R1 strip");
-      expect(homes.at(-1)?.shown ?? 0).toBeGreaterThan(0);
+      expect(homes.at(-1)?.shown.room ?? 0).toBeGreaterThan(0);
     });
 
     await test.step("4. paint each of the five zones at each of the three densities: each grows buildings of its own kind", async () => {
@@ -764,7 +774,7 @@ for (const variant of [
       await settleBuilt(page);
       await shot(page, info, dir, "4-every-zone-grew-its-own-kind-closer");
       await noteHomes("every zone grew");
-      expect(homes.at(-1)?.shown ?? 0).toBeGreaterThan(homes.at(-2)?.shown ?? 0);
+      expect(homes.at(-1)?.shown.room ?? 0).toBeGreaterThan(homes.at(-2)?.shown.room ?? 0);
     });
 
     await test.step("5. a shallow R2 strip gets townhomes and a deep one apartments; an R3 lot smaller than 4 x 4 stays empty, and the overlay says why", async () => {
@@ -830,7 +840,9 @@ for (const variant of [
       const top = await page.evaluate(async (id) => (await window.cityCouncil.view).buildingTop(id), house.id);
       if (!top) throw new Error(`house ${house.id} is not drawn`);
       await noteHomes("before the house is cleared");
-      const homesBefore = homes.at(-1)?.shown ?? NaN;
+      const roomBefore = homes.at(-1)?.shown.room ?? NaN;
+      const houseRoom = await page.evaluate((id) => window.cityCouncil.mirror.state?.buildings["residents"]?.[id] ?? 0, house.id);
+      expect(houseRoom).toBeGreaterThan(0);
       await page.keyboard.press("KeyB");
       await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
       await hoverBuilding(page, house.id);
@@ -842,9 +854,9 @@ for (const variant of [
       await expect.poll(async () => (await buildings(page)).some((b) => b.id === house.id && b.type === house.type)).toBe(false);
       expect((await logTypes(page)).at(-1)).toBe("BulldozeBuilding");
       await noTool(page);
-      // The homes figure falls by the house.
+      // The room behind the population figure falls by the house's.
       await noteHomes("the house cleared");
-      expect(homes.at(-1)?.shown).toBe(homesBefore - 1);
+      expect(homes.at(-1)?.shown.room).toBe(roomBefore - houseRoom);
 
       const c2 = await growUntil(
         page,
@@ -1162,6 +1174,7 @@ for (const variant of [
       expect(bs.filter((b) => b.strip === smallStrip)).toEqual([]);
       expect(saved.tints.filter((t) => t !== null).length).toBeGreaterThan(20);
       await shot(page, info, dir, "13-before-reload");
+      await noteHomes("before the reload");
       const id = (await status(page)).city.id;
 
       await page.reload();
@@ -1183,21 +1196,21 @@ for (const variant of [
       await shot(page, info, dir, "13-after-reload");
     });
 
-    await test.step("14. the top bar counts the homes built: up as houses grow, down when one is bulldozed, the same after the reload", async () => {
+    await test.step("14. the top bar shows the population and the room the homes hold: the room up as houses grow, down when one is bulldozed, both the same after the reload", async () => {
       await noteHomes("after the reload");
-      const at = (when: string) => homes.find((h) => h.when === when)?.shown ?? NaN;
-      expect(at("before any zoning")).toBe(0);
-      expect(at("houses grew on the R1 strip")).toBeGreaterThan(0);
-      expect(at("every zone grew")).toBeGreaterThan(at("houses grew on the R1 strip"));
-      expect(at("the house cleared")).toBe(at("before the house is cleared") - 1);
-      // Every figure the bar showed was the count of residential buildings in the copy.
-      for (const h of homes) expect(h.shown, h.when).toBe(h.counted);
-      expect(homes.at(-1)?.shown).toBe(homes.at(-2)?.shown);
-      expect(homes.at(-1)?.shown).toBe(saved.buildings.filter((b) => b.zone === zoneNumber("residential")).length);
-      info.annotations.push({ type: "homes", description: homes.map((h) => `${h.when}: ${h.shown}`).join("; ") });
-      const topBar = join(SCREENSHOTS, dir, "14-homes-in-the-top-bar.png");
+      const at = (when: string) => homes.find((h) => h.when === when)?.shown;
+      const room = (when: string) => at(when)?.room ?? NaN;
+      expect(room("before any zoning")).toBe(0);
+      expect(room("houses grew on the R1 strip")).toBeGreaterThan(0);
+      expect(room("every zone grew")).toBeGreaterThan(room("houses grew on the R1 strip"));
+      expect(room("the house cleared")).toBeLessThan(room("before the house is cleared"));
+      // Every figure the bar showed was the copy's population, and the room its buildings hold.
+      for (const h of homes) expect(h.shown, h.when).toEqual(h.counted);
+      expect(homes.at(-1)?.shown).toEqual(at("before the reload"));
+      info.annotations.push({ type: "population", description: homes.map((h) => `${h.when}: ${h.shown.population} in room for ${h.shown.room}`).join("; ") });
+      const topBar = join(SCREENSHOTS, dir, "14-population-in-the-top-bar.png");
       await page.locator(".top-bar").screenshot({ path: topBar });
-      await info.attach("14-homes-in-the-top-bar", { path: topBar, contentType: "image/png" });
+      await info.attach("14-population-in-the-top-bar", { path: topBar, contentType: "image/png" });
     });
 
     await test.step("15. a replay of the recorded command log from the same seed gives the same state hash", async () => {

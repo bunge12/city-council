@@ -93,9 +93,9 @@ let served = 0;
  * Opens `city` in one page load and waits until it is drawn. The page's
  * `?load=` address names a city file that `page.route` answers with the
  * fixture's bytes, and the worker stores and opens it in place of any other,
- * as an import does but without the import's reload. Only city-file.spec.ts,
- * the M0 walkthrough and one step of homes.spec.ts still import through
- * `#import-file`, since there the import is what is tested. Returns the
+ * as an import does but without the import's reload. Only city-file.spec.ts
+ * and the M0 walkthrough still import through `#import-file`, since there
+ * the import is what is tested. Returns the
  * render backend.
  */
 export async function openCity(page: Page, city: SimState | Uint8Array, options: OpenCityOptions = {}): Promise<string> {

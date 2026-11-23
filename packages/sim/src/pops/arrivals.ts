@@ -10,8 +10,10 @@
 // `pops.owed` is the day's plan: people due who have not yet found a home.
 // A tick adds its share, then newcomers move in while any are owed. Each
 // is one household, a pop: a home drawn among those with room from the
-// generator in state, then its size, education, wealth and children drawn
-// with the mix in pops.json. Its size is drawn between the least and most
+// generator in state, each weighted by its land value (M3-25, `homeWeight`),
+// then its size, education, wealth and children drawn with the mix in
+// pops.json, its wealth with the mix landvalue.json gives for the home's
+// value. Its size is drawn between the least and most
 // for the home's density and cut to the room the home has left, so a large
 // household can take more than is owed and `owed` goes below 0. The next
 // arrivals wait until the ticks have paid that back, and the people a day
@@ -37,6 +39,8 @@ import { POPS_BALANCE } from "./balance";
 import { addPop, popSizeCap, type PopProfile } from "./pops";
 import { homeRoomLeft, homesWithRoom, newcomerRoomLeft } from "./room";
 import type { EducationShares } from "../buildings/balance";
+import { LAND_VALUE_BALANCE, wealthMixAt } from "../landvalue/balance";
+import { buildingValues } from "../landvalue/land-value";
 
 /** The name the timer hook reports for arrivals. */
 export const ARRIVALS_SYSTEM = "arrivals";
@@ -55,13 +59,22 @@ function drawLevel(rng: Uint32Array, shares: EducationShares): number {
   return u < shares.low + shares.medium ? 1 : 2;
 }
 
-/** A newcomer's profile, drawn with the mix in pops.json: education, then wealth, then children. */
-export function drawProfile(rng: Uint32Array): PopProfile {
+/**
+ * A newcomer's profile: education with the mix in pops.json, then wealth
+ * with the mix for a home worth `value` points (landvalue.json, M3-25),
+ * then children.
+ */
+export function drawProfile(rng: Uint32Array, value: number): PopProfile {
   const mix = POPS_BALANCE.newcomer;
   const education = drawLevel(rng, mix.education);
-  const wealth = drawLevel(rng, mix.wealth);
+  const wealth = drawLevel(rng, wealthMixAt(value));
   const children = nextFloat(rng) < mix.childrenShare ? 1 : 0;
   return { education, wealth, children };
+}
+
+/** A home's weight in the draw of newcomers' homes: its land value less `homeWeightFrom`, at least 1 (M3-25). */
+export function homeWeight(value: number): number {
+  return Math.max(1, value - LAND_VALUE_BALANCE.newcomers.homeWeightFrom);
 }
 
 /** A newcomer household's size for a home of `density` with `room` left: drawn between the density's least and most, cut to the size cap and the room. */
@@ -72,19 +85,78 @@ export function drawSize(rng: Uint32Array, density: number, room: number): numbe
   return Math.max(1, Math.min(drawn, popSizeCap(density), room));
 }
 
-/** Moves one household into a home drawn from `homes`, which are those with room, and returns its people. Takes the home off the list once it has no room left for another household (room.ts). */
-function moveIn(state: SimState, homes: number[]): number {
+/**
+ * The homes with room (room.ts), in id order, each with its land value and
+ * its weight in the draw, and the weights' sum. A home that fills keeps its
+ * place with a weight of 0, so the order of the rest, and so the draw,
+ * follows from state alone. A tick brings a household or a few, so each
+ * draw walks the weights rather than keeping a tree of them.
+ */
+interface HomeDraw {
+  homes: number[];
+  values: Float64Array;
+  weights: Float64Array;
+  /** The weights' sum, and the homes with a weight left. */
+  total: number;
+  left: number;
+}
+
+/**
+ * Scratch for `homeDraw`, kept between ticks and grown as needed: two arrays
+ * the length of the homes with room, made on every tick people are due,
+ * were garbage the size of the town. Never state: each tick fills it afresh.
+ */
+let scratchValues = new Float64Array(0);
+let scratchWeights = new Float64Array(0);
+
+function homeDraw(state: SimState): HomeDraw {
+  const homes = homesWithRoom(state);
+  if (scratchValues.length < homes.length) {
+    const size = Math.max(homes.length, 2 * scratchValues.length);
+    scratchValues = new Float64Array(size);
+    scratchWeights = new Float64Array(size);
+  }
+  const values = buildingValues(state, homes, scratchValues);
+  const weights = scratchWeights;
+  let total = 0;
+  for (let i = 0; i < homes.length; i++) {
+    const w = homeWeight(values[i] as number);
+    weights[i] = w;
+    total += w;
+  }
+  return { homes, values, weights, total, left: homes.length };
+}
+
+/** The place in `d.homes` of the home a whole number `u` from 0 to under `d.total` lands on, the weights laid end to end in id order. */
+function drawnAt(d: HomeDraw, u: number): number {
+  const w = d.weights;
+  let at = 0;
+  for (let edge = w[0] as number; u >= edge; edge += w[at] as number) at++;
+  return at;
+}
+
+/** Takes the home at place `at` out of the draw. */
+function fill(d: HomeDraw, at: number): void {
+  d.total -= d.weights[at] as number;
+  d.weights[at] = 0;
+  d.left--;
+}
+
+/**
+ * Moves one household into a home drawn among `d`'s, each as likely as its
+ * weight, and returns its people. Its wealth follows the home's land value.
+ * Takes the home out of the draw once it has no room left for another
+ * household (room.ts).
+ */
+function moveIn(state: SimState, d: HomeDraw): number {
   const rng = state.rng;
-  const at = nextInt(rng, homes.length);
-  const home = homes[at] as number;
+  const at = drawnAt(d, nextInt(rng, d.total));
+  const home = d.homes[at] as number;
   const size = drawSize(rng, state.buildings.density[home] ?? 1, homeRoomLeft(state, home));
-  const profile = drawProfile(rng);
+  const profile = drawProfile(rng, d.values[at] as number);
   addPop(state, { home, size, ...profile, satisfaction: POPS_BALANCE.newcomer.satisfaction });
   noteYear(state, "arrivals", size);
-  if (newcomerRoomLeft(state, home) === 0) {
-    homes[at] = homes[homes.length - 1] as number;
-    homes.pop();
-  }
+  if (newcomerRoomLeft(state, home) === 0) fill(d, at);
   return size;
 }
 
@@ -93,8 +165,8 @@ export function arrive(state: SimState): void {
   const p = state.pops;
   p.owed += growthOnTick(state.tick, dayArrivals(state.demand.residential.value));
   if (p.owed <= 0) return;
-  const homes = homesWithRoom(state);
-  while (p.owed > 0 && homes.length > 0) p.owed -= moveIn(state, homes);
+  const d = homeDraw(state);
+  while (p.owed > 0 && d.left > 0) p.owed -= moveIn(state, d);
   if (p.owed > 0) p.owed = 0;
 }
 

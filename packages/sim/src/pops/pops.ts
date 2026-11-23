@@ -36,7 +36,7 @@ import { countEmployment, countFilled, countHomeDensity, countPop, countSatisfac
 import { DAYS_LOW_LIMIT, POPS_BALANCE } from "./balance";
 import { notePopBuilding } from "./changes";
 import { jobsProblem } from "./open-jobs";
-import { popIndexOf, linkHome, linkWork, moveHome, unlinkHome, unlinkWork, moveSatisfactionPeople, type PopIndex } from "./where";
+import { emptyHome, emptyWork, popIndexOf, linkHome, linkWork, moveHome, unlinkHome, unlinkWork, moveSatisfactionPeople, type PopIndex } from "./where";
 
 /** Set in `flags` for a live pop. */
 export const POP_ALIVE = 1;
@@ -345,11 +345,25 @@ export function addPop(state: SimState, spec: NewPop): number {
 export function removePop(state: SimState, id: number): void {
   const p = state.pops;
   if (!isPop(p, id)) throw new RangeError(`pop ${id} does not exist`);
-  if (p.home[id] === NO_HOME) p.displaced = p.displaced.filter((d) => d !== id);
+  if (p.home[id] === NO_HOME) p.displaced = withoutEntry(p.displaced, id);
   clearPop(state, id);
   const free = resized(p.free, p.free.length + 1);
   free[p.free.length] = id;
   p.free = free;
+}
+
+/**
+ * `queue` without its one entry `id`, in the same order. Two copies of the
+ * parts either side, not a filter: satisfaction and turnover can send the
+ * pops of a long queue away one at a time (issue #306).
+ */
+function withoutEntry(queue: Int32Array, id: number): Int32Array {
+  const at = queue.indexOf(id);
+  if (at < 0) return queue;
+  const out = new Int32Array(queue.length - 1);
+  out.set(queue.subarray(0, at));
+  out.set(queue.subarray(at + 1), at);
+  return out;
 }
 
 /**
@@ -582,20 +596,15 @@ export function displaceBuildingPops(state: SimState, ids: readonly number[]): v
   const p = state.pops;
   const queued: number[] = [];
   for (const building of ids) {
-    countFilled(state, building, -1);
-    for (let pop = index.workHead[building] ?? -1; pop >= 0; pop = index.workHead[building] ?? -1) {
+    if ((index.workHead[building] ?? -1) >= 0) {
+      countFilled(state, building, -1);
       // Only its workers' employment moves: the building's jobs filled are already out of the totals.
-      countEmployment(state, popWorkers(p, pop), -1);
-      unlinkWork(index, p, pop);
-      p.work[pop] = NO_WORK;
+      countEmployment(state, emptyWork(index, p, building), -1);
     }
     // Only the residents of the home's density move in the totals: its pops are still the city's people.
     const people = index.people[building] ?? 0;
     if (people > 0) countHomeDensity(state, building, -people);
-    for (let pop = index.homeHead[building] ?? -1; pop >= 0; pop = index.homeHead[building] ?? -1) {
-      moveHome(index, p, pop, NO_HOME);
-      queued.push(pop);
-    }
+    emptyHome(index, p, building, queued);
   }
   if (queued.length === 0) return;
   const queue = resized(p.displaced, p.displaced.length + queued.length);
