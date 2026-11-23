@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { BUILDING_TYPES, cellAt, createState, generateTerrain, heightAt, syncCells, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
+import { addPop } from "../packages/sim/src/pops/pops";
 import { finishConstruction } from "./building-fixtures";
 import { lotProblem } from "../packages/sim/src/buildings/where";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
@@ -69,7 +70,9 @@ function houseCity(): { state: SimState; houses: number } {
     const shape = { first: { seg: cell.segment, side: cell.side, place: cell.place, dir: 0 }, width: 2, depth: 4, back: null };
     if (lotProblem(state, shape, 1, 1) !== null) continue;
     const lot = { firstSeg: cell.segment, firstSide: cell.side, firstPlace: cell.place, dir: 0, width: 2, depth: 4, backSeg: 0, backSide: 0, backPlace: 0, backDir: 0, backDepth: 0 };
-    addBuilding(state, { ...lot, type, residents: 3, variant: p * 7 });
+    const home = addBuilding(state, { ...lot, type, residents: 3, variant: p * 7 });
+    // Two people in a house with room for three, so a count of the people living there differs from the room (M3-12).
+    addPop(state, { home, size: 2, education: 1, wealth: 1, children: 0, satisfaction: 100 });
     houses++;
   }
   finishConstruction(state);
@@ -154,7 +157,7 @@ test("a road through a row of houses marks and counts them before the click, and
   const count = Number(await readout.getAttribute("data-clears"));
   expect(count).toBeGreaterThan(0);
   expect(count).toBeLessThan(houses);
-  await expect(page.locator("#road-clears")).toHaveText(count === 1 ? "Clears 1 building, 3 residents" : `Clears ${count} buildings, ${count * 3} residents`);
+  await expect(page.locator("#road-clears")).toHaveText(count === 1 ? "Clears 1 building, 2 residents" : `Clears ${count} buildings, ${count * 2} residents`);
   expect(await page.evaluate(() => document.body.dataset["buildingsToClear"])).toBe(String(count));
   await attach(page, testInfo, "the road's preview marks the houses in its way");
 

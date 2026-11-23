@@ -709,7 +709,8 @@ for (const variant of [
       const onStrip = async () => (await buildings(page)).filter((b) => b.strip === strip);
       const first = await growUntil(page, "a house on the R1 strip", onStrip, (b) => b.length >= 1);
       const firstTick = await page.evaluate(() => window.cityCouncil.mirror.state?.tick ?? 0);
-      const grown = await growUntil(page, "two single family homes on the R1 strip", onStrip, (b) => b.filter((h) => h.type === home).length >= 2);
+      // More than were there at first too: since M3-25 the best ground fills first, and the first look can already find both houses.
+      const grown = await growUntil(page, "two single family homes on the R1 strip, and more buildings than at first", onStrip, (b) => b.filter((h) => h.type === home).length >= 2 && b.length > first.length);
       // Over time: more stood later than at first, on a later tick.
       expect(grown.length).toBeGreaterThan(first.length);
       expect(await page.evaluate(() => window.cityCouncil.mirror.state?.tick ?? 0)).toBeGreaterThan(firstTick);

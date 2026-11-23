@@ -63,6 +63,7 @@ function copyPops(p: PopState): PopState {
     owed: p.owed,
     leaveScore: p.leaveScore,
     leaveAtScore: p.leaveAtScore,
+    displaced: p.displaced.slice(),
   };
 }
 

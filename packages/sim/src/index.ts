@@ -102,6 +102,7 @@ export type { JobsByEducation, JobsByKind } from "./buildings/jobs";
 export { POPS_BALANCE, checkPopsBalance } from "./pops/balance";
 export type { PopsBalance } from "./pops/balance";
 export {
+  NO_HOME,
   NO_WORK,
   POP_ALIVE,
   POP_LEVELS,
@@ -128,6 +129,7 @@ export { addPop, removePop, setPopDaysLow, setPopHousehold, setPopProfile, setPo
 export type { NewPop } from "./pops/pops";
 export { POPS_SYSTEM, popSlice } from "./pops/sweep";
 export { ARRIVALS, ARRIVALS_SYSTEM, dayArrivals, drawProfile, drawSize } from "./pops/arrivals";
+export { DISPLACED, DISPLACED_SYSTEM, placeDisplaced } from "./pops/displaced";
 export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homesWithRoom, leastNewcomers, newcomerRoomLeft, reachableRoom, whyNoNewcomers } from "./pops/room";
 export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/matching";
 export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
@@ -197,7 +199,7 @@ export {
   roadClears,
   seeBuilding,
 } from "./buildings/bulldoze";
-export type { BuildingSeen, BuildingsInTheWay, BulldozeBuildingPayload } from "./buildings/bulldoze";
+export type { BuildingSeen, BuildingsInTheWay, BulldozeBuildingPayload, PeopleIn } from "./buildings/bulldoze";
 export { applyBuildingDelta, drainBuildingDelta, recordBuildingChanges } from "./buildings/delta";
 export type { BuildingDelta } from "./buildings/delta";
 export type { ZoneCellsPayload, ZonePlan, ZonePlanResult, ZonePoint, ZoneRect } from "./zoning/zone";

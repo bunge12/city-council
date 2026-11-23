@@ -20,6 +20,7 @@ import { terrainOf } from "../terrain/cache";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { openCellsUnder, syncCells } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE } from "./balance";
+import { popIndexOf } from "../pops/where";
 import { isBuilding, removeBuildings, type BuildingState } from "./buildings";
 import { buildingsOnCells, buildingsOnSegments, buildingsOnStretch } from "./where";
 
@@ -50,8 +51,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The building ids a `BulldozeBuilding` payload names, ascending, or the reason it cannot apply to `state`. Changes nothing. */
-export function planBulldozeBuildings(state: SimState, payload: unknown): { ok: true; ids: number[] } | { ok: false; reason: string } {
+/**
+ * The people living in building `id`. The sim reads its own pops
+ * (`buildingPeople`); a client's copy holds no pop rows, so it passes the
+ * people its mirror keeps for each building (M3-05).
+ */
+export type PeopleIn = (id: number) => number;
+
+/** The sim's own `PeopleIn`: the pop index read once, so a plan over thousands of buildings looks it up once. */
+function peopleOf(state: SimState): PeopleIn {
+  const people = popIndexOf(state).people;
+  return (id) => people[id] ?? 0;
+}
+
+/**
+ * The building ids a `BulldozeBuilding` payload names, ascending, and the
+ * people living in them, who would be displaced (M3-12), or the reason it
+ * cannot apply to `state`. Changes nothing.
+ */
+export function planBulldozeBuildings(
+  state: SimState,
+  payload: unknown,
+  people: PeopleIn = peopleOf(state),
+): { ok: true; ids: number[]; residents: number } | { ok: false; reason: string } {
   const need = "BulldozeBuilding needs a list of buildings, each { id, segment, side, place, builtAt }";
   if (!isRecord(payload) || !Array.isArray(payload["buildings"]) || payload["buildings"].length === 0) return { ok: false, reason: need };
   const list = payload["buildings"] as unknown[];
@@ -71,7 +93,10 @@ export function planBulldozeBuildings(state: SimState, payload: unknown): { ok: 
       return { ok: false, reason: BUILDING_CHANGED };
     }
   }
-  return { ok: true, ids: [...ids].sort((p, q) => p - q) };
+  const sorted = [...ids].sort((p, q) => p - q);
+  let residents = 0;
+  for (const id of sorted) residents += people(id);
+  return { ok: true, ids: sorted, residents };
 }
 
 /** Removes the buildings a plan named, in ascending id order. */
@@ -83,26 +108,28 @@ export function bulldozeBuildings(state: SimState, ids: readonly number[]): void
 export interface BuildingsInTheWay {
   /** Building ids, ascending. */
   ids: number[];
-  /** The people they hold room for, added up. M3 moves people in, so these are the residents that would be displaced. */
+  /** The people living in them, added up: the residents who would be displaced (M3-12), not the room the buildings hold. */
   residents: number;
 }
 
-function inTheWay(state: SimState, ids: number[]): BuildingsInTheWay {
+function inTheWay(ids: number[], people: PeopleIn): BuildingsInTheWay {
   let residents = 0;
-  for (const id of ids) residents += state.buildings.residents[id] ?? 0;
+  for (const id of ids) residents += people(id);
   return { ids, residents };
 }
+
+
 
 /**
  * The buildings that stand on the cells of the segments a bulldoze removes,
  * or of the stretch of each it cuts out. Their cells go with the road, so
  * the command removes them at once.
  */
-export function bulldozeClears(state: SimState, plan: BulldozePlan): BuildingsInTheWay {
+export function bulldozeClears(state: SimState, plan: BulldozePlan, people: PeopleIn = peopleOf(state)): BuildingsInTheWay {
   const cut = new Set(plan.sections.map((s) => s.seg));
   const ids = new Set(buildingsOnSegments(state, plan.segments.filter((seg) => !cut.has(seg))));
   for (const s of plan.sections) for (const id of buildingsOnStretch(state, s.seg, s.from, s.to)) ids.add(id);
-  return inTheWay(state, [...ids].sort((p, q) => p - q));
+  return inTheWay([...ids].sort((p, q) => p - q), people);
 }
 
 /**
@@ -135,36 +162,48 @@ function cellsCoveredBy(state: SimState, build: (net: RoadNetwork) => boolean): 
  * The pieces of a road it splits keep their cells, and the buildings on
  * them stand.
  */
-export function roadClears(state: SimState, plan: RoadPlan): BuildingsInTheWay {
+export function roadClears(state: SimState, plan: RoadPlan, people: PeopleIn = peopleOf(state)): BuildingsInTheWay {
   const terrain = terrainOf(state.seed);
   const keys = cellsCoveredBy(state, (net) => {
     buildRoad(net, terrain, plan);
     return true;
   });
-  return inTheWay(state, buildingsOnCells(state, keys, CELL_KEY_STRIDE));
+  return inTheWay(buildingsOnCells(state, keys, CELL_KEY_STRIDE), people);
 }
 
 /** The buildings a grid would clear, as `roadClears` says for each street. None for a grid a street of which is refused. */
-export function gridClears(state: SimState, plan: GridPlan): BuildingsInTheWay {
+export function gridClears(state: SimState, plan: GridPlan, people: PeopleIn = peopleOf(state)): BuildingsInTheWay {
   const terrain = terrainOf(state.seed);
   const keys = cellsCoveredBy(state, (net) => buildRoadGrid(net, terrain, plan) === null);
-  return inTheWay(state, buildingsOnCells(state, keys, CELL_KEY_STRIDE));
+  return inTheWay(buildingsOnCells(state, keys, CELL_KEY_STRIDE), people);
 }
 
 /** `planRoad` on `state`, with the buildings the road would clear. For the road tool's preview. */
-export function previewBuildRoad(state: SimState, payload: unknown): { ok: true; plan: RoadPlan; clears: BuildingsInTheWay } | { ok: false; reason: string } {
+export function previewBuildRoad(
+  state: SimState,
+  payload: unknown,
+  people: PeopleIn = peopleOf(state),
+): { ok: true; plan: RoadPlan; clears: BuildingsInTheWay } | { ok: false; reason: string } {
   const result = planRoad(state.roads, terrainOf(state.seed), payload);
-  return result.ok ? { ...result, clears: roadClears(state, result.plan) } : result;
+  return result.ok ? { ...result, clears: roadClears(state, result.plan, people) } : result;
 }
 
 /** `planRoadGrid` on `state`, with the buildings the grid would clear. For the grid tool's preview. */
-export function previewBuildRoadGrid(state: SimState, payload: unknown): { ok: true; plan: GridPlan; clears: BuildingsInTheWay } | { ok: false; reason: string } {
+export function previewBuildRoadGrid(
+  state: SimState,
+  payload: unknown,
+  people: PeopleIn = peopleOf(state),
+): { ok: true; plan: GridPlan; clears: BuildingsInTheWay } | { ok: false; reason: string } {
   const result = planRoadGrid(state.roads, terrainOf(state.seed), payload);
-  return result.ok ? { ...result, clears: gridClears(state, result.plan) } : result;
+  return result.ok ? { ...result, clears: gridClears(state, result.plan, people) } : result;
 }
 
 /** `planBulldoze` on `state`, with the buildings the bulldoze would clear. For the bulldoze tool's preview. */
-export function previewBulldozeRoad(state: SimState, payload: unknown): { ok: true; plan: BulldozePlan; clears: BuildingsInTheWay } | { ok: false; reason: string } {
+export function previewBulldozeRoad(
+  state: SimState,
+  payload: unknown,
+  people: PeopleIn = peopleOf(state),
+): { ok: true; plan: BulldozePlan; clears: BuildingsInTheWay } | { ok: false; reason: string } {
   const result = planBulldoze(state.roads, payload);
-  return result.ok ? { ...result, clears: bulldozeClears(state, result.plan) } : result;
+  return result.ok ? { ...result, clears: bulldozeClears(state, result.plan, people) } : result;
 }

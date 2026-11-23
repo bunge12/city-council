@@ -4,12 +4,28 @@ import { useBuildingHover } from "./store";
 /** Offset of the readout from the pointer, CSS pixels. */
 const OFFSET = 18;
 
-/** The lines the readout shows for a building: its type, then zone and density, lot size and residents. */
-export function buildingLines(b: BuildingInfo): { title: string; detail: string } {
+function residentsOf(n: number): string {
+  return n === 1 ? "1 resident" : `${n.toLocaleString("en-US")} residents`;
+}
+
+/**
+ * The lines the readout shows for a building: its type, then zone and
+ * density, lot size and residents. Given `living`, the people living there
+ * now, a home says them against its room, as the bulldozer's tag does for
+ * the people a click would displace (M3-12); without it, its room.
+ */
+export function buildingLines(b: BuildingInfo, living?: number): { title: string; detail: string } {
   const type = BUILDING_TYPES[b.type];
   const zone = ZONING_BALANCE.zones[b.zone - 1];
   const lot = `lot ${b.width} × ${b.depth} cells`;
-  const residents = (type?.residents[1] ?? 0) === 0 ? "no residents" : b.residents === 1 ? "1 resident" : `${b.residents.toLocaleString("en-US")} residents`;
+  const home = (type?.residents[1] ?? 0) > 0;
+  const residents = !home
+    ? "no residents"
+    : living === undefined
+      ? residentsOf(b.residents)
+      : living === 0
+        ? `nobody living here, room for ${b.residents.toLocaleString("en-US")}`
+        : `${residentsOf(living)}, room for ${b.residents.toLocaleString("en-US")}`;
   return {
     title: type?.name ?? "Building",
     detail: `${zone?.name ?? "?"} ${zone?.letter ?? "?"}${b.density} · ${lot} · ${residents}`,

@@ -53,12 +53,13 @@ import type { SimState } from "../state";
 import type { System } from "../step";
 import { noteYear } from "../stats/stats";
 import { drawProfile, drawSize } from "./arrivals";
+import { buildingValue } from "../landvalue/land-value";
 import { POPS_BALANCE } from "./balance";
 import { BUILDING_TYPES } from "../buildings/balance";
 import { homeRoom } from "../buildings/buildings";
 import { partThatFits } from "./matching";
 import { jobsProblem, openJobsFor } from "./open-jobs";
-import { NO_WORK, POP_ALIVE, addPop, popSizeCap, removePop, setPopHousehold, setPopSize, setPopWork, workersFor } from "./pops";
+import { NO_HOME, NO_WORK, POP_ALIVE, addPop, popSizeCap, removePop, setPopHousehold, setPopSize, setPopWork, workersFor } from "./pops";
 import { homeReachesOutside, homeRoomLeft } from "./room";
 import { popSlice } from "./sweep";
 import { popIndexOf } from "./where";
@@ -120,7 +121,7 @@ function replace(state: SimState, id: number): void {
   if (room === 0 || !homeReachesOutside(state, home)) return;
   const rng = state.rng;
   const size = drawSize(rng, state.buildings.density[home] ?? 1, room);
-  const profile = drawProfile(rng);
+  const profile = drawProfile(rng, buildingValue(state, home));
   // The id just freed is the last on the free list, so the newcomer takes it.
   addPop(state, { home, size, ...profile, satisfaction: POPS_BALANCE.newcomer.satisfaction });
   noteYear(state, "arrivals", size);
@@ -179,6 +180,8 @@ export function turnOver(state: SimState): void {
   const rng = state.rng;
   for (let id = from; id < to; id++) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0) continue;
+    // A displaced pop waits in the queue for a home (M3-12); its household changes once it has one.
+    if (p.home[id] === NO_HOME) continue;
     const size = p.size[id] ?? 0;
     const children = p.children[id] ?? 0;
     const event = turnoverEvent(chances, nextFloat(rng), size, children);

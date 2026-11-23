@@ -20,10 +20,10 @@
 // On 1 January the running year becomes the last one and starts again at 0.
 
 import { BUILDING_TYPES, JOB_KINDS, type JobKind } from "../buildings/balance";
-import { BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
+import { BUILDING_ALIVE, OFFERS_JOBS, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByKind, type JobsByKind } from "../buildings/jobs";
 import { isMonthStart, isYearStart } from "../calendar";
-import { NO_WORK, POP_ALIVE, POP_LEVELS, workersFor, type PopState } from "../pops/pops";
+import { NO_HOME, NO_WORK, POP_ALIVE, POP_LEVELS, workersFor, type PopState } from "../pops/pops";
 import { popIndexOf } from "../pops/where";
 import type { SimState } from "../state";
 import type { System } from "../step";
@@ -141,12 +141,13 @@ export function statsFor(state: Pick<SimState, "pops" | "buildings">): StatsStat
 function addPop(t: StatTotals, p: PopState, b: BuildingState, id: number, sign: number): void {
   const size = p.size[id] ?? 0;
   const children = p.children[id] ?? 0;
-  const density = b.density[p.home[id] ?? 0] ?? 1;
+  const home = p.home[id] ?? 0;
   const workers = workersFor(size, children);
   const people = sign * size;
   bump(t, "population", people);
   bump(t, "pops", sign);
-  bump(t, RESIDENTS_BY_DENSITY[Math.min(DENSITIES, Math.max(1, density)) - 1], people);
+  // A displaced pop waiting for a home (M3-12) is in the population but in no density's residents.
+  if (home !== NO_HOME) bump(t, RESIDENTS_BY_DENSITY[Math.min(DENSITIES, Math.max(1, b.density[home] ?? 1)) - 1], people);
   bump(t, RESIDENTS_BY_EDUCATION[Math.min(POP_LEVELS - 1, p.education[id] ?? 0)], people);
   bump(t, RESIDENTS_BY_WEALTH[Math.min(POP_LEVELS - 1, p.wealth[id] ?? 0)], people);
   bump(t, "residentSatisfaction", people * (p.satisfaction[id] ?? 0));
@@ -183,6 +184,11 @@ function addBuilding(t: StatTotals, b: BuildingState, id: number, sign: number):
   const zone = b.zone[id] ?? 0;
   const density = b.density[id] ?? 0;
   bump(t, BUILDINGS_BY_ZONE[zone - 1]?.[density - 1], sign);
+  addJobs(t, b, id, sign);
+}
+
+/** Adds `sign` times the jobs live building `id` offers to `t`, by kind. */
+function addJobs(t: StatTotals, b: BuildingState, id: number, sign: number): void {
   const type = BUILDING_TYPES[b.type[id] ?? 0];
   const jobs = buildingJobs(b, id);
   if (!type || jobs === 0) return;
@@ -215,6 +221,16 @@ export function countFilled(state: SimState, id: number, sign: 1 | -1): void {
   addFilled(state.stats.totals, state.buildings, id, popIndexOf(state).filled[id] ?? 0, sign);
 }
 
+/**
+ * Adds `people` to the residents of building `home`'s density, or takes
+ * them away when negative: all a move of pops between a home and none
+ * changes in the totals (M3-12).
+ */
+export function countHomeDensity(state: SimState, home: number, people: number): void {
+  const density = state.buildings.density[home] ?? 1;
+  bump(state.stats.totals, RESIDENTS_BY_DENSITY[Math.min(DENSITIES, Math.max(1, density)) - 1], people);
+}
+
 /** Moves `workers` from unemployed to employed in the running totals, or back with `sign` -1, as a pop takes a job or loses one. */
 export function countEmployment(state: SimState, workers: number, sign: 1 | -1): void {
   const t = state.stats.totals;
@@ -225,6 +241,29 @@ export function countEmployment(state: SimState, workers: number, sign: 1 | -1):
 /** Adds live building `id` and the jobs it offers to the running totals, or takes it out with `sign` -1, while its row still says what it is. */
 export function countBuilding(state: SimState, id: number, sign: 1 | -1): void {
   addBuilding(state.stats.totals, state.buildings, id, sign);
+}
+
+/**
+ * `countBuilding` for each of `ids`, with the buildings by zone and density
+ * added up first and each total moved once: a bulldoze of thousands would
+ * look each name up thousands of times (issue #306). Every count is a
+ * whole number, so the totals come out the same.
+ */
+export function countBuildings(state: SimState, ids: readonly number[], sign: 1 | -1): void {
+  const t = state.stats.totals;
+  const b = state.buildings;
+  const zones = BUILDINGS_BY_ZONE.length;
+  const densities = DENSITIES;
+  const byZone = new Int32Array(zones * densities);
+  for (const id of ids) {
+    const zone = (b.zone[id] ?? 0) - 1;
+    const density = (b.density[id] ?? 0) - 1;
+    if (zone >= 0 && zone < zones && density >= 0 && density < densities) byZone[zone * densities + density] = (byZone[zone * densities + density] as number) + 1;
+    if (OFFERS_JOBS[b.type[id] ?? 0] === 1) addJobs(t, b, id, sign);
+  }
+  for (let zone = 0; zone < zones; zone++) {
+    for (let density = 0; density < densities; density++) bump(t, BUILDINGS_BY_ZONE[zone]?.[density], sign * (byZone[zone * densities + density] as number));
+  }
 }
 
 /** Adds `by` to the residents' summed satisfaction: a pop's people times the change in its score (M3-10). */

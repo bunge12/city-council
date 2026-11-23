@@ -21,23 +21,31 @@
 // day's plan of arrivals (arrivals.ts), and `leaveScore` and `leaveAtScore`
 // the day's plan of departures while the residential bar is below zero
 // (satisfaction.ts).
+//
+// A pop whose home is removed is displaced (M3-12, displaced.ts): its home
+// becomes NO_HOME and its id joins `displaced`, the queue of pops waiting
+// for a new home. A pop in the queue still counts in the population and
+// keeps its job. Only a pop in the queue has no home.
 
 import { BUILDING_TYPES } from "../buildings/balance";
 import { homeRoom, isAbandoned, isBuilding, type BuildingState } from "../buildings/buildings";
 import { buildingJobs } from "../buildings/jobs";
 import { resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
-import { countEmployment, countFilled, countPop, countSatisfaction } from "../stats/stats";
+import { countEmployment, countFilled, countHomeDensity, countPop, countSatisfaction } from "../stats/stats";
 import { DAYS_LOW_LIMIT, POPS_BALANCE } from "./balance";
 import { notePopBuilding } from "./changes";
 import { jobsProblem } from "./open-jobs";
-import { popIndexOf, linkHome, linkWork, unlinkHome, unlinkWork, moveSatisfactionPeople, type PopIndex } from "./where";
+import { emptyHome, emptyWork, popIndexOf, linkHome, linkWork, moveHome, unlinkHome, unlinkWork, moveSatisfactionPeople, type PopIndex } from "./where";
 
 /** Set in `flags` for a live pop. */
 export const POP_ALIVE = 1;
 
 /** A pop's workplace when it has none. */
 export const NO_WORK = -1;
+
+/** A pop's home while it waits in the queue of displaced pops (M3-12). */
+export const NO_HOME = -1;
 
 /** The levels of education and of wealth, as a pop stores them: 0 low, 1 medium, 2 high. */
 export const POP_LEVELS = 3;
@@ -49,7 +57,7 @@ export const SATISFACTION_MAX = 100;
 export interface PopState {
   /** POP_ALIVE for a live id, 0 for a free one. */
   flags: Uint8Array;
-  /** The building it lives in. */
+  /** The building it lives in, or NO_HOME while it waits in `displaced`. */
   home: Int32Array;
   /** The building it works in, or NO_WORK. */
   work: Int32Array;
@@ -92,6 +100,13 @@ export interface PopState {
    */
   leaveScore: number;
   leaveAtScore: number;
+  /**
+   * The pops whose homes were removed, waiting for a new one, first in
+   * line first (M3-12, displaced.ts). Each has home NO_HOME. State, so a
+   * city saved with pops in the queue places the same pops in the same
+   * homes.
+   */
+  displaced: Int32Array;
 }
 
 /** `leaveScore` on a day nobody is sent away by the residential bar. */
@@ -135,6 +150,7 @@ export function createPops(): PopState {
     owed: 0,
     leaveScore: NO_LEAVING,
     leaveAtScore: 0,
+    displaced: new Int32Array(0),
   };
 }
 
@@ -321,10 +337,61 @@ export function addPop(state: SimState, spec: NewPop): number {
   return id;
 }
 
-/** Removes pop `id`, freeing its home's room and its job. Its row becomes zeros and its id goes on the free list. */
+/**
+ * Removes pop `id`, freeing its home's room and its job. Its row becomes
+ * zeros and its id goes on the free list. A pop with no home leaves the
+ * queue of displaced pops too.
+ */
 export function removePop(state: SimState, id: number): void {
   const p = state.pops;
   if (!isPop(p, id)) throw new RangeError(`pop ${id} does not exist`);
+  if (p.home[id] === NO_HOME) p.displaced = withoutEntry(p.displaced, id);
+  clearPop(state, id);
+  const free = resized(p.free, p.free.length + 1);
+  free[p.free.length] = id;
+  p.free = free;
+}
+
+/**
+ * `queue` without its one entry `id`, in the same order. Two copies of the
+ * parts either side, not a filter: satisfaction and turnover can send the
+ * pops of a long queue away one at a time (issue #306).
+ */
+function withoutEntry(queue: Int32Array, id: number): Int32Array {
+  const at = queue.indexOf(id);
+  if (at < 0) return queue;
+  const out = new Int32Array(queue.length - 1);
+  out.set(queue.subarray(0, at));
+  out.set(queue.subarray(at + 1), at);
+  return out;
+}
+
+/**
+ * Removes pops `ids`, each with no home and none of them in the queue of
+ * displaced pops, as `removePop` would one at a time, with one growth of
+ * the free list: the placing of displaced pops takes its batch off the
+ * queue first, and sends away those it finds no room for together
+ * (displaced.ts). Throws, changing nothing, if any is not a live pop with
+ * no home or is named twice. That none is in the queue is the caller's to
+ * keep: checking would cost a pass over the queue every tick it drains.
+ */
+export function removeHomelessPops(state: SimState, ids: readonly number[]): void {
+  const p = state.pops;
+  const named = new Set<number>();
+  for (const id of ids) {
+    if (!isPop(p, id) || p.home[id] !== NO_HOME || named.has(id)) throw new RangeError(`pop ${id} is not a pop with no home, named once`);
+    named.add(id);
+  }
+  if (ids.length === 0) return;
+  for (const id of ids) clearPop(state, id);
+  const free = resized(p.free, p.free.length + ids.length);
+  free.set(ids, p.free.length);
+  p.free = free;
+}
+
+/** Takes live pop `id` out of the index and the totals and clears its row, leaving the free list to the caller. */
+function clearPop(state: SimState, id: number): void {
+  const p = state.pops;
   const index = popIndexOf(state);
   const work = p.work[id] ?? NO_WORK;
   uncount(state, id, work, NO_WORK);
@@ -332,9 +399,6 @@ export function removePop(state: SimState, id: number): void {
   unlinkHome(index, p, id);
   if (work !== NO_WORK) countFilled(state, work, 1);
   clearRow(p, id);
-  const free = resized(p.free, p.free.length + 1);
-  free[p.free.length] = id;
-  p.free = free;
 }
 
 function clearRow(p: PopState, id: number): void {
@@ -374,8 +438,9 @@ function livePop(state: SimState, id: number): PopIndex {
 }
 
 /**
- * Sets pop `id`'s size. Throws, changing nothing, if the new size is past
- * the cap for its home's density, its home has no room for it, or its
+ * Sets pop `id`'s size. Throws, changing nothing, if it has no home
+ * (M3-12), the new size is past the cap for its home's density, its home
+ * has no room for it, or its
  * workplace has too few jobs for the workers it then has. A pop left with
  * nobody who works loses its job.
  */
@@ -383,6 +448,7 @@ export function setPopSize(state: SimState, id: number, size: number): void {
   const index = livePop(state, id);
   const p = state.pops;
   const home = p.home[id] ?? 0;
+  if (home === NO_HOME) throw new RangeError(`pop ${id} has no home, so its size waits until it finds one`);
   const old = p.size[id] ?? 0;
   checkHomeRoom(state, home, size, (index.people[home] ?? 0) - old);
   const work = p.work[id] ?? NO_WORK;
@@ -415,6 +481,7 @@ export function setPopHousehold(state: SimState, id: number, size: number, child
   const education = p.education[id] ?? 0;
   checkProfile({ education, wealth: p.wealth[id] ?? 0, children });
   const home = p.home[id] ?? 0;
+  if (home === NO_HOME) throw new RangeError(`pop ${id} has no home, so its household waits until it finds one`);
   const old = p.size[id] ?? 0;
   checkHomeRoom(state, home, size, (index.people[home] ?? 0) - old);
   const work = p.work[id] ?? NO_WORK;
@@ -514,25 +581,53 @@ export function setPopDaysLow(state: SimState, id: number, days: number): void {
 }
 
 /**
- * Removes the pops who live in buildings `ids` and takes the jobs of those
- * who work in them, so state never names a building that is gone. The
- * building module calls it before it clears the rows. M3-12 replaces this
- * with displacement. Free when the city has no pops.
+ * Displaces the pops who live in buildings `ids` and takes the jobs of
+ * those who work in them, so state never names a building that is gone
+ * (M3-12). Each resident's home becomes NO_HOME and it joins the end of the
+ * queue of displaced pops, by building and then pop id as given, so the
+ * queue reads the same on every machine. It keeps its job unless that was
+ * in one of `ids` too, and its people stay in the population. The
+ * building module calls it before it clears the rows. Free when the city
+ * has no pops.
  */
-export function removeBuildingPops(state: SimState, ids: readonly number[]): void {
+export function displaceBuildingPops(state: SimState, ids: readonly number[]): void {
   if (popCount(state.pops) === 0) return;
   const index = popIndexOf(state);
   const p = state.pops;
+  const queued: number[] = [];
   for (const building of ids) {
-    countFilled(state, building, -1);
-    for (let pop = index.workHead[building] ?? -1; pop >= 0; pop = index.workHead[building] ?? -1) {
-      countPop(state, pop, -1);
-      unlinkWork(index, p, pop);
-      p.work[pop] = NO_WORK;
-      countPop(state, pop, 1);
+    if ((index.workHead[building] ?? -1) >= 0) {
+      countFilled(state, building, -1);
+      // Only its workers' employment moves: the building's jobs filled are already out of the totals.
+      countEmployment(state, emptyWork(index, p, building), -1);
     }
-    for (let pop = index.homeHead[building] ?? -1; pop >= 0; pop = index.homeHead[building] ?? -1) removePop(state, pop);
+    // Only the residents of the home's density move in the totals: its pops are still the city's people.
+    const people = index.people[building] ?? 0;
+    if (people > 0) countHomeDensity(state, building, -people);
+    emptyHome(index, p, building, queued);
   }
+  if (queued.length === 0) return;
+  const queue = resized(p.displaced, p.displaced.length + queued.length);
+  queue.set(queued, p.displaced.length);
+  p.displaced = queue;
+}
+
+/**
+ * Moves pop `id`, which has no home, into building `home` (M3-12). It
+ * keeps its size, profile, satisfaction and job. Throws, changing nothing,
+ * if the pop has a home already, the building is not a live home, its
+ * size is past the cap for the home's density, or the home has no room
+ * for it. The caller takes it off the queue of displaced pops.
+ */
+export function rehomePop(state: SimState, id: number, home: number): void {
+  const index = livePop(state, id);
+  const p = state.pops;
+  if (p.home[id] !== NO_HOME) throw new RangeError(`pop ${id} has a home`);
+  if (!isBuilding(state.buildings, home) || (state.buildings.residents[home] ?? 0) <= 0) throw new RangeError(`building ${home} is not a home`);
+  if (isAbandoned(state.buildings, home)) throw new RangeError(`building ${home} is abandoned`);
+  checkHomeRoom(state, home, p.size[id] ?? 0, index.people[home] ?? 0);
+  moveHome(index, p, id, home);
+  countHomeDensity(state, home, p.size[id] ?? 0);
 }
 
 // --- Loading -----------------------------------------------------------------
@@ -540,8 +635,9 @@ export function removeBuildingPops(state: SimState, ids: readonly number[]): voi
 /**
  * Why `value` is not a well-formed set of pops for `buildings`, or null if
  * it is. For loading a save: every id live or free, never both, a free
- * id's row all zeros, every live pop in a live home with at least one
- * person and its fields in range, working nowhere or at a live building
+ * id's row all zeros, every live pop in a live home, or with no home and
+ * in the queue of displaced pops, which names each live pop at most once,
+ * with at least one person and its fields in range, working nowhere or at a live building
  * with jobs, no home holding more people than its stored room, the
  * sweep's limit within the ids handed out, the plan of arrivals a whole
  * number of 0 or below, and the plan of departures a score to leave at, or
@@ -559,8 +655,9 @@ export function checkPops(value: unknown, buildings: BuildingState): string | nu
   for (const [key, Type] of Object.entries(ARRAY_TYPES)) {
     if (!(raw[key] instanceof Type)) return `${key} is not a ${Type.name}`;
   }
-  const numbers = ["sweep", "owed", "leaveScore", "leaveAtScore"];
-  const extra = Object.keys(raw).find((key) => !(key in ARRAY_TYPES) && !numbers.includes(key));
+  if (!(raw["displaced"] instanceof Int32Array)) return "displaced is not an Int32Array";
+  const others = ["sweep", "owed", "leaveScore", "leaveAtScore", "displaced"];
+  const extra = Object.keys(raw).find((key) => !(key in ARRAY_TYPES) && !others.includes(key));
   if (extra !== undefined) return `it has an unknown field "${extra}"`;
   const p = raw as unknown as PopState;
   const limit = p.flags.length;
@@ -574,6 +671,11 @@ export function checkPops(value: unknown, buildings: BuildingState): string | nu
     if (id < 0 || id >= limit || seen[id] || isPop(p, id)) return "its free list is malformed";
     seen[id] = 1;
   }
+  const waiting = new Uint8Array(limit);
+  for (const id of p.displaced) {
+    if (id < 0 || id >= limit || waiting[id] || !isPop(p, id)) return "its queue of displaced pops names a pop twice or one that does not exist";
+    waiting[id] = 1;
+  }
   const people = new Float64Array(buildings.flags.length);
   for (let id = 0; id < limit; id++) {
     const flags = p.flags[id] ?? 0;
@@ -584,14 +686,15 @@ export function checkPops(value: unknown, buildings: BuildingState): string | nu
       continue;
     }
     const home = p.home[id] ?? 0;
-    if (!isBuilding(buildings, home) || (buildings.residents[home] ?? 0) <= 0) return `pop ${id} lives in a building that is not a home`;
-    if (isAbandoned(buildings, home)) return `pop ${id} lives in an abandoned building`;
+    if ((home === NO_HOME) !== (waiting[id] === 1)) return `pop ${id} has no home and is not in the queue of displaced pops, or is in it with a home`;
+    if (home !== NO_HOME && (!isBuilding(buildings, home) || (buildings.residents[home] ?? 0) <= 0)) return `pop ${id} lives in a building that is not a home`;
+    if (home !== NO_HOME && isAbandoned(buildings, home)) return `pop ${id} lives in an abandoned building`;
     const size = p.size[id] ?? 0;
     if (size < 1) return `pop ${id} has nobody in it`;
     if ((p.education[id] ?? 0) >= POP_LEVELS || (p.wealth[id] ?? 0) >= POP_LEVELS) return `pop ${id} has a bad education or wealth`;
     if ((p.children[id] ?? 0) > 1) return `pop ${id} has a bad children flag`;
     if ((p.satisfaction[id] ?? 0) > SATISFACTION_MAX) return `pop ${id} is past the highest satisfaction`;
-    people[home] = (people[home] ?? 0) + size;
+    if (home !== NO_HOME) people[home] = (people[home] ?? 0) + size;
     const work = p.work[id] ?? NO_WORK;
     if (work === NO_WORK) continue;
     if (!isBuilding(buildings, work) || buildingJobs(buildings, work) <= 0) return `pop ${id} works at a building with no jobs`;

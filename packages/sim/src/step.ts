@@ -1,6 +1,7 @@
 import { GROWER } from "./buildings/grower";
 import { POPS } from "./pops/sweep";
 import { ARRIVALS } from "./pops/arrivals";
+import { DISPLACED } from "./pops/displaced";
 import { JOBS } from "./pops/matching";
 import { SATISFACTION } from "./pops/satisfaction";
 import { TURNOVER } from "./pops/turnover";
@@ -27,7 +28,8 @@ export interface System {
  * new year, and a month's sample is the city as the month opens. Demand
  * comes next, so every system that acts on the bars reads the day's. The pops'
  * sweep comes after it, so every system after it reads the day's slice.
- * Arrivals come after the sweep, so a pop that arrives waits for the next
+ * Displaced pops find homes next, in the tick that removed theirs and
+ * before newcomers take the room (M3-12). Arrivals come after them, so a pop that arrives waits for the next
  * day's, and before the grower, which holds new homes back while there is
  * room in standing ones. Turnover comes after arrivals and before job
  * matching, so a household that replaces another looks for work the same
@@ -42,7 +44,7 @@ export interface System {
  * keeps the city centre before the grower builds, so a building grown on
  * the first tick of a month sees the month's centre.
  */
-export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, GROWER];
+export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, DISPLACED, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";

@@ -17,7 +17,7 @@ import { buildingIdLimit } from "../buildings/buildings";
 import type { SimState } from "../state";
 import { notePopBuilding } from "./changes";
 import { noteOpening } from "./opening-changes";
-import { NO_WORK, POP_ALIVE, POP_LEVELS, SATISFACTION_MAX, popWorkers, type PopState } from "./pops";
+import { NO_HOME, NO_WORK, POP_ALIVE, POP_LEVELS, SATISFACTION_MAX, popWorkers, type PopState } from "./pops";
 
 const NONE = -1;
 
@@ -104,8 +104,10 @@ function buildIndex(state: SimState): PopIndex {
   for (let id = p.flags.length - 1; id >= 0; id--) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0) continue;
     const home = p.home[id] ?? 0;
-    pushFront(index.homeHead, index.homeTail, index.homeNext, index.homePrev, home, id);
-    index.people[home] = (index.people[home] ?? 0) + (p.size[id] ?? 0);
+    if (home !== NO_HOME) {
+      pushFront(index.homeHead, index.homeTail, index.homeNext, index.homePrev, home, id);
+      index.people[home] = (index.people[home] ?? 0) + (p.size[id] ?? 0);
+    }
     moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, p.size[id] ?? 0);
     const work = p.work[id] ?? NO_WORK;
     if (work === NO_WORK) continue;
@@ -178,23 +180,106 @@ export function popIndexOf(state: SimState): PopIndex {
   return index;
 }
 
-/** Files live pop `id` under its home and adds its people there. */
+/**
+ * Files live pop `id` under its home and adds its people there, and to the
+ * city's people by satisfaction. A pop with no home, displaced and waiting
+ * for one (M3-12), is filed under no building but still counts by
+ * satisfaction, since it is still one of the city's people.
+ */
 export function linkHome(index: PopIndex, p: PopState, id: number): void {
   fit(index, 0, p.flags.length);
   const home = p.home[id] ?? 0;
+  moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, p.size[id] ?? 0);
+  if (home === NO_HOME) return;
   insertSorted(index.homeHead, index.homeTail, index.homeNext, index.homePrev, home, id);
   index.people[home] = (index.people[home] ?? 0) + (p.size[id] ?? 0);
-  moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, p.size[id] ?? 0);
   notePopBuilding(p, home);
 }
 
-/** Takes live pop `id` off its home's list and its people out of the count. */
+/** Takes live pop `id` off its home's list and its people out of the counts `linkHome` adds them to. */
 export function unlinkHome(index: PopIndex, p: PopState, id: number): void {
   const home = p.home[id] ?? 0;
+  moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, -(p.size[id] ?? 0));
+  if (home === NO_HOME) return;
   unlink(index.homeHead, index.homeTail, index.homeNext, index.homePrev, home, id);
   index.people[home] = (index.people[home] ?? 0) - (p.size[id] ?? 0);
-  moveSatisfactionPeople(index, p.satisfaction[id] ?? 0, -(p.size[id] ?? 0));
   notePopBuilding(p, home);
+}
+
+/**
+ * Moves live pop `id` out of its home's list and its people out of the
+ * home's count, and sets its home to `home`, filing it there unless that
+ * is NO_HOME: for a pop displaced or placed again (M3-12). Its people stay
+ * at their score, since it stays one of the city's people.
+ */
+export function moveHome(index: PopIndex, p: PopState, id: number, home: number): void {
+  const was = p.home[id] ?? 0;
+  const size = p.size[id] ?? 0;
+  if (was !== NO_HOME) {
+    unlink(index.homeHead, index.homeTail, index.homeNext, index.homePrev, was, id);
+    index.people[was] = (index.people[was] ?? 0) - size;
+    notePopBuilding(p, was);
+  }
+  p.home[id] = home;
+  if (home === NO_HOME) return;
+  insertSorted(index.homeHead, index.homeTail, index.homeNext, index.homePrev, home, id);
+  index.people[home] = (index.people[home] ?? 0) + size;
+  notePopBuilding(p, home);
+}
+
+/**
+ * Moves every pop out of `home`, as `moveHome` to NO_HOME does each, first
+ * in its list first, and adds them to `out` in that order. One walk down
+ * the list and one note for the building, for a bulldoze of thousands of
+ * homes (issue #306).
+ */
+export function emptyHome(index: PopIndex, p: PopState, home: number, out: number[]): void {
+  const { homeHead, homeTail, homeNext, homePrev, people } = index;
+  let id = homeHead[home] ?? NONE;
+  if (id === NONE) return;
+  let left = people[home] ?? 0;
+  while (id !== NONE) {
+    const after = homeNext[id] ?? NONE;
+    left -= p.size[id] ?? 0;
+    p.home[id] = NO_HOME;
+    homeNext[id] = NONE;
+    homePrev[id] = NONE;
+    out.push(id);
+    id = after;
+  }
+  homeHead[home] = NONE;
+  homeTail[home] = NONE;
+  people[home] = left;
+  notePopBuilding(p, home);
+}
+
+/**
+ * Takes every pop off workplace `work`'s list and sets its work to NO_WORK,
+ * as `unlinkWork` and then the write of NO_WORK do each, and returns their
+ * workers added up. One walk and one note of each kind for the building.
+ */
+export function emptyWork(index: PopIndex, p: PopState, work: number): number {
+  const { workHead, workTail, workNext, workPrev, filled, filledByEducation } = index;
+  let id = workHead[work] ?? NONE;
+  if (id === NONE) return 0;
+  let all = 0;
+  while (id !== NONE) {
+    const after = workNext[id] ?? NONE;
+    const workers = popWorkers(p, id);
+    all += workers;
+    filled[work] = (filled[work] ?? 0) - workers;
+    const at = work * POP_LEVELS + Math.min(POP_LEVELS - 1, p.education[id] ?? 0);
+    filledByEducation[at] = (filledByEducation[at] ?? 0) - workers;
+    p.work[id] = NO_WORK;
+    workNext[id] = NONE;
+    workPrev[id] = NONE;
+    id = after;
+  }
+  workHead[work] = NONE;
+  workTail[work] = NONE;
+  notePopBuilding(p, work);
+  noteOpening(p, work);
+  return all;
 }
 
 /** Adds `people` to the count at satisfaction `score`, or takes them away when negative. pops.ts calls it around every change of a pop's size or score. */

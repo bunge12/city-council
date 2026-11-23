@@ -1,8 +1,8 @@
 // Pop numbers from `balance/pops.json`, checked when the module loads
 // (M3-01, PRD "M3 Demand" and "Turnover"). Pops in state (M3-03) read the
 // size cap and the worker shares; newcomers read the newcomer mix in M3-08,
-// satisfaction reads `satisfaction` in M3-10 and turnover reads `turnover`
-// in M3-11.
+// satisfaction reads `satisfaction` in M3-10, turnover reads `turnover`
+// in M3-11 and displacement reads `displacedPerTick` in M3-12.
 
 import balance from "../../balance/pops.json" with { type: "json" };
 import { EDUCATION_LEVELS, type EducationShares } from "../buildings/balance";
@@ -13,12 +13,12 @@ import { ZONING_BALANCE } from "../zoning/balance";
 export interface PopsBalance {
   /** The most people in one pop, for a home of density 1, 2 and 3 in order. */
   popSizeCap: number[];
+  /** The most displaced pops placed in new homes in one tick; the rest wait in the queue (M3-12). */
+  displacedPerTick: number;
   /** Who moves to the city. */
   newcomer: {
     /** The share of newcomers at each education level. */
     education: EducationShares;
-    /** The share of newcomers at each wealth level, low, medium and high like education. Adds to 1. */
-    wealth: EducationShares;
     /** The share of newcomers with children. */
     childrenShare: number;
     /** For a home of density 1, 2 and 3 in order: the least and most people in a newcomer household (M3-08). */
@@ -58,7 +58,7 @@ export const POP_SIZE_LIMIT = 255;
 /** The most `satisfaction.leaveAfterDays` may be: a pop's days below the threshold are a byte in state (pops.ts). */
 export const DAYS_LOW_LIMIT = 255;
 
-const TOP = ["popSizeCap", "newcomer", "workerShare", "satisfaction", "turnover"];
+const TOP = ["popSizeCap", "displacedPerTick", "newcomer", "workerShare", "satisfaction", "turnover"];
 
 /** Every problem with a pops balance file, or none. A missing field is a problem, and so is a share out of 0 to 1. */
 export function checkPopsBalance(data: unknown): string[] {
@@ -78,11 +78,16 @@ export function checkPopsBalance(data: unknown): string[] {
     } else capsOk = true;
   }
 
+  if ("displacedPerTick" in data) {
+    const problem = numberProblem(data, "displacedPerTick", { min: 1, whole: true }, "");
+    if (problem) errors.push(problem);
+  }
+
   if ("newcomer" in data) {
     const n = data["newcomer"];
     if (!isRecord(n)) errors.push("newcomer must be an object");
     else {
-      for (const key of ["education", "wealth"]) {
+      for (const key of ["education"]) {
         if (!(key in n)) errors.push(`newcomer.${key} is missing`);
         else errors.push(...shareProblems(n[key], EDUCATION_LEVELS, `newcomer.${key}`));
       }
@@ -93,7 +98,7 @@ export function checkPopsBalance(data: unknown): string[] {
       const s = n["satisfaction"];
       if (!("satisfaction" in n)) errors.push("newcomer.satisfaction is missing");
       else if (!Number.isSafeInteger(s) || (s as number) < 0 || (s as number) > 100) errors.push("newcomer.satisfaction must be a whole number from 0 to 100");
-      errors.push(...unknownKeys(n, ["education", "wealth", "childrenShare", "size", "satisfaction"], "newcomer"));
+      errors.push(...unknownKeys(n, ["education", "childrenShare", "size", "satisfaction"], "newcomer"));
     }
   }
 
