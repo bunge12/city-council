@@ -35,7 +35,7 @@ import type { SimState } from "../state";
 import { syncCells, type Column } from "../zoning/cell-index";
 import { CELL_LEFT, CELL_RIGHT, placesAlong } from "../zoning/cells";
 import { BUILDING_TYPES } from "./balance";
-import { noteColumns } from "./candidates";
+import { noteAddedColumns } from "./candidates";
 import { noteBuildingChanged } from "./changes";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { displaceBuildingPops } from "../pops/pops";
@@ -339,10 +339,10 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   return id;
 }
 
-/** Tells the grower's candidates (candidates.ts) that the front cells of a lot gained or lost a building. */
+/** Tells the grower's candidates (candidates.ts) that the front cells of a lot gained a building. */
 function noteLotFronts(state: SimState, first: Column, width: number): void {
   const cols = lotColumns(syncCells(state), first, width);
-  if (cols) noteColumns(state, cols);
+  if (cols) noteAddedColumns(state, cols);
 }
 
 /**

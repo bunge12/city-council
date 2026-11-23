@@ -1,5 +1,5 @@
 {
-  "_about": "Land value (PRD, \"Land value\"; M3-13). A zoning cell's value is `base` plus four parts, held between 0 and 100: road access, distance to water, distance to the city centre, and pollution from industry, which subtracts. Every part is a whole number of points. `roadAccess` gives the points a cell takes from the type of the road it fronts, one entry for each zonable road type in roads.json. `water` and `centre` each give `points` within `near` metres, nothing from `far` metres on, and fall in a straight line between, rounded down: no curve, so two machines agree (CLAUDE.md rule 6). Water distance is measured to the nearest water sample of the terrain, and a `far` of more than 1,000 m is refused, since the distance map searches that far around every sample. The centre is the middle of the city's jobs, recomputed on the first tick of each game month, or the middle of its homes while it has no jobs; a city with neither has no centre, and every cell takes 0 from it. `industry` has one entry for each industrial density, 1 to 3: each industrial building takes `strength` points off the ground at its lot's centre, falling in a straight line to nothing at `radius` metres, rounded down, and the takes of several buildings add up to at most `maxPollution`. Pollution is counted on squares `squareSize` metres a side, and a cell reads the square its centre is in. Every value here is a starting value with no source behind it, to tune in M3-21. No prices here, so no source years.",
+  "_about": "Land value (PRD, \"Land value\"; M3-13). A zoning cell's value is `base` plus four parts, held between 0 and 100: road access, distance to water, distance to the city centre, and pollution from industry, which subtracts. Every part is a whole number of points. `roadAccess` gives the points a cell takes from the type of the road it fronts, one entry for each zonable road type in roads.json. `water` and `centre` each give `points` within `near` metres, nothing from `far` metres on, and fall in a straight line between, rounded down: no curve, so two machines agree (CLAUDE.md rule 6). Water distance is measured to the nearest water sample of the terrain, and a `far` of more than 1,000 m is refused, since the distance map searches that far around every sample. The centre is the middle of the city's jobs, recomputed on the first tick of each game month, or the middle of its homes while it has no jobs; a city with neither has no centre, and every cell takes 0 from it. `industry` has one entry for each industrial density, 1 to 3: each industrial building takes `strength` points off the ground at its lot's centre, falling in a straight line to nothing at `radius` metres, rounded down, and the takes of several buildings add up to at most `maxPollution`. Pollution is counted on squares `squareSize` metres a side, and a cell reads the square its centre is in. `newcomers` is how land value shapes who moves in (M3-25): a newcomer household's home is drawn among the homes with room, each weighted by its value less `homeWeightFrom` and at least 1, and its wealth is drawn with the `wealth` band for that value, the last whose `from` is at or below it; the shares in a band add to 1. A home's value is the value at its lot's centre, fronting the road of its first cell. Both arrivals and replaced households draw this way. Every value here is a starting value with no source behind it, to tune in M3-21. No prices here, so no source years.",
   "base": 30,
   "roadAccess": { "street": 10, "avenue": 15, "oneWay": 12 },
   "water": { "points": 25, "near": 48, "far": 400 },
@@ -10,5 +10,14 @@
     { "strength": 40, "radius": 400 }
   ],
   "maxPollution": 60,
-  "squareSize": 32
+  "squareSize": 32,
+  "newcomers": {
+    "homeWeightFrom": 20,
+    "wealth": [
+      { "from": 0, "low": 0.5, "medium": 0.4, "high": 0.1 },
+      { "from": 50, "low": 0.3, "medium": 0.5, "high": 0.2 },
+      { "from": 65, "low": 0.15, "medium": 0.5, "high": 0.35 },
+      { "from": 80, "low": 0.05, "medium": 0.45, "high": 0.5 }
+    ]
+  }
 }

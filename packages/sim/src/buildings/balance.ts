@@ -41,8 +41,6 @@ export interface BuildingsBalance {
   maxThroughLotWidth: number;
   /** The most buildings the grower adds a day, every zone together, which keeps its ticks inside the budget. */
   growthPerDayMax: number;
-  /** Free cells the grower draws for one building before it gives that building up. */
-  growthTries: number;
   /** The most buildings one `BulldozeBuilding` may name (M2-11). */
   bulldozeMaxBuildings: number;
   /** For each kind of job, the share of its jobs at each education level (M3-01). */
@@ -160,8 +158,6 @@ export function checkBuildingsBalance(data: unknown): string[] {
   const widestThrough = throughOk ? (maxThrough as number) : 0;
   const perDayMax = data["growthPerDayMax"];
   if (!Number.isSafeInteger(perDayMax) || (perDayMax as number) < 1) errors.push("growthPerDayMax must be a whole number of at least 1");
-  const tries = data["growthTries"];
-  if (!Number.isSafeInteger(tries) || (tries as number) < 1) errors.push("growthTries must be a whole number of at least 1");
   const most = data["bulldozeMaxBuildings"];
   if (!Number.isSafeInteger(most) || (most as number) < 1) errors.push("bulldozeMaxBuildings must be a whole number of at least 1");
   errors.push(...jobShareProblems(data));

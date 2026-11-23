@@ -53,6 +53,7 @@ import type { SimState } from "../state";
 import type { System } from "../step";
 import { noteYear } from "../stats/stats";
 import { drawProfile, drawSize } from "./arrivals";
+import { buildingValue } from "../landvalue/land-value";
 import { POPS_BALANCE } from "./balance";
 import { BUILDING_TYPES } from "../buildings/balance";
 import { homeRoom } from "../buildings/buildings";
@@ -120,7 +121,7 @@ function replace(state: SimState, id: number): void {
   if (room === 0 || !homeReachesOutside(state, home)) return;
   const rng = state.rng;
   const size = drawSize(rng, state.buildings.density[home] ?? 1, room);
-  const profile = drawProfile(rng);
+  const profile = drawProfile(rng, buildingValue(state, home));
   // The id just freed is the last on the free list, so the newcomer takes it.
   addPop(state, { home, size, ...profile, satisfaction: POPS_BALANCE.newcomer.satisfaction });
   noteYear(state, "arrivals", size);

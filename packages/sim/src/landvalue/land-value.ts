@@ -24,15 +24,17 @@
 // where each lot is.
 
 import { TIME_BALANCE, gameDate } from "../calendar";
-import { jobAndHomeMiddles, pollutionGrid } from "../buildings/where";
+import { isBuilding } from "../buildings/buildings";
+import { jobAndHomeMiddles, lotCentres, pollutionGrid } from "../buildings/where";
+import type { Terrain } from "../terrain/terrain";
 import { ROAD_TYPES } from "../roads/balance";
 import type { SimState } from "../state";
 import type { System } from "../step";
 import { terrainOf } from "../terrain/cache";
 import { cellCorners, cellsSettled } from "../zoning/cell-index";
 import type { CellRef } from "../zoning/cells";
-import { LAND_VALUE_BALANCE, LAND_VALUE_MAX, type Falloff } from "./balance";
-import { pollutionAt } from "./pollution";
+import { LAND_VALUE_BALANCE, LAND_VALUE_MAX, falloff } from "./balance";
+import { pollutionAt, pollutionSide } from "./pollution";
 import { waterDistanceAt } from "./water";
 
 /** Name the timer hook reports for the land value system. */
@@ -75,12 +77,7 @@ export function updateCentre(state: SimState): void {
 /** The land value system: keeps the city centre. Values themselves are worked out when asked for. */
 export const LAND_VALUE: System = { name: LAND_VALUE_SYSTEM, run: updateCentre };
 
-/** `f.points` within `f.near` of `distance`, none from `f.far` on, a straight line between, rounded down. */
-export function falloff(f: Falloff, distance: number): number {
-  if (distance <= f.near) return f.points;
-  if (distance >= f.far) return 0;
-  return Math.floor((f.points * (f.far - distance)) / (f.far - f.near));
-}
+export { falloff };
 
 /** A cell's value and the parts it is made of, each in whole points. */
 export interface LandValue {
@@ -102,15 +99,85 @@ export interface LandValue {
  * in `ROAD_TYPES`), and its parts. For a cell, `landValueAt`.
  */
 export function landValueAtPoint(state: SimState, x: number, z: number, roadType: number): LandValue {
+  return valueWith(state, terrainOf(state.seed), pollutionGrid(state), x, z, roadType);
+}
+
+/** `landValueAtPoint` with the terrain and the pollution grid looked up already, for a pass over many points. */
+function valueWith(state: SimState, terrain: Terrain, grid: Int32Array, x: number, z: number, roadType: number): LandValue {
   const lv = LAND_VALUE_BALANCE;
   const id = ROAD_TYPES[roadType]?.id;
   const road = id === undefined ? 0 : (lv.roadAccess[id] ?? 0);
-  const water = falloff(lv.water, waterDistanceAt(terrainOf(state.seed), x, z));
+  const water = falloff(lv.water, waterDistanceAt(terrain, x, z));
   const c = state.centre;
   const centre = c.weight > 0 ? falloff(lv.centre, Math.sqrt((x - c.x) * (x - c.x) + (z - c.z) * (z - c.z))) : 0;
-  const pollution = Math.min(lv.maxPollution, Math.max(0, pollutionAt(pollutionGrid(state), x, z)));
+  const pollution = Math.min(lv.maxPollution, Math.max(0, pollutionAt(grid, x, z)));
   const value = Math.min(LAND_VALUE_MAX, Math.max(0, lv.base + road + water + centre - pollution));
   return { value, base: lv.base, road, water, centre, pollution };
+}
+
+/**
+ * The land value of each of the buildings `ids` (M3-25): the value at its
+ * lot's centre, fronting the road of its lot's first cell, as
+ * `landValueAtPoint` gives it. A building whose lot is not there, or no
+ * building, is worth 0. For the arrivals system, which asks of every home
+ * with room on each tick people are due: the building index keeps each
+ * value until its building is filed again, pollution changes within reach
+ * of it or the centre moves (buildings/where.ts), so most are read, not
+ * worked out. Written into `into` when it is long enough, for a caller that
+ * keeps one between ticks rather than make one each.
+ */
+export function buildingValues(state: SimState, ids: readonly number[], into?: Float64Array): Float64Array {
+  const lv = LAND_VALUE_BALANCE;
+  const grid = pollutionGrid(state);
+  const { x, z, water: waterPoints, value: kept, valueCentre } = lotCentres(state);
+  const b = state.buildings;
+  const segType = state.roads.segType;
+  const road = ROAD_TYPES.map((t) => lv.roadAccess[t.id] ?? 0);
+  const c = state.centre;
+  // The values kept are for one centre: a move, once a game month, means working each out again.
+  if (valueCentre.weight !== c.weight || valueCentre.x !== c.x || valueCentre.z !== c.z) {
+    kept.fill(-1);
+    valueCentre.x = c.x;
+    valueCentre.z = c.z;
+    valueCentre.weight = c.weight;
+  }
+  const q = lv.squareSize;
+  const side = pollutionSide();
+  const out = into && into.length >= ids.length ? into : new Float64Array(ids.length);
+  const n = kept.length;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i] as number;
+    // Nearly every home, nearly every tick: a value kept is one for a live building whose lot is there.
+    const known = id >= 0 && id < n ? (kept[id] as number) : -1;
+    if (known >= 0) {
+      out[i] = known;
+      continue;
+    }
+    // Kept by the building index as it files the lot, from the same distance `landValueAtPoint` reads; -1 where the lot is not there.
+    const water = id >= 0 && id < n ? (waterPoints[id] as number) : -1;
+    if (water < 0 || !isBuilding(b, id)) {
+      out[i] = 0;
+      continue;
+    }
+    const px = x[id] as number;
+    const pz = z[id] as number;
+    const centre = c.weight > 0 ? falloff(lv.centre, Math.sqrt((px - c.x) * (px - c.x) + (pz - c.z) * (pz - c.z))) : 0;
+    // `pollutionAt`, inline: this runs over every home with room.
+    const si = Math.floor(px / q);
+    const sj = Math.floor(pz / q);
+    const pol = si < 0 || sj < 0 || si >= side || sj >= side ? 0 : (grid[sj * side + si] as number);
+    const pollution = Math.min(lv.maxPollution, Math.max(0, pol));
+    const points = road[segType[b.firstSeg[id] ?? 0] ?? 0] ?? 0;
+    const v = Math.min(LAND_VALUE_MAX, Math.max(0, lv.base + points + water + centre - pollution));
+    kept[id] = v;
+    out[i] = v;
+  }
+  return out;
+}
+
+/** The land value of building `id`, as `buildingValues` gives it. */
+export function buildingValue(state: SimState, id: number): number {
+  return buildingValues(state, [id])[0] ?? 0;
 }
 
 /**

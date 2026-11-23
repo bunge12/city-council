@@ -323,8 +323,9 @@ export interface CellIndex {
    * What changed for the grower's candidates (buildings/candidates.ts)
    * since it last looked: segments laid out again, the nodes at their ends
    * before and after, and the front cells, at depth 0, of other segments
-   * whose status changed, as `segment * KEY_STRIDE + column`. Null until
-   * the grower first builds its candidates.
+   * whose status changed, as `segment * KEY_STRIDE + column`, and the
+   * columns whose cells behind the front did. Null until the grower first
+   * builds its candidates.
    */
   watch: CellWatch | null;
   /**
@@ -363,6 +364,8 @@ export interface CellWatch {
   segs: Set<number>;
   nodes: Set<number>;
   fronts: Set<number>;
+  /** Columns of other segments with a cell behind the front whose status changed, as `segment * KEY_STRIDE + column` (M3-25). */
+  columns: Set<number>;
 }
 
 // Scratch space. The sim runs on one thread, and no two users of one of
@@ -767,7 +770,10 @@ function setStatus(index: CellIndex, seg: number, s: SegShape, local: number, no
     index.dirty.add(chunkAt(x, z));
   }
   if ((was === CELL_OPEN) !== (now === CELL_OPEN)) fileCell(index, index.openBuckets, seg, s, local, now === CELL_OPEN);
-  if (index.watch && was !== now && local % DEPTH === 0) index.watch.fronts.add(seg * KEY_STRIDE + local / DEPTH);
+  if (index.watch && was !== now) {
+    if (local % DEPTH === 0) index.watch.fronts.add(seg * KEY_STRIDE + local / DEPTH);
+    else index.watch.columns.add(seg * KEY_STRIDE + Math.floor(local / DEPTH));
+  }
   if (index.buildingWatch && was !== now && now !== CELL_OPEN) index.buildingWatch.blocked.add(seg);
 }
 
@@ -1936,6 +1942,20 @@ export function cellCorners(state: SimState, ref: CellRef): number[] | null {
   const q = new Float64Array(8);
   cellQuad(s, (ref.place * 2 + ref.side) * DEPTH + ref.depth, q);
   return Array.from(q);
+}
+
+/**
+ * The corners of the front cell of column `col` (`place * 2 + side`) of
+ * segment `seg` as `index` has it, as `cellCorners` gives them, or null.
+ * Reads the index as it is and settles nothing, for derived data kept
+ * inside a step (buildings/lot-order.ts, M3-25).
+ */
+export function frontCellCornersIn(index: CellIndex, seg: number, col: number): Float64Array | null {
+  const s = index.segs[seg];
+  if (!s?.status || !Number.isInteger(col) || col < 0 || col >= s.places * 2) return null;
+  const q = new Float64Array(8);
+  cellQuad(s, col * DEPTH, q);
+  return q;
 }
 
 /**
