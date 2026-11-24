@@ -408,6 +408,10 @@ async function download(page: Page, info: TestInfo, name: string): Promise<Uint8
 /** Points at building `id` with no tool on and returns the readout's figures and text. */
 async function readout(page: Page, id: number): Promise<Record<string, string>> {
   await noTool(page);
+  const top = await page.evaluate(async (id) => (await window.cityCouncil.view).buildingTop(id), id);
+  if (!top) throw new Error(`building ${id} is not drawn`);
+  await look(page, top.x, top.z, 160);
+  await settleBuilt(page);
   await hoverBuilding(page, id);
   const r = page.locator("#building-readout");
   await expect(r).toBeVisible();
@@ -652,15 +656,11 @@ for (const variant of [
       const house = ofZone(bs, RESIDENTIAL, 1).find((b) => b.people > 0);
       const shop = ofZone(bs, COMMERCIAL).find((b) => b.filled > 0);
       if (!house || !shop) throw new Error("no lived-in house or staffed shop");
-      await look(page, ...stripCell(HOUSES[0] ?? REZONED), 160);
-      await settleBuilt(page);
       const h = await readout(page, house.id);
       expect(h["people"]).toBe(String(house.people));
       expect(h["residents"]).toBe(String(house.residents));
       expect(h["text"]).toContain(`${house.people}/${house.residents} residents`);
       await shot(page, info, dir, "8-house-readout");
-      await look(page, ...stripCell(SHOP_STRIPS[0] ?? REZONED), 160);
-      await settleBuilt(page);
       const s = await readout(page, shop.id);
       expect(s["filled"]).toBe(String(shop.filled));
       const jobs = Number(s["jobs"]);
@@ -676,7 +676,9 @@ for (const variant of [
       const house = ofZone(bs, RESIDENTIAL, 1).find((b) => b.people > 0 && b.people <= room - b.residents);
       if (!house) throw new Error(`no occupied house fits the room left (${room})`);
       const before = await population(page);
-      await look(page, ...stripCell(HOUSES[0] ?? REZONED), 160);
+      const top = await page.evaluate(async (id) => (await window.cityCouncil.view).buildingTop(id), house.id);
+      if (!top) throw new Error(`house ${house.id} is not drawn`);
+      await look(page, top.x, top.z, 160);
       await settleBuilt(page);
       await page.keyboard.press("KeyB");
       await hoverBuilding(page, house.id);
