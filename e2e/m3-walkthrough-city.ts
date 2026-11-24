@@ -26,9 +26,12 @@ import {
   cellAt,
   createState,
   deserialize,
+  isAbandoned,
+  seeBuilding,
   serialize,
   step,
   submit,
+  type BuildingSeen,
   type SimState,
 } from "../packages/sim/src/index";
 import { buildRoads } from "./road-fixtures";
@@ -193,4 +196,64 @@ export function stripOpen(state: SimState, s: Strip, depth: number): { open: num
     }
   }
   return { open, all };
+}
+
+/**
+ * Step 9's abandonment: the town grown with homes, shops and factories,
+ * then every workplace bulldozed and its ground unzoned, and run on until
+ * the first home is about to be abandoned. Returned at the start of that
+ * game day, paused. A home is abandoned after 90 game days vacant while the
+ * residential bar is at or below zero, and in the page the pull from outside
+ * kept refilling the town's homes for over a game year, so the walkthrough
+ * cannot wait for it there.
+ */
+export function abandonmentCity(): { bytes: Uint8Array; bulldozedOnDay: number } {
+  const state = createState(SEED);
+  townRoads(state);
+  for (const piece of ["west", "east"] as const) {
+    zone(state, { z: HOMES, piece, side: "north" }, "residential", 1, 6);
+    zone(state, { z: HOMES, piece, side: "south" }, "residential", 1, 6);
+    zone(state, { z: UPPER, piece, side: "north" }, "residential", 1, 6);
+    // Apartments and towers, so the town grows well past the 500 residents the pull from outside holds a city to: below that the pull refills empty homes faster than they can be abandoned.
+    zone(state, { z: UPPER, piece, side: "south" }, "residential", 3, 5);
+    zone(state, { z: SHORE, piece, side: "north" }, "residential", 2, 4);
+  }
+  for (let d = 0; d < 40; d++) runDay(state);
+  const work: Strip[] = [];
+  for (const piece of ["west", "east"] as const) {
+    work.push({ z: SHOPS, piece, side: "south" }, { z: MAIN, piece, side: "south" });
+    zone(state, { z: SHOPS, piece, side: "south" }, "commercial", 1, 6);
+    zone(state, { z: MAIN, piece, side: "south" }, "industrial", 1, 6);
+    work.push({ z: SHOPS, piece, side: "north" });
+    zone(state, { z: SHOPS, piece, side: "north" }, "office", 2, 5);
+  }
+  for (let d = 0; d < 120; d++) runDay(state);
+  const b = state.buildings;
+  const seen: BuildingSeen[] = [];
+  for (let id = 0; id < b.flags.length; id++) {
+    if (!b.flags[id] || b.zone[id] === 1) continue;
+    const one = seeBuilding(b, id);
+    if (one) seen.push(one);
+  }
+  if (seen.length < 10) throw new Error(`only ${seen.length} workplaces to bulldoze`);
+  if ((state.stats.totals["population"] ?? 0) < 1000) throw new Error(`only ${state.stats.totals["population"]} residents before the bulldoze`);
+  send(state, "BulldozeBuilding", { buildings: seen });
+  for (const strip of work) zone(state, strip, "none", 1, 6);
+  const bulldozedOnDay = Math.floor(state.tick / DAY);
+  while (state.tick % DAY !== 0) step(state);
+  const abandoned = (s: SimState): number => {
+    let n = 0;
+    for (let id = 0; id < s.buildings.flags.length; id++) if (s.buildings.flags[id] && isAbandoned(s.buildings, id)) n++;
+    return n;
+  };
+  for (let d = 0; d < 600; d++) {
+    const dayStart = serialize(state);
+    runDay(state);
+    if (abandoned(state) > 0) {
+      const city = deserialize(dayStart).state;
+      send(city, "SetSpeed", { speed: 0 });
+      return { bytes: serialize(city), bulldozedOnDay };
+    }
+  }
+  throw new Error("no home was abandoned in 600 game days");
 }

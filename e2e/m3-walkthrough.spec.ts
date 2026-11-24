@@ -5,7 +5,7 @@ import { PLAYER_STATE } from "./browser-state";
 import { TIME_BALANCE, YEAR_COUNTS, ZONING_BALANCE, deserialize, hashState, heightAt, generateTerrain, replay } from "../packages/sim/src/index";
 import { MENU_SHIFT } from "./dock";
 import { cityReady, frames, hideNotes, openCity, openSettings, settingsButton, settle } from "./helpers";
-import { HALF, HOMES, MAIN, REZONED, SEED, SHOPS, SHORE, UPPER, X0, X1, XM, fillPoint, redevelopmentCity, stripCell, townCity, type Strip } from "./m3-walkthrough-city";
+import { HALF, HOMES, MAIN, REZONED, SEED, SHOPS, SHORE, UPPER, X0, X1, XM, abandonmentCity, fillPoint, redevelopmentCity, stripCell, townCity, type Strip } from "./m3-walkthrough-city";
 
 // The M3 exit test from docs/milestones/M3.md (issue M3-22), as one
 // walkthrough a player could do by hand, run once on WebGPU (when the
@@ -31,7 +31,10 @@ import { HALF, HOMES, MAIN, REZONED, SEED, SHOPS, SHORE, UPPER, X0, X1, XM, fill
 // Redevelopment in step 11 is a daily draw that took this town game months
 // in Node, so step 11 opens a city built in Node a game day short of the
 // first tower, as the issue's notes ask, in a browser context of its own so
-// the town's saves are untouched. The page still runs the day, and every
+// the town's saves are untouched. Step 9 does the same for abandonment,
+// after the bulldoze, the departures and the vacant homes in the town: the
+// pull from outside refills a town of under 500 residents faster than a
+// home can stand vacant for 90 game days. The page still runs the day, and every
 // check goes through its tools. Screenshots of each step land in
 // walkthrough-screenshots/m3-<backend>/ and are attached to the report.
 
@@ -469,6 +472,9 @@ async function openOn(page: Page, info: TestInfo, city: Parameters<typeof openCi
 let redevelopmentBuilt: ReturnType<typeof redevelopmentCity> | null = null;
 /** Step 11's city, built once per worker. */
 const redevelopment = (): ReturnType<typeof redevelopmentCity> => (redevelopmentBuilt ??= redevelopmentCity());
+let abandonmentBuilt: ReturnType<typeof abandonmentCity> | null = null;
+/** Step 9's abandonment city, built once per worker. */
+const abandonment = (): ReturnType<typeof abandonmentCity> => (abandonmentBuilt ??= abandonmentCity());
 
 for (const variant of [
   { name: "webgpu", query: "" },
@@ -787,30 +793,26 @@ for (const variant of [
       await shot(page, info, dir, "9-workplaces-gone");
       let sawDown = false;
       let low = peak;
-      const seenVacant = new Set<number>();
-      const abandonedAfterVacant = new Set<number>();
+      let vacantIds: number[] = [];
+      const read = async () => {
+        const ids = (await buildings(page)).map((b) => b.id);
+        const uses = await page.evaluate(async (ids) => {
+          const view = await window.cityCouncil.view;
+          return ids.map((id) => view.buildingUse(id));
+        }, ids);
+        return { vacant: ids.filter((_, k) => uses[k] === VACANT), population: await population(page), trend: (await page.locator("#population-trend").getAttribute("data-trend")) ?? "" };
+      };
       await growUntil(
         page,
-        "homes abandoned",
-        async () => {
-          const ids = (await buildings(page)).map((b) => b.id);
-          const uses = await page.evaluate(async (ids) => {
-            const view = await window.cityCouncil.view;
-            return ids.map((id) => view.buildingUse(id));
-          }, ids);
-          for (const [k, u] of uses.entries()) {
-            const id = ids[k] ?? -1;
-            if (u === VACANT) seenVacant.add(id);
-            if (u === ABANDONED && seenVacant.has(id)) abandonedAfterVacant.add(id);
-          }
-          return { vacant: uses.filter((u) => u === VACANT).length, abandoned: uses.filter((u) => u === ABANDONED).length, population: await population(page), trend: (await page.locator("#population-trend").getAttribute("data-trend")) ?? "" };
-        },
-        (v) => v.abandoned >= 2 && sawDown && abandonedAfterVacant.size > 0,
-        40_000,
-        200,
+        "people leaving and homes vacant",
+        read,
+        (v) => v.vacant.length >= 1 && sawDown && v.population < peak,
+        12_000,
+        100,
         (v) => {
           if (v.trend === "down") sawDown = true;
           low = Math.min(low, v.population);
+          vacantIds = v.vacant;
         },
       );
       expect(low).toBeLessThan(peak);
@@ -820,30 +822,44 @@ for (const variant of [
       const crossed = Math.floor(((await page.evaluate(() => window.cityCouncil.mirror.state?.tick)) ?? 0) / YEAR) > Math.floor(yearBefore / YEAR);
       const departed = crossed ? (after.lastYear["departures"] ?? 0) - leftBefore + (after.year["departures"] ?? 0) : (after.year["departures"] ?? 0) - leftBefore;
       expect(departed, "people who left after the workplaces went").toBeGreaterThan(0);
-      // An abandoned and a vacant home, as the readout and the drawing have them.
-      const ids = (await buildings(page)).map((b) => b.id);
-      const uses = await page.evaluate(async (ids) => {
-        const view = await window.cityCouncil.view;
-        return ids.map((id) => ({ id, use: view.buildingUse(id) }));
-      }, ids);
-      const abandoned = uses.find((u) => u.use === ABANDONED);
-      if (!abandoned) throw new Error("no abandoned home");
-      await lookAtTown(page);
-      await settleBuilt(page);
-      const a = await readout(page, abandoned.id);
+      const vacantId = vacantIds[0];
+      if (vacantId === undefined) throw new Error("no vacant home");
+      const v = await readout(page, vacantId);
+      expect(v["use"]).toBe("vacant");
+      expect(v["text"]).toContain("Vacant");
+      // How it looks: the view draws it in its disuse shade (buildingUse), which the screenshot shows.
+      await shot(page, info, dir, "9-vacant");
+      await away(page);
+
+      // Abandonment comes 90 game days of vacancy later, with the residential bar at or below zero. In this town the
+      // pull from outside refills homes while it has under 500 residents, so the wait runs on a city built in Node
+      // the same way, a game day short of its first abandoned home, in a context of its own.
+      const context = await browser.newContext({ ...devices["Desktop Chrome"], viewport: VIEWPORT, storageState: PLAYER_STATE, ...(info.project.use.baseURL ? { baseURL: info.project.use.baseURL } : {}) });
+      const other = await context.newPage();
+      await openOn(other, info, abandonment().bytes, variant, "M3 walkthrough, abandonment");
+      expect((await stats(other)).totals["workersEmployed"]).toBe(0);
+      expect(await bar(other, "residential")).toBeLessThanOrEqual(0);
+      const uses = async () => {
+        const ids = (await buildings(other)).map((b) => b.id);
+        const u = await other.evaluate(async (ids) => {
+          const view = await window.cityCouncil.view;
+          return ids.map((id) => view.buildingUse(id));
+        }, ids);
+        return { vacant: ids.filter((_, k) => u[k] === VACANT), abandoned: ids.filter((_, k) => u[k] === ABANDONED) };
+      };
+      const before = await uses();
+      expect(before.abandoned).toEqual([]);
+      expect(before.vacant.length).toBeGreaterThan(0);
+      const later = await growUntil(other, "a home abandoned", uses, (v) => v.abandoned.length > 0, 2 * DAY, 10);
+      // Each one abandoned stood vacant the day before.
+      for (const id of later.abandoned) expect(before.vacant, `home ${id} was vacant first`).toContain(id);
+      const abandonedId = later.abandoned[0] ?? -1;
+      const a = await readout(other, abandonedId);
       expect(a["use"]).toBe("abandoned");
       expect(a["text"]).toContain("Abandoned");
-      // How it looks: the view draws it in its disuse shade (buildingUse), which the screenshot shows.
-      await shot(page, info, dir, "9-abandoned");
-      const vacant = uses.find((u) => u.use === VACANT);
-      if (vacant) {
-        const v = await readout(page, vacant.id);
-        expect(v["use"]).toBe("vacant");
-        expect(v["text"]).toContain("Vacant");
-        await shot(page, info, dir, "9-vacant");
-      }
-      await away(page);
-      info.annotations.push({ type: "step 9", description: `population ${peak} at its peak, ${low} at its lowest; ${uses.filter((u) => u.use === ABANDONED).length} abandoned, ${uses.filter((u) => u.use === VACANT).length} vacant` });
+      await shot(other, info, dir, "9-abandoned");
+      await context.close();
+      info.annotations.push({ type: "step 9", description: `population ${peak} at its peak, ${low} at its lowest, ${departed} departures; in the abandonment city ${later.abandoned.length} abandoned of ${before.vacant.length} vacant` });
     });
 
     await test.step("12. run some game years at 4x: the statistics panel graphs population over time and lists births, deaths, arrivals and departures per year", async () => {
