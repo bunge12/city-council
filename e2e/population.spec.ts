@@ -349,17 +349,16 @@ test("while six towers fill, the residential bar's tooltip says new homes are wa
 
   await test.step("people move in, and once fewer than six towers are still filling the line goes", async () => {
     await setSpeed(page, 4);
-    // Hovered again each time: the top bar's figures change width as the clock runs, and the bar moves from under a still pointer.
-    const title = async () => {
-      await bar.hover();
-      return (await bar.getAttribute("title")) ?? "";
-    };
-    await expect.poll(title, { timeout: 120_000 }).not.toMatch(waitingLine);
+    // Waits on the copy's count, not the title: the title also drops the line whenever the pointer is off the bar.
+    await expect.poll(() => page.evaluate(() => window.cityCouncil.mirror.homesWaiting()), { timeout: 120_000 }).toBeNull();
     await setSpeed(page, 0);
     const c = await copy(page);
     expect(c.residential.value).toBeGreaterThan(0);
     expect(c.population).toBeGreaterThan(0);
     expect(await page.evaluate(() => window.cityCouncil.mirror.homesWaiting())).toBeNull();
+    // Hovered again: the top bar's figures change width as the clock runs, and the bar moves from under a still pointer.
+    await page.mouse.move(640, 400);
+    await bar.hover();
     await expect(bar).toHaveAttribute("title", formatDemandTitle("residential", c.residential.value, c.residential.parts));
     await attachTooltip(page, testInfo, `${c.population} people in, nothing waiting`);
   });

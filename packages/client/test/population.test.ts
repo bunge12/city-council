@@ -315,6 +315,7 @@ describe("the top bar's tooltips", () => {
     expect(formatHomesWaiting(1)).toBe("New homes waiting: 1 empty place to fill first.");
     expect(formatDemandTitle("residential", 40, { openJobs: 40 }, 3100)).toBe("Residential demand +40. Open jobs +40\nNew homes waiting: 3,100 empty places to fill first.");
     expect(formatDemandTitle("residential", 40, { openJobs: 40 }, null)).toBe("Residential demand +40. Open jobs +40");
+    expect(formatDemandTitle("residential", 0.3, { openJobs: 0.3 }, 3100)).toBe("Residential demand 0. Nothing pushes it either way.");
     expect(formatDemandTitle("residential", 0, { openJobs: 0 }, 3100)).toBe("Residential demand 0. Nothing pushes it either way.");
     expect(formatDemandTitle("residential", -20, { unemployment: -20 }, 3100)).toBe("Residential demand -20. Unemployment -20");
   });

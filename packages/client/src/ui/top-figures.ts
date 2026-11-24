@@ -116,11 +116,11 @@ export function formatHomesWaiting(empty: number): string {
 /**
  * The tooltip on a demand bar: its name and value, then its parts. With
  * `waiting`, the empty places in homes still filling, and the bar above
- * zero, a second line says new homes are held (#330).
+ * zero as shown, rounded, a second line says new homes are held (#330).
  */
 export function formatDemandTitle(bar: DemandBar, value: number | null, parts: Readonly<Record<string, number>> | null, waiting: number | null = null): string {
   if (value === null || parts === null) return `${BAR_NAMES[bar]} demand`;
   const why = formatParts(bar, parts);
   const title = `${BAR_NAMES[bar]} demand ${signed(value)}. ${why === "" ? "Nothing pushes it either way." : why}`;
-  return waiting !== null && value > 0 ? `${title}\n${formatHomesWaiting(waiting)}` : title;
+  return waiting !== null && Math.round(value) > 0 ? `${title}\n${formatHomesWaiting(waiting)}` : title;
 }
