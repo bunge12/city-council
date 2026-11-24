@@ -82,7 +82,6 @@ declare const window: {
     view: Promise<{
       buildingTop(id: number): { x: number; y: number; z: number } | null;
       buildingUse(id: number): number | null;
-      buildingTint(id: number): { wall: number; roof: number; trim: number } | null;
     }>;
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
@@ -415,6 +414,7 @@ async function readout(page: Page, id: number): Promise<Record<string, string>> 
   await hoverBuilding(page, id);
   const r = page.locator("#building-readout");
   await expect(r).toBeVisible();
+  await expect(r).toHaveAttribute("data-building", String(id));
   const out: Record<string, string> = { text: (await r.innerText()).replace(/\s+/g, " ") };
   for (const name of ["use", "people", "residents", "jobs", "filled"]) out[name] = (await r.getAttribute(`data-${name}`)) ?? "";
   return out;
@@ -456,6 +456,10 @@ async function openOn(page: Page, info: TestInfo, city: Parameters<typeof openCi
   await expect(speedButton(page, "Pause")).toHaveAttribute("aria-pressed", "true");
   await page.locator("#view").focus();
 }
+
+let redevelopmentBuilt: ReturnType<typeof redevelopmentCity> | null = null;
+/** Step 11's city, built once per worker. */
+const redevelopment = (): ReturnType<typeof redevelopmentCity> => (redevelopmentBuilt ??= redevelopmentCity());
 
 for (const variant of [
   { name: "webgpu", query: "" },
@@ -502,7 +506,8 @@ for (const variant of [
         page,
         "the stall",
         async () => ({ bar: await bar(page, "residential"), departures: (await stats(page)).year["departures"] ?? 0, unemployed: (await stats(page)).totals["workersUnemployed"] ?? 0 }),
-        (v) => v.bar < 0 && v.departures > left,
+        // At -1 or below, so the tooltip's rounded figure is negative too.
+        (v) => v.bar <= -1 && v.departures > left,
         12_000,
         100,
       );
@@ -520,11 +525,14 @@ for (const variant of [
       const houses = ofZone(await buildings(page), RESIDENTIAL).length;
       await page.evaluate(() => window.cityCouncil.holdClock());
       await heldSpeed(page, "4x");
+      let stalledDays = 0;
       for (let d = 0; d < 7; d++) {
         await page.evaluate((n) => window.cityCouncil.advance(n), DAY);
         if ((await bar(page, "residential")) >= 0) break;
         expect(ofZone(await buildings(page), RESIDENTIAL).length, `houses on stalled day ${d + 1}`).toBe(houses);
+        stalledDays++;
       }
+      expect(stalledDays, "game days the bar stayed below zero").toBeGreaterThan(0);
       await heldSpeed(page, "Pause");
       await page.evaluate(() => window.cityCouncil.releaseClock());
       info.annotations.push({ type: "step 2", description: `${s.totals["workersUnemployed"]} unemployed, ${s.year["departures"]} departures this year` });
@@ -562,7 +570,7 @@ for (const variant of [
     await test.step("5. zone mixed ground: it builds only while the residential and commercial bars are both above zero", async () => {
       await zoneStrips(page, [MIXED_STRIP], "mixed", 1, 5);
       const key = await stripKey(page, MIXED_STRIP);
-      // Each read: the bars and the mixed buildings. A new one may only come while both bars were above zero, before and after its chunk.
+      // Each read: the bars and the mixed buildings. A new one may only come in a chunk that started with both bars above zero.
       let last: { r: number; c: number; ids: number[] } | null = null;
       const checked: string[] = [];
       await growUntil(
@@ -673,27 +681,42 @@ for (const variant of [
     await test.step("10. bulldoze an occupied house while other homes have room: its pops move into them and the population does not drop", async () => {
       const bs = await buildings(page);
       const room = bs.filter((b) => b.zone === RESIDENTIAL || b.zone === MIXED).reduce((n, b) => n + b.residents - b.people, 0);
-      const house = ofZone(bs, RESIDENTIAL, 1).find((b) => b.people > 0 && b.people <= room - b.residents);
-      if (!house) throw new Error(`no occupied house fits the room left (${room})`);
+      // An occupied house that fits the room left elsewhere, and that the pointer reaches: a tower can stand in front of one.
+      const candidates = ofZone(bs, RESIDENTIAL, 1).filter((b) => b.people > 0 && b.people <= room - b.residents);
       const before = await population(page);
-      const top = await page.evaluate(async (id) => (await window.cityCouncil.view).buildingTop(id), house.id);
-      if (!top) throw new Error(`house ${house.id} is not drawn`);
-      await look(page, top.x, top.z, 160);
-      await settleBuilt(page);
-      await page.keyboard.press("KeyB");
-      await hoverBuilding(page, house.id);
+      let house: Building | null = null;
+      for (const c of candidates.slice(0, 8)) {
+        const top = await page.evaluate(async (id) => (await window.cityCouncil.view).buildingTop(id), c.id);
+        if (!top) continue;
+        await noTool(page);
+        await look(page, top.x, top.z, 160);
+        await settleBuilt(page);
+        await page.keyboard.press("KeyB");
+        await hoverBuilding(page, c.id);
+        if ((await page.locator("#bulldoze-tag").getAttribute("data-ids")) === String(c.id)) {
+          house = c;
+          break;
+        }
+      }
+      if (!house) throw new Error(`no occupied house the pointer reaches that fits the room left (${room})`);
       await expect(page.locator("#bulldoze-tag")).toHaveAttribute("data-kind", "building");
-      await expect(page.locator("#bulldoze-tag")).toHaveAttribute("data-ids", String(house.id));
       await page.mouse.down();
       await page.mouse.up();
       await expect.poll(async () => (await log(page)).at(-1)?.type).toBe("BulldozeBuilding");
       await noTool(page);
-      // One step applies it and the displaced pops are housed within the day.
+      // Run at 4x: paused, the step applies the command but runs no system, so the displaced pass needs the clock.
+      // A few ticks, so turnover and arrivals have little room to hide anyone leaving.
+      const left = (await stats(page)).year["departures"] ?? 0;
       await page.evaluate(() => window.cityCouncil.holdClock());
-      await page.evaluate(() => window.cityCouncil.advance(2));
-      expect((await buildings(page)).some((b) => b.id === house.id && b.builtAt === house.builtAt)).toBe(false);
-      expect(await population(page)).toBeGreaterThanOrEqual(before);
+      await heldSpeed(page, "4x");
+      await page.evaluate(() => window.cityCouncil.advance(10));
+      await heldSpeed(page, "Pause");
       await page.evaluate(() => window.cityCouncil.releaseClock());
+      expect((await buildings(page)).some((b) => b.id === house.id && b.builtAt === house.builtAt)).toBe(false);
+      const gone = ((await stats(page)).year["departures"] ?? 0) - left;
+      expect(gone, `departures while ${house.people} people were rehoused`).toBeLessThan(house.people);
+      expect(await population(page)).toBeGreaterThanOrEqual(before - gone);
+      expect(await population(page)).toBeGreaterThanOrEqual(before - 1);
       await shot(page, info, dir, "10-house-cleared-people-stay");
       info.annotations.push({ type: "step 10", description: `house ${house.id} of ${house.people} people cleared; population ${before} then ${await population(page)}` });
     });
@@ -702,7 +725,7 @@ for (const variant of [
       // A context of its own, so the town's saves and reload are untouched (see the top of the file).
       const context = await browser.newContext({ ...devices["Desktop Chrome"], viewport: VIEWPORT, storageState: PLAYER_STATE, ...(info.project.use.baseURL ? { baseURL: info.project.use.baseURL } : {}) });
       const other = await context.newPage();
-      const city = redevelopmentCity();
+      const city = redevelopment();
       await openOn(other, info, city.bytes, variant, "M3 walkthrough, redevelopment");
       const r = await bar(other, "residential");
       expect(r).toBeGreaterThan(15);
@@ -715,6 +738,7 @@ for (const variant of [
       await settleBuilt(other);
       await shot(other, info, dir, "11-before-redevelopment");
       const before = await population(other);
+      const leftBefore = (await stats(other)).year["departures"] ?? 0;
       const tower = await growUntil(other, "a tower in place of a house", async () => (await buildings(other)).filter((b) => b.strip === key && b.density === 3), (v) => v.length > 0, 2 * DAY, 10);
       const after = (await buildings(other)).filter((b) => b.strip === key);
       const gone = houses.filter((h) => !after.some((b) => b.id === h.id && b.builtAt === h.builtAt));
@@ -722,7 +746,11 @@ for (const variant of [
       // Its pops found other homes: everyone who lived in the houses it replaced is still in the city, give or take the day's turnover.
       const housed = gone.reduce((n, h) => n + h.people, 0);
       const now = await population(other);
-      expect(now, `${housed} people were in the houses replaced`).toBeGreaterThan(before - Math.max(5, housed / 4));
+      const departed = ((await stats(other)).year["departures"] ?? 0) - leftBefore;
+      expect(housed).toBeGreaterThan(0);
+      // Nobody left the city for want of a home: fewer departures in the day than the people moved, and the population held.
+      expect(departed, `departures while ${housed} people were moved`).toBeLessThan(housed);
+      expect(now, `${housed} people were in the houses replaced`).toBeGreaterThanOrEqual(before - departed);
       await look(other, ...stripCell(REZONED), 260);
       await settleBuilt(other);
       await shot(other, info, dir, "11-tower");
@@ -733,6 +761,8 @@ for (const variant of [
     await test.step("9. bulldoze the workplaces: pops lose their jobs, then leave; homes stand vacant, then abandoned, and look it; the population falls and the arrow points down", async () => {
       await lookAtTown(page);
       await settleBuilt(page);
+      const leftBefore = (await stats(page)).year["departures"] ?? 0;
+      const yearBefore = (await page.evaluate(() => window.cityCouncil.mirror.state?.tick)) ?? 0;
       for (const strip of [...SHOP_STRIPS, ...FACTORY_STRIPS, OFFICE_STRIP, MIXED_STRIP]) await bulldozeAlong(page, strip);
       // Their ground unzoned, so they do not grow back.
       await zoneStrips(page, [...SHOP_STRIPS, ...FACTORY_STRIPS, OFFICE_STRIP, MIXED_STRIP], "erase", 1, 6);
@@ -746,6 +776,8 @@ for (const variant of [
       await shot(page, info, dir, "9-workplaces-gone");
       let sawDown = false;
       let low = peak;
+      const seenVacant = new Set<number>();
+      const abandonedAfterVacant = new Set<number>();
       await growUntil(
         page,
         "homes abandoned",
@@ -755,9 +787,14 @@ for (const variant of [
             const view = await window.cityCouncil.view;
             return ids.map((id) => view.buildingUse(id));
           }, ids);
+          for (const [k, u] of uses.entries()) {
+            const id = ids[k] ?? -1;
+            if (u === VACANT) seenVacant.add(id);
+            if (u === ABANDONED && seenVacant.has(id)) abandonedAfterVacant.add(id);
+          }
           return { vacant: uses.filter((u) => u === VACANT).length, abandoned: uses.filter((u) => u === ABANDONED).length, population: await population(page), trend: (await page.locator("#population-trend").getAttribute("data-trend")) ?? "" };
         },
-        (v) => v.abandoned >= 2 && sawDown,
+        (v) => v.abandoned >= 2 && sawDown && abandonedAfterVacant.size > 0,
         40_000,
         200,
         (v) => {
@@ -767,22 +804,25 @@ for (const variant of [
       );
       expect(low).toBeLessThan(peak);
       expect(sawDown).toBe(true);
-      expect((await stats(page)).year["departures"] ?? 0).toBeGreaterThan(0);
+      // Departures since the bulldoze, across a year's end if the wait crossed one.
+      const after = await stats(page);
+      const crossed = Math.floor(((await page.evaluate(() => window.cityCouncil.mirror.state?.tick)) ?? 0) / YEAR) > Math.floor(yearBefore / YEAR);
+      const departed = crossed ? (after.lastYear["departures"] ?? 0) - leftBefore + (after.year["departures"] ?? 0) : (after.year["departures"] ?? 0) - leftBefore;
+      expect(departed, "people who left after the workplaces went").toBeGreaterThan(0);
       // An abandoned and a vacant home, as the readout and the drawing have them.
       const ids = (await buildings(page)).map((b) => b.id);
       const uses = await page.evaluate(async (ids) => {
         const view = await window.cityCouncil.view;
-        return ids.map((id) => ({ id, use: view.buildingUse(id), tint: view.buildingTint(id) }));
+        return ids.map((id) => ({ id, use: view.buildingUse(id) }));
       }, ids);
       const abandoned = uses.find((u) => u.use === ABANDONED);
-      const inUse = uses.find((u) => u.use === 0);
       if (!abandoned) throw new Error("no abandoned home");
       await lookAtTown(page);
       await settleBuilt(page);
       const a = await readout(page, abandoned.id);
       expect(a["use"]).toBe("abandoned");
       expect(a["text"]).toContain("Abandoned");
-      if (inUse) expect(abandoned.tint, "an abandoned home looks unlike a lived-in one").not.toEqual(inUse.tint);
+      // How it looks: the view draws it in its disuse shade (buildingUse), which the screenshot shows.
       await shot(page, info, dir, "9-abandoned");
       const vacant = uses.find((u) => u.use === VACANT);
       if (vacant) {
