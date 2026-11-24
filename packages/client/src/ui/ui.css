@@ -789,13 +789,6 @@ kbd {
   gap: 6px;
 }
 
-.build-bar .dock-divider {
-  align-self: stretch;
-  width: 1px;
-  margin: 0 2px;
-  background: var(--line);
-}
-
 .build-bar .dock > .dock-slot > button {
   padding-inline: 10px;
 }

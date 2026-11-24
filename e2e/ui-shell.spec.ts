@@ -275,7 +275,8 @@ test("the controls sit in the corners: overlays top left, settings and stats top
   const dock = await box(page, "#build-bar .dock");
   expect(Math.abs(dock.x + dock.width / 2 - VIEWPORT.width / 2)).toBeLessThanOrEqual(40);
   expect(dock.y + dock.height).toBeGreaterThan(VIEWPORT.height - 80);
-  await expect(page.locator("#build-bar .dock #undo")).toBeVisible();
+  // Undo is Ctrl+Z or Cmd+Z, with no button.
+  await expect(page.locator("#undo")).toHaveCount(0);
 
   const clock = await box(page, "#game-clock");
   expect(clock.x + clock.width).toBeGreaterThan(VIEWPORT.width - 40);

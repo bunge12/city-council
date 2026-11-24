@@ -84,16 +84,13 @@ function MenuGroup({
  * stays short (issue 47). Upgrade is an action in the menu, and the grid is
  * a build mode beside straight, curved and continuous. The bulldozer has its
  * own button beside the road's, with its filters in a menu above it (issue
- * 116). A tool's menu is centred over the dock, and Undo ends the row
- * (issue #332).
+ * 116). A tool's menu is centred over the dock (issue #332). Undo has no
+ * button: it is Ctrl+Z or Cmd+Z.
  */
 export function BuildBar() {
-  const { roadTool, gridTool, editTool, bulldozeTool, zoneTool, undo, mirror } =
+  const { roadTool, gridTool, editTool, bulldozeTool, zoneTool } =
     useServices();
   const ready = useSim((s) => s !== null);
-  const canUndo = useSim(
-    (s) => s?.undo.some((r) => r.playerId === mirror.playerId) ?? false,
-  );
   const undoNote = useUi((s) => s.undoNote);
   const tool = useUi((s) => s.tool);
   const roadType = useUi((s) => s.roadType);
@@ -374,20 +371,6 @@ export function BuildBar() {
             Zone <kbd>K</kbd>
           </button>
         </div>
-        <span className="dock-divider" aria-hidden="true" />
-        <button
-          type="button"
-          id="undo"
-          disabled={!canUndo}
-          title={
-            canUndo
-              ? "Undo your last road or zoning change (Ctrl+Z or Cmd+Z)"
-              : "Nothing to undo"
-          }
-          onClick={() => void undo()}
-        >
-          Undo
-        </button>
       </div>
       {anyPending && (
         <p className="hint" id="build-pending" role="status">
