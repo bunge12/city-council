@@ -56,6 +56,13 @@ function undoDelta(sent: readonly UndoRecord[], now: readonly UndoRecord[]): Und
  */
 export const MAX_CATCH_UP_STEPS = 8;
 
+/**
+ * Most deltas out at once, sent and not yet taken by the client. Two, not
+ * one, so a client that never got a delta still gets the next, sees the gap
+ * in the numbers and asks for a snapshot.
+ */
+export const MAX_DELTAS_OUT = 2;
+
 /** How often the worker calls `pump`, in real milliseconds. */
 export const PUMP_INTERVAL_MS = 10;
 
@@ -97,6 +104,12 @@ export class SimHost {
   private unsentRoads: RoadChanges | null = null;
   /** `seq` of the next delta. */
   private deltaSeq = 0;
+  /**
+   * `seq` of the first delta the client has not said it took. While
+   * `MAX_DELTAS_OUT` are out, the next waits and the steps in between go in
+   * it together.
+   */
+  private ackedSeq = 0;
   private sentTick: number;
   private sentSpeed: number;
   /** The undo history the last delta or snapshot reflected. The sim replaces it on every change. */
@@ -271,6 +284,15 @@ export class SimHost {
       case "requestSnapshot":
         this.sendSnapshot();
         return;
+      case "deltaAck":
+        // Only a delta that is out: one already counted, or never sent,
+        // changes nothing. Taking one takes those before it, so a delta that
+        // never arrived is not waited for.
+        if (message.seq < this.ackedSeq || message.seq >= this.deltaSeq) return;
+        this.ackedSeq = message.seq + 1;
+        // What was stepped while it was out goes now, not at the next pump.
+        this.flushDelta();
+        return;
     }
   }
 
@@ -332,7 +354,9 @@ export class SimHost {
    */
   advance(steps: number): void {
     for (let i = 0; i < steps; i++) this.stepOnce();
-    this.flushDelta();
+    // Whatever is out: the caller is told the steps are done right after
+    // this, and their delta must already be on its way (see `serveClock`).
+    this.flushDelta(true);
   }
 
   private stepOnce(): void {
@@ -355,7 +379,18 @@ export class SimHost {
     this.unsentRoads = mergeRoadChanges(this.unsentRoads, drainRoadChanges(this.state.roads));
   }
 
-  private flushDelta(): void {
+  /**
+   * Sends what changed since the last delta, unless the client has yet to
+   * take `MAX_DELTAS_OUT` of those before it. A worker steps whether or not the page keeps up, and a
+   * page that draws a frame in a second took each delta later than the one
+   * before: the queue grew without end and every click waited behind it
+   * (issues #335, #345). Held back, the changes stay where they are read
+   * from and go in one delta once the client says it took one.
+   * `force` is for a snapshot, which must follow everything stepped so far,
+   * and for `advance`, whose caller waits for the delta of its steps.
+   */
+  private flushDelta(force = false): void {
+    if (!force && this.deltaSeq - this.ackedSeq >= MAX_DELTAS_OUT) return;
     // Cells are read now, like road rows below, so a cell painted and then
     // moved by a road in between goes out once, as what it is now.
     const cells = drainCellDelta(this.state);
@@ -437,8 +472,8 @@ export class SimHost {
 
   private sendSnapshot(): void {
     // Anything stepped but unsent goes out first, so deltas and the snapshot
-    // agree on where the log stands.
-    this.flushDelta();
+    // agree on where the log stands, whether or not the last delta was taken.
+    this.flushDelta(true);
     // The worker keeps stepping its own state, so the snapshot is a copy.
     // The copy's buffers are then moved to the client rather than copied a
     // second time by postMessage.
@@ -447,6 +482,9 @@ export class SimHost {
       { v: PROTOCOL_VERSION, type: "snapshot", state, logFrom: this.logCursor, deltaSeq: this.deltaSeq },
       typedArrayBuffers(state),
     );
+    // The client's copy is whole from here, so the next delta need not wait
+    // for the ones before the snapshot.
+    this.ackedSeq = this.deltaSeq;
   }
 
   private send(message: FromSimMessage): void {

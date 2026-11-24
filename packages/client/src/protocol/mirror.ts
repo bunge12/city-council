@@ -434,9 +434,17 @@ export class SimMirror {
         return;
       case "delta": {
         const before = this.deltaSeq;
-        this.applyDelta(message);
-        // A delta the copy could not take still says which commands were dropped, and why.
-        if (this.deltaSeq === before) this.settleDropped(message);
+        try {
+          this.applyDelta(message);
+          // A delta the copy could not take still says which commands were dropped, and why.
+          if (this.deltaSeq === before) this.settleDropped(message);
+        } finally {
+          // Taken, applied or not: the host sends the next only now (issue
+          // #345), after everything listening has run. Also when one of
+          // them threw, or the host would wait for good on a page that
+          // went on after the error.
+          this.transport.send({ v: PROTOCOL_VERSION, type: "deltaAck", seq: message.seq });
+        }
         return;
       }
       case "commandResult": {

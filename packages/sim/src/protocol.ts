@@ -33,7 +33,19 @@ export interface RequestSnapshotMessage {
   type: "requestSnapshot";
 }
 
-export type ToSimMessage = CommandMessage | RequestSnapshotMessage;
+/**
+ * Says the client has taken the delta numbered `seq`, applied or not. A host
+ * sends the next delta only once the last is taken, so a client slower than
+ * the sim gets fewer, larger deltas instead of a queue that grows without
+ * end (issue #345).
+ */
+export interface DeltaAckMessage {
+  v: typeof PROTOCOL_VERSION;
+  type: "deltaAck";
+  seq: number;
+}
+
+export type ToSimMessage = CommandMessage | RequestSnapshotMessage | DeltaAckMessage;
 
 // ---- Sim to client ----
 
@@ -201,6 +213,9 @@ export function parseToSimMessage(raw: unknown): ToSimMessage | string {
   switch (raw.type) {
     case "requestSnapshot":
       return { v: PROTOCOL_VERSION, type: "requestSnapshot" };
+    case "deltaAck":
+      if (typeof raw.seq !== "number" || !Number.isInteger(raw.seq) || raw.seq < 0) return "deltaAck must carry the delta's seq";
+      return { v: PROTOCOL_VERSION, type: "deltaAck", seq: raw.seq };
     case "command": {
       const command = raw.command;
       if (!isRecord(command)) return "command message must carry a command object";

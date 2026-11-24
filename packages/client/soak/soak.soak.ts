@@ -204,6 +204,12 @@ function pageInWorker(file: string): {
       send: (message) => {
         received.push(message);
         post({ kind: "message", message });
+        // Taken at once, for the host: it sends no delta while two are out
+        // (issue #345), and the soak runs an hour in minutes without
+        // waiting for its page, so the page's own acks come long after.
+        // The step times below are read one delta a step. The page's acks
+        // then name deltas already counted, which the host ignores.
+        if (message.type === "delta") handler?.({ v: message.v, type: "deltaAck", seq: message.seq });
       },
       onMessage: (h) => {
         handler = h;

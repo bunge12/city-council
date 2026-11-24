@@ -27,9 +27,9 @@ import {
   segmentEnds,
   segmentTypeId,
 } from "@city-council/sim";
-import { MAX_CATCH_UP_STEPS, PUMP_INTERVAL_MS, SimHost, typedArrayBuffers } from "../src/protocol/host";
+import { MAX_CATCH_UP_STEPS, MAX_DELTAS_OUT, PUMP_INTERVAL_MS, SimHost, typedArrayBuffers } from "../src/protocol/host";
 import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
-import { memoryTransportPair } from "../src/protocol/transport";
+import { memoryTransportPair, type ClientTransport } from "../src/protocol/transport";
 
 function setup(seed = 7) {
   const { client, host: hostEnd } = memoryTransportPair();
@@ -322,6 +322,155 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     run(1000);
     expect(mirror.state?.demand).toEqual(sim.demand);
     expect(mirror.state && hashState(mirror.state)).toBe(hashState(sim));
+  });
+});
+
+/**
+ * A client end that takes what the host sends only when told to, as a page
+ * busy drawing does: `take(n)` hands over the next `n` messages, oldest first.
+ */
+function slowClient(client: ClientTransport) {
+  const waiting: FromSimMessage[] = [];
+  const handlers = new Set<(message: FromSimMessage) => void>();
+  client.onMessage((m) => waiting.push(m));
+  const slow: ClientTransport = {
+    send: (message, transfer) => client.send(message, transfer),
+    onMessage: (handler) => {
+      handlers.add(handler);
+      return () => void handlers.delete(handler);
+    },
+  };
+  const take = (n = waiting.length) => {
+    for (let i = 0; i < n && waiting.length > 0; i++) {
+      const message = waiting.shift() as FromSimMessage;
+      for (const handler of handlers) handler(message);
+    }
+  };
+  return { slow, waiting, take };
+}
+
+describe("a client slower than the sim (issue #345)", () => {
+  function slowSetup() {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const { slow, waiting, take } = slowClient(client);
+    let now = 0;
+    const host = new SimHost(createBareState(7), hostEnd, () => now);
+    const run = (ms: number) => {
+      for (let t = 0; t < ms; t += PUMP_INTERVAL_MS) {
+        now += PUMP_INTERVAL_MS;
+        host.pump();
+      }
+    };
+    return { host, client, slow, waiting, take, run };
+  }
+  const deltas = (messages: readonly FromSimMessage[]) => messages.filter((m) => m.type === "delta");
+  const ack = (client: ClientTransport, seq: number) => client.send({ v: PROTOCOL_VERSION, type: "deltaAck", seq });
+
+  it("has no more than MAX_DELTAS_OUT deltas waiting however long the client takes", () => {
+    const { host, waiting, run } = slowSetup();
+    run(60_000);
+    expect(host.tick).toBe(600);
+    expect(deltas(waiting).length).toBe(MAX_DELTAS_OUT);
+  });
+
+  it("sends the steps taken meanwhile as one delta, as soon as the client takes one", () => {
+    const { host, client, waiting, run } = slowSetup();
+    run(1000);
+    expect(deltas(waiting).map((d) => d.tick)).toEqual([1, 2]);
+    ack(client, 0);
+    // Without a pump: the ack itself sends it.
+    expect(deltas(waiting).map((d) => [d.seq, d.tick, d.steps])).toEqual([[0, 1, 1], [1, 2, 1], [2, 10, 8]]);
+    expect(host.tick).toBe(10);
+    // Still two out, so the next waits again.
+    run(500);
+    expect(deltas(waiting).length).toBe(3);
+  });
+
+  it("counts a delta taken as those before it taken too, and ignores an ack for one not out", () => {
+    const { client, waiting, run } = slowSetup();
+    run(1000);
+    // Never sent, and so not a reason to send more.
+    ack(client, 7);
+    run(100);
+    expect(deltas(waiting).length).toBe(2);
+    ack(client, 1);
+    run(200);
+    expect(deltas(waiting).map((d) => d.seq)).toEqual([0, 1, 2, 3]);
+    // Already counted.
+    ack(client, 0);
+    run(200);
+    expect(deltas(waiting).length).toBe(4);
+  });
+
+  it("answers a snapshot request with everything stepped so far, and starts counting again", () => {
+    const { client, waiting, run } = slowSetup();
+    run(1000);
+    client.send({ v: PROTOCOL_VERSION, type: "requestSnapshot" });
+    const sent = waiting.map((m) => m.type);
+    expect(sent).toEqual(["delta", "delta", "delta", "snapshot"]);
+    const snapshot = waiting.at(-1);
+    const last = waiting.at(-2);
+    expect(snapshot?.type === "snapshot" && snapshot.state.tick).toBe(10);
+    expect(last?.type === "delta" && last.tick).toBe(10);
+    expect(snapshot?.type === "snapshot" && last?.type === "delta" && snapshot.deltaSeq === last.seq + 1).toBe(true);
+    run(1000);
+    expect(deltas(waiting).length).toBe(3 + MAX_DELTAS_OUT);
+  });
+
+  it("sends an advance's delta at once, whatever is out, for the caller waiting on it", () => {
+    const { host, waiting, run } = slowSetup();
+    run(1000);
+    host.hold();
+    host.advance(3);
+    expect(deltas(waiting).map((d) => [d.seq, d.tick, d.steps])).toEqual([[0, 1, 1], [1, 2, 1], [2, 13, 11]]);
+  });
+
+  it("is told a delta was taken even when something listening to the mirror threw", () => {
+    const { host, slow, waiting, take, run } = slowSetup();
+    const mirror = new SimMirror(slow, "p1");
+    take();
+    let thrown = 0;
+    mirror.subscribe((update) => {
+      if (update.kind !== "delta" || thrown > 0) return;
+      thrown++;
+      throw new Error("a listener broke");
+    });
+    run(1000);
+    expect(() => take(1)).toThrow("a listener broke");
+    take();
+    run(1000);
+    for (let i = 0; i < 10 && waiting.length > 0; i++) take();
+    expect(mirror.state?.tick).toBe(host.tick);
+    expect(host.tick).toBe(20);
+  });
+
+  it("keeps a mirror that takes a message every 700 ms equal to the host, commands and all", async () => {
+    const { host, slow, waiting, take, run } = slowSetup();
+    const mirror = new SimMirror(slow, "p1");
+    take();
+    const rng = seedRng(3);
+    let most = 0;
+    const outcomes: Promise<unknown>[] = [];
+    for (let i = 0; i < 60; i++) {
+      if (nextInt(rng, 3) === 0) outcomes.push(mirror.sendCommandSettled("SetSpeed", { speed: ([0, 1, 2, 4] as const)[nextInt(rng, 4)] }));
+      if (nextInt(rng, 2) === 0) outcomes.push(mirror.sendCommandSettled("NoOp"));
+      run(700);
+      most = Math.max(most, deltas(waiting).length);
+      take(1);
+    }
+    expect(most).toBe(MAX_DELTAS_OUT);
+    // Let it catch up: each one taken lets the next out.
+    for (let i = 0; i < 10 && waiting.length > 0; i++) take();
+    expect(waiting.length).toBe(0);
+    expect(mirror.state?.tick).toBe(host.tick);
+    // Every command's outcome reached the page, in deltas of many steps.
+    expect(outcomes.length).toBeGreaterThan(30);
+    expect(await Promise.all(outcomes)).toEqual(outcomes.map(() => ({ ok: true })));
+    const mirrored = hashMirrored(mirror.state);
+    mirror.requestSnapshot();
+    take();
+    expect(hashMirrored(mirror.state)).toBe(mirrored);
+    expect(mirror.state?.tick).toBe(host.tick);
   });
 });
 
