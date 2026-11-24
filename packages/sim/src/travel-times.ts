@@ -52,14 +52,14 @@ export const TRAVEL_ZONES = CHUNKS_PER_SIDE * CHUNKS_PER_SIDE;
 /**
  * The last whole table, held in state while a rebuild runs (#313): the
  * table and sources as they were before the change, and the tick of the
- * change that copied them.
+ * last change while it was held.
  */
 export interface TravelLast {
   /** Seconds from zone `a` to zone `b` at `a * TRAVEL_ZONES + b`, as `travelTimeTable` gives them. */
   table: Uint16Array;
   /** Each zone's source node, or NONE. */
   sources: Int32Array;
-  /** The tick it was copied on. */
+  /** The tick of the change that copied it, or of the last change while it was held. */
   tick: number;
 }
 
@@ -616,8 +616,15 @@ export function stepTravel(state: SimState): void {
     // and the table is whole again. A change during a rebuild keeps the
     // copy it holds, or goes without one when it holds none (a city saved
     // before version 27).
+    //
+    // A change during a rebuild stamps the copy with this tick: a small
+    // change can bring the ready tick back to this one, and a later paused
+    // step on it must still see the copy as this tick's, as a replay, which
+    // applies the tick's commands in one step, does.
     const held = state.travelLast;
-    if (state.tick >= state.travelReadyAt && held?.tick !== state.tick && tt.table && tt.sources && !tt.rebuild && !tt.waiting) {
+    if (state.tick < state.travelReadyAt) {
+      if (held) held.tick = state.tick;
+    } else if (held?.tick !== state.tick && tt.table && tt.sources && !tt.rebuild && !tt.waiting) {
       state.travelLast = { table: tt.table.slice(), sources: tt.sources.slice(), tick: state.tick };
     }
     const ticks = rebuildTicks(tt);

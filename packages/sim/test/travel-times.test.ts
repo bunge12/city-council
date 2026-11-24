@@ -561,6 +561,45 @@ describe("paused steps", () => {
     });
   });
 
+  it("keep the copy a replay keeps, when a small change part way through a rebuild brings the ready tick back on a paused tick (#313)", () => {
+    withSettlesPerTick(1, () => {
+      const live = createState(SEED);
+      prepareDerived(live);
+      const join = twoHalves(live);
+      stepUntilReady(live);
+      const net = live.roads;
+      let nodes = 0;
+      for (let n = 0; n < nodeIdLimit(net); n++) if (isNode(net, n) && net.nodeFirstSeg[n] !== NONE) nodes++;
+      const rows = travelZoneSources(live).filter((z) => z !== NONE).length;
+      ROUTING_BALANCE.travelTimes.rebuildSettlesPerTick = rows * nodes;
+      for (let i = 0; i < 5; i++) step(live);
+      const across = zoneTravelTime(live, WEST, EAST);
+      // A longer street, unpaused: more than a tick's work, so the copy is taken.
+      send(live, 20, "BuildRoad", { from: { x: 4300, z: 4700 }, to: { x: 4600, z: 4700 }, type: "street" });
+      expect(live.travelReadyAt).toBeGreaterThan(live.tick);
+      send(live, 21, "SetSpeed", { speed: 0 });
+      const tick = live.tick;
+      expect(live.travelReadyAt).toBeGreaterThan(tick);
+      // Paused, part way through: the street and the join go, which leaves less to rebuild than before either.
+      send(live, 22, "Undo", {});
+      send(live, 23, "BulldozeRoad", { segments: [join] });
+      expect(live.travelReadyAt).toBe(tick);
+      const loaded = deserialize(serialize(live)).state;
+      prepareDerived(loaded);
+      for (const s of [live, loaded]) {
+        // Another change on the same paused tick keeps the copy from before the first street.
+        send(s, 24, "BuildRoad", { from: { x: 4300, z: 4700 }, to: { x: 4600, z: 4700 }, type: "street" });
+        expect(readable(s, WEST, EAST)).toBe(across);
+        send(s, 25, "SetSpeed", { speed: 1 });
+      }
+      expect(hashState(loaded)).toBe(hashState(live));
+      expect(hashState(replay(live.seed, live.log, live.tick))).toBe(hashState(live));
+      for (let i = 0; i < 10; i++) for (const s of [live, loaded]) step(s);
+      expect(hashState(loaded)).toBe(hashState(live));
+      expect(hashState(replay(live.seed, live.log, live.tick))).toBe(hashState(live));
+    });
+  });
+
   it("refuse a read between a command that changed the roads and the step's catch-up", () => {
     const state = createBareState(1);
     const ids = grid(state.roads, 1010, 1010, 4, 4, 100);
