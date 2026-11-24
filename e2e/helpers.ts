@@ -1,7 +1,7 @@
 // What most spec files need to open a city and wait for the page, in one
 // place, so a fix to one of them reaches every spec (issue #227).
 
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { serialize, type SimState } from "../packages/sim/src/index";
 
 /** What the page reports about its renderer, as `window.cityCouncil.renderStatus()` returns it. */
@@ -195,4 +195,18 @@ export async function canvasShot(page: Page): Promise<Buffer> {
   } finally {
     await hide.evaluate((tag) => tag.remove());
   }
+}
+
+/** The settings menu under the top bar's Settings button (issue #332), opened if it is closed. */
+export async function openSettings(page: Page): Promise<Locator> {
+  const menu = page.getByRole("region", { name: "Settings", exact: true });
+  if (!(await menu.isVisible())) await page.locator("#settings-toggle").click();
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+/** Presses one of the settings menu's panel buttons, opening the menu first if it is closed. */
+export async function settingsButton(page: Page, name: "City" | "Log" | "Debug"): Promise<void> {
+  const menu = await openSettings(page);
+  await menu.getByRole("button", { name, exact: true }).click();
 }

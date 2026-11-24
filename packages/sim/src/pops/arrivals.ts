@@ -142,8 +142,11 @@ function homeDraw(state: SimState, homes: number[]): HomeDraw {
   const tree = scratchTree;
   const n = homes.length;
   let total = 0;
+  // `homeWeight`, inline, its balance number read once a draw rather than once a home (issue #347).
+  const from = LAND_VALUE_BALANCE.newcomers.homeWeightFrom;
   for (let i = 0; i < n; i++) {
-    const w = homeWeight(values[i] as number);
+    const v = (values[i] as number) - from;
+    const w = v > 1 ? v : 1;
     weights[i] = w;
     tree[i + 1] = w;
     total += w;

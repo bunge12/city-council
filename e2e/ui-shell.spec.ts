@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { cityLoaded } from "./helpers";
+import { cityLoaded, settingsButton } from "./helpers";
 
 // The UI shell: top bar, speed controls and shortcuts, debug panel, activity
 // log and city menu. Everything here goes through the page's own controls.
@@ -111,7 +111,7 @@ test("keyboard shortcuts change the speed and toggle the panels, and the debug p
   await expect(debug).toBeHidden();
 
   // Typing in a field does not trigger shortcuts.
-  await page.getByRole("button", { name: "City" }).click();
+  await settingsButton(page, "City");
   const name = page.getByLabel("Name");
   await name.fill("");
   await name.pressSequentially("3 L`");
@@ -168,7 +168,7 @@ test("the demand bars reach the page with their parts, and their system shows in
 
 test("the Send NoOp button lands a command in the activity log with its tick and player", async ({ page }, testInfo) => {
   await open(page);
-  await page.getByRole("button", { name: "Log" }).click();
+  await settingsButton(page, "Log");
   const log = page.getByRole("region", { name: "Activity log" });
   await expect(log).toBeVisible();
   await expect(log).toContainText("No commands yet.");
@@ -195,7 +195,7 @@ test("the city menu starts a new city from a seed and opens a saved one from the
   test.setTimeout(90_000);
   await open(page);
   const first = await status(page);
-  await page.getByRole("button", { name: "City" }).click();
+  await settingsButton(page, "City");
   const menu = page.getByRole("region", { name: "City menu" });
   await expect(menu).toBeVisible();
   await expect(menu.getByRole("list", { name: "Saved cities" }).getByRole("listitem")).toHaveCount(first.cities.length);
@@ -224,7 +224,7 @@ test("the city menu starts a new city from a seed and opens a saved one from the
   await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout: 15_000 });
 
   // The first city is in the list and opens again.
-  await page.getByRole("button", { name: "City" }).click();
+  await settingsButton(page, "City");
   const items = menu.getByRole("list", { name: "Saved cities" }).getByRole("listitem");
   await expect(items).toHaveCount(first.cities.length + 1);
   await expect(items.filter({ hasText: "Harbourside" })).toContainText("open now");
@@ -237,4 +237,144 @@ test("the city menu starts a new city from a seed and opens a saved one from the
   expect(third.city.id).toBe(first.city.id);
   expect(third.loadedFrom).toBe("latest save");
   await expect(page.locator("#file-note")).toContainText(`Opened "${first.city.name}"`);
+});
+
+/** The box of `selector`, laid out. */
+async function box(page: Page, selector: string): Promise<{ x: number; y: number; width: number; height: number }> {
+  const b = await page.locator(selector).first().boundingBox();
+  if (!b) throw new Error(`${selector} is not laid out`);
+  return b;
+}
+
+test("the controls sit in the corners: overlays top left, settings and stats top right, population bottom left, tools bottom centre, speed bottom right (#332)", async ({ page }, testInfo) => {
+  await open(page);
+  const bar = await box(page, ".top-bar");
+  const barBottom = bar.y + bar.height;
+
+  const overlays = await box(page, "#overlay-bar");
+  expect(overlays.x).toBeLessThan(40);
+  expect(overlays.y).toBeGreaterThanOrEqual(barBottom);
+  expect(overlays.y).toBeLessThan(barBottom + 40);
+  await expect(page.locator("#overlay-bar #overlay-landValue")).toBeVisible();
+
+  const settings = await box(page, "#settings-toggle");
+  const stats = await box(page, "#stats-toggle");
+  expect(settings.x + settings.width).toBeGreaterThan(VIEWPORT.width - 40);
+  expect(settings.y + settings.height).toBeLessThanOrEqual(barBottom);
+  expect(stats.x).toBeGreaterThan(VIEWPORT.width / 2);
+  expect(stats.x + stats.width).toBeLessThanOrEqual(settings.x);
+  // The top bar holds no more than that: graphics, sound, the date and the speeds moved out.
+  for (const id of ["#game-date", "#graphics-preset", "#sound-interface", "#population", "#undo"]) {
+    await expect(page.locator(`.top-bar ${id}`)).toHaveCount(0);
+  }
+
+  const status = await box(page, "#city-status");
+  expect(status.x).toBeLessThan(40);
+  expect(status.y + status.height).toBeGreaterThan(VIEWPORT.height - 40);
+
+  const dock = await box(page, "#build-bar .dock");
+  expect(Math.abs(dock.x + dock.width / 2 - VIEWPORT.width / 2)).toBeLessThanOrEqual(40);
+  expect(dock.y + dock.height).toBeGreaterThan(VIEWPORT.height - 80);
+  // Undo is Ctrl+Z or Cmd+Z, with no button.
+  await expect(page.locator("#undo")).toHaveCount(0);
+
+  const clock = await box(page, "#game-clock");
+  expect(clock.x + clock.width).toBeGreaterThan(VIEWPORT.width - 40);
+  expect(clock.y + clock.height).toBeGreaterThan(VIEWPORT.height - 40);
+  await expect(page.locator("#game-clock #game-date")).toHaveText(/^\d+ [A-Z][a-z]{2}, Year \d+$/);
+  await expect(page.locator("#game-clock").getByRole("group", { name: "Game speed" })).toBeVisible();
+  await testInfo.attach("the controls in their corners", { body: await page.screenshot(), contentType: "image/png" });
+});
+
+test("Settings opens under its button, the panels in it open beside it, and Escape closes the newest window first (#332)", async ({ page }, testInfo) => {
+  await open(page);
+  const menu = page.getByRole("region", { name: "Settings", exact: true });
+  const city = page.getByRole("region", { name: "City menu" });
+  await expect(menu).toBeHidden();
+  await page.locator("#settings-toggle").click();
+  await expect(menu).toBeVisible();
+  const toggle = await box(page, "#settings-toggle");
+  const opened = await box(page, "#settings-menu");
+  expect(opened.y).toBeGreaterThanOrEqual(toggle.y + toggle.height);
+  expect(Math.abs(opened.x + opened.width - (toggle.x + toggle.width))).toBeLessThanOrEqual(16);
+  for (const id of ["#graphics-preset", "#sound-interface", "#sound-ambience", "#sound-mute"]) await expect(menu.locator(id)).toBeVisible();
+  for (const name of ["City", "Log", "Debug"]) await expect(menu.getByRole("button", { name, exact: true })).toBeVisible();
+
+  // A panel from the menu opens beside it, under it in the right column.
+  await menu.getByRole("button", { name: "City", exact: true }).click();
+  await expect(city).toBeVisible();
+  const cityBox = await box(page, "#city-menu");
+  expect(cityBox.y).toBeGreaterThanOrEqual(opened.y + opened.height);
+  expect(Math.abs(cityBox.x + cityBox.width - (opened.x + opened.width))).toBeLessThanOrEqual(1);
+  await testInfo.attach("settings and the city menu opened from it", { body: await page.screenshot(), contentType: "image/png" });
+
+  // Escape closes the city menu, opened last, then the settings menu.
+  await page.keyboard.press("Escape");
+  await expect(city).toBeHidden();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+
+  // From a slider, Escape still closes the menu the slider is in.
+  await page.locator("#settings-toggle").click();
+  await page.locator("#sound-interface").focus();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+});
+
+test("Escape closes a panel opened over a tool before it leaves the tool, and the tool before a panel opened under it (#332)", async ({ page }) => {
+  await open(page);
+  const stats = page.getByRole("region", { name: "Statistics" });
+  const road = page.locator("#road-tool");
+
+  await page.keyboard.press("KeyR");
+  await expect(road).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("KeyP");
+  await expect(stats).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(stats).toBeHidden();
+  await expect(road).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(road).toHaveAttribute("aria-pressed", "false");
+
+  // The other way round: the tool was opened last, so it goes first.
+  await page.keyboard.press("KeyP");
+  await expect(stats).toBeVisible();
+  await page.keyboard.press("KeyR");
+  await expect(road).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(road).toHaveAttribute("aria-pressed", "false");
+  await expect(stats).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(stats).toBeHidden();
+});
+
+/** Whether two boxes share any area. */
+function overlap(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+test("on a narrower screen the dock and its menus stay clear of the corner cards, and Escape from a text field closes its window (#332)", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await open(page);
+  await page.keyboard.press("KeyR");
+  await expect(page.locator("#road-menu")).toBeVisible();
+  const clock = await box(page, "#game-clock");
+  const status = await box(page, "#city-status");
+  for (const id of ["#build-bar .dock", "#road-menu"]) {
+    const b = await box(page, id);
+    expect(overlap(b, clock), `${id} and the clock`).toBe(false);
+    expect(overlap(b, status), `${id} and the population card`).toBe(false);
+  }
+  await testInfo.attach("the road menu at 1024 px", { body: await page.screenshot(), contentType: "image/png" });
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "false");
+
+  // Typing in the city menu's name field, Escape closes the menu and hands focus back to its button.
+  await settingsButton(page, "City");
+  const city = page.getByRole("region", { name: "City menu" });
+  await city.getByLabel("Name").focus();
+  await page.keyboard.press("Escape");
+  await expect(city).toBeHidden();
+  await expect(page.locator('#settings-menu [aria-controls="city-menu"]')).toBeFocused();
 });

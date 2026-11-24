@@ -4,9 +4,9 @@ import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE,
 import { formatDemandTitle } from "../packages/client/src/ui/top-figures";
 import { buildEverySide, finishConstruction, zoneSides } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
-import { frames, openCity, ready } from "./helpers";
+import { frames, openCity, ready, settingsButton } from "./helpers";
 
-// Issue M3-15: population and demand in the top bar. A player paints R1
+// Issue M3-15: population and demand, in the bottom left corner since #332. A player paints R1
 // along a street that runs from an outside connection, lets houses grow and
 // people move in, and watches the population rise with its arrow up. The
 // residential bar's value and tooltip are read and checked against the
@@ -101,7 +101,7 @@ async function screenAt(page: Page, x: number, z: number): Promise<{ x: number; 
   return page.evaluate(async ([x, y, z]) => (await window.cityCouncil.camera).project(x, y, z), [x, h, z] as const);
 }
 
-/** The population the top bar shows, as a number, or the text when it is not one. */
+/** The population the city status card shows, as a number, or the text when it is not one. */
 async function shown(page: Page): Promise<number | string> {
   const text = (await page.locator("#population-count").textContent()) ?? "";
   const n = Number(text.replace(/,/g, ""));
@@ -128,7 +128,7 @@ async function setSpeed(page: Page, speed: number): Promise<void> {
   expect(await page.evaluate((speed) => window.cityCouncil.sendCommand("SetSpeed", { speed }), speed)).toEqual({ ok: true });
 }
 
-/** Checks the top bar against the copy while the city is paused: population, room and the residential bar, value and tooltip. */
+/** Checks the city status card against the copy while the city is paused: population, room and the residential bar, value and tooltip. */
 async function agrees(page: Page): Promise<Awaited<ReturnType<typeof copy>>> {
   const c = await copy(page);
   expect(c.mirrorRoom).toBe(c.room);
@@ -137,7 +137,7 @@ async function agrees(page: Page): Promise<Awaited<ReturnType<typeof copy>>> {
   const bar = page.locator("#demand-residential");
   await expect(bar).toHaveAttribute("data-value", String(c.residential.value));
   await expect(bar).toHaveAttribute("aria-valuenow", String(Math.round(c.residential.value)));
-  await expect(bar).toHaveAttribute("title", formatDemandTitle("residential", c.residential.value, c.residential.parts));
+  await expect(bar).toHaveAttribute("data-tip", formatDemandTitle("residential", c.residential.value, c.residential.parts));
   return c;
 }
 
@@ -145,7 +145,7 @@ let shotNo = 0;
 async function attach(page: Page, testInfo: TestInfo, name: string, whole = false): Promise<void> {
   const file = `${String(++shotNo).padStart(2, "0")}-${name.replace(/[^a-z0-9]+/gi, "-")}.png`;
   const path = testInfo.outputPath(file);
-  const png = whole ? await page.screenshot() : await page.locator(".top-bar").screenshot();
+  const png = whole ? await page.screenshot() : await page.locator("#city-status").screenshot();
   writeFileSync(path, png);
   if (EVIDENCE) {
     mkdirSync(EVIDENCE, { recursive: true });
@@ -175,19 +175,27 @@ async function zoneR1(page: Page, s: Street): Promise<void> {
   await page.mouse.move(640, 20);
 }
 
-test("the top bar shows the population rising with its arrow up, and the residential bar as the sim has it, the same after a reload", async ({ page }, testInfo) => {
+test("the city status card shows the population rising with its arrow up, and the residential bar as the sim has it, the same after a reload", async ({ page }, testInfo) => {
   const { state, street } = streetCity(true);
   await openCity(page, state, { name: "Gateway Street" });
 
   await test.step("a city with nobody in it shows 0, and four demand bars beside it", async () => {
     await setSpeed(page, 0);
     await expect(page.locator("#population-count")).toHaveText("0");
-    expect(await page.locator("#game-date + #population + #demand").count()).toBe(1);
+    // In the bottom left corner, the population over the bars (issue #332).
+    expect(await page.locator("#city-status > #population + #demand").count()).toBe(1);
+    const card = await page.locator("#city-status").boundingBox();
+    const viewport = page.viewportSize();
+    if (!card || !viewport) throw new Error("the card is not laid out");
+    expect(card.x).toBeLessThan(viewport.width / 4);
+    expect(card.y + card.height).toBeGreaterThan(viewport.height - 80);
     await expect(page.locator("#demand .demand-bar")).toHaveCount(4);
+    // Each bar lies on its side, wide enough to read, with its name and value beside it.
     for (const bar of ["residential", "commercial", "office", "industrial"]) {
-      const box = await page.locator(`#demand-${bar}`).boundingBox();
-      expect(box?.width, bar).toBeGreaterThanOrEqual(6);
-      expect(box?.width, bar).toBeLessThanOrEqual(10);
+      const box = await page.locator(`#demand-${bar} .track`).boundingBox();
+      expect(box?.width, bar).toBeGreaterThanOrEqual(80);
+      expect(box?.height, bar).toBeLessThanOrEqual(box?.width ?? 0);
+      await expect(page.locator(`#demand-${bar} .value`)).not.toHaveText("");
     }
     await agrees(page);
     await attach(page, testInfo, "nobody yet");
@@ -207,18 +215,26 @@ test("the top bar shows the population rising with its arrow up, and the residen
     const c = await agrees(page);
     grown = c.population;
     expect(c.residential.value).toBeGreaterThan(0);
-    await expect(page.locator("#population")).toHaveAttribute("title", new RegExp(`^${c.population.toLocaleString("en-US")} residents in homes with room for ${c.room.toLocaleString("en-US")}\\. Up over the last game month\\.$`));
+    await expect(page.locator("#population")).toHaveAttribute("data-tip", new RegExp(`^${c.population.toLocaleString("en-US")} residents in homes with room for ${c.room.toLocaleString("en-US")}\\. Up over the last game month\\.$`));
     // The bar's tooltip says what lifts it, in plain words.
-    await expect(page.locator("#demand-residential")).toHaveAttribute("title", /^Residential demand \+\d+\. .*(Newcomers from outside|Open jobs) \+\d+/);
+    await expect(page.locator("#demand-residential")).toHaveAttribute("data-tip", /^Residential demand \+\d+\. .*(Newcomers from outside|Open jobs) \+\d+/);
+    // Pointing at a bar shows its tooltip at once, beside the card.
+    await page.locator("#demand-residential").hover();
+    const tip = page.locator("#demand-residential [role=tooltip]");
+    await expect(tip).toBeVisible();
+    await expect(tip).toHaveText(/^Residential demand \+\d+\./);
+    await attach(page, testInfo, "the residential bar's tooltip", true);
+    await page.mouse.move(640, 300);
+    await expect(tip).toHaveCount(0);
     await attach(page, testInfo, `a growing city of ${grown}`);
     const [mx, mz] = on(street, LENGTH / 2, 30);
     await look(page, mx, mz, 220);
-    await attach(page, testInfo, "the houses and the top bar", true);
+    await attach(page, testInfo, "the houses and the city status card", true);
   });
 
   await test.step("a reload shows the same figures", async () => {
     const before = await copy(page);
-    await page.getByRole("button", { name: "City" }).click();
+    await settingsButton(page, "City");
     await page.getByRole("region", { name: "City menu" }).getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.locator("#save-status")).toContainText("(manual)");
     await page.reload();
@@ -243,11 +259,11 @@ test("a street cut off from the outside builds houses but stays empty: populatio
   await setSpeed(page, 0);
   const c = await agrees(page);
   expect(c.population).toBe(0);
-  await expect(page.locator("#population")).toHaveAttribute("title", `0 residents in homes with room for ${c.room.toLocaleString("en-US")}. Level over the last game month.`);
+  await expect(page.locator("#population")).toHaveAttribute("data-tip", `0 residents in homes with room for ${c.room.toLocaleString("en-US")}. Level over the last game month.`);
   await attach(page, testInfo, "a stalled city");
   const [mx, mz] = on(street, LENGTH / 2, 30);
   await look(page, mx, mz, 220);
-  await attach(page, testInfo, "the empty houses and the top bar", true);
+  await attach(page, testInfo, "the empty houses and the city status card", true);
 });
 
 const DENSITIES = ZONING_BALANCE.densities.length;
@@ -284,82 +300,48 @@ function towersCity(): { state: SimState; street: Street } {
   return { state, street };
 }
 
-/** Draws the residential bar's tooltip text under it, for the screenshot: a browser leaves its own tooltips out of one. */
-async function showTooltip(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const doc = (globalThis as unknown as { document: { getElementById(id: string): { getAttribute(n: string): string | null; getBoundingClientRect(): { left: number; bottom: number } } | null; createElement(t: string): { id: string; textContent: string; style: { cssText: string } }; body: { appendChild(n: unknown): void } } }).document;
-    const bar = doc.getElementById("demand-residential");
-    if (!bar) throw new Error("no residential bar");
-    const old = doc.getElementById("test-tooltip") as unknown as { remove(): void } | null;
-    old?.remove();
-    const box = bar.getBoundingClientRect();
-    const tip = doc.createElement("div");
-    tip.id = "test-tooltip";
-    tip.textContent = bar.getAttribute("title") ?? "";
-    tip.style.cssText = `position:fixed;left:${Math.max(8, box.left - 200)}px;top:${box.bottom + 6}px;max-width:420px;white-space:pre-line;font:12px sans-serif;background:#ffffe8;color:#111;border:1px solid #777;padding:4px 6px;z-index:99999;pointer-events:none`;
-    doc.body.appendChild(tip);
-  });
-}
-
-async function hideTooltip(page: Page): Promise<void> {
-  await page.evaluate(() => (globalThis as unknown as { document: { getElementById(id: string): { remove(): void } | null } }).document.getElementById("test-tooltip")?.remove());
-}
-
-/** Shoots the top bar with the tooltip text drawn under it. */
-async function attachTooltip(page: Page, testInfo: TestInfo, name: string): Promise<void> {
-  await showTooltip(page);
-  const bar = await page.locator(".top-bar").boundingBox();
-  const file = `${String(++shotNo).padStart(2, "0")}-${name.replace(/[^a-z0-9]+/gi, "-")}.png`;
-  const path = testInfo.outputPath(file);
-  const png = await page.screenshot({ clip: { x: 0, y: 0, width: 1280, height: Math.ceil((bar?.height ?? 40) + 70) } });
-  await hideTooltip(page);
-  writeFileSync(path, png);
-  if (EVIDENCE) {
-    mkdirSync(EVIDENCE, { recursive: true });
-    writeFileSync(`${EVIDENCE}/${file}`, png);
-  }
-  await testInfo.attach(name, { path, contentType: "image/png" });
-}
-
 test("while six towers fill, the residential bar's tooltip says new homes are waiting, and the line goes once they fill (#330)", async ({ page }, testInfo) => {
   const { state, street } = towersCity();
   await openCity(page, state, { name: "Tower Street" });
   const bar = page.locator("#demand-residential");
+  const tip = page.locator("#demand-residential [role=tooltip]");
   const waitingLine = /\nNew homes waiting: [\d,]+ empty places to fill first\.$/;
 
-  await test.step("six empty towers and the bar above zero: hovering the bar shows the line", async () => {
+  await test.step("six empty towers and the bar above zero: pointing at the bar shows the line", async () => {
     await setSpeed(page, 0);
-    await page.mouse.move(640, 400);
-    // Not counted while the pointer is elsewhere.
-    await expect(bar).not.toHaveAttribute("title", waitingLine);
+    const [mx, mz] = on(street, TOWER_STREET / 2, 0);
+    await look(page, mx, mz, 320);
+    await page.mouse.move(640, 300);
+    // Not counted while the tooltip is closed.
+    await expect(bar).not.toHaveAttribute("data-tip", waitingLine);
     await bar.hover();
     const c = await copy(page);
     expect(c.residential.value).toBeGreaterThan(0);
     const waiting = await page.evaluate(() => window.cityCouncil.mirror.homesWaiting());
     expect(waiting?.unfilled).toBe(6);
     expect(waiting?.empty).toBe(c.room);
-    await expect(bar).toHaveAttribute("title", formatDemandTitle("residential", c.residential.value, c.residential.parts, waiting?.empty ?? null));
-    await expect(bar).toHaveAttribute("title", new RegExp(`\\nNew homes waiting: ${c.room.toLocaleString("en-US")} empty places to fill first\\.$`));
-    await attachTooltip(page, testInfo, "six towers filling, new homes waiting");
-    const [mx, mz] = on(street, TOWER_STREET / 2, 0);
-    await look(page, mx, mz, 320);
-    await bar.hover();
-    await attach(page, testInfo, "the empty towers and the offices facing them", true);
+    await expect(bar).toHaveAttribute("data-tip", formatDemandTitle("residential", c.residential.value, c.residential.parts, waiting?.empty ?? null));
+    await expect(tip).toBeVisible();
+    await expect(tip).toHaveText(new RegExp(`New homes waiting: ${c.room.toLocaleString("en-US")} empty places to fill first\\.$`));
+    // On a line of its own: the rendered text keeps the break only where the tip draws it.
+    expect(await tip.evaluate((e) => (e as unknown as { innerText: string }).innerText)).toMatch(/\nNew homes waiting: /);
+    await attach(page, testInfo, "six towers filling, new homes waiting", true);
   });
 
   await test.step("people move in, and once fewer than six towers are still filling the line goes", async () => {
+    await page.mouse.move(640, 300);
     await setSpeed(page, 4);
-    // Waits on the copy's count, not the title: the title also drops the line whenever the pointer is off the bar.
+    // Waits on the copy's count, not the tooltip, which drops the line whenever it is closed.
     await expect.poll(() => page.evaluate(() => window.cityCouncil.mirror.homesWaiting()), { timeout: 120_000 }).toBeNull();
     await setSpeed(page, 0);
     const c = await copy(page);
     expect(c.residential.value).toBeGreaterThan(0);
     expect(c.population).toBeGreaterThan(0);
     expect(await page.evaluate(() => window.cityCouncil.mirror.homesWaiting())).toBeNull();
-    // Hovered again: the top bar's figures change width as the clock runs, and the bar moves from under a still pointer.
-    await page.mouse.move(640, 400);
     await bar.hover();
-    await expect(bar).toHaveAttribute("title", formatDemandTitle("residential", c.residential.value, c.residential.parts));
-    await attachTooltip(page, testInfo, `${c.population} people in, nothing waiting`);
+    await expect(tip).toBeVisible();
+    await expect(bar).toHaveAttribute("data-tip", formatDemandTitle("residential", c.residential.value, c.residential.parts));
+    await expect(tip).not.toHaveText(/New homes waiting/);
+    await attach(page, testInfo, `${c.population} people in, nothing waiting`, true);
   });
 });

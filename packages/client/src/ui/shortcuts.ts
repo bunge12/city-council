@@ -59,7 +59,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     codes: ["Escape"],
     label: "Esc",
-    description: "drop the road being drawn, the grid's rectangle, the drag or the brush stroke, or leave the tool",
+    description: "close the window opened last, or drop the road being drawn, the grid's rectangle, the drag or the brush stroke, or leave the tool",
     action: { kind: "escape" },
   },
 ];
@@ -106,6 +106,8 @@ export interface KeyPress {
  */
 export function shortcutFor(press: KeyPress): ShortcutAction | null {
   const tag = press.targetTag;
+  // Escape from a field still closes the window it is in (issue #332). A field that answers Escape itself prevents the default, and the page leaves it alone.
+  if (press.code === "Escape" && !press.repeat && !press.altKey && !press.ctrlKey && !press.metaKey) return { kind: "escape" };
   // A field keeps Ctrl Z for its own text.
   if (press.targetEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return null;
   if (press.repeat || press.altKey) return null;

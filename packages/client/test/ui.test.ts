@@ -7,7 +7,8 @@ import { TickRateMeter } from "../src/ui/rate";
 import { parseSeed, randomSeed } from "../src/ui/seed";
 import { DRAW_MODES, TOOL_ROAD_TYPES } from "../src/tools/road-tool";
 import { SHORTCUTS, shortcutFor, toggledSpeed, type KeyPress } from "../src/ui/shortcuts";
-import { setViewReadout, useViewReadout } from "../src/ui/store";
+import { setPanel, setViewReadout, togglePanel, useUi, useViewReadout } from "../src/ui/store";
+import { columnOrder, escapeTarget, stacked, stackedForTool } from "../src/ui/windows";
 
 describe("formatMoneyShort", () => {
   it.each([
@@ -110,7 +111,10 @@ describe("shortcuts", () => {
     expect(shortcutFor(press("KeyX"))).toEqual({ kind: "roadType", type: "avenue" });
     expect(shortcutFor(press("KeyC"))).toEqual({ kind: "roadType", type: "oneWay" });
     expect(shortcutFor(press("Escape"))).toEqual({ kind: "escape" });
-    expect(shortcutFor(press("Escape", { targetTag: "INPUT" }))).toBeNull();
+    // From a field Escape still closes the window the field is in (issue #332); other keys stay the field's.
+    expect(shortcutFor(press("Escape", { targetTag: "INPUT" }))).toEqual({ kind: "escape" });
+    expect(shortcutFor(press("Escape", { targetTag: "SELECT" }))).toEqual({ kind: "escape" });
+    expect(shortcutFor(press("KeyL", { targetTag: "INPUT" }))).toBeNull();
     // Every type the tool offers has a key.
     const types = SHORTCUTS.flatMap((s) => (s.action.kind === "roadType" ? [s.action.type] : []));
     expect(types).toEqual([...TOOL_ROAD_TYPES]);
@@ -204,5 +208,54 @@ describe("the building readout's ground line (M3-14)", () => {
   it("says a house on ground zoned up may redevelop", async () => {
     const { groundLine } = await import("../src/ui/BuildingReadout");
     expect(groundLine({ kind: "zoned-up", zone: 1, density: 3 })).toBe("Zoned up to Residential R3 · may redevelop");
+  });
+});
+
+describe("the order Escape closes windows in (issue #332)", () => {
+  it("puts a window on top when it opens and takes it out when it closes", () => {
+    expect(stacked([], "settings", true)).toEqual(["settings"]);
+    expect(stacked(["settings"], "city", true)).toEqual(["settings", "city"]);
+    // Opened again, it moves to the top.
+    expect(stacked(["settings", "city", "debug"], "city", true)).toEqual(["settings", "debug", "city"]);
+    expect(stacked(["settings", "city"], "settings", false)).toEqual(["city"]);
+    expect(stacked([], "log", false)).toEqual([]);
+  });
+
+  it("stacks the right column's panels newest first, under the settings menu", () => {
+    const windows = ["city", "settings", "tool", "stats"] as const;
+    expect(columnOrder(windows, "settings")).toBeLessThan(columnOrder(windows, "stats"));
+    expect(columnOrder(windows, "stats")).toBeLessThan(columnOrder(windows, "city"));
+    expect(columnOrder(windows, "log")).toBe(0);
+  });
+
+  it("closes the newest window first, and nothing with none open", () => {
+    expect(escapeTarget([])).toBeNull();
+    expect(escapeTarget(["settings", "city"])).toBe("city");
+    expect(escapeTarget(["debug", "tool"])).toBe("tool");
+  });
+
+  it("puts the tool on top when one is picked or changed, and takes it out when the last is left", () => {
+    expect(stackedForTool(["debug"], "road", null)).toEqual(["debug", "tool"]);
+    expect(stackedForTool(["tool", "stats"], "zone", "road")).toEqual(["stats", "tool"]);
+    expect(stackedForTool(["debug", "tool"], null, "road")).toEqual(["debug"]);
+    const same = ["tool"] as const;
+    expect(stackedForTool(same, "road", "road")).toBe(same);
+  });
+
+  it("keeps the store's stack in step with the panels and the tool", () => {
+    useUi.setState({ windows: [], settingsOpen: false, menuOpen: false, debugOpen: false, tool: null });
+    togglePanel("settings");
+    setPanel("city", true);
+    expect(useUi.getState()).toMatchObject({ settingsOpen: true, menuOpen: true, windows: ["settings", "city"] });
+    useUi.setState({ tool: "road" });
+    expect(useUi.getState().windows).toEqual(["settings", "city", "tool"]);
+    setPanel("debug", true);
+    expect(useUi.getState().windows).toEqual(["settings", "city", "tool", "debug"]);
+    // Setting a panel to how it already is leaves the order alone.
+    setPanel("settings", true);
+    expect(useUi.getState().windows).toEqual(["settings", "city", "tool", "debug"]);
+    useUi.setState({ tool: null });
+    setPanel("city", false);
+    expect(useUi.getState()).toMatchObject({ menuOpen: false, windows: ["settings", "debug"] });
   });
 });

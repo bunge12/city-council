@@ -149,7 +149,8 @@ function tangentFrom(seg: SegInfo, at: [number, number]): [number, number] {
   return [dx / len, dz / len];
 }
 
-const hint = (page: Page) => page.locator("#road-hint");
+/** Where the road being drawn has got to, as the road menu says for tests (the dock shows no hint since #332). */
+const step = (page: Page) => page.locator("#road-menu");
 
 test("a curved avenue ends on an existing node, with the preview following the curve", async ({ page }, testInfo) => {
   await openCity(page, city(true), { name: "Modes" });
@@ -158,16 +159,16 @@ test("a curved avenue ends on an existing node, with the preview following the c
   await page.keyboard.press("KeyX");
   await page.keyboard.press("KeyY");
   await expect(page.locator("#draw-mode-curved")).toHaveAttribute("aria-pressed", "true");
-  await expect(hint(page)).toContainText("Click on the map to start a road.");
+  await expect(step(page)).toHaveAttribute("data-step", "start");
 
   await click(page, 4300, 4800);
-  await expect(hint(page)).toContainText("set the direction");
+  await expect(step(page)).toHaveAttribute("data-step", "direction");
   // No road yet: only a line shows the direction.
   await hover(page, 4524, 4800);
   await expect(page.locator("#road-readout")).toBeHidden();
   await attach(page, testInfo, "curved 1 direction line");
   await click(page, 4524, 4800);
-  await expect(hint(page)).toContainText("Click to end the curve");
+  await expect(step(page)).toHaveAttribute("data-step", "end");
 
   // The end catches the street's east end.
   const end = await hover(page, 4522, 4603);
@@ -246,12 +247,12 @@ test("continuous mode draws a three-segment road, one log entry per segment, end
       await frames(page);
     } else {
       await click(page, x, z);
-      await expect(hint(page)).toContainText("start the next");
+      await expect(step(page)).toHaveAttribute("data-step", "next");
     }
     await expect.poll(() => logLength(page)).toBe(i + 1);
   }
   // The double click ended the road.
-  await expect(hint(page)).toContainText("Click on the map to start a road.");
+  await expect(step(page)).toHaveAttribute("data-step", "start");
   await expect(page.locator("#road-note")).toBeHidden();
   const log = await page.evaluate(() => window.cityCouncil.mirror.state?.log.map((e) => [e.type, e.playerId]) ?? []);
   expect(log).toHaveLength(3);
@@ -281,7 +282,7 @@ test("a continuous road stops at a refused segment and keeps the ones built", as
   await attach(page, testInfo, "refused 1 sharp segment in red");
   await click(page, 4240, 4630);
   await expect(page.locator("#road-note")).toContainText("too sharp");
-  await expect(hint(page)).toContainText("Click on the map to start a road.");
+  await expect(step(page)).toHaveAttribute("data-step", "start");
   expect(await logLength(page)).toBe(1);
   expect(await segments(page)).toHaveLength(1);
 });
@@ -293,11 +294,11 @@ test("switching mode or tool part way through a road cancels it and leaves nothi
   await page.keyboard.press("KeyY");
   await click(page, 4300, 4760);
   await click(page, 4400, 4700);
-  await expect(hint(page)).toContainText("Click to end the curve");
+  await expect(step(page)).toHaveAttribute("data-step", "end");
   // Mode switch: the curve goes.
   await page.keyboard.press("KeyT");
   await expect(page.locator("#draw-mode-straight")).toHaveAttribute("aria-pressed", "true");
-  await expect(hint(page)).toContainText("Click on the map to start a road.");
+  await expect(step(page)).toHaveAttribute("data-step", "start");
   await hover(page, 4480, 4760);
   await expect(page.locator("#road-readout")).toBeHidden();
   // Tool switch, part way through a continuous road.
@@ -313,7 +314,7 @@ test("switching mode or tool part way through a road cancels it and leaves nothi
   await hover(page, 4400, 4660);
   // No road at the cursor. A parallel offset beside the street may still show its gap.
   await expect(page.locator("#road-cells")).toBeHidden();
-  await expect(hint(page)).toContainText("Click on the map to start a road.");
+  await expect(step(page)).toHaveAttribute("data-step", "start");
   // Only the street and the one segment clicked before the switch.
   expect(await logLength(page)).toBe(2);
   expect(await segments(page)).toHaveLength(2);

@@ -160,12 +160,11 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   await look(page, 4350, 4600, 260);
   await page.keyboard.press("KeyL");
   await expect(page.locator("#activity-log")).toBeVisible();
-  const undoButton = page.locator("#undo");
   const note = page.locator("#undo-note");
   const start = await roads(page);
   const startLog = (await logTypes(page)).length;
-  // The street came with the city, built by someone else: nothing to undo.
-  await expect(undoButton).toBeDisabled();
+  // Undo is Ctrl+Z or Cmd+Z only: the dock has no button for it (issue #332).
+  await expect(page.locator("#undo")).toHaveCount(0);
   await attach(page, testInfo, "1 a street from the city file, nothing to undo");
 
   // Draw a street west to east across it. It splits the street it crosses.
@@ -175,7 +174,6 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   await click(page, 4480, 4600);
   await expect.poll(async () => (await logTypes(page)).length).toBe(startLog + 1);
   await page.keyboard.press("KeyR");
-  await expect(undoButton).toBeEnabled();
   const built = await roads(page);
   const west = await segmentNear(page, 4285, 4600);
   const east = await segmentNear(page, 4415, 4600);
@@ -231,12 +229,12 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   expect(await buildingCount(page)).toBe(0);
   await attachZoning(page, testInfo, "6 Ctrl+Z put the bulldozed piece back with its zoning, and no house");
 
-  // The button takes back the upgrade.
-  await undoButton.click();
+  // Ctrl+Z again takes back the upgrade.
+  await page.keyboard.press("Control+KeyZ");
   await expect.poll(async () => (await segmentNear(page, 4285, 4600)).type).toBe(0);
   expect(await roads(page)).toEqual(built);
   await away(page);
-  await attach(page, testInfo, "7 the undo button turned the avenue back into a street");
+  await attach(page, testInfo, "7 Ctrl+Z turned the avenue back into a street");
 
   // Ctrl+Z takes back the zoning, and leaves the roads as they are.
   await page.keyboard.press("Control+KeyZ");
@@ -247,7 +245,6 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   // Cmd+Z takes back the build and rejoins the street it split.
   await page.keyboard.press("Meta+KeyZ");
   await expect.poll(async () => roads(page)).toEqual(start);
-  await expect(undoButton).toBeDisabled();
   expect((await logTypes(page)).slice(startLog)).toEqual(["BuildRoad", "ZoneCells", "UpgradeRoad", "SetSpeed", "BulldozeRoad", "Undo", "Undo", "Undo", "Undo"]);
   await expect(page.locator("#activity-log")).toContainText("Undo");
   await away(page);

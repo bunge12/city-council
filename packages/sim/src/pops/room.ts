@@ -122,6 +122,11 @@ function eachReachableHome(state: SimState, visit: (id: number, room: number, le
   const abandoned = BUILDING_ABANDONED;
   const road = NETWORK_ROAD;
   const oneHousehold = ONE_HOUSEHOLD;
+  // The least newcomer household by density, read once a pass rather than
+  // from pops.json once a home: `usableRoom`, inline (issue #347).
+  const least1 = leastNewcomers(1);
+  const least2 = leastNewcomers(2);
+  const least3 = leastNewcomers(3);
   const n = flags.length;
   for (let id = 0; id < n; id++) {
     const room = residents[id] as number;
@@ -131,7 +136,12 @@ function eachReachableHome(state: SimState, visit: (id: number, room: number, le
     if (segNetwork[seg] !== road || reach[segA[seg] as number] !== 1) continue;
     const living = people[id] ?? 0;
     const left = living > 0 && oneHousehold[type[id] as number] === 1 ? 0 : room - living;
-    visit(id, room, left > 0 ? usableRoom(left, density[id] as number) : 0);
+    let usable = 0;
+    if (left > 0) {
+      const d = density[id] as number;
+      usable = left >= (d <= 1 ? least1 : d === 2 ? least2 : least3) ? left : 0;
+    }
+    visit(id, room, usable);
   }
 }
 

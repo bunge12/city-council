@@ -8,7 +8,7 @@ import { useServices, useSim } from "./hooks";
 import { TickRateMeter } from "./rate";
 import { CAMERA_KEYS, SHORTCUTS } from "./shortcuts";
 import { presetLabel } from "../render/presets";
-import { useGraphics, useUi, useViewReadout, type GraphicsState } from "./store";
+import { useGraphics, usePanelOrder, useUi, useViewReadout, type GraphicsState } from "./store";
 
 const READOUT_MS = 250;
 
@@ -203,8 +203,9 @@ export function DebugPanel() {
   const graphics = useGraphics(graphicsReadout);
   const info = simInfo();
 
+  const order = usePanelOrder("debug");
   return (
-    <section id="debug-panel" className="panel debug-panel" aria-label="Debug panel" hidden={!open}>
+    <section id="debug-panel" className="panel debug-panel" aria-label="Debug panel" hidden={!open} style={{ order }}>
       <h2>Debug</h2>
       <p id="sim-info" className="hint">{`${info.name}, tick ${info.tickMs} ms`}</p>
       <dl>

@@ -16,11 +16,27 @@ import type { AppServices } from "./services";
 import { shortcutFor, toggledSpeed } from "./shortcuts";
 import { LandValueLegend, LandValueReadout } from "./LandValue";
 import { StatsPanel } from "./StatsPanel";
-import { toggleDebug, toggleLog, toggleOverlay, toggleStats } from "./store";
-import { TopBar } from "./TopBar";
+import { OverlayBar } from "./OverlayBar";
+import { setPanel, toggleDebug, toggleLog, toggleOverlay, toggleStats, useUi } from "./store";
+import { CityStatus, GameClock, SettingsMenu, TopBar } from "./TopBar";
+import { PANEL_ELEMENTS, escapeTarget, type PanelId } from "./windows";
 import { ZoneLegend } from "./ZoneLegend";
 import { ZoneReadout } from "./ZoneReadout";
 import "./ui.css";
+
+/**
+ * After Escape closes panel `id`, focus that was inside it goes back to the
+ * button that opened it, where that button still shows, or leaves the page's
+ * controls, so the next key still reaches the map.
+ */
+function refocus(id: PanelId): void {
+  const panel = document.getElementById(PANEL_ELEMENTS[id]);
+  const focused = document.activeElement;
+  if (!panel || !(focused instanceof HTMLElement) || !panel.contains(focused)) return;
+  const opener = document.querySelector<HTMLElement>(`[aria-controls="${panel.id}"]`);
+  if (opener && !opener.closest("[hidden]")) opener.focus();
+  else focused.blur();
+}
 
 /** Turns key presses into shortcut actions. Speed keys send `SetSpeed`, like the buttons. */
 function useShortcuts(): void {
@@ -33,6 +49,8 @@ function useShortcuts(): void {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // A field that answers Escape itself, as the grid's sizes do, has the last word.
+      if (e.code === "Escape" && e.defaultPrevented) return;
       const target = e.target instanceof HTMLElement ? e.target : null;
       const action = shortcutFor({
         code: e.code,
@@ -94,9 +112,17 @@ function useShortcuts(): void {
         case "drawMode":
           roadTool.pickMode(action.mode);
           return;
-        case "escape":
+        case "escape": {
+          // The window opened last closes first: a panel, or the tool on top with what it holds (issue #332).
+          const top = escapeTarget(useUi.getState().windows);
+          if (top !== null && top !== "tool") {
+            setPanel(top, false);
+            refocus(top);
+            return;
+          }
           if (!routeTool.escape() && !editTool.escape() && !bulldozeTool.escape() && !gridTool.escape() && !zoneTool.escape()) roadTool.escape();
           return;
+        }
         case "undo":
           void undo();
           return;
@@ -114,18 +140,24 @@ function Shell() {
       {/* First, so the panels sit over the labels. */}
       <BlockLabels />
       <TopBar />
+      {/* Top left: the overlays, their legends, then notes to the player (issue #332). */}
       <div className="left-column">
+        <OverlayBar />
+        <ZoneLegend />
+        <LandValueLegend />
         <Notes />
-        <CityMenu />
       </div>
+      {/* Top right: settings and statistics, and the panels they open, under their buttons. */}
       <div className="right-column">
+        <SettingsMenu />
+        <CityMenu />
         <StatsPanel />
         <DebugPanel />
         <ActivityLog />
       </div>
+      <CityStatus />
       <BuildBar />
-      <ZoneLegend />
-      <LandValueLegend />
+      <GameClock />
       <RoadReadout />
       <EditReadout />
       <BulldozeTag />

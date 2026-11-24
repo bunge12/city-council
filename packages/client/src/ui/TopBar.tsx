@@ -1,12 +1,12 @@
-import { useState } from "react";
 import { DEMAND_BARS, SPEEDS, ZONING_BALANCE, gameDate, type DemandBar, type Speed } from "@city-council/sim";
 import { cellColour } from "../render/cell-geometry";
 import { PRESETS } from "../render/config";
 import { isPreset, presetLabel } from "../render/presets";
 import { formatGameDate } from "./format";
 import { useRoom, useSaveStatus, useServices, useSim } from "./hooks";
+import { tipParts, useTip, useTipState } from "./Tip";
 import { BAR_NAMES, formatDemandTitle, formatPopulationTitle, populationTrend, trendArrow } from "./top-figures";
-import { toggleDebug, toggleLog, toggleMenu, toggleStats, useGraphics, useSound, useUi } from "./store";
+import { toggleDebug, toggleLog, toggleMenu, toggleSettings, toggleStats, useGraphics, usePanelOrder, useSound, useUi } from "./store";
 
 /** The graphics setting: Low, Balanced or High, kept in this browser. */
 function GraphicsSetting() {
@@ -58,17 +58,39 @@ function SoundSetting() {
   const { setSound } = useServices();
   const sound = useSound();
   return (
-    <details className="sound-setting" id="sound-settings">
-      <summary title="Sound settings. Kept in this browser.">{sound.muted ? "Sound: muted" : "Sound"}</summary>
-      <div className="sound-panel" role="group" aria-label="Sound">
-        <Volume id="sound-interface" label="Interface" value={sound.interface} onChange={(v) => setSound({ interface: v })} />
-        <Volume id="sound-ambience" label="Ambience" value={sound.ambience} onChange={(v) => setSound({ ambience: v })} />
-        <label htmlFor="sound-mute" className="sound-mute">
-          <input id="sound-mute" type="checkbox" checked={sound.muted} onChange={(e) => setSound({ muted: e.target.checked })} />
-          Mute
-        </label>
-      </div>
-    </details>
+    <div className="sound-setting" id="sound-settings" role="group" aria-label="Sound" title="Sound settings. Kept in this browser.">
+      <h3>Sound</h3>
+      <Volume id="sound-interface" label="Interface" value={sound.interface} onChange={(v) => setSound({ interface: v })} />
+      <Volume id="sound-ambience" label="Ambience" value={sound.ambience} onChange={(v) => setSound({ ambience: v })} />
+      <label htmlFor="sound-mute" className="sound-mute">
+        <input id="sound-mute" type="checkbox" checked={sound.muted} onChange={(e) => setSound({ muted: e.target.checked })} />
+        Mute
+      </label>
+    </div>
+  );
+}
+
+/**
+ * The settings menu, under the top bar's Settings button (issue #332):
+ * graphics and sound, and the buttons for the city, log and debug panels,
+ * which open beside it.
+ */
+export function SettingsMenu() {
+  const open = useUi((s) => s.settingsOpen);
+  const menuOpen = useUi((s) => s.menuOpen);
+  const logOpen = useUi((s) => s.logOpen);
+  const debugOpen = useUi((s) => s.debugOpen);
+  const order = usePanelOrder("settings");
+  return (
+    <section id="settings-menu" className="panel settings-menu" aria-label="Settings" hidden={!open} style={{ order }}>
+      <GraphicsSetting />
+      <SoundSetting />
+      <nav className="panels" aria-label="Panels">
+        <button type="button" aria-expanded={menuOpen} aria-controls="city-menu" title="Start, open, save and download cities" onClick={toggleMenu}>City</button>
+        <button type="button" aria-expanded={logOpen} aria-controls="activity-log" title="The commands the sim applied (L)" onClick={toggleLog}>Log</button>
+        <button type="button" aria-expanded={debugOpen} aria-controls="debug-panel" title="Timings, the camera and every key (`)" onClick={toggleDebug}>Debug</button>
+      </nav>
+    </section>
   );
 }
 
@@ -77,16 +99,18 @@ function Population() {
   const population = useSim((s) => s?.stats.totals["population"] ?? null);
   const trend = useSim((s) => (s ? populationTrend(s.stats, s.tick) : null));
   const room = useRoom();
+  const { props, tip } = useTip(formatPopulationTitle(population, room, trend));
   return (
-    <span className="population" id="population" title={formatPopulationTitle(population, room, trend)}>
-      Population{" "}
+    <div className="population" id="population" {...props}>
+      <span className="label">Population</span>
       <span id="population-count" data-room={room ?? ""}>
         {population === null ? "-" : population.toLocaleString("en-US")}
       </span>
       <span className="trend" id="population-trend" data-trend={trend ?? ""} aria-label={trend ? `trend ${trend}` : undefined}>
         {trendArrow(trend)}
       </span>
-    </span>
+      {tip}
+    </div>
   );
 }
 
@@ -97,23 +121,25 @@ const BAR_COLOURS = Object.fromEntries(
 ) as Record<DemandBar, string>;
 
 /**
- * One demand bar, from -100 to 100 about a centre line, with what pushes it
- * in the tooltip (issue M3-15). The residential bar's tooltip also says
- * when homes still filling hold new homes back (#330). Counting those walks
- * every building, so it is counted only while the pointer is over the bar.
+ * One demand bar, lying on its side from -100 on the left to 100 on the
+ * right of a centre line, with its name and value beside it and what pushes
+ * it in the tooltip (issues M3-15, #332). The residential bar's tooltip also
+ * says when homes still filling hold new homes back (#330). Counting those
+ * walks every building, so it is counted only while the tooltip shows.
  */
 function DemandMeter({ bar }: { bar: DemandBar }) {
   const { mirror } = useServices();
-  const [hovered, setHovered] = useState(false);
-  const asksWaiting = hovered && bar === "residential";
+  const tipState = useTipState();
+  const asksWaiting = tipState.shown && bar === "residential";
   const value = useSim((s) => s?.demand[bar].value ?? null);
   const title = useSim((s) =>
     s ? formatDemandTitle(bar, s.demand[bar].value, s.demand[bar].parts, asksWaiting ? (mirror.homesWaiting()?.empty ?? null) : null) : formatDemandTitle(bar, null, null),
   );
+  const { props, tip } = tipParts(tipState, title);
   const shown = value === null ? null : Math.round(value);
   const size = value === null ? 0 : Math.min(100, Math.abs(value)) / 2;
   return (
-    <span
+    <div
       className="demand-bar"
       id={`demand-${bar}`}
       role="meter"
@@ -123,12 +149,15 @@ function DemandMeter({ bar }: { bar: DemandBar }) {
       aria-valuenow={shown ?? undefined}
       aria-valuetext={shown === null ? "-" : String(shown)}
       data-value={value ?? ""}
-      title={title}
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
+      {...props}
     >
-      <span className="fill" style={{ background: BAR_COLOURS[bar], height: `${size}%`, ...(value !== null && value < 0 ? { top: "50%" } : { bottom: "50%" }) }} />
-    </span>
+      <span className="name">{BAR_NAMES[bar]}</span>
+      <span className="track">
+        <span className="fill" style={{ background: BAR_COLOURS[bar], width: `${size}%`, ...(value !== null && value < 0 ? { right: "50%" } : { left: "50%" }) }} />
+      </span>
+      <span className="value">{shown === null ? "-" : shown > 0 ? `+${shown}` : String(shown)}</span>
+      {tip}
+    </div>
   );
 }
 
@@ -136,33 +165,32 @@ function DemandMeter({ bar }: { bar: DemandBar }) {
 function Demand() {
   const open = useSim((s) => s !== null);
   return (
-    <span className="demand" id="demand" role="group" aria-label="Demand">
+    <div className="demand" id="demand" role="group" aria-label="Demand">
       {open ? DEMAND_BARS.map((bar) => <DemandMeter key={bar} bar={bar} />) : "-"}
-    </span>
+    </div>
+  );
+}
+
+/** Population and demand, in the bottom left corner (issue #332). */
+export function CityStatus() {
+  return (
+    <section className="panel city-status" id="city-status" aria-label="Population and demand">
+      <Population />
+      <Demand />
+    </section>
   );
 }
 
 const SPEED_LABELS: Record<Speed, string> = { 0: "Pause", 1: "1x", 2: "2x", 4: "4x" };
 
-export function TopBar() {
-  const { sendCommand, undo, mirror } = useServices();
-  const canUndo = useSim((s) => s?.undo.some((r) => r.playerId === mirror.playerId) ?? false);
+/** The game date and the speed buttons, in the bottom right corner (issue #332). */
+export function GameClock() {
+  const { sendCommand } = useServices();
   const date = useSim((s) => (s ? formatGameDate(gameDate(s.tick)) : "-"));
   const speed = useSim((s) => s?.speed ?? null);
-  const status = useSaveStatus();
-  const city = !status ? "Loading…" : status.openElsewhere ? "No city open" : status.city.name;
-  const menuOpen = useUi((s) => s.menuOpen);
-  const logOpen = useUi((s) => s.logOpen);
-  const debugOpen = useUi((s) => s.debugOpen);
-  const statsOpen = useUi((s) => s.statsOpen);
-
   return (
-    <header className="top-bar">
-      <h1>City Council</h1>
-      <span className="city-name" id="city-name">{city}</span>
+    <section className="panel game-clock" id="game-clock" aria-label="Time">
       <span className="game-date" id="game-date" aria-label="Game date">{date}</span>
-      <Population />
-      <Demand />
       <div className="speeds" role="group" aria-label="Game speed">
         {SPEEDS.map((s) => (
           <button
@@ -176,22 +204,24 @@ export function TopBar() {
           </button>
         ))}
       </div>
-      <button
-        type="button"
-        id="undo"
-        disabled={!canUndo}
-        title={canUndo ? "Undo your last road or zoning change (Ctrl+Z or Cmd+Z)" : "Nothing to undo"}
-        onClick={() => void undo()}
-      >
-        Undo
-      </button>
-      <GraphicsSetting />
-      <SoundSetting />
+    </section>
+  );
+}
+
+/** The top bar: the city on the left, statistics and settings on the right (issue #332). */
+export function TopBar() {
+  const status = useSaveStatus();
+  const city = !status ? "Loading…" : status.openElsewhere ? "No city open" : status.city.name;
+  const settingsOpen = useUi((s) => s.settingsOpen);
+  const statsOpen = useUi((s) => s.statsOpen);
+
+  return (
+    <header className="top-bar">
+      <h1>City Council</h1>
+      <span className="city-name" id="city-name">{city}</span>
       <nav className="panels" aria-label="Panels">
-        <button type="button" aria-expanded={menuOpen} aria-controls="city-menu" onClick={toggleMenu}>City</button>
         <button type="button" id="stats-toggle" aria-expanded={statsOpen} aria-controls="stats-panel" title="Statistics: population and the city's numbers over time (P)" onClick={toggleStats}>Stats</button>
-        <button type="button" aria-expanded={logOpen} aria-controls="activity-log" onClick={toggleLog}>Log</button>
-        <button type="button" aria-expanded={debugOpen} aria-controls="debug-panel" onClick={toggleDebug}>Debug</button>
+        <button type="button" id="settings-toggle" aria-expanded={settingsOpen} aria-controls="settings-menu" title="Settings: graphics, sound, cities, the log and the debug panel" onClick={toggleSettings}>Settings</button>
       </nav>
     </header>
   );

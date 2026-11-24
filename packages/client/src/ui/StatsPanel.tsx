@@ -2,7 +2,7 @@ import { useMemo, useState, type PointerEvent } from "react";
 import { STAT_TOTALS, TIME_BALANCE, YEAR_COUNTS, gameDate, type YearCount } from "@city-council/sim";
 import { useSim, type MirrorState } from "./hooks";
 import { STAT_GROUPS, STAT_RANGES, STAT_SERIES, axisNumber, lastSamples, monthShort, newestMonth, niceTicks, rangeMonths, sampleDate, seriesById, steppedTick, type StatRange, type StatSeries } from "./stat-series";
-import { setStatsRange, setStatsSeries, toggleStats, useUi } from "./store";
+import { setStatsRange, setStatsSeries, toggleStats, usePanelOrder, useUi } from "./store";
 
 // The statistics panel (issue M3-16, PRD "City statistics"): a graph of one
 // series' monthly history over 1, 10 or 100 game years, the breakdowns
@@ -262,8 +262,9 @@ function StatsBody() {
 /** The panel itself. Closed, it reads nothing and draws nothing. */
 export function StatsPanel() {
   const open = useUi((u) => u.statsOpen);
+  const order = usePanelOrder("stats");
   return (
-    <section id="stats-panel" className="panel stats-panel" aria-label="Statistics" hidden={!open}>
+    <section id="stats-panel" className="panel stats-panel" aria-label="Statistics" hidden={!open} style={{ order }}>
       {open && <StatsBody />}
     </section>
   );

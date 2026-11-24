@@ -36,21 +36,24 @@ test("the dock shows only the road button until a road tool is on, and opens the
   for (const id of ["#road-menu", "#bulldoze-menu", "#road-type-street", "#draw-mode-straight", "#grid-tool", "#guide-angle"]) {
     await expect(page.locator(id)).toHaveCount(0);
   }
-  // No tool on: no hint explaining the buttons (issue 173).
-  await expect(page.locator("#road-hint")).toHaveCount(0);
+  // No hint explaining the buttons, with a tool on or off (issues 173, #332).
+  await expect(page.locator("#build-bar .hint")).toHaveCount(0);
   await attach(page, testInfo, "1 the dock with no tool on");
 
   // The road tool: four groups, in a menu that sits above the road button.
   await page.locator("#road-tool").click();
   await expect(page.locator("#road-menu")).toBeVisible();
-  await expect(page.locator("#road-hint")).toContainText("Click on the map to start a road.");
+  await expect(page.locator("#build-bar .hint")).toHaveCount(0);
   expect(await groups(page, "#road-menu")).toEqual(["Actions", "Road type", "Build mode", "Snapping"]);
   const menu = await page.locator("#road-menu").boundingBox();
   const button = await page.locator("#road-tool").boundingBox();
-  if (!menu || !button) throw new Error("menu or button not laid out");
+  const dock = await page.getByRole("group", { name: "Tools" }).boundingBox();
+  if (!menu || !button || !dock) throw new Error("menu, button or dock not laid out");
   expect(menu.y + menu.height).toBeLessThanOrEqual(button.y);
   expect(menu.x).toBeLessThanOrEqual(button.x);
   expect(menu.x + menu.width).toBeGreaterThan(button.x + button.width);
+  // Centred over the dock's buttons, not hanging off the road button (issue #332).
+  expect(Math.abs(menu.x + menu.width / 2 - (dock.x + dock.width / 2))).toBeLessThanOrEqual(1);
   await attach(page, testInfo, "2 the road menu above the road button");
 
   // The bulldozer closes the road menu and opens its own, with its filters; pressing it again turns it off.
@@ -58,6 +61,9 @@ test("the dock shows only the road button until a road tool is on, and opens the
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#road-menu")).toHaveCount(0);
   expect(await groups(page, "#bulldoze-menu")).toEqual(["Removes"]);
+  const bulldozeMenu = await page.locator("#bulldoze-menu").boundingBox();
+  if (!bulldozeMenu) throw new Error("bulldoze menu not laid out");
+  expect(Math.abs(bulldozeMenu.x + bulldozeMenu.width / 2 - (dock.x + dock.width / 2))).toBeLessThanOrEqual(1);
   await expect(page.locator("#bulldoze-filter-building")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#bulldoze-filter-road")).toHaveAttribute("aria-pressed", "true");
   await attach(page, testInfo, "3 bulldoze on");

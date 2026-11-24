@@ -4,7 +4,7 @@ import { ZONING_BALANCE, buildingCount, createState, serialize, type SimState } 
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { buildEverySide, zoneSides } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
-import { frames, openCity } from "./helpers";
+import { frames, openCity, openSettings } from "./helpers";
 
 // Issue M3-19: ambient sound. The wind plays everywhere and grows louder as
 // the camera pulls out from the street band to the city band, and stops
@@ -70,7 +70,7 @@ const dataset = (page: Page, key: string) => page.evaluate((key) => document.bod
 /** Opens the sound settings: the click is the first, so it starts audio. */
 async function startSound(page: Page): Promise<void> {
   expect(await page.evaluate(() => window.cityCouncil.sound.unlocked())).toBe(false);
-  await page.locator("#sound-settings summary").click();
+  await openSettings(page);
   await expect.poll(() => page.evaluate(() => window.cityCouncil.sound.unlocked())).toBe(true);
 }
 
@@ -139,7 +139,7 @@ test("houses going up at street zoom make construction sounds, which stop when t
   await page.waitForFunction((n) => document.body.dataset["buildingsDrawn"] === String(n), houses, { timeout: 60_000 });
   expect(await dataset(page, "zoomBand")).toBe("street");
   await startSound(page);
-  await page.locator("#sound-settings summary").click();
+  await page.locator("#settings-toggle").click();
 
   // Paused on the tick they were built: nothing has gone up yet, and nothing is heard.
   await expect.poll(async () => (await ambience(page)).construction.sites).toBe(houses);

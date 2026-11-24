@@ -36,7 +36,7 @@ import { noteFrontCells } from "../src/buildings/candidates";
 import { isSegment, segmentIdLimit, type RoadNetwork } from "../src/roads/network";
 import { checkCells, fromLocal, unzonedCells } from "../src/zoning/cells";
 import { settleCells } from "../src/zoning/cell-index";
-import { quadsOverlap } from "../src/zoning/shape";
+import { cellsOverlap } from "../src/zoning/shape";
 import { churnNetwork, growNetwork } from "./road-network-helper";
 
 // M2-03: zoning cells along roads.
@@ -120,7 +120,7 @@ function overlappingOpenCells(state: SimState): number {
     for (let j = i + 1; j < quads.length; j++) {
       const p = quads[i] as { q: Float64Array; name: string };
       const q = quads[j] as { q: Float64Array; name: string };
-      if (quadsOverlap(p.q, q.q)) pairs.push(`${p.name} ${q.name} ${Array.from(p.q).join(",")} | ${Array.from(q.q).join(",")}`);
+      if (cellsOverlap(p.q, q.q)) pairs.push(`${p.name} ${q.name} ${Array.from(p.q).join(",")} | ${Array.from(q.q).join(",")}`);
     }
   }
   expect(pairs.slice(0, 3)).toEqual([]);
@@ -363,7 +363,7 @@ describe("roads competing for ground", () => {
         const [x, z] = centreOf(state, c);
         const mine = Float64Array.from(cellCorners(state, c) ?? []);
         const winners = cellsInBox(state, x - 16, z - 16, x + 16, z + 16).filter(
-          (o) => o.status === CELL_OPEN && quadsOverlap(mine, Float64Array.from(cellCorners(state, o) ?? [])),
+          (o) => o.status === CELL_OPEN && cellsOverlap(mine, Float64Array.from(cellCorners(state, o) ?? [])),
         );
         expect(winners.length, `${seg}/${c.side}/${c.place}/${c.depth}`).toBeGreaterThan(0);
         for (const w of winners) expect(net.segOrder[w.segment]).toBe(net.segOrder[seg]);
@@ -387,6 +387,33 @@ function openBehindBlocked(state: SimState): string[] {
   }
   return out;
 }
+
+describe("cells overlapping (#348)", () => {
+  // Corners as cellCornersInto writes them: inner start, inner end, outer end, outer start.
+  /** A cell reaching south from a road's edge at z = 5, out to z = 13. */
+  const south = Float64Array.from([0, 5, 8, 5, 8, 13, 0, 13]);
+  /** A cell reaching north from a road's edge at z = 21, its outer edge at `outer`. */
+  const north = (outer: number) => Float64Array.from([8, 21, 0, 21, 0, outer, 8, outer]);
+  /** A cell reaching east from a road's edge at x = -3, its outer edge at x = 5, beside `south`'s depth. */
+  const east = Float64Array.from([-3, 13, -3, 5, 5, 5, 5, 13]);
+
+  it("lets two cells back to back share a sliver up to twice the build grid step", () => {
+    expect(cellsOverlap(south, north(13))).toBe(false);
+    expect(cellsOverlap(south, north(12.76))).toBe(false);
+    expect(cellsOverlap(north(12.76), south)).toBe(false);
+    expect(cellsOverlap(south, north(12.74))).toBe(true);
+    expect(cellsOverlap(south, north(9))).toBe(true);
+  });
+
+  it("keeps a centimetre between cells that do not face each other", () => {
+    // East's outer edge reaches 5 m into south, at right angles.
+    expect(cellsOverlap(south, east)).toBe(true);
+    const sliver = Float64Array.from([-3, 13, -3, 5, 0.02, 5, 0.02, 13]);
+    expect(cellsOverlap(south, sliver)).toBe(true);
+    const touching = Float64Array.from([-3, 13, -3, 5, 0.005, 5, 0.005, 13]);
+    expect(cellsOverlap(south, touching)).toBe(false);
+  });
+});
 
 describe("cells cut off from their road (#341)", () => {
   it("are blocked when the cell in front of them is not open, and come back with it", () => {
