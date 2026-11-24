@@ -118,6 +118,8 @@ export interface View {
    */
   updateBuildings(roadChunks: readonly number[], changed: readonly number[], ids: readonly number[]): void;
   buildingStats(): BuildingStats | null;
+  /** How many building chunks within `radius` metres of the camera, across the ground, wait to be read (#327). */
+  buildingsPendingNear(radius: number): number;
   /** The building whose drawn box the ray enters first, or -1 (issue 116). */
   pickBuilding(ray: Ray, limit?: number): number;
   /** Changes whenever a chunk's buildings change form, so a pick made before is stale. */
@@ -527,6 +529,7 @@ export async function createView(canvas: HTMLCanvasElement, forceWebGL: boolean,
       if (roadChunks.length > 0 || changed.length === 0) layer.applyIds(ids);
     },
     buildingStats: () => terrainRoot?.buildings?.stats() ?? null,
+    buildingsPendingNear: (radius) => terrainRoot?.buildings?.pendingWithin(camera.position.x, camera.position.z, radius) ?? 0,
     setGameTick(tick) {
       gameTick = tick;
     },

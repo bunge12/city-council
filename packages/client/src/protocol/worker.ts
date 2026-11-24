@@ -89,4 +89,10 @@ async function start(): Promise<void> {
   await saver.start();
 }
 
-void start();
+// Thrown again outside the promise, so the page hears of it as the worker's
+// error event and takes its loading screen down (#327).
+start().catch((error: unknown) => {
+  setTimeout(() => {
+    throw error;
+  }, 0);
+});

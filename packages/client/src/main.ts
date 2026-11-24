@@ -47,7 +47,7 @@ import { connectionMarks } from "./render/connection-marks-geometry";
 import type { RoadNet } from "./render/road-geometry";
 import { createSnapMarkLayer } from "./render/snap-marks";
 import { cellColour } from "./render/cell-geometry";
-import { ROAD_CELLS, ZONE_PREVIEW } from "./render/config";
+import { BUILDINGS, ROAD_CELLS, ZONE_PREVIEW } from "./render/config";
 import { createZonePreviewLayer, type ZoneMark } from "./render/zone-preview";
 import { createBuildingMarkLayer } from "./render/building-marks";
 import { createGameClock } from "./render/construction";
@@ -132,6 +132,8 @@ if (load.address !== null) {
     .then((file) => worker.saves.send(file, file.bytes ? [file.bytes] : []));
 }
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
+// A worker that throws sends no city, so nothing would take the screen down.
+worker.onError(() => loading.done());
 
 // Sound (issue M3-02). The settings are kept in this browser, like the
 // graphics preset. The audio context is made on the first click or key,
@@ -642,8 +644,16 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
     return { seed: state.seed, buildMs: t2 - t1 };
   };
   /** Once the map `showMap` put up and what the snapshot drew on it are in a frame, the page is ready. */
+  /**
+   * Once the map `showMap` put up and what the snapshot drew on it are in a
+   * frame, the page is ready. Behind the loading screen it waits too for the
+   * buildings the start view draws, out to where they are simplified, which
+   * fill in a frame's budget at a time; the rest fill in after (#327).
+   */
   const markReady = ({ seed, buildMs }: { seed: number; buildMs: number }) => {
-    requestAnimationFrame(() => {
+    const startViewDrawn = () => !loading.visible || view.buildingsPendingNear(BUILDINGS.simpleRadius) === 0;
+    const whenDrawn = () => (startViewDrawn() ? ready() : requestAnimationFrame(whenDrawn));
+    const ready = () => {
       status = {
         backend: view.backend,
         seed,
@@ -658,7 +668,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
         graphicsStarted = true;
         void startGraphics(view);
       }
-    });
+    };
+    requestAnimationFrame(whenDrawn);
   };
   // Roads come from the mirror alone: a snapshot draws them all, a delta
   // redraws the chunks its changed rows touch.
@@ -793,18 +804,23 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
    */
   const drawStaged = async () => {
     staging = true;
-    loading.advance("map");
-    await painted();
-    const shown = showMap();
-    loading.advance("view");
-    await painted();
-    const snapshot: MirrorUpdate = { kind: "snapshot" };
-    showRoads(snapshot);
-    showCells(snapshot);
-    showBuildings(snapshot);
-    staging = false;
-    if (shown) markReady(shown);
-    else loading.done();
+    let shown: ReturnType<typeof showMap> = null;
+    try {
+      loading.advance("map");
+      await painted();
+      shown = showMap();
+      loading.advance("view");
+      await painted();
+      const snapshot: MirrorUpdate = { kind: "snapshot" };
+      showRoads(snapshot);
+      showCells(snapshot);
+      showBuildings(snapshot);
+    } finally {
+      staging = false;
+      // A part that threw leaves the page as it is, with the screen down.
+      if (shown) markReady(shown);
+      else loading.done();
+    }
   };
   const drawFirst = () => {
     if (loading.visible) void drawStaged();

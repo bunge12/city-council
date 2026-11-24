@@ -8,8 +8,8 @@ import { SCALE_CITY_RESIDENTS, scaleCityFile } from "./scale-city-files";
 // takes, against "Opening a large city" under "Proposed targets" in the
 // PRD: a city of 500,000 interactive within 30 s on the Low class, behind
 // a loading screen that shows progress (#327). The test photographs the
-// screen while the worker lays out the zoning cells, the longest stage, and
-// reports how long each stage of it took.
+// screen while the worker builds the derived data, and reports how long
+// each stage of it took.
 //
 // Two times, from the page asked to open the file: until the page has
 // drawn the city and the worker reports the file loaded (`openCity`), and
@@ -35,13 +35,18 @@ for (const residents of SCALE_CITY_RESIDENTS) {
     const { bytes, totals } = scaleCityFile(residents);
     const t0 = Date.now();
     const opening = openCity(page, bytes, { query: "webgl&preset=low", name: `Scale ${residents}`, timeout: OPEN_TIMEOUT_MS });
-    // The worker holds this stage, so the page is free to be photographed.
-    await page.locator('body[data-loading-stage="cells"] .loading').waitFor({ timeout: OPEN_TIMEOUT_MS });
-    // Past the screen's fade-in.
-    await page.waitForTimeout(400);
-    const screenPath = testInfo.outputPath(`loading screen ${residents}.png`);
-    await page.screenshot({ path: screenPath });
-    await testInfo.attach(`loading screen of ${label}`, { path: screenPath, contentType: "image/png" });
+    // Past reading the save, the worker holds the stages, so the page is free
+    // to be photographed. A page that opens the city first has no screen left
+    // to photograph, and the test goes on without one.
+    const pastReading = page.locator('body:not([data-loading-stage="reading"]):not([data-loading-stage=""]) .loading');
+    const photographable = await Promise.race([pastReading.waitFor({ timeout: OPEN_TIMEOUT_MS }).then(() => true), opening.then(() => false)]);
+    if (photographable) {
+      // Past the screen's fade-in.
+      await page.waitForTimeout(400);
+      const screenPath = testInfo.outputPath(`loading screen ${residents}.png`);
+      await page.screenshot({ path: screenPath });
+      await testInfo.attach(`loading screen of ${label}`, { path: screenPath, contentType: "image/png" });
+    }
     await opening;
     const openMs = Date.now() - t0;
     const loading = await page.evaluate(() => window.cityCouncil.loading());

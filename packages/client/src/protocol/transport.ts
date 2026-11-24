@@ -90,6 +90,8 @@ export interface WorkerChannels {
   saves: PageSaveTransport;
   clock: SimTransport<ToClock, FromClock>;
   terminate(): void;
+  /** Calls `listener` if the worker throws, which leaves the page with no city to wait for (#327). */
+  onError(listener: () => void): void;
 }
 
 /**
@@ -111,6 +113,7 @@ export function createWorkerTransport(cityId: string | null = null, loadsFile = 
     saves: portTransport<ToSaver, FromSaver>(worker, isSaveMessage),
     clock: portTransport<ToClock, FromClock>(worker, isClockMessage),
     terminate: () => worker.terminate(),
+    onError: (listener) => worker.addEventListener("error", listener),
   };
 }
 

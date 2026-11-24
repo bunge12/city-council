@@ -10,7 +10,8 @@ import type { DerivedStage } from "@city-council/sim";
  * A stage of opening a saved city. `reading` is the worker reading the
  * save, the derived stages are `prepareDerived`'s in the worker, `map` is
  * the page drawing the terrain and `view` the page building the meshes of
- * the start view and drawing its first frame.
+ * the start view, its buildings out to where they are simplified, and
+ * drawing its first frame.
  */
 export type LoadStage = "reading" | DerivedStage | "map" | "view";
 
@@ -32,15 +33,15 @@ export interface LoadStageInfo {
  * being stored.
  */
 export const LOAD_STAGES: readonly LoadStageInfo[] = [
-  { stage: "reading", label: "Reading the save", weight: 1140 },
-  { stage: "terrain", label: "Shaping the terrain", weight: 85 },
-  { stage: "roads", label: "Indexing the roads", weight: 85 },
-  { stage: "cells", label: "Laying out the zoning cells", weight: 2075 },
-  { stage: "buildings", label: "Finding every building and household", weight: 295 },
-  { stage: "travel", label: "Working out travel times", weight: 670 },
-  { stage: "openings", label: "Finding room to build", weight: 150 },
-  { stage: "map", label: "Drawing the terrain", weight: 445 },
-  { stage: "view", label: "Drawing the start view", weight: 4755 },
+  { stage: "reading", label: "Reading the save", weight: 1000 },
+  { stage: "terrain", label: "Shaping the terrain", weight: 35 },
+  { stage: "roads", label: "Indexing the roads", weight: 60 },
+  { stage: "cells", label: "Laying out the zoning cells", weight: 1900 },
+  { stage: "buildings", label: "Finding every building and household", weight: 280 },
+  { stage: "travel", label: "Working out travel times", weight: 610 },
+  { stage: "openings", label: "Finding room to build", weight: 140 },
+  { stage: "map", label: "Drawing the terrain", weight: 420 },
+  { stage: "view", label: "Drawing the start view", weight: 5300 },
 ];
 
 const TOTAL_WEIGHT = LOAD_STAGES.reduce((sum, s) => sum + s.weight, 0);

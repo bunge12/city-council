@@ -27,7 +27,7 @@ async function screen(page: Page) {
   }));
 }
 
-test("a city file opens behind the loading screen, through every stage, and the screen comes down with the first frame", async ({ page }) => {
+test("a city file opens behind the loading screen, through every stage, and the screen comes down once the start view is drawn", async ({ page }) => {
   await openCity(page, createState(2026), { name: "Loading" });
   const shown = await screen(page);
   expect(shown.stages).toBe(EVERY_STAGE);
