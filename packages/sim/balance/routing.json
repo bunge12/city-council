@@ -13,8 +13,8 @@
     }
   },
   "travelTimes": {
-    "_about": "Free-flow travel times between zones (issue #177). The map is cut into 500 m zones, one per chunk, and a table holds the drive between every two of them. sameZoneSeconds is the time given two buildings in one zone, so a pop can work next door. A change of roads rebuilds the table over ticks: rebuildSettlesPerTick is how many road nodes the rebuild may settle in a tick, counted as zones with a road times the road nodes in the city, so the tick it is ready by follows from state alone. 32,000 is about 2.5 ms on the development container, kept low because the soak, at 4x with the page beside it, ran slices about three times slower: the 30,000 segment city, 440 zones with a road and 18,500 road nodes, rebuilds over about 260 ticks.",
+    "_about": "Free-flow travel times between zones (issue #177). The map is cut into 500 m zones, one per chunk, and a table holds the drive between every two of them. sameZoneSeconds is the time given two buildings in one zone, so a pop can work next door. A change of roads rebuilds the table over ticks: rebuildSettlesPerTick is how many road nodes the rebuild may settle in a tick, counted as zones with a road times the road nodes in the city, so the tick it is ready by follows from state alone. A row's search stops part way when a tick's share runs out and carries on in the next. 16,000 is about 2 ms on the development container on the city of 200,000 residents. It was 32,000, about 3.8 ms, until the soak on that city, at 4x with the page beside it, ran some slices at 20 to 39 ms and passed the tick budget on idle steps (#326). The 30,000 segment city, 440 zones with a road and 18,500 road nodes, rebuilds over about 510 ticks.",
     "sameZoneSeconds": 60,
-    "rebuildSettlesPerTick": 32000
+    "rebuildSettlesPerTick": 16000
   }
 }
