@@ -25,7 +25,7 @@ import { NONE, addNode, addSegment, isNode, isSegment, nodeIdLimit, removeSegmen
 import { ROUTING_BALANCE, findRoute, findRouteBetween, routingGraphOf } from "../src/roads/routing";
 import { nextFloat, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
-import { markRoadsChanged, prepareTravelTimes, travelRebuildSize, travelStepSettled, travelZoneSources } from "../src/travel-times";
+import { NO_ROUTE_SECONDS, markRoadsChanged, prepareTravelTimes, readableTravelTimes, travelRebuildSize, travelStepSettled, travelZoneSources } from "../src/travel-times";
 import { chunkAt } from "../src/zoning/cell-index";
 import { runFixture } from "./replay-helper";
 import { submit } from "./seen-ends";
@@ -411,6 +411,64 @@ describe("a town in two halves", () => {
   });
 });
 
+/** What a reader that cannot wait reads from `from` to `to`: seconds, null for no route, or "none" while the city holds no table it may read. */
+function readable(state: SimState, from: number, to: number): number | null | "none" {
+  const r = readableTravelTimes(state);
+  if (!r) return "none";
+  const seconds = r.table[from * TRAVEL_ZONES + to] ?? NO_ROUTE_SECONDS;
+  return seconds === NO_ROUTE_SECONDS ? null : seconds;
+}
+
+describe("the last whole table (#313)", () => {
+  it("is read while a change of roads rebuilds, through further changes, and let go once the rebuild is ready", () => {
+    withSettlesPerTick(5, () => {
+      const state = createState(SEED);
+      prepareDerived(state);
+      const join = twoHalves(state);
+      stepUntilReady(state);
+      const across = zoneTravelTime(state, WEST, EAST);
+      expect(across).toBeGreaterThan(0);
+      // The streets' own rebuild held a copy up to its ready tick, and the step after lets it go.
+      step(state);
+      expect(state.travelLast).toBeNull();
+      send(state, 6, "BulldozeRoad", { segments: [join] });
+      expect(travelTimesReady(state)).toBe(false);
+      const held = state.travelLast;
+      expect(held?.tick).toBe(state.tick - 1);
+      // The halves are apart, but the table being read is the one from before.
+      expect(readable(state, WEST, EAST)).toBe(across);
+      for (let i = 0; i < 3; i++) step(state);
+      // A change while it rebuilds keeps the table from before the first.
+      send(state, 7, "BuildRoad", { from: { x: 4300, z: 4700 }, to: { x: 4600, z: 4700 }, type: "street" });
+      expect(state.travelLast).toBe(held);
+      expect(readable(state, WEST, EAST)).toBe(across);
+      stepUntilReady(state);
+      // Ready: the reader reads the roads as they are, and the copy goes on the next step.
+      const rejoined = zoneTravelTime(state, WEST, EAST);
+      expect(rejoined).toBeGreaterThan(0);
+      expect(rejoined).not.toBe(across);
+      expect(readable(state, WEST, EAST)).toBe(rejoined);
+      step(state);
+      expect(state.travelLast).toBeNull();
+      expect(hashState(replay(state.seed, state.log, state.tick))).toBe(hashState(state));
+    });
+  });
+
+  it("is not held by a city whose rebuild began before it could be, as one saved before version 27", () => {
+    withSettlesPerTick(5, () => {
+      const state = createState(SEED);
+      prepareDerived(state);
+      const join = twoHalves(state);
+      stepUntilReady(state);
+      send(state, 6, "BulldozeRoad", { segments: [join] });
+      state.travelLast = null;
+      expect(readable(state, WEST, EAST)).toBe("none");
+      send(state, 7, "BuildRoad", { from: { x: 4300, z: 4700 }, to: { x: 4600, z: 4700 }, type: "street" });
+      expect(state.travelLast).toBeNull();
+    });
+  });
+});
+
 describe("what counts as a change of roads", () => {
   it("is only a command the step applies: a check that builds a grid and takes it back moves nothing", () => {
     withSettlesPerTick(5, () => {
@@ -460,6 +518,84 @@ describe("paused steps", () => {
       expect(pushed).toBeGreaterThan(tick);
       // The undo was a small change again: readable at once, from the tick it applied on.
       expect(live.travelReadyAt).toBe(tick);
+      expect(hashState(replay(live.seed, live.log, live.tick))).toBe(hashState(live));
+    });
+  });
+
+  it("hold the table from before a tick's first command, when a small change and then a big one applied over paused steps (#313)", () => {
+    withSettlesPerTick(1, () => {
+      const live = createState(SEED);
+      prepareDerived(live);
+      twoHalves(live);
+      stepUntilReady(live);
+      const net = live.roads;
+      let nodes = 0;
+      for (let n = 0; n < nodeIdLimit(net); n++) if (isNode(net, n) && net.nodeFirstSeg[n] !== NONE) nodes++;
+      const rows = travelZoneSources(live).filter((z) => z !== NONE).length;
+      ROUTING_BALANCE.travelTimes.rebuildSettlesPerTick = rows * nodes;
+      for (let i = 0; i < 5; i++) step(live);
+      const across = zoneTravelTime(live, WEST, EAST);
+      send(live, 20, "SetSpeed", { speed: 0 });
+      const tick = live.tick;
+      // Undoing the street that joins the halves leaves less to rebuild: ready at once.
+      send(live, 21, "Undo", {});
+      expect(live.travelReadyAt).toBe(tick);
+      expect(zoneTravelTime(live, WEST, EAST)).toBeNull();
+      expect(live.travelLast?.tick).toBe(tick);
+      // Saved between the paused steps, as an autosave may.
+      const loaded = deserialize(serialize(live)).state;
+      prepareDerived(loaded);
+      for (const s of [live, loaded]) {
+        // A longer street, on the same tick: more than a tick's work.
+        send(s, 22, "BuildRoad", { from: { x: 4300, z: 4700 }, to: { x: 4600, z: 4700 }, type: "street" });
+        expect(s.travelReadyAt).toBeGreaterThan(tick);
+        // The table from before the tick's first command, which joined the halves.
+        expect(readable(s, WEST, EAST)).toBe(across);
+        send(s, 23, "SetSpeed", { speed: 1 });
+      }
+      expect(hashState(loaded)).toBe(hashState(live));
+      expect(hashState(replay(live.seed, live.log, live.tick))).toBe(hashState(live));
+      for (let i = 0; i < 10; i++) for (const s of [live, loaded]) step(s);
+      expect(hashState(loaded)).toBe(hashState(live));
+      expect(hashState(replay(live.seed, live.log, live.tick))).toBe(hashState(live));
+    });
+  });
+
+  it("keep the copy a replay keeps, when a small change part way through a rebuild brings the ready tick back on a paused tick (#313)", () => {
+    withSettlesPerTick(1, () => {
+      const live = createState(SEED);
+      prepareDerived(live);
+      const join = twoHalves(live);
+      stepUntilReady(live);
+      const net = live.roads;
+      let nodes = 0;
+      for (let n = 0; n < nodeIdLimit(net); n++) if (isNode(net, n) && net.nodeFirstSeg[n] !== NONE) nodes++;
+      const rows = travelZoneSources(live).filter((z) => z !== NONE).length;
+      ROUTING_BALANCE.travelTimes.rebuildSettlesPerTick = rows * nodes;
+      for (let i = 0; i < 5; i++) step(live);
+      const across = zoneTravelTime(live, WEST, EAST);
+      // A longer street, unpaused: more than a tick's work, so the copy is taken.
+      send(live, 20, "BuildRoad", { from: { x: 4300, z: 4700 }, to: { x: 4600, z: 4700 }, type: "street" });
+      expect(live.travelReadyAt).toBeGreaterThan(live.tick);
+      send(live, 21, "SetSpeed", { speed: 0 });
+      const tick = live.tick;
+      expect(live.travelReadyAt).toBeGreaterThan(tick);
+      // Paused, part way through: the street and the join go, which leaves less to rebuild than before either.
+      send(live, 22, "Undo", {});
+      send(live, 23, "BulldozeRoad", { segments: [join] });
+      expect(live.travelReadyAt).toBe(tick);
+      const loaded = deserialize(serialize(live)).state;
+      prepareDerived(loaded);
+      for (const s of [live, loaded]) {
+        // Another change on the same paused tick keeps the copy from before the first street.
+        send(s, 24, "BuildRoad", { from: { x: 4300, z: 4700 }, to: { x: 4600, z: 4700 }, type: "street" });
+        expect(readable(s, WEST, EAST)).toBe(across);
+        send(s, 25, "SetSpeed", { speed: 1 });
+      }
+      expect(hashState(loaded)).toBe(hashState(live));
+      expect(hashState(replay(live.seed, live.log, live.tick))).toBe(hashState(live));
+      for (let i = 0; i < 10; i++) for (const s of [live, loaded]) step(s);
+      expect(hashState(loaded)).toBe(hashState(live));
       expect(hashState(replay(live.seed, live.log, live.tick))).toBe(hashState(live));
     });
   });

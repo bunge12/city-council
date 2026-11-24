@@ -19,8 +19,10 @@
 // draws rather than a pass over the zones for every pop.
 // The draws come from the
 // generator in state. A pop whose home zone has no route to any zone with
-// open jobs it may take stays without work, and so does every pop while
-// the travel times are still being rebuilt after a change of roads.
+// open jobs it may take stays without work. While the travel times are
+// rebuilt after a change of roads, matching reads the last whole table
+// (`readableTravelTimes`, #313), so a player who keeps changing the roads
+// does not keep everyone out of work.
 //
 // Only workplaces on a road that reaches an outside connection are
 // offered, as only homes on one take newcomers (room.ts): a shop on a
@@ -47,7 +49,7 @@ import { outsideReachByNode } from "../roads/outside";
 import { ROUTING_BALANCE } from "../roads/routing";
 import type { SimState } from "../state";
 import type { System } from "../step";
-import { NO_ROUTE_SECONDS, TRAVEL_ZONES, travelTimeTable, travelTimesReady } from "../travel-times";
+import { NO_ROUTE_SECONDS, TRAVEL_ZONES, readableTravelTimes, travelTimesReady } from "../travel-times";
 import { dropOpeningNote } from "./opening-changes";
 import { openJobsFrom } from "./open-jobs";
 import { openJobsInAll, openingZones, openingsOf, refileOpening, zoneOfJob, type Openings } from "./openings";
@@ -255,7 +257,8 @@ function takeJob(m: Matcher, id: number, work: number): void {
 
 /** The job matching system's work for one tick, as the header says. */
 export function matchJobs(state: SimState): void {
-  if (!travelTimesReady(state)) return;
+  // While a change of roads is rebuilt, the last whole table (#313).
+  if (!travelTimesReady(state) && !state.travelLast) return;
   const { from, to } = popSlice(state);
   const p = state.pops;
   let m: Matcher | null = null;
@@ -266,7 +269,9 @@ export function matchJobs(state: SimState): void {
       const openings = openingsOf(state);
       const zones = openingZones(openings);
       if (zones.length === 0) return;
-      const { table, sources } = travelTimeTable(state);
+      const readable = readableTravelTimes(state);
+      if (!readable) return;
+      const { table, sources } = readable;
       m = {
         state,
         openings,

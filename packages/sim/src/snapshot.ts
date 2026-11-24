@@ -57,6 +57,7 @@ import { RNG_WORDS } from "./rng";
 import { checkConnections } from "./roads/connections";
 import { checkRoadNetwork, type RoadNetwork } from "./roads/network";
 import { SNAPSHOT_VERSION, SPEEDS, type SimState } from "./state";
+import { checkTravelLast } from "./travel-times";
 import { checkUndoHistory, heldIds, type UndoRecord } from "./undo";
 import { checkCells } from "./zoning/cells";
 
@@ -741,7 +742,7 @@ function isCentre(value: unknown): boolean {
 
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
-  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, cellReads, buildings, pops, centre, stats, travelReadyAt, demand, redevelopedToday } = state;
+  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, cellReads, buildings, pops, centre, stats, travelReadyAt, demand, redevelopedToday, travelLast } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");
   if (!isUint32(seed)) throw corrupt("its seed is not a 32-bit integer");
   if (tick !== header.tick || seed !== header.seed) throw corrupt("its header does not match its contents");
@@ -777,6 +778,8 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   const demandProblem = checkDemand(demand);
   if (demandProblem !== null) throw corrupt(`its demand bars are malformed: ${demandProblem}`);
   if (!Number.isSafeInteger(redevelopedToday) || (redevelopedToday as number) < 0) throw corrupt("its count of buildings redeveloped today is not a whole number");
+  const lastProblem = checkTravelLast(travelLast, tick as number);
+  if (lastProblem !== null) throw corrupt(`its last travel-time table is malformed: ${lastProblem}`);
 }
 
 /**

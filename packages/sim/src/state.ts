@@ -10,6 +10,7 @@ import { seedRng } from "./rng";
 import { placeConnections } from "./roads/connections";
 import { createRoadNetwork, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
+import type { TravelLast } from "./travel-times";
 import type { UndoRecord } from "./undo";
 import { unzonedCells, type CellState } from "./zoning/cells";
 
@@ -17,7 +18,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 26;
+export const SNAPSHOT_VERSION = 27;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -127,6 +128,12 @@ export interface SimState {
    * demand.json. Set to 0 on each day's first tick.
    */
   redevelopedToday: number;
+  /**
+   * The last whole travel-time table, held from a change of roads until the
+   * rebuild it starts is ready, so job matching can read it meanwhile
+   * (travel-times.ts, #313). Null at other times.
+   */
+  travelLast: TravelLast | null;
 }
 
 /**
@@ -180,6 +187,8 @@ export function createBareState(seed: number): SimState {
     // After it, where the version 20 migration puts it.
     demand: createDemand(),
     redevelopedToday: 0,
+    // After it, where the version 27 migration puts it.
+    travelLast: null,
   };
 }
 

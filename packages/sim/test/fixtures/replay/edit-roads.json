@@ -14,5 +14,5 @@
     { "tick": 9, "seq": 5, "playerId": "p1", "type": "BuildRoad", "payload": { "from": { "x": 4250, "z": 4600 }, "to": { "x": 4450, "z": 4600 }, "type": "avenue" } }
   ],
   "balance": "5f9aaa58dfbdf70d",
-  "hash": "7ccbb9ca91c56659"
+  "hash": "e55d4e9e3f26102c"
 }

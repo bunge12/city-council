@@ -13,10 +13,14 @@
 // - where.ts notes a building each time a pop joins or leaves its workers,
 //   and buildings.ts each time a building comes or goes
 //   (opening-changes.ts). Each building noted is filed again from scratch.
-// - A change of roads can move any building's zone or reach, so the whole
-//   of it is built again. It watches the network's nodes and segments, as
-//   the outside reach does (roads/outside.ts), and rebuilds on its next
-//   read after any of them comes or goes, paused or not.
+// - A change of roads can change whether a workplace's road reaches
+//   outside. It watches the network's nodes and segments, as the outside
+//   reach does (roads/outside.ts), and on its next read after any of them
+//   comes or goes, paused or not, refiles only the workplaces whose road
+//   now reaches outside where it did not, or the other way (#313). A
+//   building's zone is its lot's chunk, which no road moves, and a road
+//   that removes a building notes it. A change of the outside connections
+//   builds it again whole.
 // - Job matching files its own takes again as it makes them.
 //
 // Built afresh or kept current, it gives the same answers: the sums are of
@@ -64,6 +68,12 @@ export interface Openings {
   upTo: Int32Array;
   /** By building times POP_LEVELS plus education: the open jobs it adds to its zone's sums, while filed. */
   given: Int32Array;
+  /**
+   * By building: 1 if its road reached outside when it was last filed, for
+   * a live workplace that is not abandoned. What a change of roads compares
+   * (`catchUpRoads`).
+   */
+  roadOk: Uint8Array;
 }
 
 const live = new WeakMap<PopState, Openings>();
@@ -98,6 +108,16 @@ function fit(o: Openings, n: number): void {
   o.zoneOf = grownTo(o.zoneOf, n, -1);
   o.upTo = grownTo(o.upTo, o.zoneOf.length * POP_LEVELS, 0);
   o.given = grownTo(o.given, o.zoneOf.length * POP_LEVELS, 0);
+  if (o.roadOk.length < o.zoneOf.length) {
+    const next = new Uint8Array(o.zoneOf.length);
+    next.set(o.roadOk);
+    o.roadOk = next;
+  }
+}
+
+/** Whether segment `seg` is a road whose first end reaches an outside connection. */
+function reachesOutside(net: RoadNetwork, seg: number, reach: Uint8Array): boolean {
+  return net.segNetwork[seg] === NETWORK_ROAD && reach[net.segA[seg] as number] === 1;
 }
 
 /** Adds `by` to zone `zone`'s entry in Fenwick tree `tree`. */
@@ -197,8 +217,9 @@ function refile(state: SimState, o: Openings, id: number, reach: Uint8Array, chu
   const t = b.type[id] as number;
   const rate = JOBS_PER_CELL[t] ?? 0;
   if (rate <= 0) return unfile(o, id);
-  const seg = b.firstSeg[id] as number;
-  if (state.roads.segNetwork[seg] !== NETWORK_ROAD || reach[state.roads.segA[seg] as number] !== 1) return unfile(o, id);
+  const roadOk = reachesOutside(state.roads, b.firstSeg[id] as number, reach);
+  o.roadOk[id] = roadOk ? 1 : 0;
+  if (!roadOk) return unfile(o, id);
   const zone = chunks[id] ?? NO_BUILDING;
   if (zone === NO_BUILDING) return unfile(o, id);
   // jobsForLot, written out.
@@ -241,6 +262,7 @@ function build(state: SimState): Openings {
     zoneOf: new Int32Array(0),
     upTo: new Int32Array(0),
     given: new Int32Array(0),
+    roadOk: new Uint8Array(0),
   };
   const n = state.buildings.flags.length;
   fit(o, n);
@@ -251,14 +273,44 @@ function build(state: SimState): Openings {
   return o;
 }
 
-/** The openings for `state`, built on first use or after a change of roads, and caught up with every building noted since. */
+/**
+ * After a change of roads: refiles every live workplace that is not
+ * abandoned whose road reaches outside now where it did not when it was
+ * filed, or the other way. Nothing else in a filing reads the roads, so
+ * the rest stand as they are. One pass over the buildings, reading three
+ * arrays each, where building afresh files every workplace (#313).
+ */
+function catchUpRoads(state: SimState, o: Openings): void {
+  const b = state.buildings;
+  const n = b.flags.length;
+  fit(o, n);
+  const net = state.roads;
+  const reach = outsideReachByNode(state);
+  const chunks = buildingChunks(state);
+  const filled = popIndexOf(state).filledByEducation;
+  const alive = BUILDING_ALIVE;
+  const abandoned = BUILDING_ABANDONED;
+  const { flags, type, firstSeg } = b;
+  const roadOk = o.roadOk;
+  for (let id = 0; id < n; id++) {
+    const f = flags[id] as number;
+    if ((f & alive) === 0 || (f & abandoned) !== 0 || (JOBS_PER_CELL[type[id] as number] ?? 0) <= 0) continue;
+    const now = reachesOutside(net, firstSeg[id] as number, reach) ? 1 : 0;
+    if (now !== roadOk[id]) refile(state, o, id, reach, chunks, filled);
+  }
+  o.roadsSeen = roadChanges(net);
+}
+
+/** The openings for `state`, built on first use, caught up after a change of roads, and with every building noted since. */
 export function openingsOf(state: SimState): Openings {
   let o = live.get(state.pops);
-  if (!o || o.roadsSeen !== roadChanges(state.roads) || o.connections !== state.connections) {
+  if (!o || o.connections !== state.connections) {
     o = build(state);
     live.set(state.pops, o);
     return o;
   }
+  // The notes first: a road that removed a building noted it, and its row is gone.
+  const changed = o.roadsSeen !== roadChanges(state.roads);
   const noted = takeOpeningNotes(state.pops);
   if (noted) {
     const reach = outsideReachByNode(state);
@@ -266,6 +318,7 @@ export function openingsOf(state: SimState): Openings {
     const filled = popIndexOf(state).filledByEducation;
     for (const id of noted) refile(state, o, id, reach, chunks, filled);
   }
+  if (changed) catchUpRoads(state, o);
   return o;
 }
 

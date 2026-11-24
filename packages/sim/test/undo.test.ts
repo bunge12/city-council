@@ -84,7 +84,7 @@ function refusal(state: SimState, c: Command): string {
 
 /** The state hash leaving out the log and the undo history, and the tick, which every step moves. */
 function cityHash(state: SimState): string {
-  // The ticks a change of cells settles by and the travel times are rebuilt by are deadlines, like the tick, not part of the city, and so are the grower's plan and when the centre is next due.
+  // The ticks a change of cells settles by and the travel times are rebuilt by are deadlines, like the tick, not part of the city, as is the travel-time table held until then, and so are the grower's plan and when the centre is next due.
   // The statistics' history is a record of the months that passed; the totals are kept.
   return hashState({
     ...state,
@@ -96,6 +96,8 @@ function cityHash(state: SimState): string {
     centre: { ...state.centre, due: 0 },
     stats: { ...state.stats, history: {}, next: 0 },
     travelReadyAt: 0,
+    // Held while the travel times rebuild, like the tick they are rebuilt by (#313).
+    travelLast: null,
     // The bars move a share of the way each day, so they follow the days passed too.
     demand: createDemand(),
   });

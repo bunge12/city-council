@@ -13,7 +13,7 @@
 //
 // The table is derived data (PRD, "Derived data"): never saved or hashed,
 // built from the roads alone, so a table kept current equals one built
-// afresh. Only `state.travelReadyAt` is state. A command that changes the
+// afresh. Only `state.travelReadyAt` and `state.travelLast` are state. A command that changes the
 // roads gives it the tick by which the table is rebuilt, from the size of
 // the work: zones with a source times road nodes, over
 // `rebuildSettlesPerTick`. Small cities rebuild at once. A big one
@@ -25,10 +25,17 @@
 // (CLAUDE.md rule 5). A change while one rebuilds starts it again.
 //
 // Nothing in the sim may read the table before the ready tick
-// (`travelTimesReady`). The table it would read is the one from before the
-// change, and a city loaded from a save made in between has only the
-// roads as they are now, so it could not give the same answers. A reader
-// that cannot wait does without the table until then.
+// (`travelTimesReady`): it is being built over. A reader that cannot wait,
+// as job matching cannot while a player keeps changing the roads (#313),
+// reads the last whole table instead (`readableTravelTimes`). The step
+// that applies a change copies it into `state.travelLast`, which a save
+// carries, because a city loaded in between has only the roads as they are
+// now and could not build it again. It is taken at the first change of a
+// tick at which nothing was being rebuilt, kept through changes while the
+// rebuild runs, and let go at the end of the first step that is not paused
+// at or after the ready tick (`endTravelStep`). So it is the table as it
+// stood before the tick's first command, whether the host applied that
+// tick's commands over several paused steps or a replay in one.
 //
 // Exact arithmetic only (CLAUDE.md rule 6): sums of edge times, squared
 // distances and `Math.floor`.
@@ -41,6 +48,20 @@ import type { SimState } from "./state";
 
 /** Travel zones on the map: one per 500 m chunk, numbered as chunks are. */
 export const TRAVEL_ZONES = CHUNKS_PER_SIDE * CHUNKS_PER_SIDE;
+
+/**
+ * The last whole table, held in state while a rebuild runs (#313): the
+ * table and sources as they were before the change, and the tick of the
+ * last change while it was held.
+ */
+export interface TravelLast {
+  /** Seconds from zone `a` to zone `b` at `a * TRAVEL_ZONES + b`, as `travelTimeTable` gives them. */
+  table: Uint16Array;
+  /** Each zone's source node, or NONE. */
+  sources: Int32Array;
+  /** The tick of the change that copied it, or of the last change while it was held. */
+  tick: number;
+}
 
 /** A table entry for a pair of zones with no route between them. */
 const UNREACHED = 0xffff;
@@ -545,7 +566,16 @@ function rebuildNow(tt: TravelTimes): void {
  * replay, which sees neither, must give `travelReadyAt` the same ticks.
  */
 export function startTravelWatch(state: SimState): void {
-  watched(state.roads).touched = false;
+  const tt = watched(state.roads);
+  tt.touched = false;
+  // A change may need the table as it stands to hold as the last whole one
+  // (`stepTravel`), and once the command has applied the roads it was
+  // built from are gone. So it is built now if nothing has built it, while
+  // nothing is being rebuilt. A host's load has built it already; a city
+  // that has run from its first tick builds it here, on its first command,
+  // with next to no roads. Not while this step's earlier command changed
+  // the roads: the table is still the one from before that.
+  if (!tt.changed && state.tick >= state.travelReadyAt && (!tt.table || !tt.sources || tt.rebuild || tt.waiting)) rebuildNow(tt);
 }
 
 /** Ends the watch `startTravelWatch` began: a command that applied and touched a segment changed the roads. */
@@ -579,6 +609,24 @@ export function stepTravel(state: SimState): void {
   const kept = tt.table !== null;
   if (tt.changed) {
     tt.changed = false;
+    // Copied before anything builds over it, from the table as it stood
+    // before the tick's first command. A copy this tick already took, in an
+    // earlier paused step, is that table. One from an earlier tick, still
+    // held because the game paused on or before its ready tick, is older,
+    // and the table is whole again. A change during a rebuild keeps the
+    // copy it holds, or goes without one when it holds none (a city saved
+    // before version 27).
+    //
+    // A change during a rebuild stamps the copy with this tick: a small
+    // change can bring the ready tick back to this one, and a later paused
+    // step on it must still see the copy as this tick's, as a replay, which
+    // applies the tick's commands in one step, does.
+    const held = state.travelLast;
+    if (state.tick < state.travelReadyAt) {
+      if (held) held.tick = state.tick;
+    } else if (held?.tick !== state.tick && tt.table && tt.sources && !tt.rebuild && !tt.waiting) {
+      state.travelLast = { table: tt.table.slice(), sources: tt.sources.slice(), tick: state.tick };
+    }
     const ticks = rebuildTicks(tt);
     tt.rebuild = null;
     tt.waiting = false;
@@ -620,11 +668,47 @@ export function stepTravel(state: SimState): void {
 }
 
 /**
+ * At the end of a step that is not paused, after job matching and before
+ * the tick moves on: lets the last whole table go once the rebuild is
+ * ready. A paused step keeps it, as a later command on the same tick may
+ * still need it (`stepTravel`). So a small change, ready in its own step,
+ * holds no copy past the step that applied it unless the game is paused.
+ */
+export function endTravelStep(state: SimState): void {
+  if (state.travelLast && state.tick >= state.travelReadyAt) state.travelLast = null;
+}
+
+/**
  * Whether the sim may read travel times: no change of roads is still being
  * rebuilt. Before then a reader does without them.
  */
 export function travelTimesReady(state: SimState): boolean {
   return state.tick >= state.travelReadyAt;
+}
+
+/**
+ * The table a reader that cannot wait for a rebuild may use: the table for
+ * the roads as they are once it is ready, until then the last whole one
+ * (`state.travelLast`), or null when the city holds none, as one saved
+ * mid-rebuild before version 27 does. Arranged as `travelTimeTable`'s.
+ * Read only.
+ */
+export function readableTravelTimes(state: SimState): { table: Uint16Array; sources: Int32Array } | null {
+  if (travelTimesReady(state)) return tableOf(state);
+  const last = state.travelLast;
+  return last ? { table: last.table, sources: last.sources } : null;
+}
+
+/** What is wrong with a saved `travelLast`, or null. */
+export function checkTravelLast(value: unknown, tick: number): string | null {
+  if (value === null) return null;
+  if (typeof value !== "object" || value === undefined) return "it is not a table or null";
+  const { table, sources, tick: at, ...rest } = value as Record<string, unknown>;
+  if (Object.keys(rest).length !== 0) return "it has fields it should not";
+  if (!(table instanceof Uint16Array) || table.length !== TRAVEL_ZONES * TRAVEL_ZONES) return "its table is not one entry for each pair of zones";
+  if (!(sources instanceof Int32Array) || sources.length !== TRAVEL_ZONES) return "its sources are not one for each zone";
+  if (!Number.isSafeInteger(at) || (at as number) < 0 || (at as number) > tick) return "the tick it was copied on is not a whole number up to the city's tick";
+  return null;
 }
 
 /** The table, whole and for the roads as they are now, built on first use. */
