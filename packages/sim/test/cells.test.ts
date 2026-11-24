@@ -36,7 +36,7 @@ import { noteFrontCells } from "../src/buildings/candidates";
 import { isSegment, segmentIdLimit, type RoadNetwork } from "../src/roads/network";
 import { checkCells, fromLocal, unzonedCells } from "../src/zoning/cells";
 import { settleCells } from "../src/zoning/cell-index";
-import { quadsOverlap } from "../src/zoning/shape";
+import { cellsOverlap } from "../src/zoning/shape";
 import { churnNetwork, growNetwork } from "./road-network-helper";
 
 // M2-03: zoning cells along roads.
@@ -120,7 +120,7 @@ function overlappingOpenCells(state: SimState): number {
     for (let j = i + 1; j < quads.length; j++) {
       const p = quads[i] as { q: Float64Array; name: string };
       const q = quads[j] as { q: Float64Array; name: string };
-      if (quadsOverlap(p.q, q.q)) pairs.push(`${p.name} ${q.name} ${Array.from(p.q).join(",")} | ${Array.from(q.q).join(",")}`);
+      if (cellsOverlap(p.q, q.q)) pairs.push(`${p.name} ${q.name} ${Array.from(p.q).join(",")} | ${Array.from(q.q).join(",")}`);
     }
   }
   expect(pairs.slice(0, 3)).toEqual([]);
@@ -363,7 +363,7 @@ describe("roads competing for ground", () => {
         const [x, z] = centreOf(state, c);
         const mine = Float64Array.from(cellCorners(state, c) ?? []);
         const winners = cellsInBox(state, x - 16, z - 16, x + 16, z + 16).filter(
-          (o) => o.status === CELL_OPEN && quadsOverlap(mine, Float64Array.from(cellCorners(state, o) ?? [])),
+          (o) => o.status === CELL_OPEN && cellsOverlap(mine, Float64Array.from(cellCorners(state, o) ?? [])),
         );
         expect(winners.length, `${seg}/${c.side}/${c.place}/${c.depth}`).toBeGreaterThan(0);
         for (const w of winners) expect(net.segOrder[w.segment]).toBe(net.segOrder[seg]);

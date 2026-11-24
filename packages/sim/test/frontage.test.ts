@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { CELL_OPEN, ZONING_BALANCE, cellAt, cellStatuses, createState, step, type Command, type SimState } from "../src/index";
 import { cloneState } from "../src/state";
 import { NO_TIER, isSegment, segmentIdLimit } from "../src/roads/network";
-import { settleCells } from "../src/zoning/cell-index";
+import { CELL_TAKEN, settleCells } from "../src/zoning/cell-index";
+import { placesAlong } from "../src/zoning/cells";
 import { submit } from "./seen-ends";
 
 // #341: which side of its block a strip fronts decides who gets the ground
@@ -233,4 +234,67 @@ describe("tiers stay as the road was built (#341)", () => {
     expect(ns2 === 0).toBe(ns === 0);
     expectFresh(state);
   });
+});
+
+// #348: a grid at an angle has its road ends snapped to the build grid,
+// so the streets either side of a block are a few centimetres off
+// parallel and the block comes a little short of whole cells somewhere
+// along it. The facing strips still split it row by row.
+describe("on a grid at an angle", () => {
+  const DEPTH = ZONING_BALANCE.zoneDepthCells;
+  const snap = (v: number) => Math.round(v * 8) / 8;
+
+  /** A three by three grid turned `turn` (sine and cosine, a 3-4-5 or 5-12-13 triangle), blocks `depth` by 24 cells. */
+  function turnedGrid(state: SimState, depth: number, sin: number, cos: number): void {
+    const along = 3 * (WIDTH_M(24) + ROAD);
+    const across = 3 * (depth * CELL + ROAD);
+    ok(
+      state,
+      command("BuildRoadGrid", {
+        origin: { x: OX + 120, z: OZ },
+        along: { x: snap(OX + 120 + along * cos), z: snap(OZ + along * sin) },
+        across: { x: snap(OX + 120 - across * sin), z: snap(OZ + across * cos) },
+        depth: depth * CELL,
+        width: WIDTH_M(24),
+        type: "street",
+      }),
+    );
+  }
+
+  /** Taken cells by depth, on the streets that run more east-west: the long sides of every block. */
+  function takenByDepth(state: SimState): number[] {
+    const out: number[] = new Array<number>(DEPTH).fill(0);
+    const statuses = cellStatuses(state);
+    for (const seg of live(state)) {
+      if (!eastWest(state, seg)) continue;
+      const start = state.cells.offset[seg] ?? 0;
+      const count = placesAlong(state.roads, seg) * 2 * DEPTH;
+      for (let local = 0; local < count; local++) if (statuses[start + local] === CELL_TAKEN) out[local % DEPTH] = (out[local % DEPTH] ?? 0) + 1;
+    }
+    return out;
+  }
+
+  // Small turns, where every road end lands off its line by a different amount.
+  const turns: [string, number, number][] = [
+    ["about 2 degrees", 0.04, Math.sqrt(1 - 0.04 * 0.04)],
+    ["about 13 degrees", 5 / 23, Math.sqrt(1 - (5 / 23) * (5 / 23))],
+  ];
+
+  for (const [name, sin, cos] of turns) {
+    it(`gives a block twelve cells deep all six rows on both long sides, turned ${name}`, () => {
+      const state = createState(SEED);
+      turnedGrid(state, 12, sin, cos);
+      expect(takenByDepth(state)).toEqual(new Array<number>(DEPTH).fill(0));
+      expectFresh(state);
+    });
+
+    it(`still splits a block ten cells deep five and five, turned ${name}`, () => {
+      const state = createState(SEED);
+      turnedGrid(state, 10, sin, cos);
+      // The sixth row of each strip lies on the other's fifth, so it gives way; no row before it does.
+      expect(takenByDepth(state).slice(0, DEPTH - 1)).toEqual(new Array<number>(DEPTH - 1).fill(0));
+      expect(takenByDepth(state)[DEPTH - 1]).toBeGreaterThan(0);
+      expectFresh(state);
+    });
+  }
 });
