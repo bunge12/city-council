@@ -1155,7 +1155,9 @@ for (const variant of [
       expect(hashes["balanced"]).toBe(hashes["low"]);
       expect(hashes["high"]).toBe(hashes["low"]);
       info.annotations.push({ type: "step 12", description: `state hash ${hashes["low"]} at every preset` });
+      await openSettings(page);
       await select.selectOption("low");
+      await page.locator("#settings-toggle").click();
       await expect.poll(async () => (await page.evaluate(async () => (await window.cityCouncil.view).lighting())).preset, { timeout: 180_000 }).toBe("low");
     });
 
