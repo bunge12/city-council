@@ -1,17 +1,8 @@
 import { useState } from "react";
 import { GRID_TOOL } from "../tools/config";
-import type { GridStage } from "../tools/grid-tool";
 import { formatClears, formatMoneyShort } from "./format";
 import { useServices, useSim } from "./hooks";
 import { useUi } from "./store";
-
-/** What the hint says while the grid tool is on. */
-export function gridHint(stage: GridStage | null): string {
-  if (stage === "side") return "Release to set the grid's first side. It snaps to the roads and zoning around it; hold Alt to draw free-hand.";
-  if (stage === "depth") return "Move to set how far the grid reaches, then click or press Enter. Esc or right-click drops it.";
-  if (stage === "placed") return "Confirm or press Enter to build the grid. Esc or right-click drops it.";
-  return "Drag along one side of the grid, then move to set how far it reaches.";
-}
 
 /**
  * A block size in whole cells. What is typed stays as typed, so the field

@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { ready } from "./helpers";
+import { openSettings, ready } from "./helpers";
 
 // Issue M2-02: graphics presets. The first-run benchmark, which runs once
 // per browser, and the settings that change the preset and keep the choice.
@@ -74,6 +74,8 @@ test.describe("a browser with no preset kept", () => {
     await ready(page);
     await presetSettled(page);
     expect(await page.evaluate(() => document.body.dataset["benchmarkRan"])).toBe("false");
+    // The preset is in the settings menu under the top bar's Settings button (issue #332).
+    await openSettings(page);
     await page.locator("#graphics-preset").selectOption("high");
     await presetSettled(page);
     expect((await lighting(page)).preset).toBe("high");

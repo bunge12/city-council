@@ -5,7 +5,7 @@ import { ROAD_TYPES, createState, deserialize, generateTerrain, hashState, heigh
 import { formatMoneyShort } from "../packages/client/src/ui/format";
 import { SEED, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
-import { cityLoaded, cityReady, frames, hideNotes, openCity } from "./helpers";
+import { cityLoaded, cityReady, frames, hideNotes, openCity, settingsButton } from "./helpers";
 
 // The M1 exit test from docs/milestones/M1.md (issue M1-17), as one
 // walkthrough a player could do by hand, run once on WebGPU (when the
@@ -285,7 +285,7 @@ async function setSpeed(page: Page, name: "Pause" | "1x"): Promise<void> {
 /** The city menu, opened if it is closed. */
 async function cityMenu(page: Page) {
   const menu = page.getByRole("region", { name: "City menu" });
-  if (!(await menu.isVisible())) await page.getByRole("button", { name: "City", exact: true }).click();
+  if (!(await menu.isVisible())) await settingsButton(page, "City");
   await expect(menu).toBeVisible();
   return menu;
 }
@@ -293,8 +293,10 @@ async function cityMenu(page: Page) {
 /** Closes the city menu if it is open, so it does not cover the map. */
 async function closeCityMenu(page: Page): Promise<void> {
   const menu = page.getByRole("region", { name: "City menu" });
-  if (await menu.isVisible()) await page.getByRole("button", { name: "City", exact: true }).click();
+  if (await menu.isVisible()) await settingsButton(page, "City");
   await expect(menu).toBeHidden();
+  // And the settings menu it opens from.
+  if (await page.locator("#settings-menu").isVisible()) await page.locator("#settings-toggle").click();
 }
 
 /** Downloads the city with the menu's button and returns the file's bytes. */

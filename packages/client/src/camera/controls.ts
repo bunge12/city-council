@@ -122,6 +122,12 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     const kind = left ? (toolDrag?.active() ? "tool" : "pan") : e.button === 0 || e.button === 1 || e.button === 2 ? "orbit" : null;
     if (!kind) return;
     e.preventDefault();
+    // The default would have moved focus to the map. Without it a button
+    // pressed before, such as Grid, keeps focus and takes Enter and Space
+    // for itself (#332). A field keeps focus, so its value can be retyped
+    // between drags.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused !== canvas && !isField(focused)) focused.blur();
     canvas.setPointerCapture(e.pointerId);
     drag = { kind, button: e.button, startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, moved: false };
     if (kind === "pan") rig.grab(p.x, p.y);
@@ -183,9 +189,13 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     rig.zoomAt(Math.exp(e.deltaY * scale * CAMERA_SPEEDS.wheelZoom), p.x, p.y);
   }
 
+  function isField(el: HTMLElement): boolean {
+    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable;
+  }
+
   function typing(e: KeyboardEvent): boolean {
     const el = e.target as HTMLElement | null;
-    return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+    return !!el && isField(el);
   }
 
   function onKeyDown(e: KeyboardEvent): void {

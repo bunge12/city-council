@@ -67,7 +67,7 @@ import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
 import type { Occupants } from "./ui/BuildingReadout";
-import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setLandValueHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
+import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setLandValueHover, setPanel, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
 import { colouringOf, overlayAfterTool } from "./ui/overlays";
 import { createLoadingScreen } from "./ui/loading-screen";
 import type { LoadStageTime } from "./ui/loading";
@@ -170,7 +170,7 @@ saves.subscribe((status) => {
   // the worker must not put the old one back.
   if (!switching) setTabCity(status.city.id);
   // Nothing runs in this tab, so show the menu that offers another city.
-  if (status.openElsewhere && !useUi.getState().menuOpen) useUi.setState({ menuOpen: true });
+  if (status.openElsewhere) setPanel("city", true);
 });
 
 /** Milliseconds this page took to generate each seed's terrain, for the render status. */
@@ -333,7 +333,7 @@ try {
 }
 
 // `?debug` opens the debug panel at load, for walkthroughs and bug reports.
-if (new URLSearchParams(location.search).has("debug")) useUi.setState({ debugOpen: true });
+if (new URLSearchParams(location.search).has("debug")) setPanel("debug", true);
 
 let persistence: PersistenceResult | null = null;
 void requestPersistence().then((result) => {

@@ -20,11 +20,16 @@ import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
 import { INITIAL_ZONE_TOOL, type ZonePreview, type ZoneToolState } from "../tools/zone-tool";
 import { toggledOverlay, type OverlayEntry, type OverlayId } from "./overlays";
+import { columnOrder, stacked, stackedForTool, type PanelId, type WindowId } from "./windows";
 
 export interface UiState extends RoadToolState, GridToolState, EditToolState, BulldozeToolState, RouteToolState, BlockOverlayState, ZoneToolState {
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
+  /** The settings menu under the top bar's Settings button (issue #332). */
+  settingsOpen: boolean;
+  /** The windows open, oldest first, so Escape closes the newest (windows.ts). */
+  windows: readonly WindowId[];
   /** The statistics panel (issue M3-16), the series on its graph and the game years the graph covers. */
   statsOpen: boolean;
   statsSeries: string;
@@ -50,6 +55,8 @@ export const useUi = create<UiState>(() => ({
   debugOpen: false,
   logOpen: false,
   menuOpen: false,
+  settingsOpen: false,
+  windows: [],
   statsOpen: false,
   statsSeries: "population",
   statsRange: 10,
@@ -70,26 +77,46 @@ export const useUi = create<UiState>(() => ({
   ...INITIAL_ZONE_TOOL,
 }));
 
-export function toggleDebug(): void {
-  useUi.setState((s) => ({ debugOpen: !s.debugOpen }));
+/** Which flag in the store says each panel is open. */
+const OPEN_FLAG = {
+  settings: "settingsOpen",
+  city: "menuOpen",
+  stats: "statsOpen",
+  log: "logOpen",
+  debug: "debugOpen",
+} as const satisfies Record<PanelId, keyof UiState>;
+
+/** Opens or closes panel `id`, keeping the order Escape closes them in. */
+export function setPanel(id: PanelId, open: boolean): void {
+  useUi.setState((s) => (s[OPEN_FLAG[id]] === open ? {} : { [OPEN_FLAG[id]]: open, windows: stacked(s.windows, id, open) }));
 }
 
-export function toggleLog(): void {
-  useUi.setState((s) => ({ logOpen: !s.logOpen }));
+export function togglePanel(id: PanelId): void {
+  setPanel(id, !useUi.getState()[OPEN_FLAG[id]]);
 }
+
+/** Panel `id`'s place in the column under the top bar's buttons, as a CSS `order` (windows.ts). */
+export function usePanelOrder(id: PanelId): number {
+  return useUi((s) => columnOrder(s.windows, id));
+}
+
+export const toggleDebug = (): void => togglePanel("debug");
+export const toggleLog = (): void => togglePanel("log");
+export const toggleMenu = (): void => togglePanel("city");
+export const toggleStats = (): void => togglePanel("stats");
+export const toggleSettings = (): void => togglePanel("settings");
 
 /** Turns overlay `id` on, putting away the one showing, or off again (overlays.ts, `toggledOverlay`). */
 export function toggleOverlay(id: OverlayEntry["id"]): void {
   useUi.setState((s) => ({ overlay: toggledOverlay(s.overlay, id, s.tool) }));
 }
 
-export function toggleMenu(): void {
-  useUi.setState((s) => ({ menuOpen: !s.menuOpen }));
-}
-
-export function toggleStats(): void {
-  useUi.setState((s) => ({ statsOpen: !s.statsOpen }));
-}
+// A tool and its menu is a window too: picking one puts it on top.
+useUi.subscribe((s, prev) => {
+  if (s.tool === prev.tool) return;
+  const windows = stackedForTool(s.windows, s.tool, prev.tool);
+  if (windows !== s.windows) useUi.setState({ windows });
+});
 
 /** Puts series `id` on the statistics panel's graph. */
 export function setStatsSeries(id: string): void {

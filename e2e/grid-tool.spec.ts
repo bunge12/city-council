@@ -237,3 +237,26 @@ test("a grid over the cap shows the reason and cannot be confirmed", async ({ pa
   await expect(page.locator("#grid-tool")).toHaveCount(0);
   await expect(page.locator("#road-tool")).toHaveAttribute("aria-expanded", "false");
 });
+
+test("Enter builds a grid laid out after the Grid button was clicked, rather than pressing the button again (#332)", async ({ page }, testInfo) => {
+  await openCity(page, startCity(), { name: "Grid" });
+  await look(page, 4240, 4610, 420);
+  const startLog = (await logTypes(page)).length;
+
+  // With the mouse, as a player does: the road button, then Grid in its menu.
+  await page.locator("#road-tool").click();
+  await page.locator("#grid-tool").click();
+  await expect(page.locator("#grid-tool")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#grid-tool")).toBeFocused();
+  await rectangle(page, [4350, 4480], [4350, 4740], [4120, 4600]);
+  await expect(page.locator("#grid-summary")).toHaveAttribute("data-ok", "true");
+  // Pressing on the map took focus off the button, so Enter goes to the tool.
+  await expect(page.locator("#grid-tool")).not.toBeFocused();
+  await attach(page, testInfo, "6 a grid laid out after clicking the Grid button");
+
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => (await logTypes(page)).slice(startLog)).toEqual(["BuildRoadGrid"]);
+  await expect(page.locator("#grid-tool")).toHaveAttribute("aria-pressed", "true");
+  await away(page);
+  await attach(page, testInfo, "7 Enter built it, and the grid tool is still on");
+});

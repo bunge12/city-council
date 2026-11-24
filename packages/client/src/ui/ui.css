@@ -14,6 +14,9 @@
   --bad-bg: #fde2e1;
   --bad-ink: #7a1712;
   --bar-height: 44px;
+  /* What the corner cards along the bottom take, so the columns above stop short of them. */
+  --status-room: 170px;
+  --clock-room: 56px;
   /* The statistics graph (M3-16): the line, its recessive grid, and the ring in the panel's colour that keeps a dot clear of the line. */
   --stat-line: #1d6fd6;
   --stat-grid: #e3e8ed;
@@ -115,161 +118,212 @@
   min-width: 0;
 }
 
-.top-bar .game-date {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  color: var(--ink-soft);
-}
-
-.top-bar .population {
-  white-space: nowrap;
-  color: var(--ink-soft);
-  cursor: default;
-}
-
-.top-bar .population #population-count {
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.top-bar .population .trend {
-  display: inline-block;
-  width: 1em;
-  margin-left: 3px;
-  font-size: 10px;
-  text-align: center;
-}
-
-.top-bar .population .trend[data-trend="up"] {
-  color: #2f8f2f;
-}
-
-.top-bar .population .trend[data-trend="down"] {
-  color: #c0392b;
-}
-
-/* Four bars about 8 px wide, -100 to 100 about a centre line (M3-15). */
-.top-bar .demand {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--ink-soft);
-}
-
-.top-bar .demand-bar {
-  position: relative;
-  width: 8px;
-  height: 26px;
-  background: rgba(74, 88, 102, 0.16);
-  border-radius: 1px;
-  cursor: default;
-}
-
-.top-bar .demand-bar::after {
-  content: "";
-  position: absolute;
-  left: -1px;
-  right: -1px;
-  top: 50%;
-  height: 1px;
-  background: var(--ink-soft);
-}
-
-.top-bar .demand-bar .fill {
-  position: absolute;
-  left: 0;
-  right: 0;
-}
-
-.top-bar .speeds,
 .top-bar .panels {
   display: flex;
   gap: 4px;
+  margin-left: auto;
 }
 
-.top-bar .graphics-setting {
+/* The settings menu (issue #332), under the Settings button at the top of the right column. */
+.settings-menu {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-menu .graphics-setting {
   display: flex;
   align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-  color: var(--ink-soft);
-}
-
-.top-bar .sound-setting {
-  position: relative;
-  white-space: nowrap;
-  color: var(--ink-soft);
-}
-
-.top-bar .sound-setting summary {
-  cursor: pointer;
-  padding: 3px 10px;
-  border: 1px solid #8a96a3;
-  border-radius: 4px;
-  background: #f4f6f8;
-  color: var(--ink);
-  list-style: none;
-}
-
-.top-bar .sound-setting summary::-webkit-details-marker {
-  display: none;
-}
-
-.top-bar .sound-setting[open] summary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
-}
-
-.top-bar .sound-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 10;
-  display: grid;
+  justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px;
-  min-width: 220px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 4px 14px rgb(0 0 0 / 0.12);
-  color: var(--ink);
 }
 
-.top-bar .sound-panel label {
+.settings-menu .sound-setting {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-menu .sound-setting h3 {
+  margin: 0;
+}
+
+.settings-menu .sound-setting label {
   display: grid;
   grid-template-columns: 70px 1fr 28px;
   align-items: center;
   gap: 6px;
 }
 
-.top-bar .sound-panel output {
+.settings-menu .sound-setting output {
   font-variant-numeric: tabular-nums;
   text-align: right;
   color: var(--ink-soft);
 }
 
-.top-bar .sound-panel .sound-mute {
+.settings-menu .sound-setting .sound-mute {
   display: flex;
   gap: 6px;
 }
 
-.top-bar .speeds button {
+.settings-menu .panels {
+  display: flex;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* Population and demand, in the bottom left corner (issue #332). Its
+   tooltips hang to the right of it, so it does not clip them. */
+.panel.city-status {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  width: 250px;
+  box-sizing: border-box;
+  display: grid;
+  gap: 6px;
+  overflow: visible;
+}
+
+.city-status .population {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--ink-soft);
+  cursor: default;
+}
+
+.city-status #population-count {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.city-status .population .trend {
+  display: inline-block;
+  width: 1em;
+  font-size: 10px;
+  text-align: center;
+}
+
+.city-status .population .trend[data-trend="up"] {
+  color: #2f8f2f;
+}
+
+.city-status .population .trend[data-trend="down"] {
+  color: #c0392b;
+}
+
+/* Four bars on their sides, -100 on the left to 100 on the right of a
+   centre line, each with its name and value (M3-15, #332). */
+.city-status .demand {
+  display: grid;
+  gap: 2px;
+  color: var(--ink-soft);
+}
+
+.city-status .demand-bar {
+  display: grid;
+  grid-template-columns: 76px 1fr 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: default;
+}
+
+.city-status .demand-bar .track {
+  position: relative;
+  height: 10px;
+  background: rgba(74, 88, 102, 0.16);
+  border-radius: 2px;
+}
+
+.city-status .demand-bar .track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--ink-soft);
+}
+
+.city-status .demand-bar .fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.city-status .demand-bar .value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+}
+
+.city-status .population:hover,
+.city-status .demand-bar:hover {
+  background: rgba(74, 88, 102, 0.08);
+}
+
+.city-status .population:focus-visible,
+.city-status .demand-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A tooltip that shows at once (Tip.tsx), above the card it explains, clear of the dock. */
+.tip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  width: max-content;
+  max-width: 300px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--ink);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
+  pointer-events: none;
+}
+
+/* The game date and speed, in the bottom right corner (issue #332). */
+.game-clock {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.game-clock .game-date {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.game-clock .speeds {
+  display: flex;
+  gap: 4px;
+}
+
+.game-clock .speeds button {
   min-width: 44px;
 }
 
-.top-bar .panels {
-  margin-left: auto;
-}
-
+/* The columns under the top bar stop short of the cards in the corners below them. */
 .left-column,
 .right-column {
   position: absolute;
   top: calc(var(--bar-height) + 8px);
   width: min(360px, calc(100vw - 16px));
-  max-height: calc(100vh - var(--bar-height) - 16px);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -277,11 +331,23 @@
 
 .left-column {
   left: 8px;
+  align-items: flex-start;
+  max-height: calc(100vh - var(--bar-height) - 16px - var(--status-room));
+}
+
+.left-column > .notes {
+  align-self: stretch;
 }
 
 .right-column {
   right: 8px;
+  max-height: calc(100vh - var(--bar-height) - 16px - var(--clock-room));
   overflow-y: auto;
+}
+
+/* Panels keep their height and the column scrolls; the statistics panel scrolls itself. */
+.right-column > .panel:not(.stats-panel) {
+  flex-shrink: 0;
 }
 
 .panel,
@@ -503,7 +569,7 @@ kbd {
 .stats-panel {
   flex: 0 1 auto;
   min-height: 160px;
-  max-height: calc(100vh - var(--bar-height) - 16px);
+  max-height: calc(100vh - var(--bar-height) - 16px - var(--clock-room));
   padding-top: 0;
 }
 
@@ -689,20 +755,10 @@ kbd {
   text-align: right;
 }
 
-@media (max-width: 720px) {
-  .top-bar {
-    flex-wrap: wrap;
-    height: auto;
-    padding: 6px 12px;
-    gap: 6px 10px;
-  }
-
-  .top-bar .panels {
-    margin-left: 0;
-  }
-
-  :root {
-    --bar-height: 96px;
+/* Narrower screens: the dock rises above the clock card in the bottom right corner, so the two never meet. */
+@media (max-width: 1100px) {
+  .panel.build-bar {
+    bottom: 66px;
   }
 }
 
@@ -720,18 +776,17 @@ kbd {
   width: max-content;
   max-width: calc(100vw - 16px);
   box-sizing: border-box;
-  /* The menus hang above the dock, outside the panel's box. */
+  /* The menus hang above the dock, outside the panel's box, and over the corner cards. */
   overflow: visible;
+  z-index: 2;
 }
 
+/* A tool's menu is centred over the whole dock, not its own button (issue #332). */
 .build-bar .dock {
-  display: flex;
-  gap: 6px;
-}
-
-/* A tool's button, with its menu anchored above it. */
-.build-bar .dock-slot {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .build-bar .dock > .dock-slot > button {
@@ -741,8 +796,8 @@ kbd {
 .build-bar .tool-menu {
   position: absolute;
   bottom: calc(100% + 14px);
-  /* Centred over the road button, which sits mid-screen, so a menu that
-     grows (the grid's summary) has room on both sides. */
+  /* Centred over the dock, which sits mid-screen, so a menu that grows
+     (the grid's summary) has room on both sides. */
   left: 50%;
   transform: translateX(-50%);
   display: grid;
@@ -919,11 +974,8 @@ kbd {
   white-space: nowrap;
 }
 
-/* The zoning overlay's legend, low on the left, clear of the build dock. */
+/* An overlay's legend, under the overlay buttons in the top left corner (issue #332). */
 .zone-legend {
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
   font-size: 12px;
 }
 
@@ -981,14 +1033,22 @@ kbd {
   color: #b35a00;
 }
 
-/* The overlay buttons (issue M3-18): beside the dock, level with its buttons, outside its row. */
-.build-bar .overlay-dock {
-  position: absolute;
-  left: calc(100% + 8px);
-  top: -1px;
+/* The overlay buttons (issue M3-18), in the top left corner under the top bar (issue #332). */
+.overlay-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  white-space: nowrap;
+  padding: 6px;
+}
+
+.overlay-bar button kbd {
+  margin-left: 4px;
+}
+
+.overlay-bar button[aria-pressed="true"] kbd {
+  background: rgb(255 255 255 / 0.2);
+  border-color: rgb(255 255 255 / 0.5);
+  color: inherit;
 }
 
 /* The land value overlay's legend (issue M3-18): one bar, its stops' values under it. */

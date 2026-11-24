@@ -1,7 +1,7 @@
 import { useId, useState, type FormEvent } from "react";
 import { useSaveStatus, useServices } from "./hooks";
 import { parseSeed, randomSeed } from "./seed";
-import { useUi } from "./store";
+import { usePanelOrder, useUi } from "./store";
 
 function clockTime(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -68,8 +68,9 @@ export function CityMenu() {
       ? `tick ${last.tick} at ${clockTime(last.savedAt)} (${last.reason})`
       : `not yet, resumed at tick ${status.loadedTick} from ${status.loadedFrom}`;
 
+  const order = usePanelOrder("city");
   return (
-    <section id="city-menu" className="panel city-menu" aria-label="City menu" hidden={!open}>
+    <section id="city-menu" className="panel city-menu" aria-label="City menu" hidden={!open} style={{ order }}>
       <h2>City</h2>
       <dl>
         <dt>Running</dt>
