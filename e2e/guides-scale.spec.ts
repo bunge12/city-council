@@ -1,9 +1,9 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { deserialize, generateTerrain, heightAt } from "../packages/sim/src/index";
+import { deserialize, generateTerrain, heightAt, serialize, step, submit } from "../packages/sim/src/index";
 import { frames, openCity } from "./helpers";
 import { perfFigures } from "./measure";
-import { SEED, groundAt, scaleCity } from "./road-fixtures";
+import { SEED, groundAt, scaleCityState } from "./road-fixtures";
 
 // Issue M1-19 at scale: drawing in a network of 30,000 segments with the
 // guides on, against the same with them off. In the perf project (issue
@@ -45,6 +45,24 @@ async function attach(page: Page, testInfo: TestInfo, name: string): Promise<voi
   const path = testInfo.outputPath(`${name.replace(/[^a-z0-9]+/gi, "-")}.png`);
   writeFileSync(path, await page.screenshot());
   await testInfo.attach(name, { path, contentType: "image/png" });
+}
+
+/**
+ * The city of `segments` segments, saved paused. The test times drawing, not
+ * the sim, and a city that runs sends the page a delta every few
+ * milliseconds. Where the page takes longer over one than the worker takes to
+ * send the next, as on a runner that draws a frame in a second or more, they
+ * queue without end and a click on the dock waits behind them: the test ran
+ * past its 40 minutes on an AMD EPYC 7763 (issue #335), and past 30 under a
+ * 4x CPU throttle on a machine where it takes two.
+ */
+function pausedCity(segments: number): Buffer {
+  const state = scaleCityState(segments);
+  const result = submit(state, { seq: 1, playerId: "fixture", type: "SetSpeed", payload: { speed: 0 } });
+  if (!result.ok) throw new Error(`SetSpeed: ${result.reason}`);
+  step(state);
+  if (state.speed !== 0) throw new Error("the fixture did not pause");
+  return Buffer.from(serialize(state));
 }
 
 /**
@@ -103,7 +121,7 @@ test("drawing in a network of 30,000 segments keeps its frame time with the guid
   // street lights (#279, #264) a frame takes 1.1 to 1.4 s and the test 4.6 to
   // 5.7 minutes on most runners, and 1.6 s and 8.2 minutes on an AMD EPYC
   // 7763 (issue #289), then 11.2 to past 12 there (issue #317).
-  const bytes = scaleCity(30_000);
+  const bytes = pausedCity(30_000);
   const at = busySpot(bytes, 150);
   await openCity(page, bytes, { name: "Thirty thousand" });
   const g = groundAt(at.x, at.z);
