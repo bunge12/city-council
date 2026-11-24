@@ -51,6 +51,7 @@ import {
   NETWORK_PATH,
   NETWORK_ROAD,
   NONE,
+  NO_TIER,
   SEG_ALIVE,
   heldByOps,
   isNode,
@@ -466,6 +467,8 @@ function rehearse(net: RoadNetwork, ops: readonly NetworkOp[]): string | null {
         if (op.reverse) {
           back.a = row.b;
           back.b = row.a;
+          back.tierL = row.tierR;
+          back.tierR = row.tierL;
         }
         segs.set(op.id, back);
         break;
@@ -524,6 +527,7 @@ function isRow(value: unknown): boolean {
   if (!["a", "b", "type", "network", "levelA", "levelB", "flags"].every((k) => isId(value[k]))) return false;
   if (!["cx", "cz", "length"].every((k) => isNumber(value[k]))) return false;
   if (!isId(value["order"])) return false;
+  if (![value["tierL"], value["tierR"]].every((t) => isId(t) && (t as number) <= NO_TIER)) return false;
   // The cell anchor, as `checkRoadNetwork` checks a live segment's.
   const anchor = value["anchor"];
   if (!isRecord(anchor)) return false;

@@ -75,6 +75,7 @@ export { CELL_LEFT, CELL_RIGHT, DENSITY_NONE, ZONE_NONE, cellCountOf, cellSlot, 
 export type { CellRef, CellState } from "./zoning/cells";
 export {
   CELL_BEND,
+  CELL_CUT,
   CELL_OFF_MAP,
   CELL_OPEN,
   CELL_ROAD,

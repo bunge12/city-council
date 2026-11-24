@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CELL_BEND,
+  CELL_CUT,
   CELL_LEFT,
   CELL_OPEN,
   CELL_RIGHT,
@@ -202,7 +203,8 @@ describe("cells along a road", () => {
     }
     // Near the junction the north-south road meets the older road's cells.
     const nearJunction = cellsOf(state, north).filter((c) => c.place >= 19);
-    expect(nearJunction.every((c) => c.status === CELL_TAKEN || c.status === CELL_ROAD)).toBe(true);
+    // Behind a cell the older road holds, a cell is cut off from its road (#341).
+    expect(nearJunction.every((c) => c.status === CELL_TAKEN || c.status === CELL_ROAD || c.status === CELL_CUT)).toBe(true);
     expect(count(statusesOf(state, north), CELL_TAKEN)).toBeGreaterThan(0);
     const farFromIt = cellsOf(state, north).filter((c) => c.place < 18);
     expect(farFromIt.every((c) => c.status === CELL_OPEN)).toBe(true);
@@ -288,7 +290,9 @@ describe("roads competing for ground", () => {
       expect(c.status).toBe(c.depth < 4 ? CELL_OPEN : CELL_ROAD);
     }
     expect(count(lose, CELL_OPEN)).toBe(0);
-    expect(count(lose, CELL_TAKEN)).toBe(lose.length - count(lose, CELL_ROAD));
+    // The front row is taken, and the rows behind it are cut off from the road (#341).
+    expect(count(lose, CELL_TAKEN)).toBeGreaterThan(0);
+    expect(count(lose, CELL_TAKEN) + count(lose, CELL_CUT)).toBe(lose.length - count(lose, CELL_ROAD));
     expect(keep.length).toBe(lose.length);
     // Away from each other both keep their strips.
     expect(statusesOf(state, older, 1 - olderFacing).every((s) => s === CELL_OPEN)).toBe(true);
@@ -334,7 +338,7 @@ describe("roads competing for ground", () => {
     expect(cellStatuses(state)).toEqual(before);
   });
 
-  it("lets the street laid out further west, then north, win between streets of one grid, which share an age", () => {
+  it("gives each piece of ground between streets of one grid, which share an age, to one of them", () => {
     const state = createState(SEED);
     ok(
       state,
@@ -350,30 +354,64 @@ describe("roads competing for ground", () => {
     const net = state.roads;
     const streets = live(net).filter((s) => placesAlong(net, s) > 0);
     expect(new Set(streets.map((s) => net.segOrder[s])).size).toBeLessThan(streets.length);
-    // Where two streets of the grid meet, the cells of the street whose
-    // anchor starts further east, or as far east and further south, give way.
-    const anchorOf = (seg: number) => [net.segAnchorAX[seg] ?? 0, net.segAnchorAZ[seg] ?? 0, net.segAnchorBX[seg] ?? 0, net.segAnchorBZ[seg] ?? 0];
-    const earlier = (p: number[], q: number[]) => {
-      for (let i = 0; i < p.length; i++) if (p[i] !== q[i]) return (p[i] ?? 0) < (q[i] ?? 0);
-      return false;
-    };
+    // Where two streets of the grid meet, a cell that gives way gives way
+    // to a street of its own age: which one is the block's to say
+    // (frontage.test.ts).
     for (const seg of streets) {
       for (const c of cellsOf(state, seg)) {
         if (c.status !== CELL_TAKEN) continue;
-        // Some open cell of a lower id overlaps it.
         const [x, z] = centreOf(state, c);
         const mine = Float64Array.from(cellCorners(state, c) ?? []);
         const winners = cellsInBox(state, x - 16, z - 16, x + 16, z + 16).filter(
           (o) => o.status === CELL_OPEN && quadsOverlap(mine, Float64Array.from(cellCorners(state, o) ?? [])),
         );
         expect(winners.length, `${seg}/${c.side}/${c.place}/${c.depth}`).toBeGreaterThan(0);
-        for (const w of winners) {
-          expect(net.segOrder[w.segment]).toBe(net.segOrder[seg]);
-          expect(earlier(anchorOf(w.segment), anchorOf(seg)), `${w.segment} before ${seg}`).toBe(true);
-        }
+        for (const w of winners) expect(net.segOrder[w.segment]).toBe(net.segOrder[seg]);
       }
     }
     expect(overlappingOpenCells(state)).toBe(0);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
+  });
+});
+
+/** Columns with an open cell behind one that is not open. There should be none (#341). */
+function openBehindBlocked(state: SimState): string[] {
+  const out: string[] = [];
+  for (const seg of live(state.roads)) {
+    const cells = cellsOf(state, seg);
+    for (const c of cells) {
+      if (c.depth === 0 || c.status !== CELL_OPEN) continue;
+      const front = cells.find((f) => f.side === c.side && f.place === c.place && f.depth === c.depth - 1);
+      if (front?.status !== CELL_OPEN) out.push(`${seg}/${c.side}/${c.place}/${c.depth}`);
+    }
+  }
+  return out;
+}
+
+describe("cells cut off from their road (#341)", () => {
+  it("are blocked when the cell in front of them is not open, and come back with it", () => {
+    const state = createState(SEED);
+    // An older street north from (4300, 4545); a newer one east across it.
+    // The older street's strips hold the front three rows of the newer
+    // one's north strip either side of it, and not the three behind.
+    ok(state, road([4300, 4545], [4300, 4700]));
+    ok(state, road([4200, 4570], [4392, 4570]));
+    const newer = between(state.roads, [4200, 4570], [4300, 4570]);
+    const north = cellsOf(state, newer).filter((c) => c.depth > 0 && centreOf(state, c)[1] < 4570);
+    const cut = north.filter((c) => c.status === CELL_CUT);
+    expect(cut.length).toBeGreaterThan(0);
+    // Every cut cell is behind a cell another road holds, in its own column.
+    for (const c of cut) expect(cellsOf(state, newer).find((f) => f.side === c.side && f.place === c.place && f.depth === 0)?.status).not.toBe(CELL_OPEN);
+    expect(openBehindBlocked(state)).toEqual([]);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
+    const before = cellStatuses(state);
+    // The older street goes: the newer street's columns are whole again.
+    const older = live(state.roads).filter((s) => state.roads.nodeX[state.roads.segA[s] ?? 0] === 4300 && state.roads.nodeX[state.roads.segB[s] ?? 0] === 4300);
+    ok(state, bulldoze(older));
+    expect(cellsOf(state, newer).filter((c) => c.status === CELL_CUT)).toEqual([]);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
+    ok(state, undo());
+    expect(cellStatuses(state)).toEqual(before);
     expect(rebuilt(state)).toEqual(cellStatuses(state));
   });
 });
@@ -607,6 +645,7 @@ describe("keeping cells current", () => {
           twin = deserialize(serialize(state)).state;
         }
         expect(checkCells(state.cells, state.roads)).toBeNull();
+        if (cellsSettled(state)) expect(openBehindBlocked(state)).toEqual([]);
       }
       if (rnd() < 0.25) twin = deserialize(serialize(state)).state;
     }

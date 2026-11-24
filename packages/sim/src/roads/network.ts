@@ -71,6 +71,9 @@ export const SEG_FIXED = 2;
 /** Marks the end of a list. */
 export const NONE = -1;
 
+/** A strip that fronted no block when its road was built (`segTierL`). It claims after every tier. */
+export const NO_TIER = 0x7fffffff;
+
 /** Capacity of an array's first buffer. */
 const INITIAL_CAPACITY = 16;
 
@@ -141,6 +144,16 @@ export interface RoadNetwork {
   segAnchorBZ: Float64Array;
   segAnchorTA: Float64Array;
   segAnchorTB: Float64Array;
+  /**
+   * The tier of the strip of zoning cells on the segment's left and right,
+   * from the side of the block it fronted when its road was built (#341,
+   * zoning/frontage.ts), or `NO_TIER` where it fronted none. Between
+   * segments of one build order the lower tier claims ground first. Set
+   * once, by the command that builds the road, and kept by the pieces of a
+   * split, so a later road never moves ground between older strips.
+   */
+  segTierL: Int32Array;
+  segTierR: Int32Array;
   /** Removed segment ids, the next one to reuse last. */
   segFree: Int32Array;
   /** The build order number the next new segment takes. Above every live segment's. */
@@ -205,6 +218,8 @@ export function createRoadNetwork(): RoadNetwork {
     segAnchorBZ: new Float64Array(0),
     segAnchorTA: new Float64Array(0),
     segAnchorTB: new Float64Array(0),
+    segTierL: new Int32Array(0),
+    segTierR: new Int32Array(0),
     segFree: new Int32Array(0),
     segOrderNext: 0,
   };
@@ -290,6 +305,8 @@ export const SEG_ARRAYS = [
   "segAnchorBZ",
   "segAnchorTA",
   "segAnchorTB",
+  "segTierL",
+  "segTierR",
 ] as const;
 
 /** Every field of one segment, as plain data. */
@@ -308,6 +325,9 @@ export interface SegmentRow {
   order: number;
   /** The cell anchor, `segAnchorAX` to `segAnchorTB`. */
   anchor: SegmentAnchor;
+  /** `segTierL` and `segTierR`. */
+  tierL: number;
+  tierR: number;
 }
 
 /** The road a segment's cells are measured along, and where on it the segment's ends are. */
@@ -443,6 +463,8 @@ export function readSegment(net: RoadNetwork, id: number): SegmentRow {
     length: net.segLength[id] ?? 0,
     order: net.segOrder[id] ?? 0,
     anchor: readAnchor(net, id),
+    tierL: net.segTierL[id] ?? NO_TIER,
+    tierR: net.segTierR[id] ?? NO_TIER,
   };
 }
 
@@ -460,7 +482,9 @@ export function sameRow(p: SegmentRow, q: SegmentRow): boolean {
     Object.is(p.cz, q.cz) &&
     Object.is(p.length, q.length) &&
     p.order === q.order &&
-    sameAnchor(p.anchor, q.anchor)
+    sameAnchor(p.anchor, q.anchor) &&
+    p.tierL === q.tierL &&
+    p.tierR === q.tierR
   );
 }
 
@@ -607,6 +631,9 @@ export interface SegmentSpec {
    * its own anchor, from parameter 0 at node A to 1 at node B.
    */
   anchor?: SegmentAnchor;
+  /** Strip tiers to keep, for a piece of a split segment: its parent's. Left out, `NO_TIER`. */
+  tierL?: number;
+  tierR?: number;
 }
 
 /**
@@ -666,6 +693,8 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   net.segLength[id] = curveLength(ax, az, cx, cz, bx, bz);
   net.segOrder[id] = order;
   writeAnchor(net, id, spec.anchor ?? { ax, az, cx, cz, bx, bz, tA: 0, tB: 1 });
+  net.segTierL[id] = spec.tierL ?? NO_TIER;
+  net.segTierR[id] = spec.tierR ?? NO_TIER;
   if (fresh) net.segOrderNext = order + 1;
   // Newest first in each node's list.
   net.segNextA[id] = net.nodeFirstSeg[a] ?? NONE;
@@ -675,6 +704,34 @@ export function addSegment(net: RoadNetwork, a: number, b: number, spec: Segment
   if (journals.has(net)) journal(net, { op: "addSeg", id, grown, fresh, row: readSegment(net, id) });
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
   return id;
+}
+
+/**
+ * Gives segment `id`, which the command now applying added, the tiers of
+ * its strips (#341). Its `addSeg` entry in the open journal takes them too,
+ * so an undo finds the row the command left. Observers are not told: the
+ * tiers move nothing they keep, and the cell index and the delta recorder
+ * read the row only after the command, having heard of the segment when it
+ * was added.
+ */
+export function setSegmentTiers(net: RoadNetwork, id: number, tierL: number, tierR: number): void {
+  if (!isSegment(net, id)) throw new RangeError(`segment ${id} does not exist`);
+  if (!Number.isSafeInteger(tierL) || !Number.isSafeInteger(tierR) || tierL < 0 || tierR < 0 || tierL > NO_TIER || tierR > NO_TIER) {
+    throw new RangeError(`bad tiers ${tierL}, ${tierR}`);
+  }
+  net.segTierL[id] = tierL;
+  net.segTierR[id] = tierR;
+  const ops = journals.get(net);
+  if (!ops) return;
+  for (let i = ops.length - 1; i >= 0; i--) {
+    const op = ops[i] as NetworkOp;
+    if (op.op === "addSeg" && op.id === id) {
+      op.row.tierL = tierL;
+      op.row.tierR = tierR;
+      return;
+    }
+  }
+  throw new RangeError(`segment ${id} was not added by the command now applying`);
 }
 
 /** The segment after `seg` in `node`'s list, or NONE. */
@@ -802,6 +859,8 @@ export function restoreSegment(net: RoadNetwork, id: number, row: SegmentRow, at
   net.segLength[id] = row.length;
   net.segOrder[id] = row.order;
   writeAnchor(net, id, row.anchor);
+  net.segTierL[id] = row.tierL;
+  net.segTierR[id] = row.tierR;
   linkAt(net, id, row.a, atA);
   linkAt(net, id, row.b, atB);
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
@@ -837,6 +896,10 @@ export function restyleSegment(net: RoadNetwork, id: number, type: number, rever
     const tA = net.segAnchorTA[id] ?? 0;
     net.segAnchorTA[id] = net.segAnchorTB[id] ?? 0;
     net.segAnchorTB[id] = tA;
+    // Its left is now the side that was its right.
+    const tierL = net.segTierL[id] ?? NO_TIER;
+    net.segTierL[id] = net.segTierR[id] ?? NO_TIER;
+    net.segTierR[id] = tierL;
   }
   for (const observer of observers.get(net) ?? []) observer.segmentAdded(id);
 }
@@ -910,6 +973,8 @@ const ARRAY_TYPES: Readonly<Record<Exclude<keyof RoadNetwork, "segOrderNext">, n
   segAnchorBZ: Float64Array,
   segAnchorTA: Float64Array,
   segAnchorTB: Float64Array,
+  segTierL: Int32Array,
+  segTierR: Int32Array,
   segFree: Int32Array,
 };
 
@@ -989,6 +1054,7 @@ export function checkRoadNetwork(value: unknown, held: HeldIds = { nodes: [], se
     }
     const order = n.segOrder[seg] ?? 0;
     if (!Number.isSafeInteger(order) || order < 0 || order >= n.segOrderNext) return `segment ${seg} has a bad build order`;
+    if ((n.segTierL[seg] ?? 0) < 0 || (n.segTierR[seg] ?? 0) < 0) return `segment ${seg} has a bad strip tier`;
     const anchor = readAnchor(n, seg);
     if (![anchor.ax, anchor.az, anchor.cx, anchor.cz, anchor.bx, anchor.bz].every(Number.isFinite)) return `segment ${seg} has a bad cell anchor`;
     if (!(anchor.tA >= 0 && anchor.tA <= 1 && anchor.tB >= 0 && anchor.tB <= 1)) return `segment ${seg} has a bad cell anchor`;

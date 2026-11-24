@@ -40,7 +40,8 @@
 import { ROAD_BUILD, ROAD_TYPES, type RoadType } from "./balance";
 import { buildRoad, cosDegrees, groundProblem, planRoad, snapToGrid, type BuildPoint } from "./build";
 import { isStraight, nearestOnQuad, orient, quadMeetings, segmentQuad, segmentsMeet, straightQuad, type Quad } from "./curve";
-import { LEVEL_GROUND, NETWORK_ROAD, endJournal, reverseOps, segmentAtLevel, startJournal, type RoadNetwork } from "./network";
+import { assignTiers } from "./frontage";
+import { LEVEL_GROUND, NETWORK_ROAD, endJournal, isSegment, reverseOps, segmentAtLevel, segmentIdLimit, startJournal, type RoadNetwork } from "./network";
 import { NETWORKS_ROAD, nearestNode, roadIndexOf, segmentsInBox } from "./spatial";
 import { heightAt, mapSize, type Terrain } from "../terrain/terrain";
 
@@ -543,6 +544,11 @@ export function buildRoadGrid(net: RoadNetwork, terrain: Terrain, plan: GridPlan
       buildRoad(net, terrain, result.plan, age);
     }
   }
+  // Every street of the grid, pieces included, takes its strips' tiers from
+  // the blocks the whole grid makes (#341).
+  const ours: number[] = [];
+  for (let seg = 0; seg < segmentIdLimit(net); seg++) if (isSegment(net, seg) && net.segOrder[seg] === age.order) ours.push(seg);
+  assignTiers(net, ours);
   return null;
 }
 
