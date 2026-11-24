@@ -20,7 +20,7 @@ import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
 import { INITIAL_ZONE_TOOL, type ZonePreview, type ZoneToolState } from "../tools/zone-tool";
 import { toggledOverlay, type OverlayEntry, type OverlayId } from "./overlays";
-import { stacked, stackedForTool, type PanelId, type WindowId } from "./windows";
+import { columnOrder, stacked, stackedForTool, type PanelId, type WindowId } from "./windows";
 
 export interface UiState extends RoadToolState, GridToolState, EditToolState, BulldozeToolState, RouteToolState, BlockOverlayState, ZoneToolState {
   debugOpen: boolean;
@@ -93,6 +93,11 @@ export function setPanel(id: PanelId, open: boolean): void {
 
 export function togglePanel(id: PanelId): void {
   setPanel(id, !useUi.getState()[OPEN_FLAG[id]]);
+}
+
+/** Panel `id`'s place in the column under the top bar's buttons, as a CSS `order` (windows.ts). */
+export function usePanelOrder(id: PanelId): number {
+  return useUi((s) => columnOrder(s.windows, id));
 }
 
 export const toggleDebug = (): void => togglePanel("debug");

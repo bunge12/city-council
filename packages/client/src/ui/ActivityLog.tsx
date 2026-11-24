@@ -1,5 +1,5 @@
 import { useServices, useSim } from "./hooks";
-import { useUi } from "./store";
+import { usePanelOrder, useUi } from "./store";
 
 /** How many of the latest entries the log view lists. */
 export const LOG_VIEW_ROWS = 50;
@@ -20,8 +20,9 @@ export function ActivityLog() {
   const log = mirror.state?.log ?? [];
   const rows = log.slice(-LOG_VIEW_ROWS).reverse();
 
+  const order = usePanelOrder("log");
   return (
-    <section id="activity-log" className="panel activity-log" aria-label="Activity log" hidden={!open}>
+    <section id="activity-log" className="panel activity-log" aria-label="Activity log" hidden={!open} style={{ order }}>
       <h2>Activity log</h2>
       <div className="actions">
         <button type="button" onClick={() => void sendCommand("NoOp")}>Send NoOp</button>

@@ -6,7 +6,7 @@ import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
 import { HELD_DEMAND_STATE, WALKTHROUGH_DEMAND } from "./browser-state";
-import { cityLoaded, cityReady, frames, hideNotes, openCity, settingsButton, settle } from "./helpers";
+import { cityLoaded, cityReady, frames, hideNotes, openCity, openSettings, settingsButton, settle } from "./helpers";
 import { holdDemand } from "../packages/sim/test/demand-helper";
 
 // The M2 exit test from docs/milestones/M2.md (issue M2-17), as one
@@ -1136,7 +1136,10 @@ for (const variant of [
       const select = page.locator("#graphics-preset");
       const hashes: Record<string, string> = {};
       for (const preset of ["low", "balanced", "high"] as const) {
+        // The preset is in the settings menu (issue #332), closed again before each screenshot.
+        await openSettings(page);
         await select.selectOption(preset);
+        await page.locator("#settings-toggle").click();
         await page.waitForFunction(() => document.body.dataset["presetSettled"] === "true", null, { timeout: 180_000 });
         await expect.poll(async () => (await page.evaluate(async () => (await window.cityCouncil.view).lighting())).preset, { timeout: 180_000 }).toBe(preset);
         const light = await page.evaluate(async () => (await window.cityCouncil.view).lighting());

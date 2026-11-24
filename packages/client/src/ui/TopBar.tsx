@@ -6,7 +6,7 @@ import { formatGameDate } from "./format";
 import { useRoom, useSaveStatus, useServices, useSim } from "./hooks";
 import { useTip } from "./Tip";
 import { BAR_NAMES, formatDemandTitle, formatPopulationTitle, populationTrend, trendArrow } from "./top-figures";
-import { toggleDebug, toggleLog, toggleMenu, toggleSettings, toggleStats, useGraphics, useSound, useUi } from "./store";
+import { toggleDebug, toggleLog, toggleMenu, toggleSettings, toggleStats, useGraphics, usePanelOrder, useSound, useUi } from "./store";
 
 /** The graphics setting: Low, Balanced or High, kept in this browser. */
 function GraphicsSetting() {
@@ -80,8 +80,9 @@ export function SettingsMenu() {
   const menuOpen = useUi((s) => s.menuOpen);
   const logOpen = useUi((s) => s.logOpen);
   const debugOpen = useUi((s) => s.debugOpen);
+  const order = usePanelOrder("settings");
   return (
-    <section id="settings-menu" className="panel settings-menu" aria-label="Settings" hidden={!open}>
+    <section id="settings-menu" className="panel settings-menu" aria-label="Settings" hidden={!open} style={{ order }}>
       <GraphicsSetting />
       <SoundSetting />
       <nav className="panels" aria-label="Panels">

@@ -181,7 +181,7 @@ export function BuildBar() {
                   id="upgrade-tool"
                   aria-pressed={tool === "upgrade"}
                   disabled={!ready}
-                  title="Upgrade (V): change a road to the type picked"
+                  title="Upgrade (V): click a road to change it to the type picked. Shift takes the whole road, a drag takes several, and a right-click reverses a one-way."
                   onClick={upgrade}
                 >
                   Upgrade <kbd>V</kbd>
@@ -208,7 +208,7 @@ export function BuildBar() {
                     id="grid-tool"
                     aria-pressed={gridding}
                     disabled={!ready}
-                    title="Grid (G): drag out a rectangle to lay a street grid"
+                    title="Grid (G): drag along one side of the grid, move to set how far it reaches, click, then Confirm or press Enter. Alt draws the side free-hand."
                     onClick={grid}
                   >
                     Grid <kbd>G</kbd>
@@ -241,7 +241,7 @@ export function BuildBar() {
             aria-expanded={roadMenu}
             aria-controls={roadMenu ? "road-menu" : undefined}
             disabled={!ready}
-            title="Road tool (R)"
+            title="Road tool (R): click to start a road and again to end it. Alt draws free-hand. Esc or a right-click drops it."
             onClick={() => roadTool.toggle()}
           >
             Road <kbd>R</kbd>
@@ -277,7 +277,7 @@ export function BuildBar() {
             aria-expanded={bulldozing}
             aria-controls={bulldozing ? "bulldoze-menu" : undefined}
             disabled={!ready}
-            title="Bulldozer (B): remove what is under the pointer"
+            title="Bulldozer (B): click to remove what is under the pointer. Shift takes the whole road, and a drag takes every thing of the kind it starts on."
             onClick={() => bulldozeTool.toggle()}
           >
             Bulldoze <kbd>B</kbd>

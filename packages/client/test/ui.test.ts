@@ -8,7 +8,7 @@ import { parseSeed, randomSeed } from "../src/ui/seed";
 import { DRAW_MODES, TOOL_ROAD_TYPES } from "../src/tools/road-tool";
 import { SHORTCUTS, shortcutFor, toggledSpeed, type KeyPress } from "../src/ui/shortcuts";
 import { setPanel, setViewReadout, togglePanel, useUi, useViewReadout } from "../src/ui/store";
-import { escapeTarget, stacked, stackedForTool } from "../src/ui/windows";
+import { columnOrder, escapeTarget, stacked, stackedForTool } from "../src/ui/windows";
 
 describe("formatMoneyShort", () => {
   it.each([
@@ -111,13 +111,10 @@ describe("shortcuts", () => {
     expect(shortcutFor(press("KeyX"))).toEqual({ kind: "roadType", type: "avenue" });
     expect(shortcutFor(press("KeyC"))).toEqual({ kind: "roadType", type: "oneWay" });
     expect(shortcutFor(press("Escape"))).toEqual({ kind: "escape" });
-    expect(shortcutFor(press("Escape", { targetTag: "INPUT" }))).toBeNull();
-    expect(shortcutFor(press("Escape", { targetTag: "INPUT", targetType: "text" }))).toBeNull();
-    // A slider, a checkbox or a picker lets Escape close the window it is in (issue #332).
-    expect(shortcutFor(press("Escape", { targetTag: "INPUT", targetType: "range" }))).toEqual({ kind: "escape" });
-    expect(shortcutFor(press("Escape", { targetTag: "INPUT", targetType: "checkbox" }))).toEqual({ kind: "escape" });
+    // From a field Escape still closes the window the field is in (issue #332); other keys stay the field's.
+    expect(shortcutFor(press("Escape", { targetTag: "INPUT" }))).toEqual({ kind: "escape" });
     expect(shortcutFor(press("Escape", { targetTag: "SELECT" }))).toEqual({ kind: "escape" });
-    expect(shortcutFor(press("KeyL", { targetTag: "INPUT", targetType: "range" }))).toBeNull();
+    expect(shortcutFor(press("KeyL", { targetTag: "INPUT" }))).toBeNull();
     // Every type the tool offers has a key.
     const types = SHORTCUTS.flatMap((s) => (s.action.kind === "roadType" ? [s.action.type] : []));
     expect(types).toEqual([...TOOL_ROAD_TYPES]);
@@ -222,6 +219,13 @@ describe("the order Escape closes windows in (issue #332)", () => {
     expect(stacked(["settings", "city", "debug"], "city", true)).toEqual(["settings", "debug", "city"]);
     expect(stacked(["settings", "city"], "settings", false)).toEqual(["city"]);
     expect(stacked([], "log", false)).toEqual([]);
+  });
+
+  it("stacks the right column's panels newest first, under the settings menu", () => {
+    const windows = ["city", "settings", "tool", "stats"] as const;
+    expect(columnOrder(windows, "settings")).toBeLessThan(columnOrder(windows, "stats"));
+    expect(columnOrder(windows, "stats")).toBeLessThan(columnOrder(windows, "city"));
+    expect(columnOrder(windows, "log")).toBe(0);
   });
 
   it("closes the newest window first, and nothing with none open", () => {

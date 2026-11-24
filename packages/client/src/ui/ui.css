@@ -185,7 +185,6 @@
 }
 
 .city-status .population {
-  position: relative;
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -224,7 +223,6 @@
 }
 
 .city-status .demand-bar {
-  position: relative;
   display: grid;
   grid-template-columns: 76px 1fr 32px;
   align-items: center;
@@ -276,11 +274,11 @@
   outline-offset: 1px;
 }
 
-/* A tooltip that shows at once (Tip.tsx), to the right of what it explains. */
+/* A tooltip that shows at once (Tip.tsx), above the card it explains, clear of the dock. */
 .tip {
   position: absolute;
-  left: calc(100% + 14px);
-  bottom: 0;
+  left: 0;
+  bottom: calc(100% + 6px);
   z-index: 20;
   width: max-content;
   max-width: 300px;
@@ -345,6 +343,11 @@
   right: 8px;
   max-height: calc(100vh - var(--bar-height) - 16px - var(--clock-room));
   overflow-y: auto;
+}
+
+/* Panels keep their height and the column scrolls; the statistics panel scrolls itself. */
+.right-column > .panel:not(.stats-panel) {
+  flex-shrink: 0;
 }
 
 .panel,
@@ -752,16 +755,10 @@ kbd {
   text-align: right;
 }
 
-/* Narrow screens: the corner cards sit above the dock rather than beside it. */
-@media (max-width: 1000px) {
-  .city-status,
-  .game-clock {
-    bottom: 64px;
-  }
-
-  :root {
-    --status-room: 226px;
-    --clock-room: 112px;
+/* Narrower screens: the dock rises above the clock card in the bottom right corner, so the two never meet. */
+@media (max-width: 1100px) {
+  .panel.build-bar {
+    bottom: 66px;
   }
 }
 
@@ -779,8 +776,9 @@ kbd {
   width: max-content;
   max-width: calc(100vw - 16px);
   box-sizing: border-box;
-  /* The menus hang above the dock, outside the panel's box. */
+  /* The menus hang above the dock, outside the panel's box, and over the corner cards. */
   overflow: visible;
+  z-index: 2;
 }
 
 /* A tool's menu is centred over the whole dock, not its own button (issue #332). */

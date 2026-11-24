@@ -19,10 +19,24 @@ import { StatsPanel } from "./StatsPanel";
 import { OverlayBar } from "./OverlayBar";
 import { setPanel, toggleDebug, toggleLog, toggleOverlay, toggleStats, useUi } from "./store";
 import { CityStatus, GameClock, SettingsMenu, TopBar } from "./TopBar";
-import { escapeTarget } from "./windows";
+import { PANEL_ELEMENTS, escapeTarget, type PanelId } from "./windows";
 import { ZoneLegend } from "./ZoneLegend";
 import { ZoneReadout } from "./ZoneReadout";
 import "./ui.css";
+
+/**
+ * After Escape closes panel `id`, focus that was inside it goes back to the
+ * button that opened it, where that button still shows, or leaves the page's
+ * controls, so the next key still reaches the map.
+ */
+function refocus(id: PanelId): void {
+  const panel = document.getElementById(PANEL_ELEMENTS[id]);
+  const focused = document.activeElement;
+  if (!panel || !(focused instanceof HTMLElement) || !panel.contains(focused)) return;
+  const opener = document.querySelector<HTMLElement>(`[aria-controls="${panel.id}"]`);
+  if (opener && !opener.closest("[hidden]")) opener.focus();
+  else focused.blur();
+}
 
 /** Turns key presses into shortcut actions. Speed keys send `SetSpeed`, like the buttons. */
 function useShortcuts(): void {
@@ -35,6 +49,8 @@ function useShortcuts(): void {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // A field that answers Escape itself, as the grid's sizes do, has the last word.
+      if (e.code === "Escape" && e.defaultPrevented) return;
       const target = e.target instanceof HTMLElement ? e.target : null;
       const action = shortcutFor({
         code: e.code,
@@ -44,7 +60,6 @@ function useShortcuts(): void {
         shiftKey: e.shiftKey,
         repeat: e.repeat,
         targetTag: target?.tagName ?? "",
-        targetType: target instanceof HTMLInputElement ? target.type : "",
         targetEditable: target?.isContentEditable ?? false,
       });
       if (!action) return;
@@ -102,6 +117,7 @@ function useShortcuts(): void {
           const top = escapeTarget(useUi.getState().windows);
           if (top !== null && top !== "tool") {
             setPanel(top, false);
+            refocus(top);
             return;
           }
           if (!routeTool.escape() && !editTool.escape() && !bulldozeTool.escape() && !gridTool.escape() && !zoneTool.escape()) roadTool.escape();

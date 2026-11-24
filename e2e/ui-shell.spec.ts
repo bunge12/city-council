@@ -347,3 +347,33 @@ test("Escape closes a panel opened over a tool before it leaves the tool, and th
   await page.keyboard.press("Escape");
   await expect(stats).toBeHidden();
 });
+
+/** Whether two boxes share any area. */
+function overlap(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+test("on a narrower screen the dock and its menus stay clear of the corner cards, and Escape from a text field closes its window (#332)", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await open(page);
+  await page.keyboard.press("KeyR");
+  await expect(page.locator("#road-menu")).toBeVisible();
+  const clock = await box(page, "#game-clock");
+  const status = await box(page, "#city-status");
+  for (const id of ["#build-bar .dock", "#road-menu"]) {
+    const b = await box(page, id);
+    expect(overlap(b, clock), `${id} and the clock`).toBe(false);
+    expect(overlap(b, status), `${id} and the population card`).toBe(false);
+  }
+  await testInfo.attach("the road menu at 1024 px", { body: await page.screenshot(), contentType: "image/png" });
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#road-tool")).toHaveAttribute("aria-pressed", "false");
+
+  // Typing in the city menu's name field, Escape closes the menu and hands focus back to its button.
+  await settingsButton(page, "City");
+  const city = page.getByRole("region", { name: "City menu" });
+  await city.getByLabel("Name").focus();
+  await page.keyboard.press("Escape");
+  await expect(city).toBeHidden();
+  await expect(page.locator('#settings-menu [aria-controls="city-menu"]')).toBeFocused();
+});

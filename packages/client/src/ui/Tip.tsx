@@ -27,7 +27,8 @@ export function useTip(text: string): {
       "data-tip": text,
       "aria-describedby": shown ? id : undefined,
       tabIndex: 0,
-      onPointerEnter: () => setHovered(true),
+      // A touch shows the tip by focus instead, so it does not flash on and off.
+      onPointerEnter: (e) => setHovered(e.pointerType !== "touch"),
       onPointerLeave: () => setHovered(false),
       onFocus: () => setFocused(true),
       onBlur: () => setFocused(false),
