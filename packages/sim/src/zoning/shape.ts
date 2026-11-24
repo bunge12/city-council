@@ -19,6 +19,7 @@
 // polyline `curveLength` measures, so a station's place agrees with the
 // segment's stored length.
 
+import { ROAD_BUILD } from "../roads/balance";
 import { CURVE_STEPS, curvePolyline, isStraight, quadPoint } from "../roads/curve";
 
 /**
@@ -27,6 +28,18 @@ import { CURVE_STEPS, curvePolyline, isStraight, quadPoint } from "../roads/curv
  * overlapping, whatever the rounding. A tolerance, not a balance number.
  */
 export const OVERLAP_TOLERANCE = 0.01;
+
+/**
+ * Two cells that face each other back to back, reaching into a block from
+ * the roads on either side of it, overlap only by more than this many
+ * metres. Every road end is snapped to the build grid, so on a road that is
+ * not on a whole axis each end can sit up to `gridStep` / sqrt(2) off its
+ * line, and two roads drawn a whole number of cells apart can come up to
+ * `gridStep` * sqrt(2) short of it somewhere along the block. Without this
+ * the last rows of the two strips overlap by that sliver and one of them is
+ * lost (#348). A tolerance, not a balance number.
+ */
+export const FACING_TOLERANCE = 2 * ROAD_BUILD.gridStep;
 
 /**
  * A segment with less than this left past its last whole cell, in metres,
@@ -320,8 +333,8 @@ export function isConvexQuad(q: Float64Array): boolean {
   return true;
 }
 
-/** Whether some edge of `p` separates the two quads, allowing them to overlap by the tolerance. */
-function separatedByEdgeOf(p: Float64Array, q: Float64Array): boolean {
+/** Whether some edge of `p` separates the two quads, allowing them to overlap by `tolerance` metres. */
+function separatedByEdgeOf(p: Float64Array, q: Float64Array, tolerance: number): boolean {
   for (let i = 0; i < 4; i++) {
     const ex = (p[((i + 1) % 4) * 2] ?? 0) - (p[i * 2] ?? 0);
     const ez = (p[((i + 1) % 4) * 2 + 1] ?? 0) - (p[i * 2 + 1] ?? 0);
@@ -343,7 +356,7 @@ function separatedByEdgeOf(p: Float64Array, q: Float64Array): boolean {
       if (dq > maxQ) maxQ = dq;
     }
     const overlap = (maxP < maxQ ? maxP : maxQ) - (minP > minQ ? minP : minQ);
-    if (overlap <= OVERLAP_TOLERANCE * Math.sqrt(len2)) return true;
+    if (overlap <= tolerance * Math.sqrt(len2)) return true;
   }
   return false;
 }
@@ -353,7 +366,35 @@ function separatedByEdgeOf(p: Float64Array, q: Float64Array): boolean {
  * only touch along an edge or at a corner do not.
  */
 export function quadsOverlap(p: Float64Array, q: Float64Array): boolean {
-  return !separatedByEdgeOf(p, q) && !separatedByEdgeOf(q, p);
+  return !separatedByEdgeOf(p, q, OVERLAP_TOLERANCE) && !separatedByEdgeOf(q, p, OVERLAP_TOLERANCE);
+}
+
+/**
+ * Whether two cells, corners as `cellCornersInto` writes them, face each
+ * other back to back: the ways they reach from their roads point opposite
+ * ways within 30 degrees. Only multiply, add and compare, with
+ * tan^2(30 degrees) = 1/3, so every machine agrees.
+ */
+function cellsFace(p: Float64Array, q: Float64Array): boolean {
+  // Outer start minus inner start: the way each reaches from its road.
+  const px = (p[6] ?? 0) - (p[0] ?? 0);
+  const pz = (p[7] ?? 0) - (p[1] ?? 0);
+  const qx = (q[6] ?? 0) - (q[0] ?? 0);
+  const qz = (q[7] ?? 0) - (q[1] ?? 0);
+  const dot = px * qx + pz * qz;
+  const cross = px * qz - pz * qx;
+  return dot < 0 && 3 * cross * cross < dot * dot;
+}
+
+/**
+ * Whether two cells overlap enough that only one may hold the ground: by
+ * more than `OVERLAP_TOLERANCE`, or by more than `FACING_TOLERANCE` when
+ * they face each other back to back. For cell against cell only; a cell
+ * against a road surface is `quadsOverlap`.
+ */
+export function cellsOverlap(p: Float64Array, q: Float64Array): boolean {
+  const tolerance = cellsFace(p, q) ? FACING_TOLERANCE : OVERLAP_TOLERANCE;
+  return !separatedByEdgeOf(p, q, tolerance) && !separatedByEdgeOf(q, p, tolerance);
 }
 
 /** Whether point (x, z) is inside convex quad `q` or on its edge. */

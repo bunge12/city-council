@@ -10,7 +10,10 @@
 //   - it folds over itself on the inside of a bend too tight for it,
 //   - the surface of another segment on the ground or a bridge covers it,
 //     whatever its network: road, rail or path,
-//   - it overlaps a cell that claimed the ground first,
+//   - it overlaps a cell that claimed the ground first, by more than the
+//     sliver two strips facing across a block may share (`cellsOverlap`,
+//     shape.ts), since snapping road ends to the build grid can leave such a
+//     block a few centimetres short of whole cells (#348),
 //   - or the cell in front of it, nearer the road in its column, is not
 //     open, so it is cut off from its road (#341). Nothing could build on
 //     it, so it holds no ground and takes no paint.
@@ -89,6 +92,7 @@ import {
   quadCentre,
   quadContains,
   quadsOverlap,
+  cellsOverlap,
   stationCount,
   stationsInto,
   surfaceInto,
@@ -800,7 +804,7 @@ function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): nu
         if ((boxB[0] ?? 0) > maxX || (boxB[2] ?? 0) < minX || (boxB[1] ?? 0) > maxZ || (boxB[3] ?? 0) < minZ) continue;
         // One status whoever the winner is: the buckets are in no order, so
         // a label taken from the first overlap found would depend on it.
-        if (quadsOverlap(q, quadB)) return CELL_TAKEN;
+        if (cellsOverlap(q, quadB)) return CELL_TAKEN;
       }
     }
   }
@@ -838,8 +842,10 @@ const LOST_GROUND = 1 << CELL_TAKEN;
 
 /**
  * Calls `visit` with the key of every cell in the buckets whose status is
- * one of the bits in `statuses` and that overlaps quad `q` by more than the
- * tolerance, whose box is `box`, leaving out the cells `skip` picks. A
+ * one of the bits in `statuses` and that overlaps quad `q`, whose box is
+ * `box`, leaving out the cells `skip` picks. `q` is a cell when `isCell`,
+ * and overlaps as `cellsOverlap` says, or else a road surface, and overlaps
+ * as `quadsOverlap` says. A
  * cell in several buckets is visited once per bucket. The status is read
  * first, so most cells cost no geometry.
  */
@@ -848,6 +854,7 @@ function forOverlappingCells(
   q: Float64Array,
   box: Float64Array,
   statuses: number,
+  isCell: boolean,
   visit: (key: number) => void,
   skip?: (key: number, seg: number) => boolean,
 ): void {
@@ -863,7 +870,7 @@ function forOverlappingCells(
       if (!s || ((1 << (status === UNSET ? UNSET_BIT : status)) & statuses) === 0) continue;
       cellQuad(s, local, quadB);
       quadBoxInto(quadB, boxB);
-      if (boxesTouch(box, boxB) && quadsOverlap(q, quadB)) visit(key);
+      if (boxesTouch(box, boxB) && (isCell ? cellsOverlap(q, quadB) : quadsOverlap(q, quadB))) visit(key);
     }
   });
 }
@@ -1131,13 +1138,13 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   const queue = earlier ? finishTasks(earlier) : new ClaimQueue(index);
   const box = new Float64Array(4);
   const q = new Float64Array(8);
-  const seedOverlapping = (quad: Float64Array, statuses: number) => {
+  const seedOverlapping = (quad: Float64Array, statuses: number, isCell: boolean) => {
     quadBoxInto(quad, box);
-    forOverlappingCells(index, quad, box, statuses, (key) => queue.push(key), (key) => queue.has(key));
+    forOverlappingCells(index, quad, box, statuses, isCell, (key) => queue.push(key), (key) => queue.has(key));
   };
   // A surface that comes can only block a cell, and one that goes can only free one.
   const seedUnderSurface = (s: SegShape, statuses: number) => {
-    for (let k = 0; k < s.pieces; k++) seedOverlapping(surfacePiece(s, k), statuses);
+    for (let k = 0; k < s.pieces; k++) seedOverlapping(surfacePiece(s, k), statuses, false);
   };
 
   // Removed shapes with cells, by the anchor they measure them on.
@@ -1254,6 +1261,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
         piece,
         pieceBox,
         NOT_UNDER_ROAD,
+        false,
         (key) => {
           const seg = segOfKey(key);
           const c = index.segs[seg] as SegShape;
@@ -1271,6 +1279,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
             quadC,
             box,
             LOST_GROUND,
+            true,
             (other) => {
               if (claimsFirst(index, key, other)) queue.push(other);
             },
@@ -1294,7 +1303,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
         for (let local = 0; local < status.length; local++) {
           if (status[local] !== CELL_OPEN || marks?.[local] === 1) continue;
           cellQuad(c.shape as SegShape, local, q);
-          seedOverlapping(q, LOST_GROUND);
+          seedOverlapping(q, LOST_GROUND, true);
         }
       },
     });
@@ -1370,6 +1379,7 @@ function drain(index: CellIndex, limit: number): boolean {
       q,
       box,
       now === CELL_OPEN ? BIT_OPEN : LOST_GROUND,
+      true,
       (other) => {
         if (claimsFirst(index, key, other)) queue.push(other);
       },
@@ -2305,6 +2315,7 @@ export function openCellsUnder(index: CellIndex, net: RoadNetwork, segs: readonl
         piece,
         pieceBox,
         BIT_OPEN,
+        false,
         (key) => {
           const seg = segOfKey(key);
           cellQuad(index.segs[seg] as SegShape, key - seg * KEY_STRIDE, quad);
@@ -2360,6 +2371,7 @@ export function openCellsTakenBy(index: CellIndex, segs: readonly ReturningSegme
         piece,
         takenBox,
         BIT_OPEN,
+        false,
         (key) => {
           const other = segOfKey(key);
           cellQuad(index.segs[other] as SegShape, key - other * KEY_STRIDE, takenOther);
@@ -2382,6 +2394,7 @@ export function openCellsTakenBy(index: CellIndex, segs: readonly ReturningSegme
         takenQuad,
         takenBox,
         BIT_OPEN,
+        true,
         (other) => {
           const os = segOfKey(other);
           const o = index.segs[os];
@@ -2450,7 +2463,7 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
       for (const at of from.buckets.get(bucket) ?? []) {
         for (let i = 0; i < 8; i++) other[i] = from.quads[at * 8 + i] ?? 0;
         quadBoxInto(other, otherBox);
-        if (boxesTouch(quadBox, otherBox) && quadsOverlap(quad, other)) {
+        if (boxesTouch(quadBox, otherBox) && cellsOverlap(quad, other)) {
           hit = true;
           return;
         }
@@ -2497,7 +2510,7 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
     const seg = segOfKey(key);
     cellQuad(index.segs[seg] as SegShape, key - seg * KEY_STRIDE, q);
     quadBoxInto(q, box);
-    forOverlappingCells(index, q, box, LOST_GROUND, (k) => candidates.add(k));
+    forOverlappingCells(index, q, box, LOST_GROUND, true, (k) => candidates.add(k));
   }
   const reopened = filed();
   const reopenedKeys = new Set<number>();
@@ -2519,6 +2532,7 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
       q,
       qBox,
       BIT_OPEN,
+      true,
       () => {
         blocked = true;
       },
@@ -2567,6 +2581,7 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
       q,
       qBox,
       BIT_OPEN,
+      true,
       () => {
         blocked = true;
       },
