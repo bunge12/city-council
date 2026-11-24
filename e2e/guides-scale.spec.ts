@@ -139,6 +139,10 @@ test("drawing in a network of 30,000 segments keeps its frame time with the guid
     await page.locator("#guide-offset").click();
   };
   const FRAMES = 30;
+  // The first frames after the tool opens are slower, with the guides on or
+  // off: 530 to 650 ms against 400 after, in the development container. A
+  // round not counted takes them, so the first round with the guides on does not.
+  await drawingFrameTime(page, centre, FRAMES);
   // Alternate, guides on then off, to spread the machine's noise over both.
   const on: number[] = [];
   const off: number[] = [];
