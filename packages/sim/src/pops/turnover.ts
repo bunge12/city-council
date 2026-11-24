@@ -173,12 +173,12 @@ function roomForBirth(state: SimState, id: number): boolean {
 
 /** The turnover system's work for one tick, as the header says. */
 export function turnOver(state: SimState): void {
-  const { from, to } = popSlice(state);
+  const { from, to, step } = popSlice(state);
   if (from >= to) return;
   const chances = dayChances();
   const p = state.pops;
   const rng = state.rng;
-  for (let id = from; id < to; id++) {
+  for (let id = from; id < to; id += step) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0) continue;
     // A displaced pop waits in the queue for a home (M3-12); its household changes once it has one.
     if (p.home[id] === NO_HOME) continue;
