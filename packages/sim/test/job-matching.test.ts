@@ -389,7 +389,7 @@ describe("job matching", () => {
     expectRecount(state);
   });
 
-  it("builds its openings again after a change of roads made while paused on a loaded city, whatever tick the travel times say", () => {
+  it("catches its openings up after a change of roads made while paused on a loaded city, whatever tick the travel times say", () => {
     const { state } = nearAndFar();
     const end = connectionEnd(state.roads, state.connections[0] ?? NONE);
     const x = state.roads.nodeX[end] ?? 0;
@@ -404,14 +404,49 @@ describe("job matching", () => {
     // Saved paused, loaded, and the derived data built as a host builds it.
     const loaded = deserialize(serialize(state)).state;
     prepareDerived(loaded);
-    const before = openingsOf(loaded);
+    const seen = openingsOf(loaded).roadsSeen;
     expect(submit(loaded, side(70))).toEqual({ ok: true });
     step(loaded);
     // The same tick and the same ready tick, yet the roads changed.
     expect(loaded.tick).toBe(tick);
     expect(loaded.travelReadyAt).toBe(tick);
-    expect(openingsOf(loaded)).not.toBe(before);
+    expect(openingsOf(loaded).roadsSeen).not.toBe(seen);
     expect(openingsProblem(loaded)).toBeNull();
+  });
+
+  it("refiles only what a change of roads cuts off or joins again, and its openings equal ones built afresh (#313)", () => {
+    const { state, near, far } = nearAndFar();
+    const r = state.roads;
+    const end = connectionEnd(r, state.connections[0] ?? NONE);
+    const x = r.nodeX[end] ?? 0;
+    const z = r.nodeZ[end] ?? 0;
+    // Two side streets split the street at places 10 and 50, between the near podium and the far one.
+    for (const at of [10, 50]) ok(state, "BuildRoad", { from: { x: x + CELL * at, z }, to: { x: x + CELL * at, z: z + 60 }, type: "street" });
+    const nodeAt = (at: number) => {
+      for (let n = 0; n < r.nodeX.length; n++) if (Math.abs((r.nodeX[n] ?? 0) - (x + CELL * at)) < 1 && Math.abs((r.nodeZ[n] ?? 0) - z) < 1) return n;
+      return NONE;
+    };
+    const [a, b] = [nodeAt(10), nodeAt(50)];
+    let middle = NONE;
+    for (let seg = 0; seg < r.segFlags.length; seg++) {
+      if (!r.segFlags[seg]) continue;
+      const ends = [r.segA[seg], r.segB[seg]];
+      if (ends.includes(a) && ends.includes(b)) middle = seg;
+    }
+    expect(middle).not.toBe(NONE);
+    const before = openingsOf(state);
+    expect([before.roadOk[near], before.roadOk[far]]).toEqual([1, 1]);
+    ok(state, "BulldozeRoad", { segments: [middle] });
+    const cut = openingsOf(state);
+    // Caught up in place, not built again: the far podium is cut off, the near one is not.
+    expect(cut).toBe(before);
+    expect([cut.roadOk[near], cut.roadOk[far]]).toEqual([1, 0]);
+    expect(cut.zoneOf[far]).toBe(-1);
+    expect(openingsProblem(state)).toBeNull();
+    ok(state, "Undo", {});
+    const joined = openingsOf(state);
+    expect([joined.roadOk[near], joined.roadOk[far]]).toEqual([1, 1]);
+    expect(openingsProblem(state)).toBeNull();
   });
 
   it("goes on matching while a player changes a road every few seconds, from the last whole table (#313)", () => {
