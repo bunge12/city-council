@@ -19,7 +19,8 @@
     "statistics-scale.spec.ts",
     "building-use-scale.spec.ts",
     "land-value-scale.spec.ts",
-    "scale-cities-load.spec.ts"
+    "scale-cities-load.spec.ts",
+    "district-band.spec.ts"
   ],
   "evidence": [
     "block-strips.spec.ts",
@@ -58,6 +59,7 @@
     "construction-frame-time.spec.ts": 159,
     "construction.spec.ts": 22,
     "decor.spec.ts": 15,
+    "district-band.spec.ts": 400,
     "dock.spec.ts": 16,
     "downtown.spec.ts": 6,
     "drawing-modes.spec.ts": 89,
