@@ -104,7 +104,7 @@ jobs:
           - { id: m0, timeout: 35, limit: 15, grep: "M0 walkthrough" }
           - { id: m1, timeout: 35, limit: 25, grep: "M1 walkthrough" }
           - { id: m2, timeout: 60, limit: 48, grep: "M2 walkthrough" }
-          - { id: m3, timeout: 60, limit: 48, grep: "M3 walkthrough" }
+          - { id: m3, timeout: 80, limit: 68, grep: "M3 walkthrough" }
     name: walkthrough (${{ matrix.id }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

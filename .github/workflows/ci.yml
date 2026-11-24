@@ -408,10 +408,12 @@ jobs:
           # slow runner takes twice that and a failed test runs again, which
           # 35 minutes does not hold.
           - { id: walkthrough-m2, project: walkthrough, timeout: 60, limit: 48, args: "--no-deps -g \"M2 walkthrough\"" }
-          # The M3 walkthrough waits on the sim through held steps, game years
-          # of them in steps 9 and 12, and opens a second city in step 11. Its
-          # test limit is 20 minutes, a third of the job's, as for M2.
-          - { id: walkthrough-m3, project: walkthrough, timeout: 60, limit: 48, args: "--no-deps -g \"M3 walkthrough\"" }
+          # The M3 walkthrough waits on the sim through held steps, two game
+          # years of them in step 12, and opens two more cities in steps 9 and
+          # 11. About 11 minutes on software WebGPU and 2.6 on WebGL 2 on a
+          # 4-core container, against M2's 7.5 and 3 there, which took up to
+          # 14.5 on CI. Its test limit is 26 minutes, a third of the job's.
+          - { id: walkthrough-m3, project: walkthrough, timeout: 80, limit: 68, args: "--no-deps -g \"M3 walkthrough\"" }
     name: e2e (${{ matrix.id }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

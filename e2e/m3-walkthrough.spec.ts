@@ -98,11 +98,12 @@ declare const navigator: { gpu?: { requestAdapter(): Promise<unknown> } };
 
 const VIEWPORT = { width: 1280, height: 800 };
 test.use({ viewport: VIEWPORT });
-// Two page loads of the town, one of step 11's city, and game years at 4x
-// on a machine that may have no GPU. 20 minutes is a third of the
-// walkthrough-m3 job's 60, so a test that times out twice still leaves its
+// Two page loads of the town, one each of step 9's and step 11's cities,
+// and game years at 4x on a machine that may have no GPU: 11 minutes on
+// software WebGPU in a 4-core container. 26 minutes is a third of the
+// walkthrough-m3 job's 80, so a test that times out twice still leaves its
 // job time to report (issue #228, scripts/check-e2e-timeouts.mjs).
-test.setTimeout(1_200_000);
+test.setTimeout(1_560_000);
 
 const SCREENSHOTS = "walkthrough-screenshots";
 const terrain = generateTerrain(SEED);
