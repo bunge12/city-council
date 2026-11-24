@@ -437,6 +437,9 @@ export class SimMirror {
         this.applyDelta(message);
         // A delta the copy could not take still says which commands were dropped, and why.
         if (this.deltaSeq === before) this.settleDropped(message);
+        // Taken, applied or not: the host sends the next only now (issue
+        // #345), after everything listening has run.
+        this.transport.send({ v: PROTOCOL_VERSION, type: "deltaAck", seq: message.seq });
         return;
       }
       case "commandResult": {

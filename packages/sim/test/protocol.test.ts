@@ -23,4 +23,11 @@ describe("parseToSimMessage", () => {
       command: { seq: 1, playerId: "p", type: "NoOp", payload: {} },
     });
   });
+
+  it("takes a deltaAck with the delta's seq and refuses one without (issue #345)", () => {
+    expect(parseToSimMessage({ v: PROTOCOL_VERSION, type: "deltaAck", seq: 4, extra: 1 })).toEqual({ v: PROTOCOL_VERSION, type: "deltaAck", seq: 4 });
+    for (const seq of [undefined, "4", -1, 1.5, Number.NaN]) {
+      expect(parseToSimMessage({ v: PROTOCOL_VERSION, type: "deltaAck", seq })).toMatch(/seq/);
+    }
+  });
 });
