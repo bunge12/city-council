@@ -25,6 +25,9 @@ import { performance } from "node:perf_hooks";
 import { expect, test } from "vitest";
 import {
   ARRIVALS_SYSTEM,
+  BUILDINGS_BALANCE,
+  COMMANDS_SYSTEM,
+  DISPLACED_SYSTEM,
   DEMAND_SYSTEM,
   GROWER_SYSTEM,
   JOBS_SYSTEM,
@@ -32,10 +35,16 @@ import {
   SATISFACTION_SYSTEM,
   SCALE_CITY_RESIDENTS,
   TIME_BALANCE,
+  TRAVEL_SYSTEM,
   TURNOVER_SYSTEM,
   VACANCY_SYSTEM,
   budgetFigure,
   buildScaleCity,
+  buildingPeople,
+  planRoad,
+  submit,
+  terrainOf,
+  travelTimesReady,
   deserialize,
   generateScaleCity,
   prepareDerived,
@@ -47,6 +56,8 @@ import {
   type SystemTimer,
 } from "@city-council/sim";
 import { hold } from "./budget";
+import { SimHost } from "../src/protocol/host";
+import { memoryTransportPair } from "../src/protocol/transport";
 
 /** Two game days. */
 const TICKS = 2 * TIME_BALANCE.ticksPerDay;
@@ -164,6 +175,222 @@ function runCity(city: Generated, ticks = TICKS): CityRun {
   };
 }
 
+/** Bytes of the typed arrays in `value` plus the JSON of the rest: about what a structured clone or a socket carries. */
+function messageBytes(value: unknown): number {
+  let typed = 0;
+  const json = JSON.stringify(value, (_key, v: unknown) => {
+    if (ArrayBuffer.isView(v)) {
+      typed += v.byteLength;
+      return 0;
+    }
+    return v;
+  });
+  return typed + json.length;
+}
+
+/** The M3 close-out's checkpoints on one city (M3-22): what the two-day run does not measure. */
+interface Checkpoints {
+  residents: ScaleCityResidents;
+  /** The worker's time per tick over a game day, step and delta together, as the host runs them. */
+  workerMeanMs: number;
+  workerWorstMs: number;
+  /** The worst tick's slowest system, outside the step when it is the delta or a collection. */
+  workerWorstWhere: string;
+  /** A game day's deltas, as the host sends them. */
+  dayDeltaBytes: number;
+  worstDeltaBytes: number;
+  /** An autosave: the capture on the tick it starts, then each part written between ticks. */
+  saveCaptureMs: number;
+  savePartWorstMs: number;
+  saveTotalMs: number;
+  saveBytes: number;
+  /** One BulldozeBuilding at its cap, or of every occupied building where there are fewer, each with people in it. */
+  bulldozed: number;
+  bulldozedPeople: number;
+  bulldozeStepMs: number;
+  bulldozeCommandMs: number;
+  /** The worst tick, and the displaced pass's worst, over the game day after it. */
+  afterBulldozeWorstMs: number;
+  displacedWorstMs: number;
+  /** The travel table's rebuild after one BuildRoad. */
+  travelSteps: number;
+  travelTotalMs: number;
+  travelWorstMs: number;
+  travelWorstStepMs: number;
+}
+
+/** A street a quarter of the way into a row of one of the city's grids, crossing several of its streets. */
+function crossing(state: ScaleCity["state"], grids: ScaleCity["grids"]): unknown {
+  const terrain = terrainOf(state.seed);
+  for (const g of grids) {
+    const z = g.z + 24;
+    const payload = { from: { x: g.x - 24, z }, to: { x: g.x + 6 * 96, z }, type: "street" };
+    if (planRoad(state.roads, terrain, payload).ok) return payload;
+  }
+  throw new Error("no street fits across a grid");
+}
+
+/** Opens `city` in a host as the worker does and takes the close-out's checkpoints on it. */
+function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
+  collect();
+  const state = deserialize(city.bytes).state;
+  const { client, host: hostEnd } = memoryTransportPair();
+  const host = new SimHost(state, hostEnd, () => performance.now());
+  // Each delta's size and the per-system timings of the step before it.
+  let deltaBytes = 0;
+  let worstDelta = 0;
+  let timings: { system: string; ms: number }[] = [];
+  client.onMessage((m) => {
+    if (m.type !== "delta") return;
+    const bytes = messageBytes(m);
+    deltaBytes += bytes;
+    worstDelta = Math.max(worstDelta, bytes);
+    timings = m.timings;
+  });
+  let seq = 1;
+  const send = (type: string, payload: unknown): void => {
+    const result = submit(state, { seq: seq++, playerId: "bench", type, payload });
+    if (!result.ok) throw new Error(`${type}: ${result.reason}`);
+  };
+  const tick = (): { ms: number; timings: { system: string; ms: number }[] } => {
+    const t0 = performance.now();
+    host.advance(1);
+    return { ms: performance.now() - t0, timings };
+  };
+  const systemMs = (t: { system: string; ms: number }[], name: string): number => t.filter((x) => x.system === name).reduce((n, x) => n + x.ms, 0);
+
+  // A game day as the worker runs it, after a tick that compiles the host's code.
+  tick();
+  deltaBytes = 0;
+  worstDelta = 0;
+  let workerTotal = 0;
+  let workerWorst = 0;
+  let workerWorstWhere = "";
+  for (let k = 0; k < TIME_BALANCE.ticksPerDay; k++) {
+    const at = state.tick;
+    const t = tick();
+    workerTotal += t.ms;
+    if (t.ms > workerWorst) {
+      workerWorst = t.ms;
+      const top = [...t.timings].sort((p, q) => q.ms - p.ms)[0];
+      const stepped = t.timings.reduce((n, x) => n + x.ms, 0);
+      workerWorstWhere = `tick ${at}: ${top?.system ?? "-"} ${round(top?.ms ?? 0)} ms of ${round(stepped)} ms stepped`;
+    }
+  }
+  const dayDeltaBytes = deltaBytes;
+  const worstDeltaBytes = worstDelta;
+
+  // An autosave, as the worker writes one: captured on a tick, then a part between ticks.
+  collect();
+  const s0 = performance.now();
+  const pending = host.startSave(0);
+  const saveCaptureMs = performance.now() - s0;
+  let savePartWorstMs = 0;
+  let part: IteratorResult<undefined, Uint8Array>;
+  do {
+    const p0 = performance.now();
+    part = pending.steps.next();
+    savePartWorstMs = Math.max(savePartWorstMs, performance.now() - p0);
+  } while (!part.done);
+  const saveBytes = part.value.byteLength;
+  const saveTotalMs = performance.now() - s0;
+  pending.release();
+
+  // One BulldozeBuilding at its cap, over occupied buildings only.
+  const b = state.buildings;
+  const chosen: { id: number; segment: number; side: number; place: number; builtAt: number }[] = [];
+  let bulldozedPeople = 0;
+  for (let id = 0; id < b.flags.length && chosen.length < BUILDINGS_BALANCE.bulldozeMaxBuildings; id++) {
+    if (!b.flags[id]) continue;
+    const people = buildingPeople(state, id);
+    if (people === 0) continue;
+    bulldozedPeople += people;
+    chosen.push({ id, segment: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0, builtAt: b.builtAt[id] ?? 0 });
+  }
+  collect();
+  send("BulldozeBuilding", { buildings: chosen });
+  const bulldoze = tick();
+  let afterBulldozeWorstMs = 0;
+  let displacedWorstMs = systemMs(bulldoze.timings, DISPLACED_SYSTEM);
+  for (let k = 0; k < TIME_BALANCE.ticksPerDay; k++) {
+    const t = tick();
+    afterBulldozeWorstMs = Math.max(afterBulldozeWorstMs, t.ms);
+    displacedWorstMs = Math.max(displacedWorstMs, systemMs(t.timings, DISPLACED_SYSTEM));
+  }
+
+  // One BuildRoad, and the steps until its travel table is whole.
+  while (!travelTimesReady(state)) tick();
+  collect();
+  send("BuildRoad", crossing(state, grids));
+  let travelSteps = 0;
+  let travelTotalMs = 0;
+  let travelWorstMs = 0;
+  let travelWorstStepMs = 0;
+  do {
+    const t = tick();
+    const ms = systemMs(t.timings, TRAVEL_SYSTEM);
+    travelSteps++;
+    travelTotalMs += ms;
+    travelWorstMs = Math.max(travelWorstMs, ms);
+    travelWorstStepMs = Math.max(travelWorstStepMs, t.ms);
+  } while (!travelTimesReady(state));
+
+  return {
+    residents: city.residents,
+    workerMeanMs: workerTotal / TIME_BALANCE.ticksPerDay,
+    workerWorstMs: workerWorst,
+    workerWorstWhere,
+    dayDeltaBytes,
+    worstDeltaBytes,
+    saveCaptureMs,
+    savePartWorstMs,
+    saveTotalMs,
+    saveBytes,
+    bulldozed: chosen.length,
+    bulldozedPeople,
+    bulldozeStepMs: bulldoze.ms,
+    bulldozeCommandMs: systemMs(bulldoze.timings, COMMANDS_SYSTEM),
+    afterBulldozeWorstMs,
+    displacedWorstMs,
+    travelSteps,
+    travelTotalMs,
+    travelWorstMs,
+    travelWorstStepMs,
+  };
+}
+
+function checkpointTable(rows: readonly Checkpoints[]): string {
+  const row = (label: string, cells: string[]) => `| ${label} | ${cells.join(" | ")} |`;
+  const kb = (bytes: number): string => `${Math.round(bytes / 1024).toLocaleString("en")} KB`;
+  const ms = (v: number): string => `${round(v)}`;
+  return `${[
+    "### Scale cities: the M3 close-out's checkpoints (M3-22)",
+    "",
+    "In a host as the worker runs it, over an in-memory transport. The 20 ms tick is the budget for a worker tick.",
+    "",
+    row("", rows.map((r) => r.residents.toLocaleString("en"))),
+    `|---|${rows.map(() => "---:").join("|")}|`,
+    row("Worker tick over a game day, mean ms", rows.map((r) => ms(r.workerMeanMs))),
+    row("Worker tick over a game day, worst ms", rows.map((r) => ms(r.workerWorstMs))),
+    row("The worst tick's slowest system", rows.map((r) => r.workerWorstWhere)),
+    row("A game day's deltas", rows.map((r) => kb(r.dayDeltaBytes))),
+    row("Largest delta", rows.map((r) => kb(r.worstDeltaBytes))),
+    row("Autosave: capture on its tick, ms", rows.map((r) => ms(r.saveCaptureMs))),
+    row("Autosave: worst part between ticks, ms", rows.map((r) => ms(r.savePartWorstMs))),
+    row("Autosave: all parts, ms", rows.map((r) => ms(r.saveTotalMs))),
+    row("Autosave: bytes", rows.map((r) => `${mb(r.saveBytes)} MB`)),
+    row("BulldozeBuilding: buildings, people in them", rows.map((r) => `${r.bulldozed.toLocaleString("en")}, ${r.bulldozedPeople.toLocaleString("en")}`)),
+    row("BulldozeBuilding: the tick that applies it, ms", rows.map((r) => ms(r.bulldozeStepMs))),
+    row("BulldozeBuilding: its command, ms", rows.map((r) => ms(r.bulldozeCommandMs))),
+    row("The game day after: worst tick, ms", rows.map((r) => ms(r.afterBulldozeWorstMs))),
+    row("The game day after: worst displaced pass, ms", rows.map((r) => ms(r.displacedWorstMs))),
+    row("Travel rebuild after one BuildRoad: steps", rows.map((r) => `${r.travelSteps}`)),
+    row("Travel rebuild: all steps, ms", rows.map((r) => ms(r.travelTotalMs))),
+    row("Travel rebuild: worst step's travel, ms", rows.map((r) => ms(r.travelWorstMs))),
+    row("Travel rebuild: worst tick, ms", rows.map((r) => ms(r.travelWorstStepMs))),
+  ].join("\n")}\n`;
+}
+
 function table(runs: readonly CityRun[]): string {
   const names = [...new Set(runs.flatMap((r) => [...r.systems.keys()]))];
   const head = ["", ...runs.map((r) => `${r.residents.toLocaleString("en")}`)];
@@ -213,10 +440,14 @@ test("the scale cities, two game days each", () => {
     hold("cities.step", `a step on the scale city of ${run.residents.toLocaleString("en")}`, { mean: run.stepMeanMs, max: run.worstStepMs });
     expect(run.population).toBeGreaterThan(0);
   }
-  const text = table(runs);
+  // The close-out's checkpoints (M3-22), recorded and not held: the systems' own benches hold their budgets.
+  const points = cities.map((city) => checkpoints(city, shape.grids));
+  // The cap, or every occupied building where a city has fewer: the 50,000 city has about 4,300.
+  for (const p of points) expect(p.bulldozed).toBeGreaterThan(4000);
+  const text = `${table(runs)}\n${checkpointTable(points)}`;
   console.log(text);
   mkdirSync("bench-results", { recursive: true });
   writeFileSync(join("bench-results", "scale-cities.md"), text);
   const summary = process.env["GITHUB_STEP_SUMMARY"];
   if (summary) appendFileSync(summary, `${text}\n`);
-}, 600_000);
+}, 1_800_000);
