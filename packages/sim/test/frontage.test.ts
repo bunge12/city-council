@@ -244,18 +244,18 @@ describe("on a grid at an angle", () => {
   const DEPTH = ZONING_BALANCE.zoneDepthCells;
   const snap = (v: number) => Math.round(v * 8) / 8;
 
-  /** A three by three grid turned `turn` (sine and cosine, a 3-4-5 or 5-12-13 triangle), blocks `depth` by 24 cells. */
+  /** A three by three grid turned by the angle with sine `sin` and cosine `cos`, blocks `depth` by 20 cells, inside the flat square. */
   function turnedGrid(state: SimState, depth: number, sin: number, cos: number): void {
-    const along = 3 * (WIDTH_M(24) + ROAD);
+    const along = 3 * (WIDTH_M(20) + ROAD);
     const across = 3 * (depth * CELL + ROAD);
     ok(
       state,
       command("BuildRoadGrid", {
-        origin: { x: OX + 120, z: OZ },
-        along: { x: snap(OX + 120 + along * cos), z: snap(OZ + along * sin) },
-        across: { x: snap(OX + 120 - across * sin), z: snap(OZ + across * cos) },
+        origin: { x: OX + 80, z: OZ },
+        along: { x: snap(OX + 80 + along * cos), z: snap(OZ + along * sin) },
+        across: { x: snap(OX + 80 - across * sin), z: snap(OZ + across * cos) },
         depth: depth * CELL,
-        width: WIDTH_M(24),
+        width: WIDTH_M(20),
         type: "street",
       }),
     );
