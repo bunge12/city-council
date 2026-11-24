@@ -14,7 +14,7 @@ import { LAND_VALUE } from "./landvalue/land-value";
 import { applyPending, type DroppedCommand } from "./commands";
 import { catchUpDerived } from "./derived";
 import type { SimState } from "./state";
-import { stepTravel } from "./travel-times";
+import { endTravelStep, stepTravel } from "./travel-times";
 import { settleCells } from "./zoning/cell-index";
 
 /** One part of the per-tick update. Systems run in array order. */
@@ -117,6 +117,8 @@ export function step(state: SimState, timer?: SystemTimer): DroppedCommand[] {
   for (const system of SYSTEMS) {
     timed(timer, system.name, () => system.run(state));
   }
+  // After job matching, the last reader of the last whole travel-time table.
+  endTravelStep(state);
   state.tick += 1;
   state.cellReads = 0;
   return dropped;

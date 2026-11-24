@@ -25,6 +25,7 @@ import {
   popsAtWork,
   readPop,
   recountTotals,
+  travelTimesReady,
   serialize,
   setPopWork,
   step,
@@ -413,7 +414,37 @@ describe("job matching", () => {
     expect(openingsProblem(loaded)).toBeNull();
   });
 
-  it("does nothing while the travel times are still being rebuilt", () => {
+  it("goes on matching while a player changes a road every few seconds, from the last whole table (#313)", () => {
+    const { state } = nearAndFar();
+    const end = connectionEnd(state.roads, state.connections[0] ?? NONE);
+    const x = state.roads.nodeX[end] ?? 0;
+    const z = state.roads.nodeZ[end] ?? 0;
+    const employed = state.stats.totals["workersEmployed"] ?? 0;
+    // One node a tick: each change takes about 30 ticks to rebuild, and a
+    // short street goes in every 15 ticks, 1.5 s of game time, so the travel
+    // times are never ready from the first street to the last.
+    withValue(ROUTING_BALANCE.travelTimes, "rebuildSettlesPerTick", 1, () =>
+      scaledTimes(() =>
+        holdDemand(NEAR_FAR_BARS, () => {
+          let at = 30;
+          const until = state.tick + 5 * DAY;
+          while (state.tick < until) {
+            if (state.tick % 15 === 0 && at < 90) {
+              ok(state, "BuildRoad", { from: { x: x + CELL * at, z }, to: { x: x + CELL * at, z: z + 60 }, type: "street" });
+              at += 2;
+            } else step(state);
+            if (at > 32 && at < 90) expect(travelTimesReady(state), `tick ${state.tick} ready at ${state.travelReadyAt}`).toBe(false);
+            expectJobsWithinOffers(state);
+          }
+        }),
+      ),
+    );
+    expect(state.travelLast).not.toBeNull();
+    expect(state.stats.totals["workersEmployed"]).toBeGreaterThan(employed);
+    expectRecount(state);
+  });
+
+  it("does nothing while the travel times are still being rebuilt and no whole table is held", () => {
     const { state } = nearAndFar();
     // Since M3-21 houses fill faster, and a pop or two may have found work on the first day, before the rebuild.
     const employed = state.stats.totals["workersEmployed"] ?? 0;

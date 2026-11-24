@@ -532,6 +532,9 @@ export class SimMirror {
     if (delta.pending) state.pending = delta.pending.map((c) => ({ ...c }));
     state.cellReads = delta.cellReads;
     state.travelReadyAt = delta.travelReadyAt;
+    // The last whole travel-time table is the sim's, for job matching
+    // (#313), and no delta carries it: let go of the one a snapshot brought.
+    state.travelLast = null;
     state.demand = copyDemand(delta.demand);
     state.redevelopedToday = delta.redevelopedToday;
     if (undo) state.undo = undo;

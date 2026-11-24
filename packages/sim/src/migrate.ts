@@ -126,6 +126,11 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // or cleared since the day's first tick (M3-14). A city saved before it
   // had no redevelopment, so none today.
   25: (old) => ({ ...old, version: 26, redevelopedToday: 0 }),
+  // Version 27 adds the last whole travel-time table, held while a rebuild
+  // runs so job matching need not stop (#313). A city saved before it has
+  // none: if a rebuild was under way, nobody is matched until it is ready,
+  // as before.
+  26: (old) => ({ ...old, version: 27, travelLast: null }),
 };
 
 /** A version 23 set of buildings with `statusSince`, each building's `builtAt`, after `builtAt` as a new state has it. */
