@@ -4,7 +4,9 @@
 // towers. It runs once straight through, and again saved and loaded half
 // way and at other points, through the plain snapshot and the autosave's
 // path. Every run must end on the same state hash, and the log replays to
-// it.
+// it. The session runs twice: with the bars held, so every system has work
+// whatever the tuning, and with them free, so the bars' own state is saved
+// and loaded too.
 import { describe, expect, it } from "vitest";
 import {
   CONNECTION_BALANCE,
@@ -132,16 +134,16 @@ function drive(state: SimState, i: number): void {
  * rebuild than the tuned game, so the towers come within the session.
  * Every run here holds the same, so they agree.
  */
-function run(state: SimState, from: number, to: number): SimState {
-  withValue(DEMAND_BALANCE.redevelopment, "chancePerDay", 1, () =>
-    withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 0, () =>
-      holdDemand(BARS, () => {
-        for (let i = from; i < to; i++) drive(state, i);
-      }),
-    ),
-  );
+function run(state: SimState, from: number, to: number, held = true): SimState {
+  const go = () => {
+    for (let i = from; i < to; i++) drive(state, i);
+  };
+  withValue(DEMAND_BALANCE.redevelopment, "chancePerDay", 1, () => withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 0, () => (held ? holdDemand(BARS, go) : go())));
   return state;
 }
+
+/** The same session with the bars free, as a player has them, so the bars' eased values and parts go through the save too. */
+const runFree = (state: SimState, from: number, to: number): SimState => run(state, from, to, false);
 
 function finish(steps: Generator<undefined, Uint8Array, undefined>): Uint8Array {
   for (;;) {
@@ -229,6 +231,34 @@ describe("M3 close-out: save and resume through arrivals, jobs, leaving, turnove
     const replayed = withValue(DEMAND_BALANCE.redevelopment, "chancePerDay", 1, () =>
       withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 0, () => holdDemand(BARS, () => replay(SEED, straight.log, straight.tick))),
     );
+    expect(hashState(replayed)).toBe(want);
+  });
+});
+
+describe("M3 close-out: save and resume with the demand bars free", () => {
+  const straight = runFree(createState(SEED), 0, STEPS);
+  const want = hashState(straight);
+
+  it("the straight run's bars moved on their own, and people came, worked and left", () => {
+    const year = straight.stats.year;
+    expect(year.arrivals).toBeGreaterThan(100);
+    expect(year.departures).toBeGreaterThan(0);
+    // A free bar holds its value in its parts; a held one only in its first.
+    const parts = Object.values(straight.demand.residential.parts).filter((v) => v !== 0);
+    expect(parts.length).toBeGreaterThan(1);
+  });
+
+  for (const at of [STEPS / 2, 4073, 9999]) {
+    it(`a save after step ${at} ends on the straight hash`, () => {
+      let s = runFree(createState(SEED), 0, at);
+      s = deserialize(serialize(s)).state;
+      runFree(s, at, STEPS);
+      expect(hashState(s)).toBe(want);
+    });
+  }
+
+  it("the log replays to the straight hash", () => {
+    const replayed = withValue(DEMAND_BALANCE.redevelopment, "chancePerDay", 1, () => withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 0, () => replay(SEED, straight.log, straight.tick)));
     expect(hashState(replayed)).toBe(want);
   });
 });

@@ -240,13 +240,21 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
   let deltaBytes = 0;
   let worstDelta = 0;
   let timings: { system: string; ms: number }[] = [];
+  // The in-memory transport delivers inside `advance`, so a delta is only kept here and measured after the tick's time is taken.
+  const sent: unknown[] = [];
   client.onMessage((m) => {
     if (m.type !== "delta") return;
-    const bytes = messageBytes(m);
-    deltaBytes += bytes;
-    worstDelta = Math.max(worstDelta, bytes);
+    sent.push(m);
     timings = m.timings;
   });
+  const measureSent = (): void => {
+    for (const m of sent) {
+      const bytes = messageBytes(m);
+      deltaBytes += bytes;
+      worstDelta = Math.max(worstDelta, bytes);
+    }
+    sent.length = 0;
+  };
   let seq = 1;
   const send = (type: string, payload: unknown): void => {
     const result = submit(state, { seq: seq++, playerId: "bench", type, payload });
@@ -255,7 +263,9 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
   const tick = (): { ms: number; timings: { system: string; ms: number }[] } => {
     const t0 = performance.now();
     host.advance(1);
-    return { ms: performance.now() - t0, timings };
+    const ms = performance.now() - t0;
+    measureSent();
+    return { ms, timings };
   };
   const systemMs = (t: { system: string; ms: number }[], name: string): number => t.filter((x) => x.system === name).reduce((n, x) => n + x.ms, 0);
 

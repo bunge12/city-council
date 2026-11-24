@@ -58,8 +58,10 @@ for (const residents of SCALE_CITY_RESIDENTS) {
     const openMs = Date.now() - t0;
     await settle(page, { timeout: 300_000 });
 
-    // The worker's time per tick at 4x: each delta carries the per-system
-    // times of the step before it, so this samples one step in each delta.
+    // The worker's step time at 4x: each delta carries the per-system times
+    // of the last step before it, and the page reads it once a frame, so
+    // this samples about one step in two or three, and leaves out the work
+    // of building the delta. The sim's bench times every tick in full.
     expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 4 }))).toEqual({ ok: true });
     await expect(page.locator("#sim-speed")).toHaveText("4x");
     const worker = await page.evaluate(async (ms) => {
