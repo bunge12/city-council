@@ -38,6 +38,7 @@ import { nextInt, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
 import { recountTotals } from "../src/stats/stats";
 import popsJson from "../balance/pops.json" with { type: "json" };
+import { holdDemand } from "./demand-helper";
 
 // M3-03: pops in state.
 
@@ -445,53 +446,72 @@ describe("pops in state", () => {
 });
 
 describe("the daily sweep", () => {
-  it("visits every pop id once a game day, a slice a tick, in id order, from the limit set on the day's first tick", () => {
+  it("visits every pop id once a game day, a strided slice a tick, from the limit set on the day's first tick", () => {
     const { state, tower } = town();
     for (let i = 0; i < 10; i++) addPop(state, pop(tower, 50));
     removePop(state, 3);
     addPop(state, pop(tower, 50));
     state.speed = 1;
-    // Run to the start of the next day, so its limit is set.
+    // Run to the start of the next day, so its limit is set. The bar held
+    // above zero so nobody is sent away: tick 0 now visits id 0, and a pop
+    // that left would free its id for the late one.
     const perDay = TIME_BALANCE.ticksPerDay;
-    while (state.tick % perDay !== 0) step(state);
-    step(state);
+    const stepHeld = () => holdDemand({ residential: 50 }, () => step(state));
+    while (state.tick % perDay !== 0) stepHeld();
+    stepHeld();
     expect(state.pops.sweep).toBe(10);
     // A pop added mid-day past the limit waits for the next day.
     const late = addPop(state, pop(tower, 1));
     expect(late).toBe(10);
+    // Tick 0 of the day took id 0; from tick 1 to the day's last, tick k takes ids k, k + perDay and on.
     const seen: number[] = [];
-    let last = popSlice(state).from;
     do {
-      const { from, to } = popSlice(state);
-      expect(from).toBe(last);
-      for (let id = from; id < to; id++) seen.push(id);
-      last = to;
-      step(state);
+      const { from, to, step: stride } = popSlice(state);
+      expect(from).toBe(state.tick % perDay);
+      for (let id = from; id < to; id += stride) seen.push(id);
+      stepHeld();
     } while (state.tick % perDay !== 0);
-    // From tick 1 of the day to its last, the slices run on from where tick 0's ended, to the limit.
-    const afterTick0 = Math.floor(10 / perDay);
-    expect(seen).toEqual(Array.from({ length: 10 - afterTick0 }, (_, i) => afterTick0 + i));
+    expect(seen).toEqual(Array.from({ length: 9 }, (_, i) => i + 1));
     expect(seen).not.toContain(late);
     // The next day's first tick takes the new pop in.
-    step(state);
+    stepHeld();
     expect(state.pops.sweep).toBe(11);
   });
 
-  it("gives 150,000 pops a slice of 1,500 a tick and covers them all in a day", () => {
+  it("gives 150,000 pops a slice of 1,500 a tick and covers each once a day", () => {
     const perDay = TIME_BALANCE.ticksPerDay;
     const state = createState(SEED);
     state.pops.sweep = 150_000;
-    let covered = 0;
+    const visits = new Uint8Array(150_000);
     let largest = 0;
     for (let k = 0; k < perDay; k++) {
       state.tick = 7 * perDay + k;
-      const { from, to } = popSlice(state);
-      expect(from).toBe(covered);
-      covered = to;
-      largest = Math.max(largest, to - from);
+      const { from, to, step: stride } = popSlice(state);
+      let count = 0;
+      for (let id = from; id < to; id += stride) {
+        visits[id] = (visits[id] ?? 0) + 1;
+        count++;
+      }
+      largest = Math.max(largest, count);
     }
-    expect(covered).toBe(150_000);
+    expect(visits.every((v) => v === 1)).toBe(true);
     expect(largest).toBe(150_000 / perDay);
+  });
+
+  it("spreads the newest ids, a day's newcomers, over the day's ticks (#354)", () => {
+    const perDay = TIME_BALANCE.ticksPerDay;
+    const state = createState(SEED);
+    // 140,000 pops from before and 1,000 that came yesterday, at the top of the ids.
+    state.pops.sweep = 141_000;
+    let most = 0;
+    for (let k = 0; k < perDay; k++) {
+      state.tick = 7 * perDay + k;
+      const { from, to, step: stride } = popSlice(state);
+      let newest = 0;
+      for (let id = from; id < to; id += stride) if (id >= 140_000) newest++;
+      most = Math.max(most, newest);
+    }
+    expect(most).toBe(1_000 / perDay);
   });
 
   it("visits the same slice on a city saved and loaded mid-day", () => {
