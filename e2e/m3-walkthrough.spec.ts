@@ -114,7 +114,7 @@ const COMMERCIAL = zoneNumber("commercial");
 const OFFICE = zoneNumber("office");
 const INDUSTRIAL = zoneNumber("industrial");
 const MIXED = zoneNumber("mixed");
-/** What `view.buildingUse` reads: in use, vacant, abandoned. */
+/** What `view.buildingUse` and `usesOf` read: in use, vacant, abandoned. */
 const VACANT = 1;
 const ABANDONED = 2;
 
@@ -421,6 +421,20 @@ async function readout(page: Page, id: number): Promise<Record<string, string>> 
   const out: Record<string, string> = { text: (await r.innerText()).replace(/\s+/g, " ") };
   for (const name of ["use", "people", "residents", "jobs", "filled"]) out[name] = (await r.getAttribute(`data-${name}`)) ?? "";
   return out;
+}
+
+/** Each building's use as the copy's flags have it, as `view.buildingUse` reads it once drawn: 0 in use, 1 vacant, 2 abandoned. */
+async function usesOf(page: Page, ids: readonly number[]): Promise<number[]> {
+  return page.evaluate((ids) => {
+    const flags = window.cityCouncil.mirror.state?.buildings["flags"] ?? [];
+    // BUILDING_VACANT is 2 and BUILDING_ABANDONED 4 in the sim's flags.
+    return ids.map((id) => ((flags[id] ?? 0) & 4 ? 2 : (flags[id] ?? 0) & 2 ? 1 : 0));
+  }, ids);
+}
+
+/** Waits until the view draws building `id` in the use the copy has for it, for a screenshot. */
+async function drawnAs(page: Page, id: number, use: number): Promise<void> {
+  await expect.poll(() => page.evaluate(async (id) => (await window.cityCouncil.view).buildingUse(id), id), { timeout: 60_000 }).toBe(use);
 }
 
 /** Drags the bulldozer over every building on `strip`, roof to roof from west to east, in one stroke: one BulldozeBuilding. Returns how many it covered. */
@@ -796,10 +810,7 @@ for (const variant of [
       let vacantIds: number[] = [];
       const read = async () => {
         const ids = (await buildings(page)).map((b) => b.id);
-        const uses = await page.evaluate(async (ids) => {
-          const view = await window.cityCouncil.view;
-          return ids.map((id) => view.buildingUse(id));
-        }, ids);
+        const uses = await usesOf(page, ids);
         return { vacant: ids.filter((_, k) => uses[k] === VACANT), population: await population(page), trend: (await page.locator("#population-trend").getAttribute("data-trend")) ?? "" };
       };
       await growUntil(
@@ -826,6 +837,7 @@ for (const variant of [
       if (vacantId === undefined) throw new Error("no vacant home");
       const v = await readout(page, vacantId);
       expect(v["use"]).toBe("vacant");
+      await drawnAs(page, vacantId, VACANT);
       expect(v["text"]).toContain("Vacant");
       // How it looks: the view draws it in its disuse shade (buildingUse), which the screenshot shows.
       await shot(page, info, dir, "9-vacant");
@@ -843,10 +855,7 @@ for (const variant of [
       expect(await bar(other, "residential")).toBeLessThanOrEqual(0);
       const uses = async () => {
         const ids = (await buildings(other)).map((b) => b.id);
-        const u = await other.evaluate(async (ids) => {
-          const view = await window.cityCouncil.view;
-          return ids.map((id) => view.buildingUse(id));
-        }, ids);
+        const u = await usesOf(other, ids);
         return { vacant: ids.filter((_, k) => u[k] === VACANT), abandoned: ids.filter((_, k) => u[k] === ABANDONED) };
       };
       const before = await uses();
@@ -858,6 +867,7 @@ for (const variant of [
       const abandonedId = later.abandoned[0] ?? -1;
       const a = await readout(other, abandonedId);
       expect(a["use"]).toBe("abandoned");
+      await drawnAs(other, abandonedId, ABANDONED);
       expect(a["text"]).toContain("Abandoned");
       await shot(other, info, dir, "9-abandoned");
       await context.close();
