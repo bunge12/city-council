@@ -1,0 +1,11 @@
+{
+  "_about": "What one frame may ask of the GPU on a reference class, in units every machine counts the same: draw calls and triangles, as three.js's renderer.info reads them after a frame (issue #165). No reference machine is to hand, and the development container and CI draw WebGL 2 in software, whose frame time says little about a GPU, so these stand in for a frame time until one is measured on the class. They are estimates with the reasoning in `source`, not measurements, and they leave out fill: on integrated graphics a frame can be limited by the pixels it shades, which neither count holds, so a band inside them is not shown to hold the frame rate; when a frame time on the class comes in, it replaces them. e2e/district-band.spec.ts holds the district band of the scale town to them at 1,300 and 2,700 m, with the zoning overlay off and on, in the perf run.",
+  "districtBand": {
+    "low": {
+      "class": "Low reference class (PRD, Graphics presets): a laptop of about 2019 with Intel UHD 620 class graphics and 8 GB, at Low, for 30 fps at 1280 x 800",
+      "drawCalls": 500,
+      "triangles": 1000000,
+      "source": "Draw calls: engine guidance puts low-end mobile at 100 to 200 a frame and desktops at thousands (PlayCanvas optimisation guidelines), and a WebGL game's own budget puts its low tier at 500 (Vibesmith WebGL constraints); a 2019 laptop's 4-core CPU sits between, and 30 fps leaves twice the time of 60. Triangles: UHD 620 has 24 execution units at up to 1.15 GHz and fills about 3 Gpixel/s (TechPowerUp, Notebookcheck); no source found gives a triangle rate, so 1 million is an unsourced estimate: drawn in a third of a 30 fps frame, it asks for about 90 million lit triangles a second, under a tenth of what a one-triangle-a-clock front end at that clock would set up. Set in November 2026."
+    }
+  }
+}
