@@ -25,24 +25,40 @@ import { prepareWaterMap } from "./landvalue/water";
 import { cellsLaidOut, syncCells } from "./zoning/cell-index";
 
 /**
+ * The parts of `prepareDerived`, in the order it builds them. A host that
+ * shows how far a load has got names each as it starts (the client's
+ * loading screen, issue #327).
+ */
+export const DERIVED_STAGES = ["terrain", "roads", "cells", "buildings", "travel", "openings"] as const;
+export type DerivedStage = (typeof DERIVED_STAGES)[number];
+
+/**
  * Builds every piece of derived data `state` does not have yet. Optional: a
  * query builds what it needs anyway. A host calls this after it creates or
  * loads a city, so the cost lands at load and not inside the first tick that
- * asks.
+ * asks. `onStage` is told each part of `DERIVED_STAGES` as it starts; it
+ * reports progress and must not touch `state`. A second call builds
+ * nothing and takes under a millisecond.
  */
-export function prepareDerived(state: SimState): void {
+export function prepareDerived(state: SimState, onStage: (stage: DerivedStage) => void = () => undefined): void {
+  onStage("terrain");
   terrainOf(state.seed);
+  onStage("roads");
   roadIndexOf(state.roads);
   routingGraphOf(state.roads);
   prepareOutside(state);
   listBlocks(blockIndexOf(state.roads));
+  onStage("cells");
   const index = syncCells(state);
+  onStage("buildings");
   prepareBuildingIndex(state);
   prepareWaterMap(terrainOf(state.seed));
   pollutionGrid(state);
   prepareCandidates(state, index, () => segmentBuildings(state));
   popIndexOf(state);
+  onStage("travel");
   prepareTravelTimes(state);
+  onStage("openings");
   openingsOf(state);
   setAsideCellsWithNoLot(state);
 }

@@ -2,8 +2,10 @@
 // and to take one in, and keeps the latest status for the UI. It never
 // touches state or IndexedDB itself.
 
+import type { DerivedStage } from "@city-council/sim";
 import {
   SAVES_CHANNEL,
+  isDerivedStage,
   type ExportReply,
   type FromSaver,
   type ImportReply,
@@ -15,7 +17,8 @@ import {
 } from "./channel";
 
 type Listener = (status: SaveStatus) => void;
-type OpeningListener = (seed: number) => void;
+type OpeningListener = (seed: number, saved: boolean) => void;
+type LoadingListener = (stage: DerivedStage) => void;
 
 export class SaveClient {
   private readonly transport: PageSaveTransport;
@@ -24,6 +27,7 @@ export class SaveClient {
   private readonly waiting = new Map<number, (message: FromSaver) => void>();
   private readonly listeners = new Set<Listener>();
   private readonly openingListeners = new Set<OpeningListener>();
+  private readonly loadingListeners = new Set<LoadingListener>();
 
   constructor(transport: PageSaveTransport) {
     this.transport = transport;
@@ -32,7 +36,8 @@ export class SaveClient {
         this.current = message.status;
         for (const listener of this.listeners) listener(message.status);
       }
-      if (message.type === "opening") for (const listener of this.openingListeners) listener(message.seed);
+      if (message.type === "opening") for (const listener of this.openingListeners) listener(message.seed, message.saved === true);
+      if (message.type === "loading" && isDerivedStage(message.stage)) for (const listener of this.loadingListeners) listener(message.stage);
       if (message.requestId !== null) {
         this.waiting.get(message.requestId)?.(message);
         this.waiting.delete(message.requestId);
@@ -50,10 +55,16 @@ export class SaveClient {
     return () => void this.listeners.delete(listener);
   }
 
-  /** Called with the seed of each city the worker starts to open, before its snapshot. */
+  /** Called with the seed of each city the worker starts to open, before its snapshot, and whether it is a saved city. */
   onOpening(listener: OpeningListener): () => void {
     this.openingListeners.add(listener);
     return () => void this.openingListeners.delete(listener);
+  }
+
+  /** Called as the worker starts each part of the opening city's derived data, before its snapshot (#327). */
+  onLoading(listener: LoadingListener): () => void {
+    this.loadingListeners.add(listener);
+    return () => void this.loadingListeners.delete(listener);
   }
 
   /** Asks the worker to save now. Resolves with the status after the write. */

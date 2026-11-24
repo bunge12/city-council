@@ -281,7 +281,7 @@ export { CHUNKS_PER_SIDE, CHUNK_SIZE } from "./chunks";
 export { UNDO_STEPS, applyUndoDelta, diffUndo, planUndo } from "./undo";
 export type { UndoDelta, UndoPlanResult, UndoRecord } from "./undo";
 export type { NetworkOp, SegmentRow } from "./roads/network";
-export { prepareDerived } from "./derived";
+export { DERIVED_STAGES, prepareDerived, type DerivedStage } from "./derived";
 export {
   NETWORKS_ALL,
   NETWORKS_PATH,

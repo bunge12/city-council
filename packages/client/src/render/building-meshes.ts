@@ -203,6 +203,12 @@ export interface BuildingLayer {
    */
   idle(): boolean;
   /**
+   * How many chunks waiting to be read have their middle within `radius`
+   * metres of (x, z), across the ground. The loading screen waits for none
+   * round the start view (#327).
+   */
+  pendingWithin(x: number, z: number, radius: number): number;
+  /**
    * The chunks a lot that a building came onto or left since the last call
    * reaches, with the ground round it kept clear of trees. A lot can reach
    * over a chunk line, so the zoning overlay and the decoration redraw these
@@ -1797,6 +1803,15 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
       }
     },
     idle: () => dirty.size === 0 && pendingIds.size === 0 && queued === 0 && stats.fading === 0 && stats.waiting === 0,
+    pendingWithin(x, z, radius) {
+      let n = 0;
+      for (const c of dirty.keys()) {
+        const ci = c % CHUNKS_PER_SIDE;
+        const cj = (c - ci) / CHUNKS_PER_SIDE;
+        if (Math.hypot((ci + 0.5) * CHUNK_SIZE - x, (cj + 0.5) * CHUNK_SIZE - z) <= radius) n++;
+      }
+      return n;
+    },
     takeLotChunks() {
       const out = [...lotChunks];
       lotChunks = new Set();

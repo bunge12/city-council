@@ -71,6 +71,7 @@
     "land-value-scale.spec.ts": 180,
     "land-value.spec.ts": 60,
     "levels.spec.ts": 26,
+    "loading-screen.spec.ts": 20,
     "population.spec.ts": 160,
     "presets-forest.spec.ts": 112,
     "presets.spec.ts": 80,
