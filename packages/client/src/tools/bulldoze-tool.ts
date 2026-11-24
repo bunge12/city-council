@@ -17,7 +17,11 @@
 // bulldozer.
 //
 // A left drag collects every target of the kind it touched first and sends
-// one command on release, so one log entry. A drag that starts on a
+// one command on release, so one log entry. A drag over more buildings than
+// one `BulldozeBuilding` may name (`bulldozeMaxBuildings`) sends a command
+// for each that many, in the order the drag took them, and the sim applies
+// them one a step (issue #353); each is refused on its own if a building in
+// it changed. A drag that starts on a
 // building passes over roads, and one that starts on a road removes the
 // buildings on it, as a road bulldoze does. Each kind has a filter in the
 // tool's menu; with one off the pointer ignores that kind.
@@ -32,6 +36,7 @@
 // store; nothing here writes sim state.
 
 import {
+  BUILDINGS_BALANCE,
   NONE,
   buildingInfo,
   isBuilding,
@@ -96,10 +101,16 @@ export interface BulldozePreview {
   building: BuildingInfo | null;
   /** Whether Undo can take it back. */
   undoable: boolean;
-  /** The command a click sends. */
-  command: { type: "BulldozeRoad" | "BulldozeBuilding"; payload: unknown };
+  /** The commands a click sends, in order: one, except for a drag over more than `bulldozeMaxBuildings` buildings, which sends one for each that many. */
+  commands: readonly BulldozeCommand[];
   /** For roads, the edit preview the strips are drawn from. */
   road: EditPreview | null;
+}
+
+/** One command the bulldozer sends. */
+export interface BulldozeCommand {
+  type: "BulldozeRoad" | "BulldozeBuilding";
+  payload: unknown;
 }
 
 /** What a target kind supplies to the bulldozer. */
@@ -144,32 +155,47 @@ function roadPlan(world: BulldozeWorld, ids: readonly number[], seen: readonly u
     residents: clears.residents,
     building: null,
     undoable: true,
-    command: { type: "BulldozeRoad", payload: edit.command.payload },
+    commands: [{ type: "BulldozeRoad", payload: edit.command.payload }],
     road: edit,
   };
 }
 
 function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readonly unknown[]): BulldozePreview {
-  const buildings = seen as readonly BuildingSeen[];
-  const payload = { buildings: buildings.map((b) => ({ id: b.id, segment: b.segment, side: b.side, place: b.place, builtAt: b.builtAt })) };
+  const buildings = (seen as readonly BuildingSeen[]).map((b) => ({ id: b.id, segment: b.segment, side: b.side, place: b.place, builtAt: b.builtAt }));
   const state = asState(world);
-  const result = planBulldozeBuildings(state, payload, world.people);
-  const residents = result.ok ? result.residents : 0;
+  // One command for each `bulldozeMaxBuildings` of them, each planned as the sim will check it.
+  const most = BUILDINGS_BALANCE.bulldozeMaxBuildings;
+  const commands: BulldozeCommand[] = [];
+  const cleared: number[] = [];
+  let residents = 0;
+  let reason: string | null = null;
+  for (let from = 0; from < buildings.length; from += most) {
+    const payload = { buildings: buildings.slice(from, from + most) };
+    commands.push({ type: "BulldozeBuilding", payload });
+    const result = planBulldozeBuildings(state, payload, world.people);
+    if (!result.ok) {
+      reason ??= result.reason;
+      continue;
+    }
+    for (const id of result.ids) cleared.push(id);
+    residents += result.residents;
+  }
+  const ok = reason === null;
   return {
     kind: "building",
     ids: [...ids],
-    ok: result.ok,
-    reason: result.ok ? null : result.reason,
+    ok,
+    reason,
     fixed: false,
     // The plan has no price: M2 has no money. M4 puts the eminent domain price here, from the plan.
     cost: 0,
     length: 0,
     segments: [],
-    buildings: result.ok ? result.ids : [],
-    residents,
-    building: ids.length === 1 && result.ok ? buildingInfo(state, ids[0] ?? NONE) : null,
+    buildings: ok ? cleared.sort((p, q) => p - q) : [],
+    residents: ok ? residents : 0,
+    building: ids.length === 1 && ok ? buildingInfo(state, ids[0] ?? NONE) : null,
     undoable: false,
-    command: { type: "BulldozeBuilding", payload },
+    commands,
     road: null,
   };
 }
@@ -214,6 +240,13 @@ export interface PendingBulldoze {
   /** Local to this page, for keys. Not a sim id. */
   id: number;
   preview: BulldozePreview;
+}
+
+/** What the commands of a pending bulldoze have answered so far. */
+interface Answers {
+  left: number;
+  /** The first refusal's reason, or null. */
+  reason: string | null;
 }
 
 /** The bulldozer's part of the UI store. */
@@ -416,13 +449,21 @@ export class BulldozeToolController {
     }
     const pending: PendingBulldoze = { id: this.nextId++, preview };
     this.host.set({ bulldozeNote: null, bulldozePending: [...this.host.get().bulldozePending, pending] });
-    const { type, payload } = preview.command;
-    void this.host.send(type, payload).then((result) => this.answered(pending.id, result));
+    const answers: Answers = { left: preview.commands.length, reason: null };
+    for (const { type, payload } of preview.commands) {
+      void this.host.send(type, payload).then((result) => this.answered(pending.id, answers, result));
+    }
   }
 
-  /** The sim applied the bulldoze, and the copy shows it, or refused it: either way its mark goes. */
-  private answered(id: number, result: CommandResult): void {
+  /**
+   * One of the bulldoze's commands was applied, and the copy shows it, or
+   * refused. Once all have answered its mark goes, with the first refusal's
+   * reason if any was refused.
+   */
+  private answered(id: number, answers: Answers, result: CommandResult): void {
+    if (!result.ok) answers.reason ??= result.reason;
+    if (--answers.left > 0) return;
     const pending = this.host.get().bulldozePending.filter((p) => p.id !== id);
-    this.host.set(result.ok ? { bulldozePending: pending } : { bulldozePending: pending, bulldozeNote: result.reason });
+    this.host.set(answers.reason === null ? { bulldozePending: pending } : { bulldozePending: pending, bulldozeNote: answers.reason });
   }
 }
