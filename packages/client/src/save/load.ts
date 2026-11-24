@@ -37,13 +37,15 @@ const randomId = (): string => crypto.randomUUID();
 
 /**
  * Told the seed of the city about to open, before its terrain is generated,
- * so the page can generate its own copy at the same time (#203).
+ * so the page can generate its own copy at the same time (#203), and
+ * whether it is a saved city, which the page opens behind the loading
+ * screen (#327). It is told before the save is read.
  */
-export type OpeningSeed = (seed: number) => void;
+export type OpeningSeed = (seed: number, saved: boolean) => void;
 
 /** A new city under a fresh id, with a message saying why if there is one. */
 export function newCityFallback(problem: string | null, makeId: () => string = randomId, opening: OpeningSeed = () => undefined): OpenedCity {
-  opening(NEW_CITY_SEED);
+  opening(NEW_CITY_SEED, false);
   return {
     id: makeId(),
     name: NEW_CITY_NAME,
@@ -135,7 +137,7 @@ async function decode(store: CityStore, id: string, bytes: Uint8Array): Promise<
 
 async function openCity(store: CityStore, meta: CityMeta, makeId: () => string, opening: OpeningSeed): Promise<OpenedCity> {
   // The host generates the terrain once the save is decoded (prepareDerived).
-  opening(meta.seed);
+  opening(meta.seed, true);
   const left = `"${meta.name}" was left as it is, and a new city was started.`;
   const snapshots = await store.read(meta.id);
   if (!snapshots) return newCityFallback(`The save of "${meta.name}" is missing. ${left}`, makeId, opening);

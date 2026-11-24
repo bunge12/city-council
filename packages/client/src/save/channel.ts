@@ -3,6 +3,7 @@
 // The messages share the worker's port with the sim protocol and are told
 // apart by `channel`.
 
+import { DERIVED_STAGES, type DerivedStage } from "@city-council/sim";
 import type { CityMeta } from "./store";
 import type { SimTransport } from "../protocol/transport";
 
@@ -167,10 +168,29 @@ export interface OpeningMessage {
   channel: typeof SAVES_CHANNEL;
   type: "opening";
   seed: number;
+  /** True for a saved city or a city file, which the page opens behind the loading screen (#327); false for a new city. */
+  saved: boolean;
   requestId: null;
 }
 
-export type FromSaver = StatusMessage | ExportReply | ImportReply | SwitchReply | OpeningMessage;
+/**
+ * Worker to page: the host has started building one part of the city's
+ * derived data, after the save is read and before the snapshot. The
+ * loading screen shows it (#327).
+ */
+export interface LoadingMessage {
+  channel: typeof SAVES_CHANNEL;
+  type: "loading";
+  stage: DerivedStage;
+  requestId: null;
+}
+
+/** True for a stage `prepareDerived` names. */
+export function isDerivedStage(stage: unknown): stage is DerivedStage {
+  return (DERIVED_STAGES as readonly unknown[]).includes(stage);
+}
+
+export type FromSaver = StatusMessage | ExportReply | ImportReply | SwitchReply | OpeningMessage | LoadingMessage;
 
 export type PageSaveTransport = SimTransport<ToSaver | LoadFileMessage, FromSaver>;
 export type WorkerSaveTransport = SimTransport<FromSaver, unknown>;

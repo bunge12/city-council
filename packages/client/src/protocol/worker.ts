@@ -1,6 +1,7 @@
 // Web Worker entry. Opens the saved city, hosts it, drives it from the
 // worker's clock and saves it on an interval and when the page asks. City
 // file downloads and imports go through the saver too.
+import { prepareDerived } from "@city-council/sim";
 import { AUTOSAVE_INTERVAL_MS } from "../save/config";
 import { SAVES_CHANNEL, isSaveMessage, parseLoadFile, type FromSaver, type LoadFileMessage } from "../save/channel";
 import { newCityFallback, openLatestCity, openLoadedFile, type OpenedCity } from "../save/load";
@@ -47,7 +48,7 @@ async function start(): Promise<void> {
   let store: CityStore | null = null;
   let storeError: string | undefined;
   let city: OpenedCity;
-  const opening = (seed: number): void => saveTransport.send({ channel: SAVES_CHANNEL, type: "opening", seed, requestId: null });
+  const opening = (seed: number, saved: boolean): void => saveTransport.send({ channel: SAVES_CHANNEL, type: "opening", seed, saved, requestId: null });
   try {
     store = await CityStore.open();
     city = loadFile
@@ -61,6 +62,10 @@ async function start(): Promise<void> {
   // One tab per city: without the lock this worker hosts nothing, and the
   // page offers a different city. The sim transport then stays unanswered.
   const mine = await claimCity(city.id, navigator.locks);
+  // The host prepares the derived data too; done here first, each part is
+  // named to the page as it starts, for the loading screen (#327), and the
+  // host's own call then finds it all built.
+  if (mine) prepareDerived(city.state, (stage) => saveTransport.send({ channel: SAVES_CHANNEL, type: "loading", stage, requestId: null }));
   const host = mine ? new SimHost(city.state, simTransport, () => performance.now(), city.pagedLog, LOCAL_PLAYER_ID) : null;
   const saver = new Saver({
     store,

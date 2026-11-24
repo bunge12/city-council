@@ -8,6 +8,7 @@ import {
   MAX_PENDING_COMMANDS,
   PROTOCOL_VERSION,
   SNAPSHOT_VERSION,
+  DERIVED_STAGES,
   createState,
   deserialize,
   hashState,
@@ -172,47 +173,70 @@ describe("openLatestCity", () => {
     expect(await store.read("a")).toEqual(before);
   });
 
-  // The page generates its terrain from this seed while the worker does (#203).
-  describe("names the seed it opens before the city is made", () => {
+  // The page generates its terrain from this seed while the worker does (#203),
+  // and puts up the loading screen for a saved city (#327).
+  describe("names the seed it opens before the city is made, and whether it is saved", () => {
     it("for a new city", async () => {
       const seeds: number[] = [];
-      const city = await openLatestCity(await openStore(), nextId, null, (seed) => seeds.push(seed));
+      const saved: boolean[] = [];
+      const city = await openLatestCity(await openStore(), nextId, null, (seed, s) => {
+        seeds.push(seed);
+        saved.push(s);
+      });
       expect(seeds).toEqual([NEW_CITY_SEED]);
+      expect(saved).toEqual([false]);
       expect(city.state.seed).toBe(NEW_CITY_SEED);
     });
 
     it("for a saved city, from its listing", async () => {
       const store = await openStore();
       await store.save({ ...meta("a", 10, 1), seed: 9 }, snapshotAt(10, 9));
-      const seeds: number[] = [];
-      const city = await openLatestCity(store, nextId, null, (seed) => seeds.push(seed));
-      expect(seeds).toEqual([9]);
+      const seeds: [number, boolean][] = [];
+      const city = await openLatestCity(store, nextId, null, (seed, saved) => seeds.push([seed, saved]));
+      expect(seeds).toEqual([[9, true]]);
       expect(city.state.seed).toBe(9);
     });
 
     it("for both cities when a save cannot be opened and a new one starts", async () => {
       const store = await openStore();
       await store.save({ ...meta("a", 10, 1), seed: 9 }, damaged(snapshotAt(10, 9)));
-      const seeds: number[] = [];
-      const city = await openLatestCity(store, nextId, null, (seed) => seeds.push(seed));
+      const seeds: [number, boolean][] = [];
+      const city = await openLatestCity(store, nextId, null, (seed, saved) => seeds.push([seed, saved]));
       expect(city.from).toBe("new city");
-      expect(seeds).toEqual([9, NEW_CITY_SEED]);
+      expect(seeds).toEqual([
+        [9, true],
+        [NEW_CITY_SEED, false],
+      ]);
     });
   });
 });
 
 describe("SaveClient", () => {
-  it("hands each opening seed to its listeners, and does not take it for a status", () => {
+  it("hands each opening seed to its listeners with whether it is saved, and does not take it for a status", () => {
     const saves = pair<FromSaver>();
     const client = new SaveClient(saves.page);
-    const seeds: number[] = [];
+    const seeds: [number, boolean][] = [];
     const statuses: SaveStatus[] = [];
-    client.onOpening((seed) => seeds.push(seed));
+    client.onOpening((seed, saved) => seeds.push([seed, saved]));
     client.subscribe((status) => statuses.push(status));
-    saves.worker.send({ channel: SAVES_CHANNEL, type: "opening", seed: 42, requestId: null });
-    expect(seeds).toEqual([42]);
+    saves.worker.send({ channel: SAVES_CHANNEL, type: "opening", seed: 42, saved: true, requestId: null });
+    saves.worker.send({ channel: SAVES_CHANNEL, type: "opening", seed: 7, saved: false, requestId: null });
+    expect(seeds).toEqual([
+      [42, true],
+      [7, false],
+    ]);
     expect(statuses).toEqual([]);
     expect(client.status).toBeNull();
+  });
+
+  it("hands each loading stage to its listeners, and drops one prepareDerived does not name (#327)", () => {
+    const saves = pair<FromSaver>();
+    const client = new SaveClient(saves.page);
+    const stages: string[] = [];
+    client.onLoading((stage) => stages.push(stage));
+    for (const stage of DERIVED_STAGES) saves.worker.send({ channel: SAVES_CHANNEL, type: "loading", stage, requestId: null });
+    saves.worker.send({ channel: SAVES_CHANNEL, type: "loading", stage: "nonsense", requestId: null } as unknown as FromSaver);
+    expect(stages).toEqual([...DERIVED_STAGES]);
   });
 });
 

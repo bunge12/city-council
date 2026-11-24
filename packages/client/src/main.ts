@@ -69,6 +69,8 @@ import type { AppServices, DownloadedCity } from "./ui/services";
 import type { Occupants } from "./ui/BuildingReadout";
 import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setLandValueHover, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
 import { colouringOf, overlayAfterTool } from "./ui/overlays";
+import { createLoadingScreen } from "./ui/loading-screen";
+import type { LoadStageTime } from "./ui/loading";
 import { withNeighbours } from "./render/cell-meshes";
 
 /** The city this tab runs, kept for the tab's life so a reload comes back to it. */
@@ -99,6 +101,17 @@ let switching = false;
 // comes out of the page's own, so a reload stays on the city it opened.
 const load = takeLoadAddress(location.search);
 if (load.address !== null) history.replaceState(history.state, "", `${location.pathname}${load.rest}${location.hash}`);
+
+// A saved city or a city file opens behind the loading screen, which comes
+// down once the first frame of it is drawn (issue #327). A new city opens
+// with none. A file the page fetches is a saved city from the start.
+const loading = createLoadingScreen(document.body);
+if (load.address !== null) loading.show("reading");
+
+/** Resolves once the browser has painted what the page changed before the call. */
+function painted(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
 
 // Playwright's chromium project turns this on (test-switch.ts, issue #226). A player's page never reads a key it has.
 const testSwitch = readTestSwitch(localStore());
@@ -148,6 +161,8 @@ if (new URLSearchParams(location.search).has("heldclock")) simClock.hold().catch
 
 saves.subscribe((status) => {
   document.body.dataset["saveLoaded"] = "true";
+  // The worker hosts nothing, so no snapshot comes to take the screen down.
+  if (status.openElsewhere) loading.done();
   document.body.dataset["openElsewhere"] = String(status.openElsewhere);
   // Once a switch has picked the next city, a status still on its way from
   // the worker must not put the old one back.
@@ -171,9 +186,19 @@ function pageTerrain(seed: number): Terrain {
 // terrain. Generating the page's copy now runs it alongside the worker's,
 // where waiting for the snapshot would run the two one after the other
 // (#203). The map drawn later and the mirror's cell index read the cached copy.
-saves.onOpening((seed) => {
-  if (!mirror.state) pageTerrain(seed);
+saves.onOpening((seed, saved) => {
+  if (mirror.state) return;
+  if (!saved) {
+    pageTerrain(seed);
+    return;
+  }
+  // The terrain holds the main thread for a moment, so the screen is painted first.
+  loading.show("reading");
+  void painted().then(() => {
+    if (!mirror.state) pageTerrain(seed);
+  });
 });
+saves.onLoading((stage) => loading.advance(stage));
 
 /** Saves now and resolves with the worker's status after the write. */
 function saveNow(): Promise<SaveStatus> {
@@ -592,9 +617,10 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
     });
   });
   let hooks: CameraHooks | null = null;
-  const showMap = () => {
+  /** Shows the terrain of a city whose map is not on screen yet. Null when there was nothing to show. */
+  const showMap = (): { seed: number; buildMs: number } | null => {
     const state = mirror.state;
-    if (!state || state.seed === shownSeed) return;
+    if (!state || state.seed === shownSeed) return null;
     shownSeed = state.seed;
     // The sim's cache, so the mirror's cell index and the tools read this
     // map and do not generate their own (#203).
@@ -613,15 +639,21 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
     // Start looking at the first outside connection, where the player builds from.
     const start = startPose(terrain, state.roads, state.connections);
     hooks.rig.setPose(start.position, start.target);
+    return { seed: state.seed, buildMs: t2 - t1 };
+  };
+  /** Once the map `showMap` put up and what the snapshot drew on it are in a frame, the page is ready. */
+  const markReady = ({ seed, buildMs }: { seed: number; buildMs: number }) => {
     requestAnimationFrame(() => {
       status = {
         backend: view.backend,
-        seed: state.seed,
-        terrainMs: terrainMs.get(state.seed) ?? 0,
-        buildMs: t2 - t1,
+        seed,
+        terrainMs: terrainMs.get(seed) ?? 0,
+        buildMs,
         readyMs: performance.now(),
       };
       document.body.dataset["renderReady"] = "true";
+      // This frame draws the city, so the screen comes down with it.
+      loading.done();
       if (!graphicsStarted) {
         graphicsStarted = true;
         void startGraphics(view);
@@ -741,24 +773,58 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
   // With the worker's clock held (tests, issue #224) the next tick comes only
   // when the test asks, so the screen shows the mirror's tick and does not run on.
   if (construction) view.onBeforeFrame(() => view.setGameTick(mirror.state ? (simClock.held ? mirror.state.tick : clock.at(performance.now())) : null));
-  mirror.subscribe((update) => {
-    watchClock(update);
-    showMap();
+  const draw = (update: MirrorUpdate) => {
+    const shown = showMap();
     showRoads(update);
     showCells(update);
     showBuildings(update);
+    if (shown) markReady(shown);
+  };
+  /**
+   * True while the first snapshot is drawn behind the loading screen. Each
+   * part reads the copy as it is when it runs, so the deltas that come
+   * meanwhile need nothing of their own.
+   */
+  let staging = false;
+  /**
+   * Draws the first snapshot behind the loading screen a part at a time,
+   * each after the screen has painted the stage it is in, since each holds
+   * the main thread (issue #327).
+   */
+  const drawStaged = async () => {
+    staging = true;
+    loading.advance("map");
+    await painted();
+    const shown = showMap();
+    loading.advance("view");
+    await painted();
+    const snapshot: MirrorUpdate = { kind: "snapshot" };
+    showRoads(snapshot);
+    showCells(snapshot);
+    showBuildings(snapshot);
+    staging = false;
+    if (shown) markReady(shown);
+    else loading.done();
+  };
+  const drawFirst = () => {
+    if (loading.visible) void drawStaged();
+    else draw({ kind: "snapshot" });
+  };
+  mirror.subscribe((update) => {
+    watchClock(update);
+    if (staging) return;
+    if (update.kind === "snapshot" && shownSeed === null) drawFirst();
+    else draw(update);
   });
-  showMap();
   if (mirror.state) {
     watchClock({ kind: "snapshot" });
-    showRoads({ kind: "snapshot" });
-    showCells({ kind: "snapshot" });
-    showBuildings({ kind: "snapshot" });
+    drawFirst();
   }
   setCellsVisible(useUi.getState().overlay !== null);
   return view;
 });
 viewReady.catch((error: unknown) => {
+  loading.done();
   setViewReadout({ backend: `failed: ${String(error)}` });
 });
 
@@ -1441,6 +1507,8 @@ declare global {
       view: Promise<View>;
       camera: Promise<CameraHooks>;
       renderStatus: () => RenderStatus | null;
+      /** When each stage of the loading screen began and when it came down, by `performance.now()` (issue #327). */
+      loading: () => { stages: LoadStageTime[]; doneAt: number | null };
       /** Stops the worker's clock stepping the sim. Commands then wait for `advance`. */
       holdClock: () => Promise<number>;
       /** Runs that many steps and resolves with the tick once their delta is in `mirror`. */
@@ -1471,6 +1539,7 @@ window.cityCouncil = {
   view: viewReady,
   camera: cameraReady,
   renderStatus: () => status,
+  loading: () => loading.report(),
   holdClock: () => simClock.hold(),
   advance: (steps) => simClock.advance(steps).then((tick) => untilMirrorAt(tick)),
   releaseClock: () => simClock.release(),
