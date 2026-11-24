@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { DEMAND_BARS, SPEEDS, ZONING_BALANCE, gameDate, type DemandBar, type Speed } from "@city-council/sim";
 import { cellColour } from "../render/cell-geometry";
 import { PRESETS } from "../render/config";
@@ -95,10 +96,20 @@ const BAR_COLOURS = Object.fromEntries(
   DEMAND_BARS.map((bar) => [bar, hex(cellColour(ZONING_BALANCE.zones.findIndex((z) => z.id === bar) + 1, 2))]),
 ) as Record<DemandBar, string>;
 
-/** One demand bar, from -100 to 100 about a centre line, with what pushes it in the tooltip (issue M3-15). */
+/**
+ * One demand bar, from -100 to 100 about a centre line, with what pushes it
+ * in the tooltip (issue M3-15). The residential bar's tooltip also says
+ * when homes still filling hold new homes back (#330). Counting those walks
+ * every building, so it is counted only while the pointer is over the bar.
+ */
 function DemandMeter({ bar }: { bar: DemandBar }) {
+  const { mirror } = useServices();
+  const [hovered, setHovered] = useState(false);
+  const asksWaiting = hovered && bar === "residential";
   const value = useSim((s) => s?.demand[bar].value ?? null);
-  const title = useSim((s) => (s ? formatDemandTitle(bar, s.demand[bar].value, s.demand[bar].parts) : formatDemandTitle(bar, null, null)));
+  const title = useSim((s) =>
+    s ? formatDemandTitle(bar, s.demand[bar].value, s.demand[bar].parts, asksWaiting ? (mirror.homesWaiting()?.empty ?? null) : null) : formatDemandTitle(bar, null, null),
+  );
   const shown = value === null ? null : Math.round(value);
   const size = value === null ? 0 : Math.min(100, Math.abs(value)) / 2;
   return (
@@ -113,6 +124,8 @@ function DemandMeter({ bar }: { bar: DemandBar }) {
       aria-valuetext={shown === null ? "-" : String(shown)}
       data-value={value ?? ""}
       title={title}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
     >
       <span className="fill" style={{ background: BAR_COLOURS[bar], height: `${size}%`, ...(value !== null && value < 0 ? { top: "50%" } : { bottom: "50%" }) }} />
     </span>

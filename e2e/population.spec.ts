@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, CONNECTION_BALANCE, NONE, ROAD_TYPES, connectionEnd, createState, generateTerrain, heightAt, type SimState } from "../packages/sim/src/index";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, DEMAND_BALANCE, NONE, ROAD_TYPES, ZONING_BALANCE, connectionEnd, createState, generateTerrain, heightAt, reachableRoom, step, syncCells, type SimState } from "../packages/sim/src/index";
 import { formatDemandTitle } from "../packages/client/src/ui/top-figures";
+import { buildEverySide, finishConstruction, zoneSides } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { frames, openCity, ready } from "./helpers";
 
@@ -16,6 +17,11 @@ import { frames, openCity, ready } from "./helpers";
 // Each city is one street built in Node with the sim and opened as a city
 // file, with nothing zoned. No demand is held: the outside pull lifts the
 // residential bar on its own (demand.json, `outsidePull`).
+//
+// Issue #330: a third city has six empty towers facing office towers, the
+// residential bar well above zero. While the towers fill the grower adds no
+// home, and the bar's tooltip says so; once fewer than `unfilledHomesMax`
+// are still filling, the line goes.
 
 type Vec3 = readonly [number, number, number];
 interface Bar {
@@ -27,6 +33,7 @@ declare const window: {
     sendCommand(type: string, payload?: unknown): Promise<{ ok: boolean; reason?: string }>;
     mirror: {
       room: number | null;
+      homesWaiting(): { capacity: number; empty: number; unfilled: number } | null;
       state: {
         tick: number;
         log: { type: string }[];
@@ -62,8 +69,8 @@ interface Street {
   dz: number;
 }
 
-/** A city with one street running on from the first outside connection, or, `joined` false, starting 48 m short of it. */
-function streetCity(joined: boolean): { state: SimState; street: Street } {
+/** A city with one street running on from the first outside connection, or, `joined` false, starting 48 m short of it, `length` metres long. */
+function streetCity(joined: boolean, length = LENGTH): { state: SimState; street: Street } {
   const state = createState(SEED);
   const r = state.roads;
   const edge = state.connections[0] ?? NONE;
@@ -73,7 +80,7 @@ function streetCity(joined: boolean): { state: SimState; street: Street } {
   const gap = joined ? 0 : 48;
   const x = (r.nodeX[inner] ?? 0) + dx * gap;
   const z = (r.nodeZ[inner] ?? 0) + dz * gap;
-  buildRoads(state, [[[x, z], [x + dx * LENGTH, z + dz * LENGTH], "street"]]);
+  buildRoads(state, [[[x, z], [x + dx * length, z + dz * length], "street"]]);
   return { state, street: { x, z, dx, dz } };
 }
 
@@ -241,4 +248,119 @@ test("a street cut off from the outside builds houses but stays empty: populatio
   const [mx, mz] = on(street, LENGTH / 2, 30);
   await look(page, mx, mz, 220);
   await attach(page, testInfo, "the empty houses and the top bar", true);
+});
+
+const DENSITIES = ZONING_BALANCE.densities.length;
+const zonePair = (id: string) => ZONING_BALANCE.zones.findIndex((z) => z.id === id) * DENSITIES + DENSITIES - 1;
+const RESIDENTIAL = 1 + ZONING_BALANCE.zones.findIndex((z) => z.id === "residential");
+/** A street that takes six towers on its left side. */
+const TOWER_STREET = 240;
+
+/**
+ * Six empty towers on a street from an outside connection, office towers
+ * facing them. The offices stand alone for 25 game days first, so their
+ * open jobs lift the residential bar well above zero before any home is
+ * there, then the towers go in on every lot, so the grower has nowhere to
+ * add more and the count of towers still filling only falls.
+ */
+function towersCity(): { state: SimState; street: Street } {
+  const { state, street } = streetCity(true, TOWER_STREET);
+  zoneSides(state, 0, [zonePair("residential"), zonePair("office")]);
+  syncCells(state);
+  const homes: number[] = [];
+  state.cells.zone.forEach((z, i) => {
+    if (z === RESIDENTIAL) homes.push(i);
+  });
+  for (const i of homes) state.cells.zone[i] = 0;
+  buildEverySide(state);
+  for (let t = 0; t < 25 * 100; t++) step(state);
+  for (const i of homes) state.cells.zone[i] = RESIDENTIAL;
+  const counts = buildEverySide(state);
+  const towers = BUILDING_TYPES.filter((t) => t.zone === "residential").reduce((n, t) => n + (counts[t.index] ?? 0), 0);
+  if (towers !== 6) throw new Error(`the street took ${towers} towers, not 6`);
+  if (reachableRoom(state).unfilled < DEMAND_BALANCE.unfilledHomesMax) throw new Error("the towers do not hold new homes back");
+  finishConstruction(state);
+  state.speed = 0;
+  return { state, street };
+}
+
+/** Draws the residential bar's tooltip text under it, for the screenshot: a browser leaves its own tooltips out of one. */
+async function showTooltip(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const doc = (globalThis as unknown as { document: { getElementById(id: string): { getAttribute(n: string): string | null; getBoundingClientRect(): { left: number; bottom: number } } | null; createElement(t: string): { id: string; textContent: string; style: { cssText: string } }; body: { appendChild(n: unknown): void } } }).document;
+    const bar = doc.getElementById("demand-residential");
+    if (!bar) throw new Error("no residential bar");
+    const old = doc.getElementById("test-tooltip") as unknown as { remove(): void } | null;
+    old?.remove();
+    const box = bar.getBoundingClientRect();
+    const tip = doc.createElement("div");
+    tip.id = "test-tooltip";
+    tip.textContent = bar.getAttribute("title") ?? "";
+    tip.style.cssText = `position:fixed;left:${Math.max(8, box.left - 200)}px;top:${box.bottom + 6}px;max-width:420px;white-space:pre-line;font:12px sans-serif;background:#ffffe8;color:#111;border:1px solid #777;padding:4px 6px;z-index:99999;pointer-events:none`;
+    doc.body.appendChild(tip);
+  });
+}
+
+async function hideTooltip(page: Page): Promise<void> {
+  await page.evaluate(() => (globalThis as unknown as { document: { getElementById(id: string): { remove(): void } | null } }).document.getElementById("test-tooltip")?.remove());
+}
+
+/** Shoots the top bar with the tooltip text drawn under it. */
+async function attachTooltip(page: Page, testInfo: TestInfo, name: string): Promise<void> {
+  await showTooltip(page);
+  const bar = await page.locator(".top-bar").boundingBox();
+  const file = `${String(++shotNo).padStart(2, "0")}-${name.replace(/[^a-z0-9]+/gi, "-")}.png`;
+  const path = testInfo.outputPath(file);
+  const png = await page.screenshot({ clip: { x: 0, y: 0, width: 1280, height: Math.ceil((bar?.height ?? 40) + 70) } });
+  await hideTooltip(page);
+  writeFileSync(path, png);
+  if (EVIDENCE) {
+    mkdirSync(EVIDENCE, { recursive: true });
+    writeFileSync(`${EVIDENCE}/${file}`, png);
+  }
+  await testInfo.attach(name, { path, contentType: "image/png" });
+}
+
+test("while six towers fill, the residential bar's tooltip says new homes are waiting, and the line goes once they fill (#330)", async ({ page }, testInfo) => {
+  const { state, street } = towersCity();
+  await openCity(page, state, { name: "Tower Street" });
+  const bar = page.locator("#demand-residential");
+  const waitingLine = /\nNew homes waiting: [\d,]+ empty places to fill first\.$/;
+
+  await test.step("six empty towers and the bar above zero: hovering the bar shows the line", async () => {
+    await setSpeed(page, 0);
+    await page.mouse.move(640, 400);
+    // Not counted while the pointer is elsewhere.
+    await expect(bar).not.toHaveAttribute("title", waitingLine);
+    await bar.hover();
+    const c = await copy(page);
+    expect(c.residential.value).toBeGreaterThan(0);
+    const waiting = await page.evaluate(() => window.cityCouncil.mirror.homesWaiting());
+    expect(waiting?.unfilled).toBe(6);
+    expect(waiting?.empty).toBe(c.room);
+    await expect(bar).toHaveAttribute("title", formatDemandTitle("residential", c.residential.value, c.residential.parts, waiting?.empty ?? null));
+    await expect(bar).toHaveAttribute("title", new RegExp(`\\nNew homes waiting: ${c.room.toLocaleString("en-US")} empty places to fill first\\.$`));
+    await attachTooltip(page, testInfo, "six towers filling, new homes waiting");
+    const [mx, mz] = on(street, TOWER_STREET / 2, 0);
+    await look(page, mx, mz, 320);
+    await bar.hover();
+    await attach(page, testInfo, "the empty towers and the offices facing them", true);
+  });
+
+  await test.step("people move in, and once fewer than six towers are still filling the line goes", async () => {
+    await setSpeed(page, 4);
+    // Hovered again each time: the top bar's figures change width as the clock runs, and the bar moves from under a still pointer.
+    const title = async () => {
+      await bar.hover();
+      return (await bar.getAttribute("title")) ?? "";
+    };
+    await expect.poll(title, { timeout: 120_000 }).not.toMatch(waitingLine);
+    await setSpeed(page, 0);
+    const c = await copy(page);
+    expect(c.residential.value).toBeGreaterThan(0);
+    expect(c.population).toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.cityCouncil.mirror.homesWaiting())).toBeNull();
+    await expect(bar).toHaveAttribute("title", formatDemandTitle("residential", c.residential.value, c.residential.parts));
+    await attachTooltip(page, testInfo, `${c.population} people in, nothing waiting`);
+  });
 });
