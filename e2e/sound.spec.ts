@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { createState, generateTerrain, heightAt, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
-import { cityReady, frames, hideNotes, openCity } from "./helpers";
+import { cityReady, frames, hideNotes, openCity, openSettings } from "./helpers";
 
 // Issue M3-02: interface sounds. A player places a road, paints a zone,
 // bulldozes, undoes and sends a command the sim refuses, and the engine's
@@ -152,8 +152,8 @@ test("each tool makes its cue when the sim answers, and a zero interface volume 
   ]);
   keepEvidence("cues-before-reload.json", heard);
 
-  // The sound settings, open in the top bar.
-  await page.locator("#sound-settings summary").click();
+  // The sound settings, in the settings menu under the top bar's Settings button.
+  await openSettings(page);
   await expect(page.locator("#sound-interface")).toBeVisible();
   await expect(page.locator("#sound-interface")).toHaveValue("50");
   await expect(page.locator("#sound-ambience")).toHaveValue("50");
@@ -171,7 +171,7 @@ test("each tool makes its cue when the sim answers, and a zero interface volume 
   await page.reload();
   await cityReady(page);
   await hideNotes(page);
-  await page.locator("#sound-settings summary").click();
+  await openSettings(page);
   await expect(page.locator("#sound-interface")).toHaveValue("0");
   await expect(page.locator("#sound-ambience")).toHaveValue("50");
   await attach(page, testInfo, "3 after a reload the interface volume is still zero");
@@ -186,7 +186,7 @@ test("each tool makes its cue when the sim answers, and a zero interface volume 
 
   // Mute is kept too.
   await page.locator("#sound-mute").check();
-  await expect(page.locator("#sound-settings summary")).toHaveText("Sound: muted");
+  await expect(page.locator("#sound-mute")).toBeChecked();
   const muted = await page.evaluate(() => window.localStorage.getItem("city-council:sound"));
   expect(JSON.parse(muted ?? "null")).toEqual({ interface: 0, ambience: 0.5, muted: true });
 });

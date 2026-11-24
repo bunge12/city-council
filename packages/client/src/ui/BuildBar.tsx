@@ -1,13 +1,12 @@
 import type { ReactNode } from "react";
 import { ROAD_TYPES, ZONING_BALANCE } from "@city-council/sim";
-import { FREE_HAND_KEY_LABEL, GUIDES } from "../tools/config";
+import { GUIDES } from "../tools/config";
 import { BULLDOZE_TARGETS } from "../tools/bulldoze-tool";
 import { DRAW_MODES, TOOL_ROAD_TYPES, type DrawMode } from "../tools/road-tool";
 import { ZONE_DEPTHS, ZONE_MODES, type ZoneMode } from "../tools/zone-tool";
-import { GridPanel, gridHint } from "./GridPanel";
+import { GridPanel } from "./GridPanel";
 import { useServices, useSim } from "./hooks";
-import { OVERLAYS } from "./overlays";
-import { toggleOverlay, useUi } from "./store";
+import { useUi } from "./store";
 
 const TYPE_KEYS: Record<string, string> = {
   street: "Z",
@@ -34,31 +33,15 @@ const MODES: Record<DrawMode, { label: string; key: string; title: string }> = {
   },
 };
 
-/** What the hint says while the road tool is on. */
-function toolHint(mode: DrawMode, drawing: boolean, curving: boolean): string {
-  if (!drawing) return "Click on the map to start a road.";
-  if (mode === "curved") {
-    return curving
-      ? "Click to end the curve. Esc or right-click drops it."
-      : "Click to set the direction the curve leaves in. Esc or right-click drops it.";
-  }
-  if (mode === "continuous")
-    return "Click to end this segment and start the next. Double-click, Esc or right-click to stop.";
-  return "Click to end the road. Esc or right-click drops it.";
-}
-
-/** What the hint says while the upgrade tool is on. */
-function editHint(dragging: boolean, type: string): string {
-  if (dragging)
-    return "Release to apply to every road marked. Esc drops the drag.";
-  return `Click a road to upgrade the stretch marked to ${type.toLowerCase()}. Hold Shift for the whole road. Drag along or across roads to take more at once. Right-click a one-way to reverse it. Right-drag orbits.`;
-}
-
-/** What the hint says while the bulldozer is on. */
-function bulldozeHint(dragging: boolean): string {
-  if (dragging)
-    return "Release to remove everything marked. Esc drops the drag.";
-  return "Click what is under the pointer to remove it: a stretch of road, or the whole road with Shift held. Drag to take every thing of the kind the drag starts on. Right-drag orbits.";
+/**
+ * Where a road being drawn has got to, on the road menu for tests: the
+ * menu no longer explains each step in words (issue #332), since the
+ * buttons' tooltips say how each mode draws.
+ */
+function roadStep(mode: DrawMode, drawing: boolean, curving: boolean): string {
+  if (!drawing) return "start";
+  if (mode === "curved") return curving ? "end" : "direction";
+  return mode === "continuous" ? "next" : "end";
 }
 
 const ZONE_MODE_LABELS: Record<ZoneMode, { label: string; title: string }> = {
@@ -72,15 +55,6 @@ const ZONE_MODE_LABELS: Record<ZoneMode, { label: string; title: string }> = {
     title: "Brush: click or drag over cells to zone the ones under the pointer",
   },
 };
-
-/** What the hint says while the zone tool is on. */
-function zoneHint(mode: ZoneMode, brushing: boolean, depth: number): string {
-  if (brushing)
-    return "Release to zone every cell marked. Esc or right-click drops the stroke.";
-  if (mode === "brush")
-    return "Click or drag over cells to zone them. Shift-drag orbits.";
-  return `Hover a road and click to zone the strip on that side, ${depth === 1 ? "1 cell" : `${depth} cells`} deep. [ and ] change the depth.`;
-}
 
 function typeName(id: string): string {
   return ROAD_TYPES.find((t) => t.id === id)?.name ?? id;
@@ -110,12 +84,16 @@ function MenuGroup({
  * stays short (issue 47). Upgrade is an action in the menu, and the grid is
  * a build mode beside straight, curved and continuous. The bulldozer has its
  * own button beside the road's, with its filters in a menu above it (issue
- * 116).
+ * 116). A tool's menu is centred over the dock, and Undo ends the row
+ * (issue #332).
  */
 export function BuildBar() {
-  const { roadTool, gridTool, editTool, bulldozeTool, zoneTool } =
+  const { roadTool, gridTool, editTool, bulldozeTool, zoneTool, undo, mirror } =
     useServices();
   const ready = useSim((s) => s !== null);
+  const canUndo = useSim(
+    (s) => s?.undo.some((r) => r.playerId === mirror.playerId) ?? false,
+  );
   const undoNote = useUi((s) => s.undoNote);
   const tool = useUi((s) => s.tool);
   const roadType = useUi((s) => s.roadType);
@@ -125,10 +103,8 @@ export function BuildBar() {
   const pending = useUi((s) => s.roadPending.length);
   const note = useUi((s) => s.roadNote);
   const guides = useUi((s) => s.guides);
-  const dragging = useUi((s) => s.editDrag !== null);
   const editPending = useUi((s) => s.editPending.length);
   const editNote = useUi((s) => s.editNote);
-  const gridStage = useUi((s) => s.gridStage);
   const gridPending = useUi((s) => s.gridPending.length);
   const gridNote = useUi((s) => s.gridNote);
   const zonePick = useUi((s) => s.zonePick);
@@ -136,14 +112,11 @@ export function BuildBar() {
   const zoneErase = useUi((s) => s.zoneErase);
   const zoneMode = useUi((s) => s.zoneMode);
   const zoneDepth = useUi((s) => s.zoneDepth);
-  const zoneBrushing = useUi((s) => s.zoneBrush !== null);
   const zonePending = useUi((s) => s.zonePending.length);
   const zoneNote = useUi((s) => s.zoneNote);
-  const bulldozeDragging = useUi((s) => s.bulldozeDrag !== null);
   const bulldozePending = useUi((s) => s.bulldozePending.length);
   const bulldozeNote = useUi((s) => s.bulldozeNote);
   const filters = useUi((s) => s.bulldozeFilters);
-  const overlay = useUi((s) => s.overlay);
   const zoning = tool === "zone";
   const bulldozing = tool === "bulldoze";
   const active = tool === "road";
@@ -151,20 +124,6 @@ export function BuildBar() {
   const editing = tool === "upgrade";
   const roadMenu = active || editing || gridding;
 
-  // With no tool on the buttons speak for themselves, so there is no hint (issue 173).
-  let hint = "";
-  if (active) {
-    hint = toolHint(roadMode, drawing, curving);
-    hint += ` Hold ${FREE_HAND_KEY_LABEL} to draw free-hand.`;
-  } else if (gridding) {
-    hint = gridHint(gridStage);
-  } else if (editing) {
-    hint = editHint(dragging, typeName(roadType));
-  } else if (bulldozing) {
-    hint = bulldozeHint(bulldozeDragging);
-  } else if (zoning) {
-    hint = zoneHint(zoneMode, zoneBrushing, zoneDepth);
-  }
   const anyPending =
     pending + gridPending + bulldozePending + editPending + zonePending > 0;
   const shownNote = editing
@@ -214,6 +173,7 @@ export function BuildBar() {
               className="panel tool-menu"
               id="road-menu"
               aria-label="Road tool options"
+              data-step={active ? roadStep(roadMode, drawing, curving) : undefined}
             >
               <MenuGroup label="Actions" id="actions">
                 <button
@@ -414,31 +374,23 @@ export function BuildBar() {
             Zone <kbd>K</kbd>
           </button>
         </div>
+        <span className="dock-divider" aria-hidden="true" />
+        <button
+          type="button"
+          id="undo"
+          disabled={!canUndo}
+          title={
+            canUndo
+              ? "Undo your last road or zoning change (Ctrl+Z or Cmd+Z)"
+              : "Nothing to undo"
+          }
+          onClick={() => void undo()}
+        >
+          Undo
+        </button>
       </div>
-      {/*
-        The overlays, one button each, from the list in overlays.ts (issue
-        M3-18). Zoning comes with the zone tool. They hang beside the dock,
-        outside its row, so the road button stays mid-screen with its menu
-        over it as before.
-      */}
-      <div className="panel overlay-dock" role="group" aria-label="Overlays">
-        {OVERLAYS.map((o) => (
-          <button
-            key={o.id}
-            type="button"
-            id={`overlay-${o.id}`}
-            aria-pressed={overlay === o.id}
-            disabled={!ready}
-            title={o.title}
-            onClick={() => toggleOverlay(o.id)}
-          >
-            {o.label} <kbd>{o.key}</kbd>
-          </button>
-        ))}
-      </div>
-      {(hint || anyPending) && (
-        <p className="hint" id="road-hint">
-          {hint}
+      {anyPending && (
+        <p className="hint" id="build-pending" role="status">
           {pending > 0 && (
             <span id="road-pending">
               {" "}

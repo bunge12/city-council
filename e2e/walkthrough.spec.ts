@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect, test, type CDPSession, type Page, type TestInfo } from "@playwright/test";
 import { deserialize, hashState, replay } from "../packages/sim/src/index";
 import { decodePng, shareUnlike } from "./png";
-import { cityReady } from "./helpers";
+import { cityReady, settingsButton } from "./helpers";
 
 // The M0 exit test from docs/milestones/M0.md, as one walkthrough a player
 // could do by hand, run once on WebGPU (when the browser has an adapter)
@@ -126,7 +126,7 @@ async function measureRate(page: Page, ms: number): Promise<number> {
 /** The city menu, opened if it is closed. */
 async function cityMenu(page: Page) {
   const menu = page.getByRole("region", { name: "City menu" });
-  if (!(await menu.isVisible())) await page.getByRole("button", { name: "City" }).click();
+  if (!(await menu.isVisible())) await settingsButton(page, "City");
   await expect(menu).toBeVisible();
   return menu;
 }
@@ -295,7 +295,7 @@ for (const variant of [
     });
 
     await test.step("4. a no-op command appears in the activity log with a player id and a tick", async () => {
-      await page.getByRole("button", { name: "Log" }).click();
+      await settingsButton(page, "Log");
       const panel = page.getByRole("region", { name: "Activity log" });
       await expect(panel).toBeVisible();
       await panel.getByRole("button", { name: "Send NoOp" }).click();

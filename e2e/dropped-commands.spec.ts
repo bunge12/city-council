@@ -141,7 +141,7 @@ test("a continuous road stops at a segment the step drops, and says why", async 
   // Only the rival street was built. The road ended: nothing carries on from the dropped segment.
   await expect.poll(async () => (await log(page)).length).toBe(start + 1);
   expect(await playerSegments(page)).toBe(1);
-  await expect(page.locator("#road-hint")).toContainText("Click on the map to start a road.");
+  await expect(page.locator("#road-menu")).toHaveAttribute("data-step", "start");
   await hover(page, 4400, 4720);
   await attach(page, testInfo, "2 the segment was dropped at the step: its preview is gone, the road has ended and the note says why");
 });

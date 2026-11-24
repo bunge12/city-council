@@ -6,7 +6,7 @@ import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
 import { HELD_DEMAND_STATE, WALKTHROUGH_DEMAND } from "./browser-state";
-import { cityLoaded, cityReady, frames, hideNotes, openCity, settle } from "./helpers";
+import { cityLoaded, cityReady, frames, hideNotes, openCity, settingsButton, settle } from "./helpers";
 import { holdDemand } from "../packages/sim/test/demand-helper";
 
 // The M2 exit test from docs/milestones/M2.md (issue M2-17), as one
@@ -303,15 +303,17 @@ const speedButton = (page: Page, name: string) => page.getByRole("group", { name
 /** The city menu, opened if it is closed. */
 async function cityMenu(page: Page) {
   const menu = page.getByRole("region", { name: "City menu" });
-  if (!(await menu.isVisible())) await page.getByRole("button", { name: "City", exact: true }).click();
+  if (!(await menu.isVisible())) await settingsButton(page, "City");
   await expect(menu).toBeVisible();
   return menu;
 }
 
 async function closeCityMenu(page: Page): Promise<void> {
   const menu = page.getByRole("region", { name: "City menu" });
-  if (await menu.isVisible()) await page.getByRole("button", { name: "City", exact: true }).click();
+  if (await menu.isVisible()) await settingsButton(page, "City");
   await expect(menu).toBeHidden();
+  // And the settings menu it opens from.
+  if (await page.locator("#settings-menu").isVisible()) await page.locator("#settings-toggle").click();
 }
 
 /** Downloads the city with the menu's button and returns the file's bytes. */
@@ -1208,9 +1210,9 @@ for (const variant of [
       for (const h of homes) expect(h.shown, h.when).toEqual(h.counted);
       expect(homes.at(-1)?.shown).toEqual(at("before the reload"));
       info.annotations.push({ type: "population", description: homes.map((h) => `${h.when}: ${h.shown.population} in room for ${h.shown.room}`).join("; ") });
-      const topBar = join(SCREENSHOTS, dir, "14-population-in-the-top-bar.png");
-      await page.locator(".top-bar").screenshot({ path: topBar });
-      await info.attach("14-population-in-the-top-bar", { path: topBar, contentType: "image/png" });
+      const status = join(SCREENSHOTS, dir, "14-population-in-the-corner.png");
+      await page.locator("#city-status").screenshot({ path: status });
+      await info.attach("14-population-in-the-corner", { path: status, contentType: "image/png" });
     });
 
     await test.step("15. a replay of the recorded command log from the same seed gives the same state hash", async () => {

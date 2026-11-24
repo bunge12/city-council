@@ -16,8 +16,10 @@ import type { AppServices } from "./services";
 import { shortcutFor, toggledSpeed } from "./shortcuts";
 import { LandValueLegend, LandValueReadout } from "./LandValue";
 import { StatsPanel } from "./StatsPanel";
-import { toggleDebug, toggleLog, toggleOverlay, toggleStats } from "./store";
-import { TopBar } from "./TopBar";
+import { OverlayBar } from "./OverlayBar";
+import { setPanel, toggleDebug, toggleLog, toggleOverlay, toggleStats, useUi } from "./store";
+import { CityStatus, GameClock, SettingsMenu, TopBar } from "./TopBar";
+import { escapeTarget } from "./windows";
 import { ZoneLegend } from "./ZoneLegend";
 import { ZoneReadout } from "./ZoneReadout";
 import "./ui.css";
@@ -42,6 +44,7 @@ function useShortcuts(): void {
         shiftKey: e.shiftKey,
         repeat: e.repeat,
         targetTag: target?.tagName ?? "",
+        targetType: target instanceof HTMLInputElement ? target.type : "",
         targetEditable: target?.isContentEditable ?? false,
       });
       if (!action) return;
@@ -94,9 +97,16 @@ function useShortcuts(): void {
         case "drawMode":
           roadTool.pickMode(action.mode);
           return;
-        case "escape":
+        case "escape": {
+          // The window opened last closes first: a panel, or the tool on top with what it holds (issue #332).
+          const top = escapeTarget(useUi.getState().windows);
+          if (top !== null && top !== "tool") {
+            setPanel(top, false);
+            return;
+          }
           if (!routeTool.escape() && !editTool.escape() && !bulldozeTool.escape() && !gridTool.escape() && !zoneTool.escape()) roadTool.escape();
           return;
+        }
         case "undo":
           void undo();
           return;
@@ -114,18 +124,24 @@ function Shell() {
       {/* First, so the panels sit over the labels. */}
       <BlockLabels />
       <TopBar />
+      {/* Top left: the overlays, their legends, then notes to the player (issue #332). */}
       <div className="left-column">
+        <OverlayBar />
+        <ZoneLegend />
+        <LandValueLegend />
         <Notes />
-        <CityMenu />
       </div>
+      {/* Top right: settings and statistics, and the panels they open, under their buttons. */}
       <div className="right-column">
+        <SettingsMenu />
+        <CityMenu />
         <StatsPanel />
         <DebugPanel />
         <ActivityLog />
       </div>
+      <CityStatus />
       <BuildBar />
-      <ZoneLegend />
-      <LandValueLegend />
+      <GameClock />
       <RoadReadout />
       <EditReadout />
       <BulldozeTag />

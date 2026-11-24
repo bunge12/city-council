@@ -59,7 +59,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     codes: ["Escape"],
     label: "Esc",
-    description: "drop the road being drawn, the grid's rectangle, the drag or the brush stroke, or leave the tool",
+    description: "close the window opened last, or drop the road being drawn, the grid's rectangle, the drag or the brush stroke, or leave the tool",
     action: { kind: "escape" },
   },
 ];
@@ -97,6 +97,8 @@ export interface KeyPress {
   repeat: boolean;
   /** Tag name of the focused element, upper case as the DOM gives it. */
   targetTag: string;
+  /** An input's type, such as "range" or "text". Left out for other elements. */
+  targetType?: string;
   targetEditable: boolean;
 }
 
@@ -106,6 +108,9 @@ export interface KeyPress {
  */
 export function shortcutFor(press: KeyPress): ShortcutAction | null {
   const tag = press.targetTag;
+  // Escape from a slider, a checkbox or a picker still closes the window it is in (issue #332). A text field keeps it.
+  const choice = tag === "SELECT" || (tag === "INPUT" && (press.targetType === "range" || press.targetType === "checkbox"));
+  if (press.code === "Escape" && choice && !press.repeat) return { kind: "escape" };
   // A field keeps Ctrl Z for its own text.
   if (press.targetEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return null;
   if (press.repeat || press.altKey) return null;
