@@ -612,17 +612,21 @@ for (const variant of [
       await expect.poll(() => page.evaluate(() => document.body.dataset["overlay"] ?? "")).toBe("landValue");
       const valueAt = async (strip: Strip) => {
         const [x, z] = stripCell(strip, 1);
+        await look(page, x, z, 320);
+        await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 60_000 });
         await hover(page, x, z);
         const r = page.locator("#land-value-readout");
         await expect(r).toBeVisible();
         return Number(await r.getAttribute("data-value"));
       };
       const shore = await valueAt(SHORE_STRIP);
+      await shot(page, info, dir, "7-land-value-by-the-water");
       const factories = await valueAt(FACTORY_SIDE_STRIP);
       expect(shore).toBeGreaterThan(factories);
-      await shot(page, info, dir, "7-land-value");
+      await shot(page, info, dir, "7-land-value-beside-factories");
       await away(page);
       await page.locator("#overlay-landValue").click();
+      await lookAtTown(page);
       const shoreKey = await stripKey(page, SHORE_STRIP);
       const factoryKey = await stripKey(page, FACTORY_SIDE_STRIP);
       const v = await growUntil(
