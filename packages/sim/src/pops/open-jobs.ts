@@ -15,7 +15,7 @@
 // workers is in the pop index (where.ts), so this reads no pop rows.
 
 import { BUILDING_TYPES, EDUCATION_LEVELS } from "../buildings/balance";
-import { BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByEducation, jobsByKind } from "../buildings/jobs";
 import { DEMAND_BALANCE } from "../demand/balance";
 import { NETWORK_ROAD } from "../roads/network";
@@ -111,12 +111,20 @@ export interface ZoneJobs {
   open: Float64Array;
 }
 
+/** By type index: its `jobsPerCell`, 0 for a type with no jobs. Read by `zoneJobs` in place of the type's row. */
+const JOBS_PER_CELL = Float64Array.from(BUILDING_TYPES, (t) => (t.jobsPerCell > 0 ? t.jobsPerCell : 0));
+
 /**
  * The jobs offered and open in each zone's workplaces on a road that
  * reaches an outside connection, by zone number, education aside. One pass
  * over the buildings, for the grower on a tick it adds a workplace (M3-09):
  * a shop on a street joined to nothing never fills, and should not hold
  * the rest of the city's shops back.
+ *
+ * Kept tight, as `eachReachableHome` is (room.ts): each building's jobs are
+ * `buildingJobs` worked out inline from a table by type, and the imported
+ * constants are locals. Through `buildingJobs` the pass took 4 to 6 ms on
+ * the 500,000 scale city, more than the grower's whole share (issue #324).
  */
 export function zoneJobs(state: SimState): ZoneJobs {
   const b = state.buildings;
@@ -124,21 +132,30 @@ export function zoneJobs(state: SimState): ZoneJobs {
   const reach = outsideReachByNode(state);
   const filled = popIndexOf(state).filled;
   const zones = ZONING_BALANCE.zones.length + 1;
-  const out: ZoneJobs = { jobs: new Float64Array(zones), open: new Float64Array(zones) };
-  const { flags, firstSeg, zone } = b;
+  const jobsOut = new Float64Array(zones);
+  const openOut = new Float64Array(zones);
+  const { flags, firstSeg, zone, type, width, depth } = b;
   const { segNetwork, segA } = net;
-  for (let id = 0; id < flags.length; id++) {
-    if (((flags[id] as number) & BUILDING_ALIVE) === 0) continue;
-    const jobs = buildingJobs(b, id);
-    if (jobs <= 0) continue;
+  const alive = BUILDING_ALIVE;
+  const abandoned = BUILDING_ABANDONED;
+  const road = NETWORK_ROAD;
+  const perCell = JOBS_PER_CELL;
+  const n = flags.length;
+  for (let id = 0; id < n; id++) {
+    const f = flags[id] as number;
+    if ((f & alive) === 0 || (f & abandoned) !== 0) continue;
+    const rate = perCell[type[id] as number] ?? 0;
+    if (rate <= 0) continue;
     const seg = firstSeg[id] as number;
-    if (segNetwork[seg] !== NETWORK_ROAD || reach[segA[seg] as number] !== 1) continue;
+    if (segNetwork[seg] !== road || reach[segA[seg] as number] !== 1) continue;
+    // jobsForLot (buildings/jobs.ts), the same sum in the same order.
+    const jobs = Math.max(1, Math.floor(rate * ((width[id] as number) * (depth[id] as number)) + 0.5));
     const z = zone[id] as number;
     const open = jobs - (filled[id] ?? 0);
-    out.jobs[z] = (out.jobs[z] ?? 0) + jobs;
-    if (open > 0) out.open[z] = (out.open[z] ?? 0) + open;
+    jobsOut[z] = (jobsOut[z] as number) + jobs;
+    if (open > 0) openOut[z] = (openOut[z] as number) + open;
   }
-  return out;
+  return { jobs: jobsOut, open: openOut };
 }
 
 /**

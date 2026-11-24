@@ -1,7 +1,7 @@
 // Derived data: structures rebuilt from state that are never saved or
 // hashed: the terrain, the road spatial index, the routing graph, the
 // blocks, where the zoning cells are, which building stands on each, the
-// grower's candidates, who lives and works in each building, the
+// grower's candidates and the cells it has set aside, who lives and works in each building, the
 // travel times between zones, and which pieces of road reach outside. See "Derived data" in the PRD.
 //
 // The terrain is cached by seed (terrain/cache.ts). Each other one is cached
@@ -10,6 +10,7 @@
 // rebuilds its own and nothing about a host's history can leak into it.
 
 import { candidateCount, candidatesBuilt, prepareCandidates } from "./buildings/candidates";
+import { setAsideCellsWithNoLot } from "./buildings/grower";
 import { pollutionGrid, prepareBuildingIndex, segmentBuildings } from "./buildings/where";
 import { blockIndexOf, existingBlockIndex, listBlocks, settleBlocks } from "./roads/blocks";
 import { popIndexOf } from "./pops/where";
@@ -43,6 +44,7 @@ export function prepareDerived(state: SimState): void {
   popIndexOf(state);
   prepareTravelTimes(state);
   openingsOf(state);
+  setAsideCellsWithNoLot(state);
 }
 
 /**

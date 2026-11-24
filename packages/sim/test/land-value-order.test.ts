@@ -15,6 +15,7 @@ import {
   deserialize,
   hashState,
   landValueAt,
+  prepareDerived,
   serialize,
   step,
   type CellRef,
@@ -361,8 +362,26 @@ describe("land value orders the lots", () => {
     expect([...state.buildings.flags].filter(Boolean)).toEqual([]);
   });
 
+  it("tries those cells at load when the host prepares a loaded city, so its first ticks try none, and builds the same (issue #324)", () => {
+    const l = layout();
+    const state = l.state;
+    zoneR3Gaps(l);
+    holdDemand(RESIDENTIAL_ONLY, () => {
+      runDays(state, 1);
+      const tried = setAsideCount(state);
+      expect(tried).toBe(15);
+      const loaded = deserialize(serialize(state)).state;
+      prepareDerived(loaded);
+      expect(setAsideCount(loaded)).toBe(tried);
+      runDays(loaded, 1);
+      expect(setAsideCount(loaded)).toBe(tried);
+      runDays(state, 1);
+      expect(hashState(loaded)).toBe(hashState(state));
+    });
+  });
+
   it("hashes the same saved and loaded while it grows as a city that never stopped, through a street, a bulldozer, zoning and new factories", () => {
-    const run = (saveAt: number[]): string => {
+    const run = (saveAt: number[], prepared = false): string => {
       const l = layout();
       zoneFactories(l);
       zoneWaterStrip(l);
@@ -375,7 +394,11 @@ describe("land value orders the lots", () => {
         withValue(DEMAND_BALANCE, "openJobsShareMax", 1, () => {
           while (state.tick < start + 60 * DAY) {
             const t = state.tick - start;
-            if (saveAt.includes(t)) state = deserialize(serialize(state)).state;
+            if (saveAt.includes(t)) {
+              state = deserialize(serialize(state)).state;
+              // As a host loads a city (issue #324): the grower's tries at load land the same buildings.
+              if (prepared) prepareDerived(state);
+            }
             if (t === 1500) send("BuildRoad", { from: { x: l.xs - CELL * 20, z: l.zs - CELL * 8 }, to: { x: l.xs + CELL * 20, z: l.zs - CELL * 8 }, type: "street" });
             if (t === 2500) {
               const [home] = homesOn({ ...l, state }, "water");
@@ -391,7 +414,10 @@ describe("land value orders the lots", () => {
       return hashState(state);
     };
     const straight = run([]);
-    for (const at of [150, 1500, 1501, 2501, 3501, 4321]) expect(run([at]), `saved at ${at}`).toBe(straight);
+    for (const at of [150, 1500, 1501, 2501, 3501, 4321]) {
+      expect(run([at]), `saved at ${at}`).toBe(straight);
+      expect(run([at], true), `saved at ${at} and prepared`).toBe(straight);
+    }
   });
 });
 
