@@ -22,6 +22,7 @@
     "scale-cities-load.spec.ts"
   ],
   "evidence": [
+    "block-strips.spec.ts",
     "building-looks.spec.ts",
     "presets-forest.spec.ts",
     "through-lots.spec.ts"
@@ -91,6 +92,7 @@
     "statistics.spec.ts": 30,
     "terrain.spec.ts": 14,
     "through-lots.spec.ts": 53,
+    "block-strips.spec.ts": 40,
     "tools-and-buildings.spec.ts": 80,
     "two-tabs.spec.ts": 37,
     "ui-shell.spec.ts": 63,

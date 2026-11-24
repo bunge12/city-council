@@ -10,15 +10,22 @@
 //   - it folds over itself on the inside of a bend too tight for it,
 //   - the surface of another segment on the ground or a bridge covers it,
 //     whatever its network: road, rail or path,
-//   - or it overlaps a cell that claimed the ground first.
+//   - it overlaps a cell that claimed the ground first,
+//   - or the cell in front of it, nearer the road in its column, is not
+//     open, so it is cut off from its road (#341). Nothing could build on
+//     it, so it holds no ground and takes no paint.
 // Cells claim ground in a fixed order (`claimsBefore`): the older segment
 // first, by build order. Between roads of one age, the pieces of a split and
-// the streets of a grid, the anchor that starts further west, then further
-// north, then by its other end and control point. On one anchor, the cell
-// nearer its start, then its left side, then nearer the road, so where the
-// cells of one strip close up on the inside of a bend the earlier one stays.
-// None of that changes when a road is cut. A cell that is blocked for any
-// reason claims nothing, so the next cell in the order can have that ground.
+// the streets of a grid, the strip on the lower tier of the block it fronted
+// when its road was built (`segTierL`, roads/frontage.ts), so a block's long
+// sides take its corners from its ends; and
+// between strips that front a block, the row nearer its road, so two strips
+// facing across a block too shallow for both split it row by row (#341).
+// Then the anchor that starts further west, then further north, then by its
+// other end and control point. On one anchor, its left side, then the cell
+// nearer its start, then nearer the road. None of that changes when a road
+// is cut. A cell that is blocked for any reason claims
+// nothing, so the next cell in the order can have that ground.
 //
 // The result is the same as walking every cell in that order once and
 // giving each the ground no earlier cell holds. `buildCellIndex` does that.
@@ -35,6 +42,7 @@
 // settled, so the answer is the one a full walk gives, whatever order the
 // changes came in. A change too big for one tick is walked a slice a step
 // (`stepCells`, `settleCells`).
+
 //
 // `update` also lays out the zone and density arrays in state for the new
 // roads (cells.ts). An unchanged segment keeps its run. A changed one takes,
@@ -51,6 +59,7 @@ import {
   LEVEL_BRIDGE,
   LEVEL_GROUND,
   NONE,
+  NO_TIER,
   isNode,
   isSegment,
   nextSegmentAt,
@@ -99,6 +108,8 @@ export const CELL_ROAD = 4;
 export const CELL_BEND = 5;
 /** It overlaps an open cell that claims the ground first: an older road's, or an earlier one of its own road on the inside of a bend. */
 export const CELL_TAKEN = 6;
+/** The cell in front of it, nearer the road in its column, is not open, so it is cut off from its road (#341). */
+export const CELL_CUT = 7;
 /** Not yet walked. Never left behind by a walk. */
 const UNSET = 255;
 
@@ -167,6 +178,9 @@ interface SegShape {
   boxesAt: number;
   /** Each cell's CELL_ value, in run order. Null when it has no cells. */
   status: Uint8Array | null;
+  /** The tier of the strip on its left and right, from its row (`segTierL`): `NO_TIER` where it fronted no block. */
+  tierL: number;
+  tierR: number;
 }
 
 /** Surface piece `k` of `s`, as a view on its data. */
@@ -402,6 +416,8 @@ function shapeOf(net: RoadNetwork, id: number): SegShape | null {
       length: net.segLength[id] ?? 0,
       order: net.segOrder[id] ?? 0,
       anchor: readAnchor(net, id),
+      tierL: net.segTierL[id] ?? NO_TIER,
+      tierR: net.segTierR[id] ?? NO_TIER,
     },
     net.nodeX[a] ?? 0,
     net.nodeZ[a] ?? 0,
@@ -491,7 +507,14 @@ function shapeOfRow(row: SegmentRow, ax: number, az: number, bx: number, bz: num
     surfaceAt,
     boxesAt,
     status: statusBytes > 0 ? new Uint8Array(buffer, floats * 8, statusBytes).fill(UNSET) : null,
+    tierL: row.tierL,
+    tierR: row.tierR,
   };
+}
+
+/** The tier of the strip cell `local` of `s` is in. */
+function tierAt(s: SegShape, local: number): number {
+  return ((local - (local % DEPTH)) / DEPTH) & 1 ? s.tierR : s.tierL;
 }
 
 /** The surface stations `shapeOfRow` makes pieces from. Not state. */
@@ -526,7 +549,8 @@ function sameAsNet(s: SegShape | null, net: RoadNetwork, id: number): boolean {
     s.anchorBX === net.segAnchorBX[id] &&
     s.anchorBZ === net.segAnchorBZ[id] &&
     s.anchorTA === net.segAnchorTA[id] &&
-    s.anchorTB === net.segAnchorTB[id]
+    s.anchorTB === net.segAnchorTB[id] &&
+    (!s.status || (s.tierL === net.segTierL[id] && s.tierR === net.segTierR[id]))
   );
 }
 
@@ -568,9 +592,13 @@ function forSharedRuns(s: SegShape, o: SegShape, visit: (sLocal: number, oLocal:
   }
 }
 
+/** Anchor cells an anchor may have, more than any map holds: the stride of a side in `anchorOrdinal`. */
+const ANCHOR_SIDE_STRIDE = 1 << 24;
+
 /**
- * A cell's place in its anchor's claim order: anchor cell, then side on the
- * anchor, then depth. Unpacked inline, since every claim comparison needs it.
+ * A cell's place in its anchor's claim order: side on the anchor, then
+ * anchor cell, then depth. Unpacked inline, since every claim comparison
+ * needs it.
  */
 function anchorOrdinal(s: SegShape, local: number): number {
   const depth = local % DEPTH;
@@ -578,21 +606,33 @@ function anchorOrdinal(s: SegShape, local: number): number {
   const place = rest >> 1;
   const side = rest & 1;
   const k = s.reversed ? s.from + s.places - 1 - place : s.from + place;
-  return (k * 2 + (s.reversed ? 1 - side : side)) * DEPTH + depth;
+  return ((s.reversed ? 1 - side : side) * ANCHOR_SIDE_STRIDE + k) * DEPTH + depth;
 }
 
 /**
  * Whether cell `pl` of `p` (key `pk`) claims ground before cell `ql` of `q`
  * (key `qk`). The older road first. Between roads of one age, the pieces of
- * a split and the streets of a grid, the anchor that starts further west,
- * then further north, then by its other end and control point. On one
- * anchor, the cell nearer its start, then its left side, then nearer the
- * road. None of that changes when a road is cut, so the pieces of a split
- * claim in the order their parent did. Last, the lower key, which only two
- * roads laid exactly on top of each other could need.
+ * a split and the streets of a grid, the strip on the lower tier of the
+ * block it fronted when built (roads/frontage.ts), so the long sides of a
+ * block take its corners; then,
+ * between strips that front a block, the row nearer its road, so two
+ * strips facing across a shallow block split it evenly. Then the anchor
+ * that starts further west, then further north, then by its other end and
+ * control point. On one anchor, its left side, then the cell nearer its
+ * start, then nearer the road. None of that changes when a road is cut,
+ * so the pieces of a split claim in the order their parent did. Last, the lower key, which only two roads laid exactly
+ * on top of each other could need.
  */
 function claimsBefore(p: SegShape, pl: number, pk: number, q: SegShape, ql: number, qk: number): boolean {
   if (p.order !== q.order) return p.order < q.order;
+  const pt = tierAt(p, pl);
+  const qt = tierAt(q, ql);
+  if (pt !== qt) return pt < qt;
+  if (pt !== NO_TIER) {
+    const pd = pl % DEPTH;
+    const qd = ql % DEPTH;
+    if (pd !== qd) return pd < qd;
+  }
   if (p.anchorAX !== q.anchorAX) return p.anchorAX < q.anchorAX;
   if (p.anchorAZ !== q.anchorAZ) return p.anchorAZ < q.anchorAZ;
   if (p.anchorBX !== q.anchorBX) return p.anchorBX < q.anchorBX;
@@ -738,6 +778,8 @@ function walkCell(index: CellIndex, seg: number, s: SegShape, local: number): nu
   const ground = groundStatus(index.terrain, q, box);
   if (ground !== CELL_OPEN) return ground;
   if (covered(index, seg, q, box)) return CELL_ROAD;
+  // Cut off from its road. The cell in front claims first, so it is settled.
+  if (local % DEPTH > 0 && (s.status as Uint8Array)[local - 1] !== CELL_OPEN) return CELL_CUT;
   // Lost to an open cell that claims first and overlaps it.
   const key = keyOf(seg, local);
   const i0 = bucketOf(index, minX);
@@ -785,8 +827,10 @@ function setStatus(index: CellIndex, seg: number, s: SegShape, local: number, no
 
 /** Cell statuses as bits, for picking which cells to look at again. */
 const BIT_OPEN = 1 << CELL_OPEN;
-/** Cells a new surface can block: ones it does not already find blocked by ground, a fold or a road. UNSET counts as bit 7. */
-const NOT_UNDER_ROAD = BIT_OPEN | (1 << CELL_TAKEN) | (1 << 7);
+/** The bit an UNSET cell counts as in the masks below. */
+const UNSET_BIT = 8;
+/** Cells a new surface can block: ones it does not already find blocked by ground, a fold or a road. */
+const NOT_UNDER_ROAD = BIT_OPEN | (1 << CELL_TAKEN) | (1 << CELL_CUT) | (1 << UNSET_BIT);
 /** Cells a removed surface can free: ones blocked by a road. */
 const UNDER_ROAD = 1 << CELL_ROAD;
 /** Cells that lost ground to another cell. A fold depends on its own shape only. */
@@ -816,8 +860,7 @@ function forOverlappingCells(
       const s = index.segs[seg];
       const local = key - seg * KEY_STRIDE;
       const status = s?.status?.[local] ?? UNSET;
-      // UNSET counts as bit 7.
-      if (!s || ((1 << (status === UNSET ? 7 : status)) & statuses) === 0) continue;
+      if (!s || ((1 << (status === UNSET ? UNSET_BIT : status)) & statuses) === 0) continue;
       cellQuad(s, local, quadB);
       quadBoxInto(quadB, boxB);
       if (boxesTouch(box, boxB) && quadsOverlap(q, quadB)) visit(key);
@@ -848,7 +891,8 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     buildingWatch: null,
   };
   const limit = segmentIdLimit(net);
-  const order: number[] = [];
+  /** Strips with cells, as `2 * segment + side on the anchor`. */
+  const strips: number[] = [];
   for (let id = 0; id < limit; id++) {
     const s = shapeOf(net, id);
     index.segs.push(s);
@@ -856,28 +900,59 @@ export function buildCellIndex(net: RoadNetwork, terrain: Terrain): CellIndex {
     fileSurface(index, id, s, true);
     if (s.status) {
       fileCells(index, id, s, true);
-      order.push(id);
+      strips.push(2 * id, 2 * id + 1);
     }
   }
-  // In claim order: a segment's cells go in their anchor's order, and the
-  // pieces of one anchor never share an anchor cell, so sorting segments by
-  // their first cell sorts every cell.
-  order.sort((p, q) => {
-    const a = index.segs[p] as SegShape;
-    const b = index.segs[q] as SegShape;
-    const first = (s: SegShape) => (s.reversed ? (s.places - 1) * 2 * DEPTH : 0);
-    return claimsBefore(a, first(a), keyOf(p, first(a)), b, first(b), keyOf(q, first(b))) ? -1 : 1;
+  // In claim order. A strip's cells at one depth go in their anchor's
+  // order, and the pieces of one anchor never share an anchor cell, so
+  // sorting strips by their front cell nearest the anchor's start sorts the
+  // cells of every depth. Strips of one age and tier claim a row at a time
+  // when they front a block, and a whole strip at a time when not.
+  const frontOf = (strip: number) => {
+    const s = index.segs[strip >> 1] as SegShape;
+    return localOfAnchorCell(s, s.from, strip & 1, 0);
+  };
+  const fronts = new Map<number, number>();
+  for (const strip of strips) fronts.set(strip, frontOf(strip));
+  strips.sort((p, q) => {
+    const a = index.segs[p >> 1] as SegShape;
+    const b = index.segs[q >> 1] as SegShape;
+    const pl = fronts.get(p) ?? 0;
+    const ql = fronts.get(q) ?? 0;
+    return claimsBefore(a, pl, keyOf(p >> 1, pl), b, ql, keyOf(q >> 1, ql)) ? -1 : 1;
   });
-  for (const id of order) {
+  const walkRow = (strip: number, depth: number) => {
+    const id = strip >> 1;
     const s = index.segs[id] as SegShape;
     for (let j = 0; j < s.places; j++) {
-      for (let side = 0; side < 2; side++) {
-        for (let depth = 0; depth < DEPTH; depth++) {
-          const local = localOfAnchorCell(s, s.from + j, side, depth);
-          setStatus(index, id, s, local, walkCell(index, id, s, local));
+      const local = localOfAnchorCell(s, s.from + j, strip & 1, depth);
+      setStatus(index, id, s, local, walkCell(index, id, s, local));
+    }
+  };
+  for (let i = 0; i < strips.length; ) {
+    const head = index.segs[(strips[i] ?? 0) >> 1] as SegShape;
+    const tier = tierAt(head, fronts.get(strips[i] ?? 0) ?? 0);
+    let end = i + 1;
+    while (end < strips.length) {
+      const s = index.segs[(strips[end] ?? 0) >> 1] as SegShape;
+      if (s.order !== head.order || tierAt(s, fronts.get(strips[end] ?? 0) ?? 0) !== tier) break;
+      end++;
+    }
+    if (tier === NO_TIER) {
+      for (let k = i; k < end; k++) {
+        const strip = strips[k] ?? 0;
+        const s = index.segs[strip >> 1] as SegShape;
+        for (let j = 0; j < s.places; j++) {
+          for (let depth = 0; depth < DEPTH; depth++) {
+            const local = localOfAnchorCell(s, s.from + j, strip & 1, depth);
+            setStatus(index, strip >> 1, s, local, walkCell(index, strip >> 1, s, local));
+          }
         }
       }
+    } else {
+      for (let depth = 0; depth < DEPTH; depth++) for (let k = i; k < end; k++) walkRow(strips[k] ?? 0, depth);
     }
+    i = end;
   }
   return index;
 }
@@ -1118,6 +1193,8 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
         const from = o.status as Uint8Array;
         let marks = kept.get(b);
         forSharedRuns(s, o, (sl, ol) => {
+          // A strip on another tier claims in another place in the order, so it is walked.
+          if (tierAt(s, sl) !== tierAt(o, ol)) return;
           for (let d = 0; d < DEPTH; d++) {
             const local = sl + d;
             if (got[local] === 1) continue;
@@ -1186,6 +1263,8 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
           const was = c.status?.[local];
           setStatus(index, seg, c, local, CELL_ROAD);
           if (was !== CELL_OPEN) return;
+          // The cell behind it is cut off now.
+          if (local % DEPTH < DEPTH - 1 && !queue.has(key + 1)) queue.push(key + 1);
           quadBoxInto(quadC, box);
           forOverlappingCells(
             index,
@@ -1280,6 +1359,8 @@ function drain(index: CellIndex, limit: number): boolean {
     const now = walkCell(index, seg, s, local);
     setStatus(index, seg, s, local, now);
     if ((was === CELL_OPEN) === (now === CELL_OPEN)) continue;
+    // The cell behind it is cut off, or no longer, with it.
+    if (local % DEPTH < DEPTH - 1) queue.push(key + 1);
     cellQuad(s, local, q);
     quadBoxInto(q, box);
     // A cell that now holds ground can only take it from open cells; one
@@ -2331,9 +2412,17 @@ export function openCellsTakenBy(index: CellIndex, segs: readonly ReturningSegme
  * on from there: an old cell that opens takes ground from old cells after
  * it, which can free more. The preview stops at the first round, so it can
  * be wrong where a chain of old cells lies across each other's ground, and
- * the step's walk has the final say.
+ * the step's walk has the final say. The rehearsed roads carry the tiers
+ * the command would give them, so the new strips claim as they will.
  */
 export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly number[], lost: ReadonlySet<number>): Float64Array {
+  // An open cell behind one the new surfaces cover is cut off from its road, and holds no ground either.
+  const gone = new Set(lost);
+  for (const key of lost) {
+    const seg = segOfKey(key);
+    const status = index.segs[seg]?.status;
+    for (let k = key + 1; status && (k - seg * KEY_STRIDE) % DEPTH > 0 && status[k - seg * KEY_STRIDE] === CELL_OPEN; k++) gone.add(k);
+  }
   const shapes: { id: number; s: SegShape }[] = [];
   for (const id of segs) {
     const s = shapeOf(net, id);
@@ -2404,21 +2493,26 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
   };
   // Old cells that lost ground to a cell the new roads cover may have it back.
   const candidates = new Set<number>();
-  for (const key of lost) {
+  for (const key of gone) {
     const seg = segOfKey(key);
     cellQuad(index.segs[seg] as SegShape, key - seg * KEY_STRIDE, q);
     quadBoxInto(q, box);
     forOverlappingCells(index, q, box, LOST_GROUND, (k) => candidates.add(k));
   }
   const reopened = filed();
-  for (const key of [...candidates].sort((p, r) => (claimsFirst(index, p, r) ? -1 : 1))) {
+  const reopenedKeys = new Set<number>();
+  /** Whether old cell `key` would hold ground again, filing it if so. */
+  const reopen = (key: number): boolean => {
     const seg = segOfKey(key);
     const shape = index.segs[seg] as SegShape;
     const local = key - seg * KEY_STRIDE;
+    // Cut off unless the cell in front holds its ground.
+    const frontHolds = (shape.status?.[local - 1] === CELL_OPEN && !gone.has(key - 1)) || reopenedKeys.has(key - 1);
+    if (local % DEPTH > 0 && !frontHolds) return false;
     cellQuad(shape, local, q);
     quadBoxInto(q, box);
     const qBox = box;
-    if (underNew(q, qBox, -1)) continue;
+    if (underNew(q, qBox, -1)) return false;
     let blocked = false;
     forOverlappingCells(
       index,
@@ -2428,10 +2522,19 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
       () => {
         blocked = true;
       },
-      (k, ks) => blocked || lost.has(k) || !claimsBefore(index.segs[ks] as SegShape, k - ks * KEY_STRIDE, k, shape, local, key),
+      (k, ks) => blocked || gone.has(k) || !claimsBefore(index.segs[ks] as SegShape, k - ks * KEY_STRIDE, k, shape, local, key),
     );
-    if (blocked || overlapsAny(reopened, q, qBox)) continue;
+    if (blocked || overlapsAny(reopened, q, qBox)) return false;
     file(reopened, q, qBox);
+    reopenedKeys.add(key);
+    return true;
+  };
+  for (const key of [...candidates].sort((p, r) => (claimsFirst(index, p, r) ? -1 : 1))) {
+    if (!reopen(key)) continue;
+    // The cells behind it that were cut off with it are not any more.
+    const seg = segOfKey(key);
+    const status = index.segs[seg]?.status;
+    for (let k = key + 1; status && (k - seg * KEY_STRIDE) % DEPTH > 0 && status[k - seg * KEY_STRIDE] === CELL_CUT; k++) if (!reopen(k)) break;
   }
   // Every new cell, in claim order.
   const cells: { n: number; local: number }[] = [];
@@ -2446,8 +2549,11 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
     return claimsBefore(ps, p.local, keyOfCell(p), rs, r.local, keyOfCell(r)) ? -1 : 1;
   });
   const opened = filed();
+  const openedCells = new Set<number>();
   for (const c of cells) {
     const { id, s } = shapes[c.n] as { id: number; s: SegShape };
+    // Cut off unless the cell in front opened: it claims first, so it has been looked at.
+    if (c.local % DEPTH > 0 && !openedCells.has(keyOfCell(c) - 1)) continue;
     cellQuad(s, c.local, q);
     quadBoxInto(q, box);
     if (groundStatus(index.terrain, q, box) !== CELL_OPEN) continue;
@@ -2464,10 +2570,11 @@ export function newCellsOf(index: CellIndex, net: RoadNetwork, segs: readonly nu
       () => {
         blocked = true;
       },
-      (key) => blocked || lost.has(key),
+      (key) => blocked || gone.has(key),
     );
     if (blocked || overlapsAny(reopened, q, qBox) || overlapsAny(opened, q, qBox)) continue;
     file(opened, q, qBox);
+    openedCells.add(keyOfCell(c));
   }
   return Float64Array.from(opened.quads);
 }

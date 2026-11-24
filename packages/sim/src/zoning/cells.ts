@@ -12,8 +12,8 @@
 // arrays. The cells of one segment are a run in those arrays, starting at
 // `offset[segment]`, and `offset` has one more entry than there are segment
 // ids, so the run of segment s ends at `offset[s + 1]`. Within a run, cells
-// go by place, then side, then depth, which is also the order in which
-// cells of one segment claim ground. The runs are in segment id order and
+// go by place, then side, then depth. The order cells claim ground in is
+// cell-index.ts's to say. The runs are in segment id order and
 // the number of cells a segment has follows from its type, level and anchor,
 // so the layout is a function of the road graph and two cities with the same
 // roads lay their cells out the same way.

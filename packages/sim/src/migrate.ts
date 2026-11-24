@@ -4,7 +4,7 @@ import { NO_LEAVING, createPops } from "./pops/pops";
 import { STAT_TOTALS, recountTotals, statsFor } from "./stats/stats";
 import { DEMAND_PARTS, createDemand } from "./demand/demand";
 import { placeConnections } from "./roads/connections";
-import { createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
+import { NO_TIER, createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
 import { SNAPSHOT_VERSION, type SimState } from "./state";
 import { unzonedCells } from "./zoning/cells";
@@ -26,9 +26,10 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // never takes them back.
   //
   // Placing them runs today's road code, so the network takes today's level
-  // fields, build order and cell anchors first (see versions 6, 9 and 10).
+  // fields, build order, cell anchors and strip tiers first (see versions
+  // 6, 9, 10 and 28).
   4: (old) => {
-    old = cellAnchors(buildOrder(levelsAtBothEnds(old)));
+    old = stripTiers(cellAnchors(buildOrder(levelsAtBothEnds(old))));
     const roads = old["roads"] as RoadNetwork;
     const connections = placeConnections(roads, terrainOf(old["seed"] as number), old["seed"] as number);
     return { ...old, version: 5, roads, connections };
@@ -131,7 +132,35 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // none: if a rebuild was under way, nobody is matched until it is ready,
   // as before.
   26: (old) => ({ ...old, version: 27, travelLast: null }),
+  // Version 28 adds the tiers of each segment's strips of zoning cells
+  // (#341). A city saved before it never had them, so every strip, live or
+  // in the undo history, fronted no block: its cells claim as they did, and
+  // nothing a player built moves.
+  27: (old) => ({ ...stripTiers(old), version: 28 }),
 };
+
+/** The state with `segTierL` and `segTierR` on the network at `NO_TIER`, and both on every row in the undo history. */
+function stripTiers(old: Record<string, unknown>): Record<string, unknown> {
+  const net = old["roads"] as RoadNetwork;
+  const limit = net.segFlags.length;
+  // A dead id's row is all zeros, as `removeSegment` leaves it.
+  const segTierL = new Int32Array(limit);
+  const segTierR = new Int32Array(limit);
+  for (let id = 0; id < limit; id++) {
+    if (!isSegment(net, id)) continue;
+    segTierL[id] = NO_TIER;
+    segTierR[id] = NO_TIER;
+  }
+  const fields: Record<string, unknown> = { ...net, segTierL, segTierR };
+  // In the order a new network has its fields, so it saves the same way.
+  const roads = Object.fromEntries(Object.keys(createRoadNetwork()).map((key) => [key, fields[key]]));
+  const history = (old["undo"] ?? []) as { ops: OldSegOp[] }[];
+  const undo = history.map((record) => ({
+    ...record,
+    ops: record.ops.map((op) => (op.row ? { ...op, row: { ...op.row, tierL: NO_TIER, tierR: NO_TIER } } : op)),
+  }));
+  return { ...old, roads, undo };
+}
 
 /** A version 23 set of buildings with `statusSince`, each building's `builtAt`, after `builtAt` as a new state has it. */
 function withStatusSince(value: unknown): Record<string, unknown> {

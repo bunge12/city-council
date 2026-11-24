@@ -194,12 +194,24 @@ function divides(status: number): boolean {
 }
 
 /**
+ * Whether blocked cell `t` of `segment` joins its neighbours in the strip:
+ * when nothing `divides` there and the cell holding its ground is one of
+ * the same segment's, as on the inside of a tight bend. Ground another
+ * road's cells hold is ground this fill would never paint, so a strip with
+ * an older street's cells across its middle fills as two parts (#341).
+ */
+function joins(city: City, segment: number, t: ZoneTarget): boolean {
+  if (divides(statusOf(city, t))) return false;
+  return cellAt(asState(city), t.x, t.z)?.segment === segment;
+}
+
+/**
  * The open cells of segment `segment` on side `side`, `depth` rows back from
  * the road's edge, cut into the parts nothing divides (#196). Two cells are
  * joined when they are neighbours in the strip, one place apart in a row or
  * one row apart in a column, with no cell that `divides` between them: both
- * open, or joined through cells folded at a bend or overlapping another
- * open cell. A road across the strip covers a line of its cells, so the
+ * open, or joined through cells folded at a bend or overlapping an open
+ * cell of the same segment (`joins`). A road across the strip covers a line of its cells, so the
  * cells beyond it are a part of their own. Only the rows asked for count,
  * so a road that cuts them is a cut even where the rows behind it go round
  * its end. Neighbours on the diagonal are not joined, since a road crossing
@@ -215,7 +227,7 @@ export function stripParts(city: City, segment: number, side: number, depth: num
       const t = targetOf(city, segment, side, place, d);
       if (!t) continue;
       if (isOpen(city, t)) grid[place * rows + d] = { cell: t, open: true };
-      else if (!divides(statusOf(city, t))) grid[place * rows + d] = { cell: t, open: false };
+      else if (joins(city, segment, t)) grid[place * rows + d] = { cell: t, open: false };
     }
   }
   const seen = new Uint8Array(grid.length);

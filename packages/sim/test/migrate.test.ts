@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BUILDING_TYPES, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, popCount, step, submit, travelTimesReady, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
-import { LEVEL_BRIDGE, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
+import { LEVEL_BRIDGE, NO_TIER, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 import { checkUndoHistory } from "../src/undo";
 import { createDemand } from "../src/demand/demand";
@@ -38,6 +38,25 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 26) gone.push("redevelopedToday");
   if (version < 27) gone.push("travelLast");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  // Before version 28 no segment kept the tiers of its strips (#341).
+  if (version < 28 && kept["roads"]) {
+    const { segTierL, segTierR, ...roads } = kept["roads"] as SimState["roads"];
+    void segTierL;
+    void segTierR;
+    kept["roads"] = roads;
+    if (Array.isArray(kept["undo"])) {
+      kept["undo"] = (kept["undo"] as SimState["undo"]).map((record) => ({
+        ...record,
+        ops: record.ops.map((op) => {
+          if (!("row" in op)) return op;
+          const { tierL, tierR, ...row } = op.row;
+          void tierL;
+          void tierR;
+          return { ...op, row };
+        }),
+      }));
+    }
+  }
   // Before version 14 a ZoneCells left no undo record and no record held zoning.
   if (version < 14 && Array.isArray(kept["undo"])) {
     kept["undo"] = withoutZones(kept["undo"] as SimState["undo"]).map((record) => {
@@ -118,7 +137,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(27);
+    expect(SNAPSHOT_VERSION).toBe(28);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -234,6 +253,9 @@ describe("migrateState", () => {
     want["order"] = 0;
     // Version 10 adds a cell anchor. Segment 9 is gone, so its ends are not known.
     want["anchor"] = { ax: 0, az: 0, cx: 0, cz: 0, bx: 0, bz: 0, tA: 0, tB: 1 };
+    // Version 28 adds the strips' tiers: none fronted a block.
+    want["tierL"] = NO_TIER;
+    want["tierR"] = NO_TIER;
     expect(migrated.undo[0]?.ops[1]).toEqual({ op: "addSeg", id: 9, grown: true, fresh: false, row: want });
   });
 
@@ -552,7 +574,7 @@ describe("migrateState", () => {
     const migrated = migrateState(v16);
     const { growth, ...kept } = v16;
     void growth;
-    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null });
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 

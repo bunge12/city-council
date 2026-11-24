@@ -48,6 +48,7 @@ import {
   NETWORK_ROAD,
   NODE_FIXED,
   NONE,
+  NO_TIER,
   SEG_FIXED,
   addNode,
   addSegment,
@@ -75,6 +76,7 @@ import {
   subControl,
   type Quad,
 } from "./curve";
+import { assignTiers } from "./frontage";
 import { NETWORKS_ROAD, nearestNode, roadIndexOf, segmentsInBox } from "./spatial";
 import { heightAt, mapSize, type Terrain } from "../terrain/terrain";
 
@@ -1230,6 +1232,9 @@ export function buildRoad(net: RoadNetwork, terrain: Terrain, plan: RoadPlan, ag
     if (age && age.order === undefined) age.order = net.segOrder[seg] ?? 0;
     road.push(seg);
   }
+  // A road on its own takes its strips' tiers now; a grid's streets take
+  // theirs once every street is down (grid.ts).
+  if (!age) assignTiers(net, road);
   return road;
 }
 
@@ -1255,8 +1260,10 @@ export function splitSegment(net: RoadNetwork, seg: number, cuts: readonly numbe
     level: net.segLevelA[seg] ?? 0,
     levelB: net.segLevelB[seg] ?? 0,
     fixed: ((net.segFlags[seg] ?? 0) & SEG_FIXED) !== 0,
-    // The pieces are as old as the road they were cut from.
+    // The pieces are as old as the road they were cut from, and front what it fronted.
     order: net.segOrder[seg] ?? 0,
+    tierL: net.segTierL[seg] ?? NO_TIER,
+    tierR: net.segTierR[seg] ?? NO_TIER,
   };
   // And keep its cells where they were: the same anchor, each piece over its own stretch of it.
   const anchor = readAnchor(net, seg);
