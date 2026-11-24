@@ -103,9 +103,24 @@ export function formatParts(bar: DemandBar, parts: Readonly<Record<string, numbe
   return shown.map((p) => `${words[p.name] ?? p.name} ${signed(p.value)}`).join(", ");
 }
 
-/** The tooltip on a demand bar: its name and value, then its parts. */
-export function formatDemandTitle(bar: DemandBar, value: number | null, parts: Readonly<Record<string, number>> | null): string {
+/**
+ * The line the residential bar's tooltip adds while new homes are held
+ * (#330): the homes newcomers can reach still filling hold the grower and
+ * redevelopment back, so a bar above zero builds nothing. `empty` is the
+ * room left in them, the mirror's `homesWaiting().empty`.
+ */
+export function formatHomesWaiting(empty: number): string {
+  return `New homes waiting: ${whole(empty)} empty ${empty === 1 ? "place" : "places"} to fill first.`;
+}
+
+/**
+ * The tooltip on a demand bar: its name and value, then its parts. With
+ * `waiting`, the empty places in homes still filling, and the bar above
+ * zero as shown, rounded, a second line says new homes are held (#330).
+ */
+export function formatDemandTitle(bar: DemandBar, value: number | null, parts: Readonly<Record<string, number>> | null, waiting: number | null = null): string {
   if (value === null || parts === null) return `${BAR_NAMES[bar]} demand`;
   const why = formatParts(bar, parts);
-  return `${BAR_NAMES[bar]} demand ${signed(value)}. ${why === "" ? "Nothing pushes it either way." : why}`;
+  const title = `${BAR_NAMES[bar]} demand ${signed(value)}. ${why === "" ? "Nothing pushes it either way." : why}`;
+  return waiting !== null && Math.round(value) > 0 ? `${title}\n${formatHomesWaiting(waiting)}` : title;
 }

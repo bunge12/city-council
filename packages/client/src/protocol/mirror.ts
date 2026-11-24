@@ -46,7 +46,10 @@ import {
   type SystemTiming,
   checkDemand,
   copyDemand,
+  holdsHomes,
+  reachableRoomWith,
   whyNoNewcomers,
+  type ReachableRoom,
 } from "@city-council/sim";
 import { countRoom, roomAfter, roomBefore } from "./room";
 import type { ClientTransport } from "./transport";
@@ -193,6 +196,21 @@ export class SimMirror {
    */
   whyNoNewcomers(id: number): "abandoned" | "noRoute" | "noDemand" | null {
     return this.current ? whyNoNewcomers(this.current, id) : null;
+  }
+
+  /**
+   * The homes newcomers can reach, as the sim's `reachableRoom` counts them,
+   * when they hold new homes back (#330): `unfilledHomesMax` or more of
+   * them still filling, so the grower adds no home and redevelopment waits.
+   * Null while they do not, and before the first snapshot. Worked out from
+   * the copy's buildings and roads and each building's people, with one
+   * pass over the buildings, so ask it while the tooltip is open and not on
+   * every update.
+   */
+  homesWaiting(): ReachableRoom | null {
+    if (!this.current) return null;
+    const room = reachableRoomWith(this.current, this.occupancy.people);
+    return holdsHomes(room) ? room : null;
   }
 
   /**

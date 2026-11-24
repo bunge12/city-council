@@ -8,15 +8,20 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILDING_ABANDONED,
+  CONNECTION_BALANCE,
+  DEMAND_BALANCE,
   DEMAND_PARTS,
+  NONE,
   SEG_FIXED,
   TIME_BALANCE,
   ZONING_BALANCE,
   buildingCount,
+  connectionEnd,
   createState,
   createStats,
   homeRoom,
   isBuilding,
+  reachableRoom,
   segmentEnds,
   segmentTypeId,
   step,
@@ -29,7 +34,7 @@ import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror } from "../src/protocol/mirror";
 import { memoryTransportPair } from "../src/protocol/transport";
 import { MIXED_NOTE } from "../src/ui/ZoneReadout";
-import { PART_WORDS, formatDemandTitle, formatParts, formatPopulationTitle, populationTrend, trendArrow } from "../src/ui/top-figures";
+import { PART_WORDS, formatDemandTitle, formatHomesWaiting, formatParts, formatPopulationTitle, populationTrend, trendArrow } from "../src/ui/top-figures";
 
 const SEED = 2026;
 const RESIDENTIAL = ZONING_BALANCE.zones.findIndex((z) => z.id === "residential") + 1;
@@ -170,6 +175,73 @@ describe("the room the homes hold", () => {
   });
 });
 
+/**
+ * Issue #330: a street of 48 cells from the first outside connection,
+ * zoned R3 six cells deep on both sides, so towers grow and fill side by
+ * side and hold new homes back while they do.
+ */
+function towerCity(): SimState {
+  const state = createState(SEED);
+  const seq = { n: 0 };
+  const r = state.roads;
+  const edge = state.connections[0] ?? NONE;
+  const inner = connectionEnd(r, edge);
+  const dx = ((r.nodeX[inner] ?? 0) - (r.nodeX[edge] ?? 0)) / CONNECTION_BALANCE.stubLength;
+  const dz = ((r.nodeZ[inner] ?? 0) - (r.nodeZ[edge] ?? 0)) / CONNECTION_BALANCE.stubLength;
+  const x = r.nodeX[inner] ?? 0;
+  const z = r.nodeZ[inner] ?? 0;
+  const cell = ZONING_BALANCE.cellSize;
+  const places = 48;
+  run(state, "BuildRoad", { from: { x, z }, to: { x: x + dx * cell * places, z: z + dz * cell * places }, type: "street" }, seq);
+  // Each side in two halves: a ZoneCells rect is at most 256 m a side.
+  for (const side of [1, -1]) {
+    for (const p0 of [0, places / 2]) {
+      const off = side * (5 + (cell * 6) / 2);
+      const [a, b] = [cell * p0 + 2, cell * (p0 + places / 2) - 2];
+      const rect = { from: { x: x + dx * a - dz * off, z: z + dz * a + dx * off }, to: { x: x + dx * b - dz * off, z: z + dz * b + dx * off }, width: cell * 6 - 4 };
+      run(state, "ZoneCells", { zone: "residential", density: 3, rects: [rect] }, seq);
+    }
+  }
+  return state;
+}
+
+describe("the homes waiting to fill", () => {
+  it("is null before a snapshot", () => {
+    const { client } = memoryTransportPair();
+    expect(new SimMirror(client, "p1").homesWaiting()).toBeNull();
+  });
+
+  it("agrees with the sim's count while towers grow and fill, held and then not", async () => {
+    const state = towerCity();
+    const { mirror, ticks, send } = setup(state);
+    ticks(1);
+    expect(await send("SetSpeed", { speed: 4 })).toEqual({ ok: true });
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+    let held = 0;
+    let free = 0;
+    const release = holdDemandBars(100);
+    try {
+      for (let day = 0; day < 60 && (held === 0 || free === 0 || day < 20); day++) {
+        ticks(100);
+        await settle();
+        const room = reachableRoom(state);
+        const waiting = mirror.homesWaiting();
+        if (room.unfilled >= DEMAND_BALANCE.unfilledHomesMax) {
+          expect(waiting, `day ${day}`).toEqual(room);
+          held++;
+        } else {
+          expect(waiting, `day ${day}`).toBeNull();
+          if (held > 0) free++;
+        }
+      }
+    } finally {
+      release();
+    }
+    expect(held).toBeGreaterThan(0);
+    expect(free).toBeGreaterThan(0);
+  });
+});
+
 /** Statistics with population `now` and monthly samples `samples`, oldest first. */
 function stats(now: number, samples: number[]) {
   const s = createStats();
@@ -236,6 +308,16 @@ describe("the top bar's tooltips", () => {
     expect(formatDemandTitle("residential", 24.6, { openJobs: 40, unemployment: -15.4 })).toBe("Residential demand +25. Open jobs +40, Unemployment -15");
     expect(formatDemandTitle("office", 0, { educatedWorkers: 0, serviceBuyers: 0 })).toBe("Office demand 0. Nothing pushes it either way.");
     expect(formatDemandTitle("commercial", null, null)).toBe("Commercial demand");
+  });
+
+  it("adds a line on new homes waiting while the bar is above zero, and none at or below it (#330)", () => {
+    expect(formatHomesWaiting(3100)).toBe("New homes waiting: 3,100 empty places to fill first.");
+    expect(formatHomesWaiting(1)).toBe("New homes waiting: 1 empty place to fill first.");
+    expect(formatDemandTitle("residential", 40, { openJobs: 40 }, 3100)).toBe("Residential demand +40. Open jobs +40\nNew homes waiting: 3,100 empty places to fill first.");
+    expect(formatDemandTitle("residential", 40, { openJobs: 40 }, null)).toBe("Residential demand +40. Open jobs +40");
+    expect(formatDemandTitle("residential", 0.3, { openJobs: 0.3 }, 3100)).toBe("Residential demand 0. Nothing pushes it either way.");
+    expect(formatDemandTitle("residential", 0, { openJobs: 0 }, 3100)).toBe("Residential demand 0. Nothing pushes it either way.");
+    expect(formatDemandTitle("residential", -20, { unemployment: -20 }, 3100)).toBe("Residential demand -20. Unemployment -20");
   });
 
   it("has plain words for every part the sim sends", () => {

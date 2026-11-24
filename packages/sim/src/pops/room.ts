@@ -110,10 +110,9 @@ export function homeUnfilled(room: number, left: number): boolean {
  * loop both questions below share, kept tight: it runs over every building
  * on the ticks people are due and before each home the grower adds.
  */
-function eachReachableHome(state: SimState, visit: (id: number, room: number, left: number) => void): void {
+function eachReachableHome(state: SimState, visit: (id: number, room: number, left: number) => void, people: ArrayLike<number> = popIndexOf(state).people): void {
   const b = state.buildings;
   const net = state.roads;
-  const people = popIndexOf(state).people;
   const reach = outsideReachByNode(state);
   const { flags, residents, firstSeg, type, density } = b;
   const { segNetwork, segA } = net;
@@ -148,14 +147,29 @@ function eachReachableHome(state: SimState, visit: (id: number, room: number, le
 
 /** The room in every home newcomers can reach, and how much of it is empty. One pass over the buildings. */
 export function reachableRoom(state: SimState): ReachableRoom {
+  return reachableRoomWith(state, popIndexOf(state).people);
+}
+
+/**
+ * `reachableRoom`, with the people living in each building read from
+ * `people`, by building id, and not from the pops. A client's copy holds
+ * no current pops, only each building's people (M3-05), so its residential
+ * tooltip asks this to say when new homes are held (#330). Reads only the
+ * buildings, the roads and the outside connections besides.
+ */
+export function reachableRoomWith(state: SimState, people: ArrayLike<number>): ReachableRoom {
   let capacity = 0;
   let empty = 0;
   let unfilled = 0;
-  eachReachableHome(state, (_, room, left) => {
-    capacity += room;
-    empty += left;
-    if (homeUnfilled(room, left)) unfilled++;
-  });
+  eachReachableHome(
+    state,
+    (_, room, left) => {
+      capacity += room;
+      empty += left;
+      if (homeUnfilled(room, left)) unfilled++;
+    },
+    people,
+  );
   return { capacity, empty, unfilled };
 }
 

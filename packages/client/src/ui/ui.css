@@ -289,7 +289,8 @@
   font-size: 12px;
   font-weight: 400;
   line-height: 1.35;
-  white-space: normal;
+  /* Wraps, and keeps a line break in the text: the residential bar's homes waiting is a second line (#330). */
+  white-space: pre-line;
   pointer-events: none;
 }
 

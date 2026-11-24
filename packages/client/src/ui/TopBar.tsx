@@ -4,7 +4,7 @@ import { PRESETS } from "../render/config";
 import { isPreset, presetLabel } from "../render/presets";
 import { formatGameDate } from "./format";
 import { useRoom, useSaveStatus, useServices, useSim } from "./hooks";
-import { useTip } from "./Tip";
+import { tipParts, useTip, useTipState } from "./Tip";
 import { BAR_NAMES, formatDemandTitle, formatPopulationTitle, populationTrend, trendArrow } from "./top-figures";
 import { toggleDebug, toggleLog, toggleMenu, toggleSettings, toggleStats, useGraphics, usePanelOrder, useSound, useUi } from "./store";
 
@@ -123,12 +123,19 @@ const BAR_COLOURS = Object.fromEntries(
 /**
  * One demand bar, lying on its side from -100 on the left to 100 on the
  * right of a centre line, with its name and value beside it and what pushes
- * it in the tooltip (issues M3-15, #332).
+ * it in the tooltip (issues M3-15, #332). The residential bar's tooltip also
+ * says when homes still filling hold new homes back (#330). Counting those
+ * walks every building, so it is counted only while the tooltip shows.
  */
 function DemandMeter({ bar }: { bar: DemandBar }) {
+  const { mirror } = useServices();
+  const tipState = useTipState();
+  const asksWaiting = tipState.shown && bar === "residential";
   const value = useSim((s) => s?.demand[bar].value ?? null);
-  const title = useSim((s) => (s ? formatDemandTitle(bar, s.demand[bar].value, s.demand[bar].parts) : formatDemandTitle(bar, null, null)));
-  const { props, tip } = useTip(title);
+  const title = useSim((s) =>
+    s ? formatDemandTitle(bar, s.demand[bar].value, s.demand[bar].parts, asksWaiting ? (mirror.homesWaiting()?.empty ?? null) : null) : formatDemandTitle(bar, null, null),
+  );
+  const { props, tip } = tipParts(tipState, title);
   const shown = value === null ? null : Math.round(value);
   const size = value === null ? 0 : Math.min(100, Math.abs(value)) / 2;
   return (
