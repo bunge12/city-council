@@ -417,15 +417,43 @@ describe("a client slower than the sim (issue #345)", () => {
     expect(deltas(waiting).length).toBe(3 + MAX_DELTAS_OUT);
   });
 
+  it("sends an advance's delta at once, whatever is out, for the caller waiting on it", () => {
+    const { host, waiting, run } = slowSetup();
+    run(1000);
+    host.hold();
+    host.advance(3);
+    expect(deltas(waiting).map((d) => [d.seq, d.tick, d.steps])).toEqual([[0, 1, 1], [1, 2, 1], [2, 13, 11]]);
+  });
+
+  it("is told a delta was taken even when something listening to the mirror threw", () => {
+    const { host, slow, waiting, take, run } = slowSetup();
+    const mirror = new SimMirror(slow, "p1");
+    take();
+    let thrown = 0;
+    mirror.subscribe((update) => {
+      if (update.kind !== "delta" || thrown > 0) return;
+      thrown++;
+      throw new Error("a listener broke");
+    });
+    run(1000);
+    expect(() => take(1)).toThrow("a listener broke");
+    take();
+    run(1000);
+    for (let i = 0; i < 10 && waiting.length > 0; i++) take();
+    expect(mirror.state?.tick).toBe(host.tick);
+    expect(host.tick).toBe(20);
+  });
+
   it("keeps a mirror that takes a message every 700 ms equal to the host, commands and all", async () => {
     const { host, slow, waiting, take, run } = slowSetup();
     const mirror = new SimMirror(slow, "p1");
     take();
     const rng = seedRng(3);
     let most = 0;
+    const outcomes: Promise<unknown>[] = [];
     for (let i = 0; i < 60; i++) {
-      if (nextInt(rng, 3) === 0) void mirror.sendCommand("SetSpeed", { speed: ([0, 1, 2, 4] as const)[nextInt(rng, 4)] });
-      if (nextInt(rng, 2) === 0) void mirror.sendCommand("NoOp");
+      if (nextInt(rng, 3) === 0) outcomes.push(mirror.sendCommandSettled("SetSpeed", { speed: ([0, 1, 2, 4] as const)[nextInt(rng, 4)] }));
+      if (nextInt(rng, 2) === 0) outcomes.push(mirror.sendCommandSettled("NoOp"));
       run(700);
       most = Math.max(most, deltas(waiting).length);
       take(1);
@@ -435,6 +463,9 @@ describe("a client slower than the sim (issue #345)", () => {
     for (let i = 0; i < 10 && waiting.length > 0; i++) take();
     expect(waiting.length).toBe(0);
     expect(mirror.state?.tick).toBe(host.tick);
+    // Every command's outcome reached the page, in deltas of many steps.
+    expect(outcomes.length).toBeGreaterThan(30);
+    expect(await Promise.all(outcomes)).toEqual(outcomes.map(() => ({ ok: true })));
     const mirrored = hashMirrored(mirror.state);
     mirror.requestSnapshot();
     take();

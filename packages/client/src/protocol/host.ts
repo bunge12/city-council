@@ -354,7 +354,9 @@ export class SimHost {
    */
   advance(steps: number): void {
     for (let i = 0; i < steps; i++) this.stepOnce();
-    this.flushDelta();
+    // Whatever is out: the caller is told the steps are done right after
+    // this, and their delta must already be on its way (see `serveClock`).
+    this.flushDelta(true);
   }
 
   private stepOnce(): void {
@@ -384,7 +386,8 @@ export class SimHost {
    * before: the queue grew without end and every click waited behind it
    * (issues #335, #345). Held back, the changes stay where they are read
    * from and go in one delta once the client says it took one.
-   * `force` is for a snapshot, which must follow everything stepped so far.
+   * `force` is for a snapshot, which must follow everything stepped so far,
+   * and for `advance`, whose caller waits for the delta of its steps.
    */
   private flushDelta(force = false): void {
     if (!force && this.deltaSeq - this.ackedSeq >= MAX_DELTAS_OUT) return;
