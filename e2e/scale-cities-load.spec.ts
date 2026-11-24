@@ -20,6 +20,8 @@ import { SCALE_CITY_RESIDENTS, scaleCityFile } from "./scale-city-files";
 // In the perf project: a load of the 500,000 city into software WebGL on a
 // runner with no GPU takes minutes, and the time is the runner's, not held.
 
+declare const window: { cityCouncil: { loading(): { stages: { stage: string; at: number }[]; doneAt: number | null } } };
+
 test.use({ viewport: { width: 1280, height: 800 } });
 
 /** How long the page may take to open one city before the test gives up: it stops a hang and holds no speed. */

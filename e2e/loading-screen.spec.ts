@@ -7,6 +7,13 @@ import { cityReady, openCity, openPage } from "./helpers";
 // drawing the start view. A new city opens with none. The scale cities'
 // screen is timed in scale-cities-load.spec.ts.
 
+interface LoadingReport {
+  stages: { stage: string; at: number }[];
+  doneAt: number | null;
+}
+declare const window: { cityCouncil: { loading(): LoadingReport; renderStatus(): { readyMs: number } | null } };
+declare const document: { body: { dataset: Record<string, string | undefined> }; querySelector(selector: string): unknown };
+
 const EVERY_STAGE = "reading,terrain,roads,cells,buildings,travel,openings,map,view";
 
 /** The stages the screen showed, in order, and whether it is still up. */
