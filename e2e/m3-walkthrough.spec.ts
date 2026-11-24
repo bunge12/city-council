@@ -420,28 +420,37 @@ async function readout(page: Page, id: number): Promise<Record<string, string>> 
   return out;
 }
 
-/** Drags the bulldozer along `strip`, a road's half width in from its edge, taking every building the drag passes over. */
-async function bulldozeAlong(page: Page, strip: Strip): Promise<void> {
+/** Drags the bulldozer over every building on `strip`, roof to roof from west to east, in one stroke: one BulldozeBuilding. Returns how many it covered. */
+async function bulldozeAlong(page: Page, strip: Strip): Promise<number> {
   await noTool(page);
+  const key = await stripKey(page, strip);
+  const ids = (await buildings(page)).filter((b) => b.strip === key).map((b) => b.id);
+  if (ids.length === 0) return 0;
+  const [x, z] = stripCell(strip, 1);
+  await look(page, x, z, 360);
+  await settleBuilt(page);
+  const tops = await page.evaluate(async (ids) => {
+    const view = await window.cityCouncil.view;
+    return ids.map((id) => view.buildingTop(id));
+  }, ids);
+  const points: { x: number; y: number }[] = [];
+  for (const top of tops.filter((t) => t !== null).sort((p, q) => p.x - q.x)) points.push(await screenAt(page, top.x, top.z, top.y - 1));
   await page.keyboard.press("KeyB");
   await expect(page.locator("#bulldoze-tool")).toHaveAttribute("aria-pressed", "true");
-  const [, z] = stripCell(strip, 1);
-  const [a, b] = strip.piece === "west" ? [X0 + 12, XM - 12] : [XM + 12, X1 - 12];
-  await look(page, (a + b) / 2, z, 320);
-  await settleBuilt(page);
   const before = (await log(page)).length;
-  const p0 = await screenAt(page, a, z);
-  const p1 = await screenAt(page, b, z);
-  await page.mouse.move(p0.x, p0.y, { steps: 4 });
+  const [first, ...rest] = points;
+  if (!first) throw new Error("no building on the strip is drawn");
+  await page.mouse.move(first.x, first.y, { steps: 4 });
   await frames(page, 3);
   await expect(page.locator("#bulldoze-tag")).toHaveAttribute("data-kind", "building");
   await page.mouse.down();
-  await page.mouse.move(p1.x, p1.y, { steps: 24 });
+  for (const p of rest) await page.mouse.move(p.x, p.y, { steps: 6 });
   await frames(page, 3);
   await page.mouse.up();
   await expect.poll(async () => (await log(page)).length).toBe(before + 1);
   expect((await log(page)).at(-1)?.type).toBe("BulldozeBuilding");
   await noTool(page);
+  return ids.length;
 }
 
 /** Opens a city in `page` and checks it drew on the backend the variant asks for. */
@@ -763,9 +772,11 @@ for (const variant of [
       await settleBuilt(page);
       const leftBefore = (await stats(page)).year["departures"] ?? 0;
       const yearBefore = (await page.evaluate(() => window.cityCouncil.mirror.state?.tick)) ?? 0;
-      for (const strip of [...SHOP_STRIPS, ...FACTORY_STRIPS, OFFICE_STRIP, MIXED_STRIP]) await bulldozeAlong(page, strip);
+      const workplaces = [...SHOP_STRIPS, ...FACTORY_STRIPS, OFFICE_STRIP, MIXED_STRIP];
+      // A stroke can miss a building hidden behind a taller one, so each strip is swept until nothing stands on it.
+      for (const strip of workplaces) for (let k = 0; k < 4 && (await bulldozeAlong(page, strip)) > 0; k++);
       // Their ground unzoned, so they do not grow back.
-      await zoneStrips(page, [...SHOP_STRIPS, ...FACTORY_STRIPS, OFFICE_STRIP, MIXED_STRIP], "erase", 1, 6);
+      await zoneStrips(page, workplaces, "erase", 1, 6);
       await page.evaluate(() => window.cityCouncil.holdClock());
       await page.evaluate(() => window.cityCouncil.advance(2));
       await page.evaluate(() => window.cityCouncil.releaseClock());
