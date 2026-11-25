@@ -48,7 +48,8 @@
 
 import { checkBuildings, type BuildingState } from "./buildings/buildings";
 import { checkPops } from "./pops/pops";
-import { checkStats } from "./stats/stats";
+import { checkStats, recountTotals } from "./stats/stats";
+import { replaysUnderThisBalance } from "./balance-stamp";
 import { checkDemand } from "./demand/demand";
 import { Fnv64 } from "./hash";
 import { isLogEntry, type LogEntry } from "./log";
@@ -816,5 +817,21 @@ export function deserialize(bytes: Uint8Array): Snapshot {
     throw corrupt(`it could not be upgraded (${error instanceof Error ? error.message : String(error)})`);
   }
   checkState(state as unknown as Record<string, unknown>, pagedLog, header);
+  if (!replaysUnderThisBalance(state)) recountUnderThisBalance(state);
   return { header, state, pagedLog: (pagedLog ?? []) as LogEntry[], logDetached };
+}
+
+/**
+ * Counts the running totals again for a city saved under other balance
+ * numbers (M3 review, #365). Workers per pop, jobs per building and the
+ * split of jobs by kind come from the balance files, and every later change
+ * takes out what the numbers this build runs give: totals added under the
+ * old numbers would drift, below zero for a raised `workerShare`, and the
+ * next save would be refused as damaged. Under the same numbers a recount
+ * gives the totals the save holds.
+ */
+function recountUnderThisBalance(state: SimState): void {
+  state.stats.totals = recountTotals(state);
+  const population = state.stats.totals["population"] ?? 0;
+  if (population > state.stats.highestPopulation) state.stats.highestPopulation = population;
 }
