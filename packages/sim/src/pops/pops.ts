@@ -32,8 +32,8 @@ import { homeRoom, isAbandoned, isBuilding, type BuildingState } from "../buildi
 import { buildingJobs } from "../buildings/jobs";
 import { resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
-import { countEmployment, countFilled, countHomeDensity, countPop, countSatisfaction } from "../stats/stats";
-import { DAYS_LOW_LIMIT, POPS_BALANCE } from "./balance";
+import { countEmployment, countFilled, countHomeDensity, countNewcomersUnemployed, countPop, countSatisfaction } from "../stats/stats";
+import { DAYS_LOW_LIMIT, GRACE_DAYS_LIMIT, POPS_BALANCE } from "./balance";
 import { notePopBuilding } from "./changes";
 import { jobsProblem } from "./open-jobs";
 import { emptyHome, emptyWork, popIndexOf, linkHome, linkWork, moveHome, unlinkHome, unlinkWork, moveSatisfactionPeople, type PopIndex } from "./where";
@@ -73,6 +73,13 @@ export interface PopState {
   satisfaction: Uint8Array;
   /** Game days in a row its satisfaction has been below `satisfaction.leaveBelow` in pops.json, up to DAYS_LOW_LIMIT (M3-10). */
   daysLow: Uint8Array;
+  /**
+   * Game days left before a newcomer's workers count as unemployed in the
+   * residential bar, from `newcomer.graceDays` in pops.json down to 0, one
+   * each time the daily sweep visits it (#361). A pop that takes a freed id
+   * the day's sweep has yet to reach loses its first day the day it arrives. 0 for a pop that has settled in.
+   */
+  graceDays: Uint8Array;
   /** Removed ids, the next one to reuse last. */
   free: Int32Array;
   /**
@@ -113,7 +120,7 @@ export interface PopState {
 export const NO_LEAVING = -1;
 
 /** The per-pop arrays, in the order a new state has them. */
-export const POP_ARRAYS = ["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow"] as const;
+export const POP_ARRAYS = ["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow", "graceDays"] as const;
 
 type PopKey = (typeof POP_ARRAYS)[number];
 
@@ -127,6 +134,7 @@ const ARRAY_TYPES: Readonly<Record<PopKey | "free", new (n: number) => AnyTypedA
   children: Uint8Array,
   satisfaction: Uint8Array,
   daysLow: Uint8Array,
+  graceDays: Uint8Array,
   free: Int32Array,
 };
 
@@ -145,6 +153,7 @@ export function createPops(): PopState {
     children: new Uint8Array(0),
     satisfaction: new Uint8Array(0),
     daysLow: new Uint8Array(0),
+    graceDays: new Uint8Array(0),
     free: new Int32Array(0),
     sweep: 0,
     owed: 0,
@@ -185,6 +194,8 @@ export interface NewPop extends PopProfile {
   satisfaction: number;
   /** Game days its satisfaction has already been low, for the part of a split pop (M3-10). 0 if left out. */
   daysLow?: number;
+  /** Game days left before its workers count as unemployed in the residential bar (#361): `newcomer.graceDays` for a newcomer, what is left of it for the part of a split pop. 0 if left out. */
+  graceDays?: number;
 }
 
 /** One pop's row. */
@@ -193,6 +204,7 @@ export interface PopRow extends NewPop {
   /** The building it works in, or NO_WORK. */
   work: number;
   daysLow: number;
+  graceDays: number;
 }
 
 /** The row of pop `id`. Throws if there is no such pop. */
@@ -208,6 +220,7 @@ export function readPop(p: PopState, id: number): PopRow {
     children: p.children[id] ?? 0,
     satisfaction: p.satisfaction[id] ?? 0,
     daysLow: p.daysLow[id] ?? 0,
+    graceDays: p.graceDays[id] ?? 0,
   };
 }
 
@@ -277,6 +290,10 @@ function checkDaysLow(days: number): void {
   if (!Number.isInteger(days) || days < 0 || days > DAYS_LOW_LIMIT) throw new RangeError(`days low must be a whole number from 0 to ${DAYS_LOW_LIMIT}`);
 }
 
+function checkGraceDays(days: number): void {
+  if (!Number.isInteger(days) || days < 0 || days > GRACE_DAYS_LIMIT) throw new RangeError(`grace days must be a whole number from 0 to ${GRACE_DAYS_LIMIT}`);
+}
+
 /** Throws unless `size` people fit one pop in building `home`, beside the `others` people already there. */
 function checkHomeRoom(state: SimState, home: number, size: number, others: number): void {
   const b = state.buildings;
@@ -311,6 +328,7 @@ export function addPop(state: SimState, spec: NewPop): number {
   checkProfile(spec);
   checkSatisfaction(spec.satisfaction);
   checkDaysLow(spec.daysLow ?? 0);
+  checkGraceDays(spec.graceDays ?? 0);
   const index = popIndexOf(state);
   checkHomeRoom(state, spec.home, spec.size, index.people[spec.home] ?? 0);
   const p = state.pops;
@@ -332,6 +350,7 @@ export function addPop(state: SimState, spec: NewPop): number {
   p.children[id] = spec.children;
   p.satisfaction[id] = spec.satisfaction;
   p.daysLow[id] = spec.daysLow ?? 0;
+  p.graceDays[id] = spec.graceDays ?? 0;
   linkHome(index, p, id);
   countPop(state, id, 1);
   return id;
@@ -411,6 +430,7 @@ function clearRow(p: PopState, id: number): void {
   p.children[id] = 0;
   p.satisfaction[id] = 0;
   p.daysLow[id] = 0;
+  p.graceDays[id] = 0;
 }
 
 /**
@@ -529,7 +549,7 @@ export function setPopWork(state: SimState, id: number, work: number): void {
   linkWork(index, p, id);
   if (before !== NO_WORK) countFilled(state, before, 1);
   if (work !== NO_WORK && work !== before) countFilled(state, work, 1);
-  if ((before === NO_WORK) !== (work === NO_WORK)) countEmployment(state, popWorkers(p, id), work === NO_WORK ? -1 : 1);
+  if ((before === NO_WORK) !== (work === NO_WORK)) countEmployment(state, popWorkers(p, id), work === NO_WORK ? -1 : 1, (p.graceDays[id] ?? 0) > 0);
 }
 
 /**
@@ -573,6 +593,21 @@ export function setPopSatisfaction(state: SimState, id: number, satisfaction: nu
   p.satisfaction[id] = satisfaction;
 }
 
+/**
+ * Sets the game days of grace pop `id` has left (#361). Its workers, if it
+ * has no job, move between the unemployed newcomers and the settled
+ * unemployed when that takes it to or from 0. Throws if it is not a whole
+ * number from 0 to GRACE_DAYS_LIMIT.
+ */
+export function setPopGraceDays(state: SimState, id: number, days: number): void {
+  livePop(state, id);
+  checkGraceDays(days);
+  const p = state.pops;
+  const was = (p.graceDays[id] ?? 0) > 0;
+  p.graceDays[id] = days;
+  if (was !== days > 0 && p.work[id] === NO_WORK) countNewcomersUnemployed(state, popWorkers(p, id), days > 0 ? 1 : -1);
+}
+
 /** Sets the game days pop `id`'s satisfaction has been low. Throws if it is not a whole number from 0 to DAYS_LOW_LIMIT. */
 export function setPopDaysLow(state: SimState, id: number, days: number): void {
   livePop(state, id);
@@ -599,7 +634,9 @@ export function displaceBuildingPops(state: SimState, ids: readonly number[]): v
     if ((index.workHead[building] ?? -1) >= 0) {
       countFilled(state, building, -1);
       // Only its workers' employment moves: the building's jobs filled are already out of the totals.
-      countEmployment(state, emptyWork(index, p, building), -1);
+      const { all, newcomers } = emptyWork(index, p, building);
+      countEmployment(state, all - newcomers, -1, false);
+      countEmployment(state, newcomers, -1, true);
     }
     // Only the residents of the home's density move in the totals: its pops are still the city's people.
     const people = index.people[building] ?? 0;

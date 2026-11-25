@@ -50,7 +50,7 @@ import type { System } from "../step";
 import { noteYear } from "../stats/stats";
 import { POPS_BALANCE } from "./balance";
 import { jobsUpToLevel } from "./open-jobs";
-import { NO_LEAVING, NO_WORK, POP_ALIVE, SATISFACTION_MAX, popWorkers, removePop, setPopDaysLow, setPopSatisfaction } from "./pops";
+import { NO_LEAVING, NO_WORK, POP_ALIVE, SATISFACTION_MAX, popWorkers, removePop, setPopDaysLow, setPopGraceDays, setPopSatisfaction } from "./pops";
 import { popSlice } from "./sweep";
 import { popIndexOf } from "./where";
 
@@ -142,6 +142,8 @@ export function updateSatisfaction(state: SimState): void {
       leave(state, id);
       continue;
     }
+    const grace = p.graceDays[id] ?? 0;
+    if (grace > 0) setPopGraceDays(state, id, grace - 1);
     const target = satisfactionTarget(state, id);
     const next = stepScore(score, target);
     setPopSatisfaction(state, id, next);

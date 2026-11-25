@@ -66,6 +66,22 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
     });
   }
   if (version >= 13 && version < 21) kept["growth"] = { quota: 0, day: -1, deadline: 0, free: 0, used: 0 };
+  // Before version 29 no pop had days of grace, and no total counted the unemployed in them (#361).
+  if (version < 29) {
+    if (typeof kept["pops"] === "object" && kept["pops"] !== null) {
+      const { graceDays, ...pops } = kept["pops"] as Record<string, unknown>;
+      void graceDays;
+      kept["pops"] = pops;
+    }
+    if (typeof kept["stats"] === "object" && kept["stats"] !== null) {
+      const stats = kept["stats"] as SimState["stats"];
+      const { workersUnemployedNew, ...totals } = stats.totals;
+      const { workersUnemployedNew: series, ...history } = stats.history;
+      void workersUnemployedNew;
+      void series;
+      kept["stats"] = { ...stats, totals, history };
+    }
+  }
   // Before version 22 the pops had no plan of arrivals.
   if (version < 22 && typeof kept["pops"] === "object" && kept["pops"] !== null) {
     const { owed, ...pops } = kept["pops"] as Record<string, unknown>;
@@ -137,7 +153,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(28);
+    expect(SNAPSHOT_VERSION).toBe(29);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,

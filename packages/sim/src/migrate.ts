@@ -137,7 +137,38 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // in the undo history, fronted no block: its cells claim as they did, and
   // nothing a player built moves.
   27: (old) => ({ ...stripTiers(old), version: 28 }),
+  // Version 29 gives every pop the game days of grace it has left before
+  // the residential bar counts its workers as unemployed (#361), and the
+  // statistics the unemployed workers still in their grace, with a history
+  // of zeros as long as the others. A city saved before it had no grace, so
+  // every pop has settled in, none is left, and the bar reads what it did.
+  28: (old) => ({ ...old, version: 29, pops: popsWithGrace(old["pops"]), stats: statsWithNewcomers(old["stats"]) }),
 };
+
+/** A version 28 set of pops with the days of grace version 29 adds, none, in the order a new state has them. */
+function popsWithGrace(value: unknown): Record<string, unknown> {
+  const pops = value as Record<string, unknown> & { flags: Uint8Array };
+  const out: Record<string, unknown> = {};
+  // Only the keys the save has and the one this version adds, so a later version's fields are its own migration's to add.
+  for (const key of Object.keys(createPops())) {
+    if (key === "graceDays") out[key] = new Uint8Array(pops.flags.length);
+    else if (key in pops) out[key] = pops[key];
+  }
+  return out;
+}
+
+/** Version 28 statistics with the unemployed workers in their grace, none, and a history of zeros. Totals and history keep `STAT_TOTALS` order. */
+function statsWithNewcomers(value: unknown): Record<string, unknown> {
+  const stats = value as Record<string, unknown> & { totals: Record<string, number>; history: Record<string, Int32Array> };
+  const length = stats.history["population"]?.length ?? 0;
+  const totals: Record<string, number> = {};
+  const history: Record<string, Int32Array> = {};
+  for (const name of STAT_TOTALS) {
+    totals[name] = stats.totals[name] ?? 0;
+    history[name] = stats.history[name] ?? new Int32Array(length);
+  }
+  return { ...stats, totals, history };
+}
 
 /** The state with `segTierL` and `segTierR` on the network at `NO_TIER`, and both on every row in the undo history. */
 function stripTiers(old: Record<string, unknown>): Record<string, unknown> {
@@ -178,7 +209,10 @@ function popsWithDaysLow(value: unknown): Record<string, unknown> {
   const pops = value as Record<string, unknown> & { flags: Uint8Array };
   const added: Record<string, unknown> = { daysLow: new Uint8Array(pops.flags.length), leaveScore: NO_LEAVING, leaveAtScore: 0 };
   const out: Record<string, unknown> = {};
-  for (const key of Object.keys(createPops())) out[key] = key in added ? added[key] : pops[key];
+  for (const key of Object.keys(createPops())) {
+    if (key in added) out[key] = added[key];
+    else if (key in pops) out[key] = pops[key];
+  }
   return out;
 }
 
@@ -190,6 +224,8 @@ function statsWithSatisfaction(old: Record<string, unknown>): Record<string, unk
   const totals: Record<string, number> = {};
   const history: Record<string, Int32Array> = {};
   for (const name of STAT_TOTALS) {
+    // Totals a later version adds are that version's migration's to add.
+    if (!(name in stats.totals) && name !== "residentSatisfaction") continue;
     totals[name] = name in stats.totals ? (stats.totals[name] ?? 0) : counted;
     history[name] = stats.history[name] ?? new Int32Array(length);
   }

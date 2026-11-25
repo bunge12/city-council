@@ -198,7 +198,7 @@ function moveIn(state: SimState, d: HomeDraw): number {
   const home = d.homes[at] as number;
   const size = drawSize(rng, state.buildings.density[home] ?? 1, homeRoomLeft(state, home));
   const profile = drawProfile(rng, d.values[at] as number);
-  addPop(state, { home, size, ...profile, satisfaction: POPS_BALANCE.newcomer.satisfaction });
+  addPop(state, { home, size, ...profile, satisfaction: POPS_BALANCE.newcomer.satisfaction, graceDays: POPS_BALANCE.newcomer.graceDays });
   noteYear(state, "arrivals", size);
   if (newcomerRoomLeft(state, home) === 0) fill(d, at);
   return size;

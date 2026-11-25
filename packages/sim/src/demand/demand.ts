@@ -22,10 +22,17 @@
 // the bar is the sum of its parts. A bar that would go from 80 to -80 in a
 // day takes a few days, and the city does not flicker.
 //
-// Two parts are not an input times a weight. `outsidePull` holds the
-// residential bar's target at least at `outsidePull.bar` until the city has
-// `outsidePull.untilResidents` residents, so the first houses always come,
-// whatever the other inputs say. `outsideRoute` takes away whatever the
+// Two parts are not an input times a weight. `outsidePull` adds
+// `outsidePull.bar` to the residential bar's target while the city has
+// never had `outsidePull.untilResidents` residents, and again whenever it
+// has nobody, so an empty city reads that much and its first houses come.
+// It is added to the other parts, not a floor under them (#361): a town
+// with no jobs reads its unemployment, falls below zero and empties. Its
+// first newcomers are not held back by that, because the unemployment part
+// leaves out the workers of pops still in their first `newcomer.graceDays`
+// days (pops.json), who are looking for work. It keys on the most residents
+// the city has had, so a city that shrinks back under the number does not
+// get it back until it is empty. `outsideRoute` takes away whatever the
 // industrial bar's other parts add up to above 0 while nothing the city has
 // built reaches an outside connection: factories need a route out.
 //
@@ -87,6 +94,13 @@ export interface DemandInputs {
   totals: StatTotals;
   /** Road segments the player built on pieces that reach an outside connection (`segmentsReachingOutside`). */
   segmentsOutside: number;
+  /**
+   * The most residents the city has had (`stats.highestPopulation`). The
+   * pull from outside stops once it reaches `untilResidents`, until the city
+   * is empty again. Left out, a test's city is taken to have never had more
+   * than it has now.
+   */
+  highestPopulation?: number;
 }
 
 /** Each bar's parts as the inputs put them today, before the day's share is taken. */
@@ -121,16 +135,16 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
   // in it reads 0 rather than the neutral score's distance from 0.
   const r = balance.residential;
   const jobsPart = r.openJobs * per(openJobs, workers);
-  const unemploymentPart = r.unemployment * per(unemployed, workers);
+  // Newcomers still in their grace are looking for work, not out of it (#361).
+  const unemploymentPart = r.unemployment * per(positive(unemployed - at(t, "workersUnemployedNew")), workers);
   const satisfactionPart = residents > 0 ? (r.satisfaction * (at(t, "residentSatisfaction") / residents - balance.satisfactionNeutral)) / 100 : 0;
   const pull = balance.outsidePull;
-  const others = jobsPart + unemploymentPart + satisfactionPart;
-  const pulled = residents < pull.untilResidents && others < pull.bar;
+  const highest = Math.max(residents, inputs.highestPopulation ?? 0);
   const residential: Record<string, number> = {
     openJobs: jobsPart,
     unemployment: unemploymentPart,
     satisfaction: satisfactionPart,
-    outsidePull: pulled ? pull.bar - others : 0,
+    outsidePull: residents === 0 || highest < pull.untilResidents ? pull.bar : 0,
   };
 
   // Commercial: the spending no shop serves yet, and workers to staff new
@@ -215,7 +229,11 @@ export function moveDemand(demand: DemandState, targets: DemandTargets, share: n
 /** On a game day's first tick, the bars take the day's step toward where the totals put them. */
 export function updateDemand(state: SimState): void {
   if (state.tick % TIME_BALANCE.ticksPerDay !== 0) return;
-  const targets = demandTargets({ totals: state.stats.totals, segmentsOutside: segmentsReachingOutside(state) });
+  const targets = demandTargets({
+    totals: state.stats.totals,
+    segmentsOutside: segmentsReachingOutside(state),
+    highestPopulation: state.stats.highestPopulation,
+  });
   moveDemand(state.demand, targets, DEMAND_BALANCE.dailyShare);
 }
 
