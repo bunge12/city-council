@@ -56,6 +56,8 @@ export function recountRoadUpkeep(net: RoadNetwork): number {
 /** The running sum for one network. Derived data: not state. */
 interface UpkeepSum {
   total: number;
+  /** Set when rows were copied in past the observers (`markRoadUpkeepStale`); the next read counts again. */
+  stale: boolean;
 }
 
 const sums = new WeakMap<RoadNetwork, UpkeepSum>();
@@ -63,7 +65,7 @@ const sums = new WeakMap<RoadNetwork, UpkeepSum>();
 function sumOf(net: RoadNetwork): UpkeepSum {
   let sum = sums.get(net);
   if (!sum) {
-    const made: UpkeepSum = { total: recountRoadUpkeep(net) };
+    const made: UpkeepSum = { total: recountRoadUpkeep(net), stale: false };
     // Told after a segment is added and before one is removed, while its
     // fields hold their values; a change of type is a removal and an add.
     observeNetwork(net, {
@@ -80,7 +82,22 @@ function sumOf(net: RoadNetwork): UpkeepSum {
 
 /** What the roads of `net` cost a year to keep, in whole dollars: the running sum. Built on first use. */
 export function roadUpkeepPerYear(net: RoadNetwork): number {
-  return sumOf(net).total;
+  const sum = sumOf(net);
+  if (sum.stale) {
+    sum.total = recountRoadUpkeep(net);
+    sum.stale = false;
+  }
+  return sum.total;
+}
+
+/**
+ * Tells a running sum `net` already has that rows were copied in without
+ * the observers hearing, as a client's copy applies a road delta
+ * (roads/delta.ts): the next read counts it again. Nothing if it has none.
+ */
+export function markRoadUpkeepStale(net: RoadNetwork): void {
+  const sum = sums.get(net);
+  if (sum) sum.stale = true;
 }
 
 /**

@@ -27,6 +27,8 @@ import {
 import { isMonthStart, yearDays } from "../src/calendar";
 import { checkRoadBalance, ROAD_BALANCE } from "../src/roads/balance";
 import { NETWORK_RAIL, addNode, addSegment, createRoadNetwork, isSegment, restyleSegment, segmentIdLimit, type RoadNetwork } from "../src/roads/network";
+import { applyRoadDelta, drainRoadChanges, encodeRoadDelta, recordRoadChanges } from "../src/roads/delta";
+import { cloneState } from "../src/state";
 import { churnNetwork, growNetwork } from "./road-network-helper";
 import { submit, withEnds } from "./seen-ends";
 import { watchTreasury } from "./treasury-helper";
@@ -69,8 +71,8 @@ function liveSegments(net: RoadNetwork): number[] {
 function byHand(net: RoadNetwork, seg: number): number {
   if (((net.segFlags[seg] ?? 0) & SEG_FIXED) !== 0) return 0;
   const type = ROAD_TYPES[net.segType[seg] ?? 0] as RoadType;
-  const buildCost = (net.segLength[seg] ?? 0) * type.buildCostPerMetre * (net.segLevelA[seg] === LEVEL_BRIDGE ? type.bridge.costMultiplier : 1);
-  return Math.round(buildCost * type.upkeepShare);
+  const perMetre = type.buildCostPerMetre * (net.segLevelA[seg] === LEVEL_BRIDGE ? type.bridge.costMultiplier : 1);
+  return Math.round((net.segLength[seg] ?? 0) * perMetre * type.upkeepShare);
 }
 
 /** A street, an avenue, a one-way and a street bridge over the inlet. */
@@ -189,6 +191,30 @@ describe("the running sum", () => {
       restyleSegment(net, seg, round % 3, round % 2 === 0);
       expect(roadUpkeepPerYear(net), `round ${round}`).toBe(recountRoadUpkeep(net));
     }
+  });
+});
+
+describe("a client's copy kept by deltas", () => {
+  it("counts its yearly total again after rows are copied in past the observers", () => {
+    const state = town();
+    recordRoadChanges(state.roads);
+    const copy = cloneState(state).roads;
+    // The copy has its sum before any delta, as a road readout would build it.
+    expect(roadUpkeepPerYear(copy)).toBe(roadUpkeepPerYear(state.roads));
+    const sync = () => {
+      const changes = drainRoadChanges(state.roads);
+      if (changes) expect(applyRoadDelta(copy, encodeRoadDelta(state.roads, changes))).not.toBeTypeOf("string");
+      expect(roadUpkeepPerYear(copy)).toBe(recountRoadUpkeep(state.roads));
+    };
+    ok(state, road([4350, 4400], [4350, 4700], "street"));
+    sync();
+    ok(state, command("Undo", {}));
+    sync();
+    // The copy's observers still keep it current between deltas.
+    const a = addNode(copy, 9000, 9000, 0);
+    const b = addNode(copy, 9100, 9000, 0);
+    addSegment(copy, a, b, { type: 0 });
+    expect(roadUpkeepPerYear(copy)).toBe(recountRoadUpkeep(copy));
   });
 });
 
