@@ -12,7 +12,7 @@ import { finishConstruction } from "./building-fixtures";
 import { buildingsDrawn, canvasShot, frames, openCity, settle } from "./helpers";
 import { frameTime, mb, memory, perfFigures } from "./measure";
 import { BUILDINGS } from "../packages/client/src/render/config";
-import { CHUNKS_PER_SIDE, CHUNK_SIZE, buildScaleCity, generateTerrain, growScaleCity, heightAt, serialize } from "../packages/sim/src/index";
+import { CHUNKS_PER_SIDE, CHUNK_SIZE, buildScaleCity, generateTerrain, growScaleCity, heightAt, serialize, type Terrain } from "../packages/sim/src/index";
 
 export type Vec3 = readonly [number, number, number];
 export type Form = "full" | "simple" | "box" | "flat";
@@ -90,16 +90,22 @@ function scaleTown() {
   // Saved paused (issue #226): nothing grows while a test waits on the town or measures it, however fast the machine.
   city.state.speed = 0;
   const terrain = generateTerrain(city.state.seed);
-  const centre = city.grids.reduce((best, g) => (Math.hypot(g.x - 6000, g.z - 6000) < Math.hypot(best.x - 6000, best.z - 6000) ? g : best));
+  return { city, town, terrain, bands: bandPoses(terrain, city.grids), bytes: Buffer.from(serialize(city.state)) };
+}
+
+/** A camera pose in each zoom band. */
+export type BandPose = { band: string; position: Vec3; target: Vec3 };
+
+/** A camera pose per zoom band, as in scale.spec.ts, over the middle grid of the M1 scale city, which every scale city is built on. */
+export function bandPoses(terrain: Terrain, grids: readonly { x: number; z: number }[]): BandPose[] {
+  const centre = grids.reduce((best, g) => (Math.hypot(g.x - 6000, g.z - 6000) < Math.hypot(best.x - 6000, best.z - 6000) ? g : best));
   const focus = { x: centre.x + 288, z: centre.z + 288 };
   const ground = heightAt(terrain, focus.x, focus.z);
-  /** A camera pose per zoom band, as in scale.spec.ts, over the middle grid. */
-  const bands: { band: string; position: Vec3; target: Vec3 }[] = [
+  return [
     { band: "street", position: [focus.x, ground + 190, focus.z + 170], target: [focus.x, ground, focus.z] },
     { band: "district", position: [focus.x, ground + 1300, focus.z + 900], target: [focus.x, ground, focus.z] },
     { band: "city", position: [6000, 8400, 15_800], target: [6000, 0, 5600] },
   ];
-  return { city, town, terrain, bands, bytes: Buffer.from(serialize(city.state)) };
 }
 export const scaleCity = () => (built ??= scaleTown());
 
@@ -157,8 +163,8 @@ export interface BandReport {
  * memory in each zoom band at one graphics preset, with a screenshot of
  * each. `checkBands` checks them, after the report is written.
  */
-export async function measureBands(page: Page, testInfo: TestInfo, preset: "low" | "balanced"): Promise<Record<string, BandReport>> {
-  const { bands: BANDS } = scaleCity();
+export async function measureBands(page: Page, testInfo: TestInfo, preset: "low" | "balanced", poses?: readonly BandPose[], label = "scale city with buildings"): Promise<Record<string, BandReport>> {
+  const BANDS = poses ?? scaleCity().bands;
   await page.evaluate(async (p) => (await window.cityCouncil.view).setPreset(p), preset);
   expect(await page.evaluate(async () => (await window.cityCouncil.view).lighting().shadows)).toBe(preset !== "low");
   const bands: Record<string, BandReport> = {};
@@ -171,7 +177,7 @@ export async function measureBands(page: Page, testInfo: TestInfo, preset: "low"
     // The heap leaves out typed-array storage, so the merged meshes' geometry is reported on its own.
     const merged = { simpleMb: mb(s.mergedBytes.simple), boxMb: mb(s.mergedBytes.box), flatMb: mb(s.mergedBytes.flat) };
     bands[band] = { frameMs, ...drawn, forms: s.forms, memoryMb: { ...(await memory(page)), merged } };
-    await attachCanvas(page, testInfo, `scale city with buildings, ${band} band, ${preset}`);
+    await attachCanvas(page, testInfo, `${label}, ${band} band, ${preset}`);
   }
   return bands;
 }
