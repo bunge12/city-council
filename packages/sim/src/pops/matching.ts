@@ -247,8 +247,8 @@ function takeJob(m: Matcher, id: number, work: number): void {
     const part = partThatFits(size, children, open);
     if (part === 0) return;
     setPopSize(state, id, part);
-    // The rest keeps the household's score and its days low (M3-10), so a split never resets the time to leaving.
-    addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0 });
+    // The rest keeps the household's score and its days low (M3-10), so a split never resets the time to leaving, and its grace (#361).
+    addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0, graceDays: p.graceDays[id] ?? 0 });
   }
   setPopWork(state, id, work);
   refileOpening(state, openings, work, m.reach, m.chunks, m.filled);
@@ -259,10 +259,10 @@ function takeJob(m: Matcher, id: number, work: number): void {
 export function matchJobs(state: SimState): void {
   // While a change of roads is rebuilt, the last whole table (#313).
   if (!travelTimesReady(state) && !state.travelLast) return;
-  const { from, to } = popSlice(state);
+  const { from, to, step } = popSlice(state);
   const p = state.pops;
   let m: Matcher | null = null;
-  for (let id = from; id < to; id++) {
+  for (let id = from; id < to; id += step) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0 || p.work[id] !== NO_WORK) continue;
     if (workersFor(p.size[id] ?? 0, p.children[id] ?? 0) === 0) continue;
     if (!m) {

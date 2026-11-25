@@ -25,6 +25,8 @@ export interface PopsBalance {
     size: [number, number][];
     /** The satisfaction a newcomer starts at, from 0 to 100 (M3-08). */
     satisfaction: number;
+    /** Game days a newcomer's workers are left out of the residential bar's unemployment, from 0 to `GRACE_DAYS_LIMIT` (#361). */
+    graceDays: number;
   };
   /** The share of a pop's people who work. */
   workerShare: { withoutChildren: number; withChildren: number };
@@ -57,6 +59,9 @@ export const POP_SIZE_LIMIT = 255;
 
 /** The most `satisfaction.leaveAfterDays` may be: a pop's days below the threshold are a byte in state (pops.ts). */
 export const DAYS_LOW_LIMIT = 255;
+
+/** The most `newcomer.graceDays` may be: a pop's days of grace left are a byte in state (pops.ts). */
+export const GRACE_DAYS_LIMIT = 255;
 
 const TOP = ["popSizeCap", "displacedPerTick", "newcomer", "workerShare", "satisfaction", "turnover"];
 
@@ -98,7 +103,10 @@ export function checkPopsBalance(data: unknown): string[] {
       const s = n["satisfaction"];
       if (!("satisfaction" in n)) errors.push("newcomer.satisfaction is missing");
       else if (!Number.isSafeInteger(s) || (s as number) < 0 || (s as number) > 100) errors.push("newcomer.satisfaction must be a whole number from 0 to 100");
-      errors.push(...unknownKeys(n, ["education", "childrenShare", "size", "satisfaction"], "newcomer"));
+      const g = n["graceDays"];
+      if (!("graceDays" in n)) errors.push("newcomer.graceDays is missing");
+      else if (!Number.isSafeInteger(g) || (g as number) < 0 || (g as number) > GRACE_DAYS_LIMIT) errors.push(`newcomer.graceDays must be a whole number from 0 to ${GRACE_DAYS_LIMIT}`);
+      errors.push(...unknownKeys(n, ["education", "childrenShare", "size", "satisfaction", "graceDays"], "newcomer"));
     }
   }
 

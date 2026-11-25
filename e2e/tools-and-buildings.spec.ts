@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_TYPES, cellAt, createState, generateTerrain, heightAt, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_TYPES, POPS_BALANCE, cellAt, createState, generateTerrain, heightAt, syncCells, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
 import { addPop } from "../packages/sim/src/pops/pops";
 import { finishConstruction } from "./building-fixtures";
@@ -72,7 +72,8 @@ function houseCity(): { state: SimState; houses: number } {
     const lot = { firstSeg: cell.segment, firstSide: cell.side, firstPlace: cell.place, dir: 0, width: 2, depth: 4, backSeg: 0, backSide: 0, backPlace: 0, backDir: 0, backDepth: 0 };
     const home = addBuilding(state, { ...lot, type, residents: 3, variant: p * 7 });
     // Two people in a house with room for three, so a count of the people living there differs from the room (M3-12).
-    addPop(state, { home, size: 2, education: 1, wealth: 1, children: 0, satisfaction: 100 });
+    // Newcomers in their grace, so the residential bar does not send them away while the test runs (#361).
+    addPop(state, { home, size: 2, education: 1, wealth: 1, children: 0, satisfaction: 100, graceDays: POPS_BALANCE.newcomer.graceDays });
     houses++;
   }
   finishConstruction(state);
