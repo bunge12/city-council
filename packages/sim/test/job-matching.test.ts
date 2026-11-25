@@ -34,6 +34,7 @@ import {
   workersFor,
   workplacesHeld,
   workplacesHeldBy,
+  countZoneJobs,
   zoneJobs,
   type Command,
   type SimState,
@@ -578,6 +579,11 @@ describe("a long session", () => {
       runDays(state, 10, check);
     });
     expect(openingsProblem(state)).toBeNull();
+    // The grower reads each zone's jobs as the openings keep them, and they
+    // are what a pass over the buildings counts (#366).
+    const kept = zoneJobs(state);
+    expect(kept).toEqual(countZoneJobs(state));
+    expect(kept.jobs.reduce((sum, jobs) => sum + jobs, 0)).toBeGreaterThan(0);
     expect(state.stats.totals["workersEmployed"]).toBeGreaterThan(0);
     expectRecount(state);
   });

@@ -23,6 +23,17 @@
 //   builds it again whole.
 // - Job matching files its own takes again as it makes them.
 //
+// Each filing also counts the workplace's jobs, and how many are open, in
+// its zone of the zoning (commercial, office, industrial or mixed), for the
+// grower, which holds a zone back while too many of its jobs stand open
+// (open-jobs.ts, `workplacesHeldBy`). Counted are the live workplaces that
+// are not abandoned and whose road reaches outside, full or not, whatever
+// their travel zone, as `countZoneJobs` counts them in one pass. Until
+// #366 the grower made that pass itself, once on a tick it added a
+// workplace: about once a game day on a big city, so the engine often had
+// its compiled code thrown away between calls, and on the 500,000 scale
+// city a cold pass took 3 to 7 ms of the grower's 5 ms share.
+//
 // Built afresh or kept current, it gives the same answers: the sums are of
 // whole numbers, and each zone's list is in id order whatever order the
 // changes came in. For each level of education a Fenwick tree over the
@@ -37,7 +48,8 @@ import { NETWORK_ROAD, observeNetwork, type RoadNetwork } from "../roads/network
 import { outsideReachByNode } from "../roads/outside";
 import type { SimState } from "../state";
 import { TRAVEL_ZONES } from "../travel-times";
-import { jobsUpToLevel, openJobsFrom } from "./open-jobs";
+import { ZONING_BALANCE } from "../zoning/balance";
+import { countZoneJobs, jobsUpToLevel, openJobsFrom, type ZoneJobs } from "./open-jobs";
 import { takeOpeningNotes, watchOpenings } from "./opening-changes";
 import { POP_LEVELS, type PopState } from "./pops";
 import { popIndexOf } from "./where";
@@ -74,6 +86,16 @@ export interface Openings {
    * (`catchUpRoads`).
    */
   roadOk: Uint8Array;
+  /** By zone number of the zoning: the jobs of its workplaces counted, as `countZoneJobs` gives them. */
+  zoneJobs: Float64Array;
+  /** By zone number of the zoning: how many of those jobs are open. */
+  zoneOpen: Float64Array;
+  /** By building: the jobs it adds to `zoneJobs`, 0 while it is not counted. */
+  counted: Int32Array;
+  /** By building: the open jobs it adds to `zoneOpen`. */
+  countedOpen: Int32Array;
+  /** By building: the zone number it is counted in, 0 while it is not counted. */
+  countedZone: Uint8Array;
 }
 
 const live = new WeakMap<PopState, Openings>();
@@ -102,17 +124,58 @@ function grownTo(array: Int32Array, length: number, fill: number): Int32Array {
   return next;
 }
 
+function grownBytes(array: Uint8Array, length: number): Uint8Array {
+  if (array.length >= length) return array;
+  const next = new Uint8Array(length);
+  next.set(array);
+  return next;
+}
+
 /** Room in `o` for every building id `n` covers. */
 function fit(o: Openings, n: number): void {
   if (o.zoneOf.length >= n) return;
   o.zoneOf = grownTo(o.zoneOf, n, -1);
-  o.upTo = grownTo(o.upTo, o.zoneOf.length * POP_LEVELS, 0);
-  o.given = grownTo(o.given, o.zoneOf.length * POP_LEVELS, 0);
-  if (o.roadOk.length < o.zoneOf.length) {
-    const next = new Uint8Array(o.zoneOf.length);
-    next.set(o.roadOk);
-    o.roadOk = next;
-  }
+  const length = o.zoneOf.length;
+  o.upTo = grownTo(o.upTo, length * POP_LEVELS, 0);
+  o.given = grownTo(o.given, length * POP_LEVELS, 0);
+  o.roadOk = grownBytes(o.roadOk, length);
+  o.counted = grownTo(o.counted, length, 0);
+  o.countedOpen = grownTo(o.countedOpen, length, 0);
+  o.countedZone = grownBytes(o.countedZone, length);
+}
+
+/** Building `id`'s jobs filled, every level together, from `filled` by building times POP_LEVELS plus education. */
+function filledAt(filled: Int32Array, id: number): number {
+  const u = id * POP_LEVELS;
+  let sum = 0;
+  for (let e = 0; e < POP_LEVELS; e++) sum += filled[u + e] ?? 0;
+  return sum;
+}
+
+/** Counts building `id` as adding `jobs`, `open` of them open, to zone number `zone`, in place of what it added before. */
+function setCount(o: Openings, id: number, zone: number, jobs: number, open: number): void {
+  const was = o.countedZone[id] as number;
+  const wasJobs = o.counted[id] as number;
+  const wasOpen = o.countedOpen[id] as number;
+  if (was === zone && wasJobs === jobs && wasOpen === open) return;
+  o.zoneJobs[was] = (o.zoneJobs[was] as number) - wasJobs;
+  o.zoneOpen[was] = (o.zoneOpen[was] as number) - wasOpen;
+  o.zoneJobs[zone] = (o.zoneJobs[zone] as number) + jobs;
+  o.zoneOpen[zone] = (o.zoneOpen[zone] as number) + open;
+  o.countedZone[id] = zone;
+  o.counted[id] = jobs;
+  o.countedOpen[id] = open;
+}
+
+/** Counts building `id` as adding nothing to the zones' jobs. */
+function uncount(o: Openings, id: number): void {
+  if ((o.counted[id] as number) !== 0) setCount(o, id, 0, 0, 0);
+}
+
+/** Counts the open jobs of building `id` again after a take, which changes only its jobs filled. */
+function countOpen(o: Openings, id: number, filled: Int32Array): void {
+  const jobs = o.counted[id] as number;
+  if (jobs > 0) setCount(o, id, o.countedZone[id] as number, jobs, Math.max(0, jobs - filledAt(filled, id)));
 }
 
 /** Whether segment `seg` is a road whose first end reaches an outside connection. */
@@ -213,17 +276,28 @@ function refile(state: SimState, o: Openings, id: number, reach: Uint8Array, chu
   fit(o, id + 1);
   const b = state.buildings;
   // An abandoned workplace offers no jobs (M3-24).
-  if (id >= b.flags.length || ((b.flags[id] as number) & BUILDING_ALIVE) === 0 || ((b.flags[id] as number) & BUILDING_ABANDONED) !== 0) return unfile(o, id);
+  if (id >= b.flags.length || ((b.flags[id] as number) & BUILDING_ALIVE) === 0 || ((b.flags[id] as number) & BUILDING_ABANDONED) !== 0) {
+    uncount(o, id);
+    return unfile(o, id);
+  }
   const t = b.type[id] as number;
   const rate = JOBS_PER_CELL[t] ?? 0;
-  if (rate <= 0) return unfile(o, id);
+  if (rate <= 0) {
+    uncount(o, id);
+    return unfile(o, id);
+  }
   const roadOk = reachesOutside(state.roads, b.firstSeg[id] as number, reach);
   o.roadOk[id] = roadOk ? 1 : 0;
-  if (!roadOk) return unfile(o, id);
+  if (!roadOk) {
+    uncount(o, id);
+    return unfile(o, id);
+  }
+  // jobsForLot, written out, as `countZoneJobs` has it.
+  const jobs = Math.max(1, Math.floor(rate * ((b.width[id] as number) * (b.depth[id] as number)) + 0.5));
+  // Counted whatever its travel zone, full or not, as `countZoneJobs` counts it.
+  setCount(o, id, b.zone[id] as number, jobs, Math.max(0, jobs - filledAt(filled, id)));
   const zone = chunks[id] ?? NO_BUILDING;
   if (zone === NO_BUILDING) return unfile(o, id);
-  // jobsForLot, written out.
-  const jobs = Math.max(1, Math.floor(rate * ((b.width[id] as number) * (b.depth[id] as number)) + 0.5));
   const levels = jobsUpToLevel(t, jobs);
   const u = id * POP_LEVELS;
   // The open jobs for the highest level are the most any level has.
@@ -263,6 +337,11 @@ function build(state: SimState): Openings {
     upTo: new Int32Array(0),
     given: new Int32Array(0),
     roadOk: new Uint8Array(0),
+    zoneJobs: new Float64Array(ZONING_BALANCE.zones.length + 1),
+    zoneOpen: new Float64Array(ZONING_BALANCE.zones.length + 1),
+    counted: new Int32Array(0),
+    countedOpen: new Int32Array(0),
+    countedZone: new Uint8Array(0),
   };
   const n = state.buildings.flags.length;
   fit(o, n);
@@ -334,8 +413,20 @@ export function refileOpening(state: SimState, o: Openings, id: number, reach: U
   // jobs are as they were when it was filed, so only what the take left
   // open moves, as `refile` would move it without reading the row again
   // (issue #314).
+  countOpen(o, id, filled);
   if (openJobsFrom(o.upTo, id * POP_LEVELS, filled, id * POP_LEVELS, 2) === 0) return unfile(o, id);
   moveGiven(o, id, zone, filled);
+}
+
+/**
+ * By zone number of the zoning: the jobs offered and open in each zone's
+ * workplaces on a road that reaches outside, as `countZoneJobs` counts them,
+ * from the counts kept here. Copies, so a caller may add to them, as the
+ * grower does for each workplace it builds.
+ */
+export function zoneJobs(state: SimState): ZoneJobs {
+  const o = openingsOf(state);
+  return { jobs: o.zoneJobs.slice(), open: o.zoneOpen.slice() };
 }
 
 /** The zones with any workplace filed, ascending. */
@@ -367,6 +458,12 @@ export function openingsProblem(state: SimState): string | null {
     const a = (kept.members[z] as number[]).join(",");
     const b = (fresh.members[z] as number[]).join(",");
     if (a !== b) return `zone ${z} holds workplaces ${a}, not ${b}`;
+  }
+  const counted = countZoneJobs(state);
+  for (let z = 0; z < counted.jobs.length; z++) {
+    if (kept.zoneJobs[z] !== counted.jobs[z] || kept.zoneOpen[z] !== counted.open[z]) {
+      return `zone number ${z} counts ${kept.zoneJobs[z]} jobs, ${kept.zoneOpen[z]} open, not ${counted.jobs[z]}, ${counted.open[z]}`;
+    }
   }
   return null;
 }
