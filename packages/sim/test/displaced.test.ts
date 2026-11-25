@@ -56,6 +56,8 @@ function send(state: SimState, type: string, payload: unknown): void {
 function ok(state: SimState, type: string, payload: unknown): void {
   send(state, type, payload);
   step(state);
+  // A command that reads the cells waits while a change of roads settles.
+  while (state.pending.length > 0) step(state);
   expect(state.log.at(-1)?.type, `${type} should apply`).toBe(type);
 }
 

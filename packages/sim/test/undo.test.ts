@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { syncCells } from "../src/zoning/cell-index";
+import { cellsSettled, syncCells } from "../src/zoning/cell-index";
 import {
   createDemand,
   LEVEL_BRIDGE,
@@ -341,6 +341,8 @@ describe("Undo across players", () => {
 
 describe("An undo that is no longer valid", () => {
   function refusedAndUnchanged(state: SimState, playerId: string, reason: RegExp): void {
+    // While a change of roads settles, an undo that puts roads back waits and is checked when it applies.
+    while (!cellsSettled(state)) step(state);
     const hash = hashState(state);
     const history = state.undo;
     const result = submit(state, undo(playerId));
@@ -560,6 +562,9 @@ function playUndoFixture(): SimState {
   tick();
   send(build("p1", [4400, 4400], [4400, 4600]));
   tick();
+  // Its cells settle first: while they settle an undo that puts roads back
+  // waits, and is checked only once it applies (M2 review, #147).
+  while (!cellsSettled(state)) tick();
   // p1's new road split the street pieces p2's build made, so p2 cannot
   // take its build back until p1 takes that road back.
   send(c("p2", "Undo", {}), false);

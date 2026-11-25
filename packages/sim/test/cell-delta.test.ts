@@ -47,8 +47,11 @@ function pair() {
   /** Applies commands in one step, as a host does between two deltas. */
   const run = (...commands: Command[]) => {
     for (const c of commands) expect(submit(sim, c), c.type).toEqual({ ok: true });
-    step(sim);
-    roads = mergeRoadChanges(roads, drainRoadChanges(sim.roads));
+    // A command that reads the cells waits while a change of roads settles.
+    do {
+      step(sim);
+      roads = mergeRoadChanges(roads, drainRoadChanges(sim.roads));
+    } while (sim.pending.length > 0);
   };
   /** Sends everything since the last delta to the copy. */
   const send = () => {

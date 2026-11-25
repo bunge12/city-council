@@ -1228,8 +1228,10 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
   }
 
   // Cells with nothing to start from are walked. Queued by the job, ahead
-  // of the surface tasks that skip queued cells: a big grid has thousands,
-  // and they are counted in `fresh` already, so the task costs nothing more.
+  // of the surface tasks that skip queued cells: a big grid has thousands.
+  // Their walks are counted in `fresh` already, but queuing them is work of
+  // its own, about what filing them is: 1.7 ms in one step of a grid at the
+  // cap on the scale cities while it counted nothing (#358).
   for (const { id } of changed) {
     const status = index.segs[id]?.status;
     if (!status) continue;
@@ -1237,7 +1239,7 @@ function update(index: CellIndex, cells: CellState): { cells: CellState; work: n
       run: () => {
         for (let local = 0; local < status.length; local++) if (status[local] === UNSET) queue.push(keyOf(id, local));
       },
-      cost: 0,
+      cost: status.length * ZONING_BALANCE.settleFiledCellCost,
     });
   }
   // Cells under a surface that went may be free now, and are walked.
@@ -1622,9 +1624,12 @@ export function stepCells(state: SimState): void {
   }
   // A big change gets ticks of its own after any earlier change's, so the
   // two never have to share a tick's slice. From state alone, so a city
-  // loaded mid-settle, which settled everything at load, agrees.
+  // loaded mid-settle, which settled everything at load, agrees. The step
+  // that applies it walks nothing (`settleCells`), so it is one tick more
+  // than the slices: without it a change of two slices was walked whole by
+  // the one step after, at twice a slice and more (#358).
   const from = state.cellsReadyAt > state.tick ? state.cellsReadyAt : state.tick;
-  state.cellsReadyAt = from + ticks;
+  state.cellsReadyAt = from + 1 + ticks;
   if (index.pending) index.pending.fresh = true;
 }
 
