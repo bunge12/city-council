@@ -227,9 +227,20 @@ function table(runs: readonly CityRun[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-test("the scale cities, two game days each", () => {
+/**
+ * The scale city's shape and snapshot, without its state. Built by stepping,
+ * that state is still walking a change of roads whose queue holds over a
+ * million objects. Held for the whole test, it was half the heap, and a
+ * collection that landed in a timed tick of the 500,000 city took 260 to
+ * 330 ms where the worker's own heap takes 5 to 15 (issue #355).
+ */
+function scaleCityBase(): { shape: Omit<ScaleCity, "state">; base: Uint8Array } {
   const { state, ...shape } = buildScaleCity();
-  const base = serialize(state);
+  return { shape, base: serialize(state) };
+}
+
+test("the scale cities, two game days each", () => {
+  const { shape, base } = scaleCityBase();
   const cities = SCALE_CITY_RESIDENTS.map((residents) => generate(residents, shape, base));
   // A day on a copy of the first, untimed, so no city's ticks are the ones that compile the systems.
   const warmed = warmUp(cities[0] as Generated);
