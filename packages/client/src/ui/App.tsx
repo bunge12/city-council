@@ -17,7 +17,7 @@ import { shortcutFor, toggledSpeed } from "./shortcuts";
 import { LandValueLegend, LandValueReadout } from "./LandValue";
 import { StatsPanel } from "./StatsPanel";
 import { OverlayBar } from "./OverlayBar";
-import { setPanel, toggleDebug, toggleLog, toggleOverlay, toggleStats, useUi } from "./store";
+import { closeOverlay, setPanel, toggleDebug, toggleLog, toggleOverlay, toggleStats, useUi } from "./store";
 import { CityStatus, GameClock, SettingsMenu, TopBar } from "./TopBar";
 import { PANEL_ELEMENTS, escapeTarget, type PanelId } from "./windows";
 import { ZoneLegend } from "./ZoneLegend";
@@ -113,8 +113,12 @@ function useShortcuts(): void {
           roadTool.pickMode(action.mode);
           return;
         case "escape": {
-          // The window opened last closes first: a panel, or the tool on top with what it holds (issue #332).
+          // The window opened last closes first: a panel, an overlay, or the tool on top with what it holds (issue #332).
           const top = escapeTarget(useUi.getState().windows);
+          if (top === "overlay") {
+            closeOverlay();
+            return;
+          }
           if (top !== null && top !== "tool") {
             setPanel(top, false);
             refocus(top);
