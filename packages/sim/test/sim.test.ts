@@ -90,8 +90,6 @@ describe("step", () => {
       `end ${CELLS_SYSTEM}`,
       `start ${TRAVEL_SYSTEM}`,
       `end ${TRAVEL_SYSTEM}`,
-      `start ${BUDGET_SYSTEM}`,
-      `end ${BUDGET_SYSTEM}`,
       `start ${STATS_SYSTEM}`,
       `end ${STATS_SYSTEM}`,
       `start ${DEMAND_SYSTEM}`,
@@ -116,6 +114,8 @@ describe("step", () => {
       `end ${REDEVELOP_SYSTEM}`,
       `start ${GROWER_SYSTEM}`,
       `end ${GROWER_SYSTEM}`,
+      `start ${BUDGET_SYSTEM}`,
+      `end ${BUDGET_SYSTEM}`,
     ]);
   });
 });

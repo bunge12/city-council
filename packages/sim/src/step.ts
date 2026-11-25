@@ -6,7 +6,7 @@ import { JOBS } from "./pops/matching";
 import { SATISFACTION } from "./pops/satisfaction";
 import { TURNOVER } from "./pops/turnover";
 import { STATS } from "./stats/stats";
-import { BUDGET } from "./economy/budget";
+import { BUDGET_SYSTEM, closeMonthOn } from "./economy/budget";
 import { DEMAND } from "./demand/demand";
 import { keepBuildings } from "./buildings/upkeep";
 import { VACANCY } from "./buildings/vacancy";
@@ -25,10 +25,8 @@ export interface System {
 }
 
 /**
- * The systems `step` runs each tick, in this fixed order. The budget comes
- * first, closing the month on its first tick (M4-02), so the money anything
- * moves on that tick lands in the new month, and the statistics' sample
- * after it holds the month it filed. The statistics come next, so the yearly counts roll over before anything adds to the
+ * The systems `step` runs each tick, in this fixed order. The statistics
+ * come first, so the yearly counts roll over before anything adds to the
  * new year, and a month's sample is the city as the month opens. Demand
  * comes next, so every system that acts on the bars reads the day's. The pops'
  * sweep comes after it, so every system after it reads the day's slice.
@@ -52,7 +50,7 @@ export interface System {
  * it reads the month's centre, and the grower builds on the ground it
  * clears. The pops of a home it replaces find homes on the next tick.
  */
-export const SYSTEMS: readonly System[] = [BUDGET, STATS, DEMAND, POPS, DISPLACED, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, REDEVELOP, GROWER];
+export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, DISPLACED, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, REDEVELOP, GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";
@@ -94,7 +92,8 @@ export const BUILDINGS_SYSTEM = "buildings";
  * zoning cells still settling and brings derived data up to date with the
  * step's changes, rebuilds a slice of the travel times after a change of
  * roads, then, unless the game is paused, runs every
- * system and advances exactly one tick.
+ * system, advances exactly one tick and, when the new tick is a month's
+ * first, closes the month (economy/budget.ts).
  *
  * Returns the queued commands it dropped, with why, for the host to pass
  * on to their senders. Replay has no one to tell and ignores them.
@@ -124,5 +123,9 @@ export function step(state: SimState, timer?: SystemTimer): DroppedCommand[] {
   endTravelStep(state);
   state.tick += 1;
   state.cellReads = 0;
+  // On the new tick, before anything else happens on it: money a command
+  // moves on a month's first tick, paused or not, is the new month's, and
+  // the statistics' sample on it holds the month just filed (M4-02).
+  timed(timer, BUDGET_SYSTEM, () => closeMonthOn(state));
   return dropped;
 }

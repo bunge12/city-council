@@ -19,14 +19,14 @@ function amounts(seed: number): () => number {
 }
 
 describe("the treasury", () => {
-  it("starts a new city with the starting grant on the grants line, and the tax rates at their defaults", () => {
+  it("starts a new city with the starting grant on the grants line of the month before the first, and the tax rates at their defaults", () => {
     const state = createState(2026);
     expect(state.budget.treasury).toBe(ECONOMY.startingGrant);
-    expect(state.budget.opening).toBe(0);
-    expect(state.budget.month[LINE.grants]).toBe(ECONOMY.startingGrant);
-    expect(incomeOf(state.budget.month)).toBe(ECONOMY.startingGrant);
-    expect(expensesOf(state.budget.month)).toBe(0);
-    expect(Array.from(state.budget.lastMonth).every((n) => n === 0)).toBe(true);
+    expect(state.budget.opening).toBe(ECONOMY.startingGrant);
+    expect(state.budget.lastMonth[LINE.grants]).toBe(ECONOMY.startingGrant);
+    expect(incomeOf(state.budget.lastMonth)).toBe(ECONOMY.startingGrant);
+    expect(expensesOf(state.budget.lastMonth)).toBe(0);
+    expect(Array.from(state.budget.month).every((n) => n === 0)).toBe(true);
     expect(Array.from(state.budget.taxRates)).toEqual(ECONOMY_SLIDERS.map((s) => ECONOMY.taxRates[s].default));
     expect(checkBudget(state.budget)).toBeNull();
   });
@@ -57,9 +57,9 @@ describe("the treasury", () => {
       expected += 1234;
       expect(state.budget.treasury).toBe(expected);
     }
-    // Every line moved, the grant on the grants line with the rest.
+    // Every line moved, on top of the grant the month opened with.
     expect(state.budget.treasury).toBe(state.budget.opening + incomeOf(state.budget.month) - expensesOf(state.budget.month));
-    expect(state.budget.opening).toBe(0);
+    expect(state.budget.opening).toBe(ECONOMY.startingGrant);
     expect(checkBudget(state.budget)).toBeNull();
   });
 
@@ -122,7 +122,7 @@ describe("the daily share", () => {
 });
 
 describe("the monthly close", () => {
-  it("files the starting grant as the month before the first, on tick 0", () => {
+  it("samples the starting grant as the month before the first, on tick 0", () => {
     const state = createState(2026);
     step(state);
     expect(state.budget.lastMonth[LINE.grants]).toBe(ECONOMY.startingGrant);
@@ -142,10 +142,11 @@ describe("the monthly close", () => {
     moveMoney(state, "chargeCommercial", 500);
     const month = state.budget.month.slice();
     // To the last tick of January: nothing closes.
-    while (state.tick < JANUARY * DAY) step(state);
+    while (state.tick < JANUARY * DAY - 1) step(state);
     expect(Array.from(state.budget.month)).toEqual(Array.from(month));
+    // The step onto the first tick of February closes January, and February's first step samples it.
+    step(state);
     expect(sampleCount(state.stats)).toBe(1);
-    // The first tick of February closes January.
     step(state);
     expect(Array.from(state.budget.lastMonth)).toEqual(Array.from(month));
     expect(Array.from(state.budget.month).every((n) => n === 0)).toBe(true);
@@ -174,12 +175,34 @@ describe("the monthly close", () => {
     expect(historyOf(state.stats, "treasury")).toEqual([ECONOMY.startingGrant + 5_000_000_000]);
   });
 
+  it("files money moved on a month's first tick in the new month, paused steps and all", () => {
+    const state = createBareState(7);
+    while (state.tick < JANUARY * DAY - 1) step(state);
+    moveMoney(state, "roadUpkeep", 7);
+    // The step onto 1 February closes January before anything happens on it.
+    step(state);
+    expect(state.tick).toBe(JANUARY * DAY);
+    expect(state.budget.lastMonth[LINE.roadUpkeep]).toBe(7);
+    // What a command applied on that tick moves, here a whole paused planning session of it, is February's.
+    state.speed = 0;
+    for (let i = 0; i < 5; i++) {
+      moveMoney(state, "construction", 100);
+      step(state);
+    }
+    expect(state.tick).toBe(JANUARY * DAY);
+    state.speed = 1;
+    step(state);
+    expect(state.budget.month[LINE.construction]).toBe(500);
+    expect(state.budget.lastMonth[LINE.construction]).toBe(0);
+    expect(historyOf(state.stats, "expenses")).toEqual([0, 7]);
+  });
+
   it("closes a month only on its first tick, paused steps included", () => {
     const state = createBareState(7);
     const budget = copyBudget(state.budget);
     closeMonth(budget);
     closeMonth(budget);
-    // Twice is the month filed and then an empty one: the close is never run twice on a tick by the step.
+    // Twice is the month filed and then an empty one: the step never runs it twice on a tick.
     expect(Array.from(budget.lastMonth).every((n) => n === 0)).toBe(true);
     step(state);
     const after = copyBudget(state.budget);
@@ -227,8 +250,8 @@ describe("a long session", () => {
     watch.check(state);
     expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
     session(state, (JANUARY + FEBRUARY + 2) * DAY, (s) => watch.check(s));
-    // Tick 0, 1 February and 1 March.
-    expect(watch.closes).toBe(3);
+    // 1 February and 1 March, and a sample on each and on tick 0.
+    expect(watch.closes).toBe(2);
     expect(sampleCount(state.stats)).toBe(3);
   });
 
@@ -287,7 +310,8 @@ describe("loading and the delta", () => {
       sent = state.stats.next;
     }
     expect(copy.money).toEqual(state.stats.money);
-    expect(historyOf(copy, "taxIncome")).toEqual([77, 77, 77]);
+    // Tick 0's sample is the month before the first; the first two moves were January's.
+    expect(historyOf(copy, "taxIncome")).toEqual([0, 154, 77]);
     expect(historyOf(copy, "treasury")[2]).toBe(ECONOMY.startingGrant + 3 * (3_000_000_000 + 77));
     const delta = encodeStatsDelta(state.stats, 0);
     expect(statsDeltaProblem({ ...delta, moneySamples: new Float64Array(1) })).toMatch(/money samples/);

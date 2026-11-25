@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   CHUNKS_PER_SIDE,
   CHUNK_SIZE,
+  LINE,
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
   PROTOCOL_VERSION,
@@ -200,7 +201,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "budget", "stats", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "redevelop", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "redevelop", "grower", "budget"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -239,19 +240,42 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   });
 
   it("sends the treasury and the ledger in a delta when they change, and not otherwise", async () => {
-    const { mirror, run, received } = setup();
-    run(100);
-    // Tick 0 closed the month of the starting grant, so a delta since the snapshot carried the budget.
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    // A city with tax already taken in January, set as a save would hold it, so the close on 1 February changes the ledger.
+    const state = createBareState(7);
+    state.budget.month[LINE.taxResidential] = 500;
+    state.budget.treasury += 500;
+    const host = new SimHost(state, hostEnd, () => now);
+    const mirror = new SimMirror(client, "p1");
+    const runUntil = (tick: number) => {
+      while (host.tick < tick) {
+        now += PUMP_INTERVAL_MS;
+        host.pump();
+      }
+      now += PUMP_INTERVAL_MS;
+      host.pump();
+    };
     const deltas = () => received.filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    await mirror.sendCommand("SetSpeed", { speed: 4 });
+    const day = TIME_BALANCE.ticksPerDay;
+    // Through January nothing moves money, so no delta carries the budget.
+    runUntil(31 * day - 50);
+    expect(deltas().length).toBeGreaterThan(0);
+    expect(deltas().filter((d) => d.budget !== undefined)).toHaveLength(0);
+    // The close on 1 February changes it, and one delta carries it.
+    runUntil(31 * day + 50);
     expect(deltas().filter((d) => d.budget !== undefined)).toHaveLength(1);
-    expect(mirror.state?.budget.opening).toBe(mirror.state?.budget.treasury);
+    expect(mirror.state?.budget.lastMonth[LINE.taxResidential]).toBe(500);
+    expect(mirror.state?.budget.month[LINE.taxResidential]).toBe(0);
+    expect(mirror.state?.budget.treasury).toBe(state.budget.treasury);
+    expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
+    // After it, nothing again.
     const seen = deltas().length;
-    run(1000);
+    runUntil(33 * day);
     expect(deltas().length).toBeGreaterThan(seen);
-    expect(deltas().slice(seen).every((d) => d.budget === undefined)).toBe(true);
-    // A pause changes nothing in it either.
-    await mirror.sendCommand("SetSpeed", { speed: 0 });
-    run(500);
     expect(deltas().slice(seen).every((d) => d.budget === undefined)).toBe(true);
   });
 

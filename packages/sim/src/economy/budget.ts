@@ -4,20 +4,21 @@
 // one float64 per line for the month in progress and one for the month
 // before. `moveMoney` is the only thing that writes either, so the treasury
 // is always the month's opening balance plus the month's income less its
-// expenses. On the first tick of each game month the BUDGET system files
-// the month in progress as the month before and starts a new one at zero.
-// The statistics take their monthly sample straight after, so the history
-// holds each closed month (stats/stats.ts).
+// expenses. The step that advances the tick onto the first tick of a game
+// month files the month in progress as the month before and starts a new
+// one at zero (`closeMonthOn`), before anything happens on the new tick: a
+// command applied on that tick, paused or not, moves money in the new
+// month. The statistics sample on that tick, so the history holds each
+// closed month (stats/stats.ts).
 //
-// Tick 0 is a month's first tick too. A new city's starting grant goes on
-// the grants line when the city is made, and the close on tick 0 files it
-// as the month before the first, so every month the history holds,
-// the first included, has its treasury equal to the one before plus its
-// income less its expenses.
+// Tick 0 is a month's first tick too, and no step advances onto it. A new
+// city's starting grant goes on the grants line and is filed at once as
+// the month before the first, so every month the history holds, the first
+// included, has its treasury equal to the one before plus its income less
+// its expenses.
 
 import { isMonthStart, yearDays } from "../calendar";
 import type { SimState } from "../state";
-import type { System } from "../step";
 import { ECONOMY, ECONOMY_SLIDERS } from "./balance";
 
 /**
@@ -69,7 +70,7 @@ export function isIncome(line: LedgerLine): boolean {
 export interface BudgetState {
   /** Whole dollars. May fall below zero, down to the overdraft, which issue M4-03 enforces. */
   treasury: number;
-  /** The treasury as the month in progress opened: 0 for a new city, whose grant is on the first month's grants line. */
+  /** The treasury as the month in progress opened. A new city's first month opens with its grant. */
   opening: number;
   /** By line, in `LEDGER_LINES` order: whole dollars moved this month, each income or expense counted as a positive amount. */
   month: Float64Array;
@@ -79,10 +80,15 @@ export interface BudgetState {
   taxRates: Float64Array;
 }
 
-/** A new city's budget: the starting grant on the grants line, and the tax rates at their defaults. */
+/**
+ * A new city's budget: the starting grant on the grants line of the month
+ * before the first, filed, a first month with nothing on it yet, and the
+ * tax rates at their defaults.
+ */
 export function createBudget(): BudgetState {
   const budget = emptyBudget(0);
   moveInto(budget, "grants", ECONOMY.startingGrant);
+  closeMonth(budget);
   return budget;
 }
 
@@ -172,20 +178,18 @@ export function dailyShare(yearly: number, day: number): number {
   return Math.floor((yearly * (day + 1)) / days) - Math.floor((yearly * day) / days);
 }
 
-/** On a month's first tick, the month in progress is filed and a new one starts. */
-function keepBudget(state: SimState): void {
+/**
+ * Closes the month when `state.tick` is a month's first tick. The step
+ * calls it once, right after it advances the tick, so the close comes
+ * before the buildings, commands and systems of the new tick, paused steps
+ * on it included, and before the statistics sample the month it filed.
+ */
+export function closeMonthOn(state: SimState): void {
   if (isMonthStart(state.tick)) closeMonth(state.budget);
 }
 
-/** The name the timer hook reports for the budget system. */
+/** The name the timer hook reports for the monthly close. */
 export const BUDGET_SYSTEM = "budget";
-
-/**
- * The step's system for the monthly close. It runs before the statistics,
- * which sample the month it filed, and before anything that moves money on
- * the new month's first tick, so that money lands in the new month.
- */
-export const BUDGET: System = { name: BUDGET_SYSTEM, run: keepBudget };
 
 // --- Copies, deltas and loading ----------------------------------------------------
 

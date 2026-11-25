@@ -6,14 +6,15 @@
 // sessions under it.
 
 import { expect } from "vitest";
+import { isMonthStart } from "../src/calendar";
 import { expensesOf, incomeOf, taxIncomeOf } from "../src/economy/budget";
 import { HISTORY_LENGTH, MONEY_SERIES, sampleCount } from "../src/stats/stats";
 import type { SimState } from "../src/state";
 
 export interface TreasuryWatch {
-  /** Checks `state`, which must be the city the watch was made on, stepped any number of times since the last check but across no more than one month's close. */
+  /** Checks `state`, which must be the city the watch was made on, stepped any number of times since the last check but onto no more than one month's first tick. */
   check(state: SimState): void;
-  /** Months closed while watched. */
+  /** Months closed while watched: the steps onto a month's first tick. */
   readonly closes: number;
 }
 
@@ -26,15 +27,16 @@ function newestMoney(state: SimState): Record<(typeof MONEY_SERIES)[number], num
 }
 
 /**
- * A watch on `state`'s money from now. A new city's watch starts from a
- * treasury of 0 at its opening balance, so its starting grant is a dollar
- * moved like any other.
+ * A watch on `state`'s money from now. It starts from the treasury the
+ * month in progress opened with: a new city's starting grant, which its
+ * first month opens with.
  */
 export function watchTreasury(state: SimState): TreasuryWatch {
   // The treasury the month in progress opened at, less everything closed while watched, is where the watch began.
   const start = state.budget.opening;
   let filed = 0;
   let closes = 0;
+  let seenTick = state.tick;
   let seenNext = state.stats.next;
   let seenCount = sampleCount(state.stats);
   let lastSample = newestMoney(state);
@@ -49,10 +51,16 @@ export function watchTreasury(state: SimState): TreasuryWatch {
       for (const ledger of [b.month, b.lastMonth]) for (const dollars of ledger) expect(Number.isSafeInteger(dollars), "a ledger line holds whole dollars").toBe(true);
       expect(Number.isSafeInteger(b.treasury), "the treasury holds whole dollars").toBe(true);
       expect(b.treasury, "the treasury is the month's opening balance plus its income less its expenses").toBe(b.opening + incomeOf(b.month) - expensesOf(b.month));
+      // The step onto a month's first tick closed the month before it.
+      for (let tick = seenTick + 1; tick <= now.tick; tick++) {
+        if (!isMonthStart(tick)) continue;
+        closes++;
+        filed += incomeOf(b.lastMonth) - expensesOf(b.lastMonth);
+      }
+      seenTick = now.tick;
       const count = sampleCount(now.stats);
       if (now.stats.next !== seenNext || count !== seenCount) {
-        // A month closed, and the statistics sampled it straight after.
-        closes++;
+        // The statistics sampled the month closed last, on its first tick.
         const sample = newestMoney(now);
         expect(sample).not.toBeNull();
         expect(sample?.treasury, "the sample's treasury is the treasury at the close").toBe(b.opening);
@@ -62,7 +70,6 @@ export function watchTreasury(state: SimState): TreasuryWatch {
         if (chained && lastSample && sample) {
           expect(sample.treasury, "each month's treasury is the one before plus its income less its expenses").toBe(lastSample.treasury + sample.income - sample.expenses);
         }
-        filed += incomeOf(b.lastMonth) - expensesOf(b.lastMonth);
         lastSample = sample;
         chained = true;
         seenNext = now.stats.next;
