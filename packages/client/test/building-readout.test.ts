@@ -26,6 +26,7 @@ function row(typeId: string, over: Partial<BuildingInfo> = {}): BuildingInfo {
     type,
     residents: 4,
     jobs: 0,
+    value: 0,
     variant: 0,
     builtAt: 0,
     corners: null,

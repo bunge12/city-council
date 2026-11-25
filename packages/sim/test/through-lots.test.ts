@@ -459,6 +459,8 @@ describe("a client's copy", () => {
       if (roads || cells) expect(typeof applyCellDelta(copy, cells, roads ? [...roads.segIds] : [])).not.toBe("string");
       const buildings = drainBuildingDelta(state);
       if (buildings) expect(typeof applyBuildingDelta(copy, buildings)).not.toBe("string");
+      // The step delta carries the centre (protocol.ts), and a building's value reads the land value it sets.
+      copy.centre = { ...state.centre };
     };
     grow(state, 2);
     sync();
