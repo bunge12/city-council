@@ -46,8 +46,8 @@ describe("the balance stamp", () => {
     expect(Object.keys(BALANCE_FILES).sort()).toEqual(files.sort());
     expect(BALANCE_STAMP).toBe(balanceStampOf(BALANCE_FILES));
     // Moves with any balance number. Update it with the replay fixtures and say which number moved.
-    // #361 moved it: `newcomer.graceDays` in pops.json.
-    expect(BALANCE_STAMP).toBe("f85cd391c3d540f2");
+    // #361 moved it: `newcomer.graceDays` in pops.json, on top of #353's `bulldozeMaxBuildings`.
+    expect(BALANCE_STAMP).toBe("8534268561f94bd6");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

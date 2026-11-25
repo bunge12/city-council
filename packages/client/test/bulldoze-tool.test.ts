@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { Scene } from "three/webgpu";
 import {
+  BUILDINGS_BALANCE,
   BUILDING_CHANGED,
   NONE,
   SEG_FIXED,
@@ -223,6 +224,40 @@ describe("BulldozeToolController", () => {
     expect(liveBuildings(copy())).toEqual(before.filter((id) => id !== a && id !== b && id !== c));
     expect(((copy().roads.segFlags[road] ?? 0) & 1) !== 0).toBe(true);
     expect(copy().log.length).toBe(log + 1);
+  });
+
+  it("splits a drag over more buildings than one command may name, and the sim applies them a step apart (issue #353)", async () => {
+    const was = BUILDINGS_BALANCE.bulldozeMaxBuildings;
+    BUILDINGS_BALANCE.bulldozeMaxBuildings = 2;
+    try {
+      const { tool, apply, tick, settle, sent, copy, ui } = setup(houseCity());
+      tool.toggle();
+      const [a, b, c] = housesWestToEast(copy());
+      const before = liveBuildings(copy());
+      const log = copy().log.length;
+      const want = [a, b, c].map((id) => seen(copy(), id ?? NONE));
+      tool.dragStart();
+      for (const id of [a, b, c]) tool.dragOver(tool.pick(pickerOf({ building: id })));
+      // The tag counts the whole drag, though no one command may name it.
+      expect(tool.preview(null)).toMatchObject({ kind: "building", ids: [a, b, c], ok: true, buildings: [a, b, c].sort((p, q) => (p ?? 0) - (q ?? 0)) });
+      tool.dragEnd();
+      await apply();
+      expect(sent).toEqual([
+        { type: "BulldozeBuilding", payload: { buildings: want.slice(0, 2) } },
+        { type: "BulldozeBuilding", payload: { buildings: want.slice(2) } },
+      ]);
+      // One a step: the first is in, the second waits, and the drag stays marked until both answer.
+      expect(liveBuildings(copy())).toEqual(before.filter((id) => id !== a && id !== b));
+      expect(ui().bulldozePending).toHaveLength(1);
+      tick();
+      await settle();
+      expect(liveBuildings(copy())).toEqual(before.filter((id) => id !== a && id !== b && id !== c));
+      expect(ui().bulldozePending).toEqual([]);
+      expect(ui().bulldozeNote).toBeNull();
+      expect(copy().log.length).toBe(log + 2);
+    } finally {
+      BUILDINGS_BALANCE.bulldozeMaxBuildings = was;
+    }
   });
 
   it("a drag that starts on a road takes roads, and the buildings on them go with it", async () => {

@@ -1165,7 +1165,8 @@ describe("snapshots with a road network", () => {
     // M3-21 slowed the bars (`dailyShare`), so the stepped city's bars, which
     // these bytes hold, moved: the city for the lines below is stepped at the
     // old share, and with it the bytes are main's but for the stamp, which
-    // only the last two lines carry.
+    // only the last two lines carry. Versions 26 and 27 hold the stamp from
+    // before #353 lowered `bulldozeMaxBuildings`.
     const digest = (bytes: Uint8Array): string => {
       const h = new Fnv64();
       h.bytes(bytes);
@@ -1210,12 +1211,12 @@ describe("snapshots with a road network", () => {
     const v27 = { ...withoutGrace(withoutTiers(old)), version: 27, balance: "5f9aaa58dfbdf70d" } as SimState;
     expect(digest(serialize(v27))).toBe("19544:8605f32d704923f8");
     expect(digest(serializeDetached(v27))).toBe("19520:bb3141d10113b7d0");
-    // #361's days of grace, version 29, moved them again: taken out, with the version and the stamp set back, the bytes are main's.
-    const v28 = { ...withoutGrace(old), version: 28, balance: "5f9aaa58dfbdf70d" } as SimState;
-    expect(digest(serialize(v28))).toBe("19824:a991a0651a500902");
-    expect(digest(serializeDetached(v28))).toBe("19800:0ee01337f36ff22b");
-    expect(digest(serialize(old))).toBe("20216:f7921ea1e29a87fd");
-    expect(digest(serializeDetached(old))).toBe("20192:1b1b8d6dae871871");
+    // #361's days of grace, version 29, moved them again: taken out, with the version and #353's stamp set back, the bytes are main's.
+    const v28 = { ...withoutGrace(old), version: 28, balance: "ee59f5383ffe4031" } as SimState;
+    expect(digest(serialize(v28))).toBe("19824:f332e77b26fa3d95");
+    expect(digest(serializeDetached(v28))).toBe("19800:25cde55808090ce1");
+    expect(digest(serialize(old))).toBe("20216:b56c8e8ea7a9f9f0");
+    expect(digest(serializeDetached(old))).toBe("20192:8b770692688404d4");
     expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 

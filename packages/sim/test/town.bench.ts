@@ -143,8 +143,9 @@ const chunkShapes = new Map(chunks.map((c) => [c, cellShapesInChunk(state, c)]))
 /**
  * Grows buildings, outside the timing, until the town has `count` again or
  * the grower finds no lot, so each of twenty BulldozeBuildings at the cap
- * of 5,000 clears a town as full as the first did. The town has about
- * 57,000 buildings, too few for twenty clears without it (issue #231).
+ * clears a town as full as the first did. The town has about 57,000
+ * buildings, too few for twenty clears of 5,000, the cap until issue #353,
+ * without it (issue #231).
  */
 function regrow(count: number): void {
   for (let misses = 0; buildingCount(state.buildings) < count && misses < 100; ) if (growOne(state) < 0) misses++;
