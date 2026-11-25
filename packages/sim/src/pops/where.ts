@@ -14,6 +14,7 @@
 // answers as one kept current.
 
 import { buildingIdLimit } from "../buildings/buildings";
+import { capacityOf } from "../roads/network";
 import type { SimState } from "../state";
 import { notePopBuilding } from "./changes";
 import { noteOpening } from "./opening-changes";
@@ -99,7 +100,12 @@ function buildIndex(state: SimState): PopIndex {
     workPrev: empty,
   };
   const p = state.pops;
-  fit(index, buildingIdLimit(state.buildings), p.flags.length);
+  // Room for the ids the building and pop arrays have room for, so the
+  // first building or newcomer after a load, which takes a row reserved
+  // for it (`reserveBuildingRoom`, `reservePopRoom`), grows no list here
+  // either (issue #372).
+  const b = state.buildings.flags;
+  fit(index, Math.max(b.length, capacityOf(b)), Math.max(p.flags.length, capacityOf(p.flags)));
   // Highest id first, each to the front of its lists, so every list ends up ascending.
   for (let id = p.flags.length - 1; id >= 0; id--) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0) continue;

@@ -30,7 +30,7 @@
 // (`homeRoom`), so the running totals and everything that looks for room
 // or work leave it out.
 
-import { isSegment, resized, segmentIdLimit, type AnyTypedArray, type RoadNetwork } from "../roads/network";
+import { capacityOf, isSegment, resized, segmentIdLimit, type AnyTypedArray, type RoadNetwork } from "../roads/network";
 import type { SimState } from "../state";
 import { syncCells, type Column } from "../zoning/cell-index";
 import { CELL_LEFT, CELL_RIGHT, placesAlong } from "../zoning/cells";
@@ -185,6 +185,25 @@ export function createBuildings(): BuildingState {
     statusSince: new Float64Array(0),
     free: new Int32Array(0),
   };
+}
+
+/**
+ * Gives every per-building array room for its next id, as the first id
+ * past the end would: a copy into a buffer of double the capacity. A city
+ * loaded from a snapshot has arrays of exactly their length, so the first
+ * building after the load copied every one of them inside the grower's
+ * step, and the pop index grew its lists by building in the next tick's
+ * arrivals (issue #372). A host calls this at load (`prepareDerived`), as
+ * it does `reserveRoadRoom`. Values and lengths are unchanged, so state
+ * reads, saves and hashes the same.
+ */
+export function reserveBuildingRoom(b: BuildingState): void {
+  const arrays = b as unknown as Record<BuildingKey, AnyTypedArray>;
+  for (const key of BUILDING_ARRAYS) {
+    const array = arrays[key];
+    if (capacityOf(array) > array.length) continue;
+    arrays[key] = resized(resized(array, array.length + 1), array.length);
+  }
 }
 
 /** Number of building ids handed out, removed ones included. */
