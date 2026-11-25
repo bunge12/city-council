@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_TYPES, buildingInfo, cellAt, createState, generateTerrain, heightAt, serialize, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_TYPES, POPS_BALANCE, buildingInfo, cellAt, createState, generateTerrain, heightAt, serialize, syncCells, type SimState } from "../packages/sim/src/index";
 import { addBuilding } from "../packages/sim/src/buildings/buildings";
 import { addPop } from "../packages/sim/src/pops/pops";
 import { lotProblem } from "../packages/sim/src/buildings/where";
@@ -77,7 +77,8 @@ function fourHouses(): { state: SimState; ids: number[] } {
     if (problem !== null) throw new Error(problem);
     const lot = { firstSeg: cell.segment, firstSide: cell.side, firstPlace: cell.place, dir: 0, width: 2, depth: 4, backSeg: 0, backSide: 0, backPlace: 0, backDir: 0, backDepth: 0 };
     const id = addBuilding(state, { ...lot, type, residents: 4, variant: k * 5 });
-    if (house.people > 0) addPop(state, { home: id, size: house.people, education: 1, wealth: 1, children: 0, satisfaction: 100 });
+    // Newcomers in their grace, so the residential bar does not send them away while the test runs (#361).
+    if (house.people > 0) addPop(state, { home: id, size: house.people, education: 1, wealth: 1, children: 0, satisfaction: 100, graceDays: POPS_BALANCE.newcomer.graceDays });
     return id;
   });
   finishConstruction(state);
