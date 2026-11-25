@@ -105,3 +105,43 @@ test("an undo that would put a street back over a house is refused, and goes thr
   await expect.poll(() => page.evaluate(() => window.cityCouncil.mirror.state?.log.at(-1)?.type)).toBe("Undo");
   await attach(page, testInfo, "4 cleared the house, and Ctrl+Z put the street back");
 });
+
+// #369: an undo that would remove a road buildings stand on is refused too.
+// The player built the street at z = 4600 and another player zoned along it,
+// and houses grew. Ctrl+Z would take the street and every house on it, so it
+// is refused with the sim's reason, and goes through once the houses are
+// cleared.
+test("an undo that would remove a street houses stand on is refused, and goes through once they are cleared", async ({ page }, testInfo) => {
+  const state = createState(SEED);
+  if (!submit(state, { seq: 1, playerId: "local", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } }).ok) throw new Error("street refused");
+  step(state);
+  const zone = { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4579 }, to: { x: 4390, z: 4579 }, width: 28 }] };
+  if (!submit(state, { seq: 2, playerId: "fixture", type: "ZoneCells", payload: zone }).ok) throw new Error("zoning refused");
+  step(state);
+  for (let i = 0; i < 40 * 100; i++) step(state);
+  await openCity(page, state, { name: "Undo" });
+  // Paused, so nothing grows again on the zoning once the houses are cleared.
+  expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetSpeed", { speed: 0 }))).toEqual({ ok: true });
+  const g = groundAt(4296, 4590);
+  await page.evaluate(async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t), [
+    [4296, g + 170, 4590 + 130],
+    [4296, g, 4590],
+  ] as const);
+  await frames(page);
+  const standing = await houses(page);
+  expect(standing.length).toBeGreaterThan(5);
+  await attach(page, testInfo, "1 houses another player's zoning grew along the player's street");
+
+  const logBefore = await page.evaluate(() => window.cityCouncil.mirror.state?.log.length ?? 0);
+  await page.keyboard.press("Control+KeyZ");
+  await expect(page.locator("#undo-note")).toHaveText("Cannot undo: buildings stand on that road");
+  expect(await page.evaluate(() => window.cityCouncil.mirror.state?.log.length ?? 0)).toBe(logBefore);
+  expect((await houses(page)).length).toBe(standing.length);
+  await attach(page, testInfo, "2 Ctrl+Z refused: houses stand on the street");
+
+  expect(await page.evaluate((buildings) => window.cityCouncil.sendCommand("BulldozeBuilding", { buildings }), standing)).toEqual({ ok: true });
+  await expect.poll(async () => (await houses(page)).length).toBe(0);
+  await page.keyboard.press("Control+KeyZ");
+  await expect.poll(() => page.evaluate(() => window.cityCouncil.mirror.state?.log.at(-1)?.type)).toBe("Undo");
+  await attach(page, testInfo, "3 cleared the houses, and Ctrl+Z took the street back");
+});
