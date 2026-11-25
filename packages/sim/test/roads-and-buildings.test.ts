@@ -882,6 +882,26 @@ describe("undo of a road buildings stand on (#369)", () => {
     expectSound(state);
   });
 
+  it("goes through for an upgrade or a bulldoze of a section: the street comes back whole and keeps its buildings", () => {
+    const state = street();
+    zone(state, "residential", 1, 0, 24, 3, "north");
+    expect(fill(state).length).toBeGreaterThan(0);
+    for (const type of ["UpgradeRoad", "BulldozeRoad"]) {
+      const seg = cellAt(state, 4300, 4591)?.segment as number;
+      const payload = type === "UpgradeRoad" ? { segments: [seg], type: "avenue", sections: [[0.4, 0.6]] } : { segments: [seg], sections: [[0.9, 1]] };
+      ok(state, command(type, withEnds(state.roads, payload)));
+      while (!cellsSettled(state)) step(state);
+      const kept = live(state);
+      expect(kept.length).toBeGreaterThan(0);
+      // The command split the street: the undo removes the pieces and puts the street back.
+      expect(state.undo.at(-1)?.ops.some((op) => op.op === "addSeg")).toBe(true);
+      ok(state, command("Undo", {}));
+      while (!cellsSettled(state)) step(state);
+      expect(live(state)).toEqual(kept);
+      expectSound(state);
+    }
+  });
+
   it("goes through for a road that crossed a built street: the street's pieces join again and keep their buildings", () => {
     const state = street();
     zone(state, "residential", 1, 0, 24, 3, "north");

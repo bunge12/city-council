@@ -206,7 +206,7 @@ export function recordUndo(state: SimState, record: UndoRecord): void {
  * command removed (`takesBuiltGround`), or it removes roads while buildings
  * stand in the city, which could stand on them (`clearsBuildings`).
  */
-export function undoPutsRoadsBack(state: SimState, playerId: string): boolean {
+export function undoReadsCells(state: SimState, playerId: string): boolean {
   const record = state.undo[newestStep(state.undo, playerId)[0] ?? -1];
   if (record === undefined || record.type === ZONE_CELLS) return false;
   if (returningSegments(state.roads, record.ops).back.length > 0) return true;
@@ -316,7 +316,9 @@ function takesBuiltGround(state: SimState, ops: readonly NetworkOp[]): string | 
  * whoever's, stands on a segment it would remove. A segment whose ground a
  * road the same undo puts back carries on, as when the undo joins the
  * pieces of a road the command split, keeps its buildings (`columnMover`)
- * and does not count. Only after `rehearse` passed, so every segment the
+ * and does not count. A piece that comes back wider moves its cells out,
+ * and this does not check that ground: see PRD, "An undo that would remove
+ * a built road is refused too". Only after `rehearse` passed, so every segment the
  * command added and left is there as it added it. The cells must be
  * settled, as for `takesBuiltGround`.
  */
@@ -344,7 +346,7 @@ function clearsBuildings(state: SimState, ops: readonly NetworkOp[]): string | n
 /**
  * Whether the ground of segment `row` comes back on the segments `back`
  * puts back: together they cover its stretch of its cell anchor, with the
- * same build order, so its cells keep their ground (`relayout`).
+ * same build order, so its cells stay on their anchor cells (`relayout`).
  */
 function carriedOn(row: SegmentRow, back: readonly ReturningSegment[]): boolean {
   const a = row.anchor;

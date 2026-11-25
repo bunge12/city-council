@@ -7,7 +7,7 @@ import { bulldozeRoad, planBulldoze, planUpgrade, upgradeRoad } from "./roads/ed
 import { endJournal, reverseOps, startJournal, type NetworkOp } from "./roads/network";
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
-import { applyUndo, hasUndo, planUndo, recordUndo, undoPutsRoadsBack } from "./undo";
+import { applyUndo, hasUndo, planUndo, recordUndo, undoReadsCells } from "./undo";
 import { ZONING_BALANCE } from "./zoning/balance";
 import { endTravelWatch, startTravelWatch } from "./travel-times";
 import { cellsSettled, stepCells } from "./zoning/cell-index";
@@ -381,7 +381,7 @@ export function waitsForCells(state: SimState, command: Pick<Command, "type" | "
  * settled lands over several steps, not in one.
  */
 function readsCells(state: SimState, command: Pick<Command, "type" | "playerId">): boolean {
-  return CELL_READERS.has(command.type) || (command.type === "Undo" && undoPutsRoadsBack(state, command.playerId));
+  return CELL_READERS.has(command.type) || (command.type === "Undo" && undoReadsCells(state, command.playerId));
 }
 
 /**
