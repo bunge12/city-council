@@ -22,7 +22,8 @@ import type { SimState } from "./state";
 import { prepareTravelTimes } from "./travel-times";
 import { terrainOf } from "./terrain/cache";
 import { prepareWaterMap } from "./landvalue/water";
-import { cellsLaidOut, syncCells } from "./zoning/cell-index";
+import { cellsLaidOut, reserveCellSpare, syncCells } from "./zoning/cell-index";
+import { reserveRoadRoom } from "./roads/network";
 
 /**
  * The parts of `prepareDerived`, in the order it builds them. A host that
@@ -44,12 +45,14 @@ export function prepareDerived(state: SimState, onStage: (stage: DerivedStage) =
   onStage("terrain");
   terrainOf(state.seed);
   onStage("roads");
+  reserveRoadRoom(state.roads);
   roadIndexOf(state.roads);
   routingGraphOf(state.roads);
   prepareOutside(state);
   listBlocks(blockIndexOf(state.roads));
   onStage("cells");
   const index = syncCells(state);
+  reserveCellSpare(state);
   onStage("buildings");
   prepareBuildingIndex(state);
   prepareWaterMap(terrainOf(state.seed));

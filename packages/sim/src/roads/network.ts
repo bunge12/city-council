@@ -246,6 +246,24 @@ export function resized<T extends AnyTypedArray>(array: T, length: number): T {
   return new Type(grown.buffer, 0, length);
 }
 
+/**
+ * Gives every node and segment array room for its next id, as the first
+ * id past the end would: a copy into a buffer of double the capacity. A
+ * city loaded from a snapshot has arrays of exactly their length, so the
+ * first road built after the load copied every one of them inside that
+ * step (issue #364). A host calls this at load (`prepareDerived`), so the
+ * copy lands there. Values and lengths are unchanged, so state reads,
+ * saves and hashes the same.
+ */
+export function reserveRoadRoom(net: RoadNetwork): void {
+  const arrays = net as unknown as Record<string, AnyTypedArray>;
+  for (const key of [...NODE_ARRAYS, ...SEG_ARRAYS]) {
+    const array = arrays[key] as AnyTypedArray;
+    if (capacityOf(array) > array.length) continue;
+    arrays[key] = resized(resized(array, array.length + 1), array.length);
+  }
+}
+
 /** Number of node ids handed out, removed ones included. */
 export function nodeIdLimit(net: RoadNetwork): number {
   return net.nodeFlags.length;

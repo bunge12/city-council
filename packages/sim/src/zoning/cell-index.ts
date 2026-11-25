@@ -1555,6 +1555,24 @@ export function syncCells(state: SimState): CellIndex {
 }
 
 /**
+ * Gives the cell index the spare buffers a road change lays the cells out
+ * into, as the first change would make them. Without them the first road
+ * built after a load allocated a new zone, density and offset array for
+ * every cell of the city inside that step (issue #364). A host calls this
+ * at load (`prepareDerived`). The spare is never read, only written over.
+ */
+export function reserveCellSpare(state: SimState): void {
+  const index = live.get(state.roads);
+  if (!index || index.spare) return;
+  const cells = state.cells;
+  index.spare = {
+    offset: offsetBuffer(undefined, cells.offset, cells.offset.length),
+    zone: layoutBuffer(undefined, cells.zone, cells.zone.length),
+    density: layoutBuffer(undefined, cells.density, cells.density.length),
+  };
+}
+
+/**
  * The cell index of `state`'s roads with the cells in state laid out for
  * the roads as they are now, but without walking any change still
  * settling: segment shapes and runs are current, statuses may not be. For
