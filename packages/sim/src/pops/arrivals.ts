@@ -204,6 +204,19 @@ function moveIn(state: SimState, d: HomeDraw): number {
   return size;
 }
 
+/**
+ * Works out the land value of every home newcomers can draw now, and sizes
+ * the draw's scratch for them, for a host to call at load
+ * (`prepareDerived`). A city loaded from a save keeps no values, so the
+ * first tick people were due worked out every one inside the arrivals'
+ * share: up to 1.4 ms on the scale city of 500,000, where the ticks after
+ * read them kept (issue #372). The values are derived and the same either
+ * way, so state reads and hashes the same.
+ */
+export function prepareArrivals(state: SimState): void {
+  homeDraw(state, homesAndEmptyRoom(state).homes);
+}
+
 /** The arrivals system's work for one tick, as the header says. */
 export function arrive(state: SimState): void {
   const p = state.pops;

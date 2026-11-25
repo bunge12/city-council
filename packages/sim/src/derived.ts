@@ -12,8 +12,11 @@
 import { candidateCount, candidatesBuilt, prepareCandidates } from "./buildings/candidates";
 import { setAsideCellsWithNoLot } from "./buildings/grower";
 import { pollutionGrid, prepareBuildingIndex, segmentBuildings } from "./buildings/where";
+import { reserveBuildingRoom } from "./buildings/buildings";
 import { blockIndexOf, existingBlockIndex, listBlocks, settleBlocks } from "./roads/blocks";
 import { popIndexOf } from "./pops/where";
+import { prepareArrivals } from "./pops/arrivals";
+import { reservePopRoom } from "./pops/pops";
 import { openingsOf } from "./pops/openings";
 import { catchUpOutside, prepareOutside } from "./roads/outside";
 import { routingGraphOf } from "./roads/routing";
@@ -45,7 +48,11 @@ export function prepareDerived(state: SimState, onStage: (stage: DerivedStage) =
   onStage("terrain");
   terrainOf(state.seed);
   onStage("roads");
+  // Room for the first road, building and pop after a load, made before
+  // anything is built from those arrays (issues #364, #372).
   reserveRoadRoom(state.roads);
+  reserveBuildingRoom(state.buildings);
+  reservePopRoom(state.pops);
   roadIndexOf(state.roads);
   routingGraphOf(state.roads);
   prepareOutside(state);
@@ -59,6 +66,7 @@ export function prepareDerived(state: SimState, onStage: (stage: DerivedStage) =
   pollutionGrid(state);
   prepareCandidates(state, index, () => segmentBuildings(state));
   popIndexOf(state);
+  prepareArrivals(state);
   onStage("travel");
   prepareTravelTimes(state);
   onStage("openings");

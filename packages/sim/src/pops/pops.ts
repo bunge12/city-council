@@ -30,7 +30,7 @@
 import { BUILDING_TYPES } from "../buildings/balance";
 import { homeRoom, isAbandoned, isBuilding, type BuildingState } from "../buildings/buildings";
 import { buildingJobs } from "../buildings/jobs";
-import { resized, type AnyTypedArray } from "../roads/network";
+import { capacityOf, resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
 import { countEmployment, countFilled, countHomeDensity, countNewcomersUnemployed, countPop, countSatisfaction } from "../stats/stats";
 import { DAYS_LOW_LIMIT, GRACE_DAYS_LIMIT, POPS_BALANCE } from "./balance";
@@ -161,6 +161,25 @@ export function createPops(): PopState {
     leaveAtScore: 0,
     displaced: new Int32Array(0),
   };
+}
+
+/**
+ * Gives every per-pop array room for its next id, as the first id past the
+ * end would: a copy into a buffer of double the capacity. A city loaded
+ * from a snapshot has arrays of exactly their length, so the first
+ * newcomer after the load copied every one of them inside the tick the
+ * arrivals placed it: about 1.5 ms on the scale city of 200,000 (issue
+ * #372). A host calls this at load (`prepareDerived`), as it does
+ * `reserveRoadRoom`. Values and lengths are unchanged, so state reads,
+ * saves and hashes the same.
+ */
+export function reservePopRoom(p: PopState): void {
+  const arrays = p as unknown as Record<PopKey, AnyTypedArray>;
+  for (const key of POP_ARRAYS) {
+    const array = arrays[key];
+    if (capacityOf(array) > array.length) continue;
+    arrays[key] = resized(resized(array, array.length + 1), array.length);
+  }
 }
 
 /** Number of pop ids handed out, removed ones included. */

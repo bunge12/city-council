@@ -56,7 +56,7 @@ describe("a loaded city's room for its first road (#364)", () => {
     const before = arrays(state).map((array) => array.buffer);
     const spare = syncCells(state).spare;
     buildCrossing(state);
-    expect(arrays(state).map((array) => array.buffer)).toEqual(before);
+    for (const [i, array] of arrays(state).entries()) expect(array.buffer).toBe(before[i]);
     // The layout went into the spare made at load.
     expect(state.cells.zone.buffer).toBe(spare?.zone.buffer);
     expect(state.cells.density.buffer).toBe(spare?.density.buffer);
