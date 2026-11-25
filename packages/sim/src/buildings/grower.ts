@@ -36,9 +36,10 @@
 // adds no building to a zone that offers jobs, commercial, office,
 // industrial or mixed, while the open jobs in that zone's workplaces are
 // more than `openJobsShareMax` of their jobs (pops/open-jobs.ts). Mixed is
-// held by either rule. As for homes, it works the jobs out once on a tick
-// it adds such a building, adds each one it builds, and leaves out
-// workplaces on a street joined to nothing.
+// held by either rule. It reads each zone's jobs and open jobs once on a
+// tick it adds such a building, from the counts job matching's openings
+// keep (pops/openings.ts, issue #366), adds each one it builds, and leaves
+// out workplaces on a street joined to nothing.
 //
 // Abandoned buildings come back before new ones are built (M3-24): the
 // grower adds no building to a zone while it has an abandoned building
@@ -98,7 +99,8 @@ import { bestCandidate, candidateCount, setAside } from "./candidates";
 import { freeFrontage, lotOptions, type Lot, type LotOptions } from "./lots";
 import { pollutionGrid, segmentBuildings } from "./where";
 import { buildingReachesOutside, homeUnfilled, newcomerRoomLeft, reachableRoom, type ReachableRoom } from "../pops/room";
-import { workplacesHeldBy, zoneJobs, type ZoneJobs } from "../pops/open-jobs";
+import { workplacesHeldBy, type ZoneJobs } from "../pops/open-jobs";
+import { zoneJobs } from "../pops/openings";
 import { buildingJobs } from "./jobs";
 import { abandonedWaiting } from "./vacancy";
 

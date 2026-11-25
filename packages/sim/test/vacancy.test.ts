@@ -34,7 +34,7 @@ import {
   type SimState,
 } from "../src/index";
 import { homesWithRoom, reachableRoom } from "../src/pops/room";
-import { zoneJobs } from "../src/pops/open-jobs";
+import { zoneJobs } from "../src/pops/openings";
 import { popIndexOf } from "../src/pops/where";
 import { enqueue } from "../src/commands";
 import { cloneState } from "../src/state";

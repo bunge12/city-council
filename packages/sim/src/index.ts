@@ -136,7 +136,8 @@ export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/ma
 export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
 export { TURNOVER, TURNOVER_SYSTEM, dayChances, turnOver, turnoverEvent } from "./pops/turnover";
 export type { DayChances, TurnoverEvent } from "./pops/turnover";
-export { jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy, zoneJobs } from "./pops/open-jobs";
+export { countZoneJobs, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";
+export { zoneJobs } from "./pops/openings";
 export type { ZoneJobs } from "./pops/open-jobs";
 export type { ReachableRoom } from "./pops/room";
 export { DEMAND_BALANCE, checkDemandBalance } from "./demand/balance";
