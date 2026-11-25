@@ -14,6 +14,17 @@ export interface BalancePrice {
   note?: string;
 }
 
+/** A share as written in the balance file: a fraction, with where it came from. */
+export interface BalanceShare {
+  share: number;
+  sourceYear: number;
+  source: string;
+  sourceUrl?: string;
+  /** True when no usable source was found and the number is a stand-in. */
+  placeholder?: boolean;
+  note?: string;
+}
+
 /** One road type as written in the balance file. */
 export interface RoadTypeBalance {
   id: string;
@@ -34,7 +45,8 @@ export interface RoadTypeBalance {
   /** Tightest curve allowed, metres. */
   minCurveRadius: number;
   buildCostPerMetre: BalancePrice;
-  upkeepPerMetrePerYear: BalancePrice;
+  /** What keeping this road costs a year, as a share of its build cost (M4-04). */
+  upkeepShare: BalanceShare;
   /** Taking a metre of this road out. A bridge costs `bridge.costMultiplier` times this. */
   demolitionCostPerMetre: BalancePrice;
   /** What happens where this type crosses water. */
@@ -134,11 +146,12 @@ export interface RoadBalance {
 }
 
 /** A road type with its prices in whole 2026 dollars. */
-export interface RoadType extends Omit<RoadTypeBalance, "buildCostPerMetre" | "upkeepPerMetrePerYear" | "demolitionCostPerMetre"> {
+export interface RoadType extends Omit<RoadTypeBalance, "buildCostPerMetre" | "upkeepShare" | "demolitionCostPerMetre"> {
   /** Index in the balance file. This is what segments store. */
   index: number;
   buildCostPerMetre: number;
-  upkeepPerMetrePerYear: number;
+  /** The share of a segment's build cost, the bridge multiplier included on a bridge, that it costs a year to keep. */
+  upkeepShare: number;
   demolitionCostPerMetre: number;
 }
 
@@ -152,7 +165,7 @@ const BUILD_FIELDS = [
   "groundSampleStep",
   "bridgeClearance",
 ] as const;
-const PRICE_FIELDS = ["buildCostPerMetre", "upkeepPerMetrePerYear", "demolitionCostPerMetre"] as const;
+const PRICE_FIELDS = ["buildCostPerMetre", "demolitionCostPerMetre"] as const;
 /** Segments store the type in a Uint8Array. */
 const MAX_TYPES = 256;
 
@@ -190,6 +203,21 @@ function checkPrice(price: unknown, where: string, toYear: number, errors: strin
   else if ((price["sourceYear"] as number) > toYear) errors.push(`${where}.sourceYear is after ${toYear}`);
   if (typeof price["source"] !== "string" || price["source"].trim() === "") errors.push(`${where}.source is missing`);
   if (price["placeholder"] !== undefined && typeof price["placeholder"] !== "boolean") {
+    errors.push(`${where}.placeholder must be true or false`);
+  }
+}
+
+function checkShare(share: unknown, where: string, toYear: number, errors: string[]): void {
+  if (!isRecord(share)) {
+    errors.push(`${where} is missing`);
+    return;
+  }
+  const value = share["share"];
+  if (typeof value !== "number" || !(value >= 0 && value <= 1)) errors.push(`${where}.share must be a number from 0 to 1`);
+  if (!isYear(share["sourceYear"])) errors.push(`${where}.sourceYear is missing`);
+  else if ((share["sourceYear"] as number) > toYear) errors.push(`${where}.sourceYear is after ${toYear}`);
+  if (typeof share["source"] !== "string" || share["source"].trim() === "") errors.push(`${where}.source is missing`);
+  if (share["placeholder"] !== undefined && typeof share["placeholder"] !== "boolean") {
     errors.push(`${where}.placeholder must be true or false`);
   }
 }
@@ -295,6 +323,7 @@ export function checkRoadBalance(data: unknown): string[] {
       if (typeof type[field] !== "boolean") errors.push(`${where}.${field} must be true or false`);
     }
     for (const field of PRICE_FIELDS) checkPrice(type[field], `${where}.${field}`, toYear, errors);
+    checkShare(type["upkeepShare"], `${where}.upkeepShare`, toYear, errors);
     checkBridge(type["bridge"], `${where}.bridge`, toYear, errors);
   });
   return errors;
@@ -320,7 +349,7 @@ export function resolveRoadTypes(data: unknown): RoadType[] {
     ...type,
     index,
     buildCostPerMetre: escalate(type.buildCostPerMetre, escalation),
-    upkeepPerMetrePerYear: escalate(type.upkeepPerMetrePerYear, escalation),
+    upkeepShare: type.upkeepShare.share,
     demolitionCostPerMetre: escalate(type.demolitionCostPerMetre, escalation),
   }));
 }

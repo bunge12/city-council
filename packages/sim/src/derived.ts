@@ -2,7 +2,8 @@
 // hashed: the terrain, the road spatial index, the routing graph, the
 // blocks, where the zoning cells are, which building stands on each, the
 // grower's candidates and the cells it has set aside, who lives and works in each building, the
-// travel times between zones, and which pieces of road reach outside. See "Derived data" in the PRD.
+// travel times between zones, which pieces of road reach outside, and the
+// yearly road upkeep. See "Derived data" in the PRD.
 //
 // The terrain is cached by seed (terrain/cache.ts). Each other one is cached
 // by the state object it comes from and built from its
@@ -27,6 +28,7 @@ import { terrainOf } from "./terrain/cache";
 import { prepareWaterMap } from "./landvalue/water";
 import { cellsLaidOut, reserveCellSpare, syncCells } from "./zoning/cell-index";
 import { reserveRoadRoom } from "./roads/network";
+import { roadUpkeepPerYear } from "./economy/upkeep";
 
 /**
  * The parts of `prepareDerived`, in the order it builds them. A host that
@@ -55,6 +57,7 @@ export function prepareDerived(state: SimState, onStage: (stage: DerivedStage) =
   reservePopRoom(state.pops);
   roadIndexOf(state.roads);
   routingGraphOf(state.roads);
+  roadUpkeepPerYear(state.roads);
   prepareOutside(state);
   listBlocks(blockIndexOf(state.roads));
   onStage("cells");

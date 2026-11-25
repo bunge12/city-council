@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONNECTION_BALANCE,
+  LINE,
   NONE,
   ROAD_TYPES,
   connectionEnd,
@@ -226,7 +227,8 @@ describe("the player and the stubs", () => {
     const state = createState(2026);
     const [c] = placed(state);
     if (!c) throw new Error("no connection");
-    const city = () => hashState({ ...state, log: [], tick: 0, centre: { ...state.centre, due: 0 }, stats: { ...state.stats, history: {}, next: 0, money: {} }, travelReadyAt: 0, demand: createDemand(), budget: { ...state.budget, opening: 0, month: new Float64Array(0), lastMonth: new Float64Array(0) } });
+    const city = () => hashState({ ...state, log: [], tick: 0, centre: { ...state.centre, due: 0 }, stats: { ...state.stats, history: {}, next: 0, money: {} }, travelReadyAt: 0, demand: createDemand(), budget: { ...state.budget, treasury: state.budget.treasury + (state.budget.month[LINE.roadUpkeep] ?? 0), opening: 0, month: new Float64Array(0), lastMonth: new Float64Array(0) } });
+    // Upkeep paid on the road before its undo stays paid (M4.md, "Undo and money"), so it is added back.
     const before = city();
     expect(build(state, { x: c.innerX, z: c.innerZ }, beyond(c, 300))).toEqual({ ok: true });
     expect(command(state, "Undo", {})).toEqual({ ok: true });

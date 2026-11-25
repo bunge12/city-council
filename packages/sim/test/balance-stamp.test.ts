@@ -47,7 +47,8 @@ describe("the balance stamp", () => {
     expect(BALANCE_STAMP).toBe(balanceStampOf(BALANCE_FILES));
     // Moves with any balance number. Update it with the replay fixtures and say which number moved.
     // #376 moved it: economy.json joined the stamp, on top of #358's cell settle weights in zoning.json.
-    expect(BALANCE_STAMP).toBe("7a23208d1f2e0407");
+    // #379 moved it again: roads.json's upkeep became a yearly share of build cost.
+    expect(BALANCE_STAMP).toBe("6c9d9e70e48201d9");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

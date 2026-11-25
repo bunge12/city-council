@@ -7,7 +7,8 @@ import { checkUndoHistory } from "../src/undo";
 import { createDemand } from "../src/demand/demand";
 import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
 import { ECONOMY } from "../src/economy/balance";
-import { emptyBudget } from "../src/economy/budget";
+import { dailyShare, emptyBudget } from "../src/economy/budget";
+import { roadUpkeepPerYear } from "../src/economy/upkeep";
 import { addBuilding } from "../src/buildings/buildings";
 import { addPop, setPopWork } from "../src/pops/pops";
 import { withEnds } from "./seen-ends";
@@ -707,10 +708,17 @@ describe("migrateState", () => {
     void wasBudget;
     expect(rest).toEqual(wasRest);
     expect({ ...stats, money: null }).toEqual({ ...wasStats, money: null });
-    // And it steps on, closing its months from the grant.
+    // And it steps on, closing its months from the grant, its street's upkeep paid a day at a time (M4-04).
+    const yearly = roadUpkeepPerYear(migrated.roads);
+    expect(yearly).toBeGreaterThan(0);
+    const upkeep = (from: number, to: number) => {
+      let sum = 0;
+      for (let d = from; d < to; d++) sum += dailyShare(yearly, d);
+      return sum;
+    };
     while (migrated.tick < 63 * day) step(migrated);
-    expect(migrated.budget.treasury).toBe(ECONOMY.startingGrant);
-    expect(Array.from(migrated.stats.money.treasury)).toEqual([0, 0, ECONOMY.startingGrant]);
+    expect(migrated.budget.treasury).toBe(ECONOMY.startingGrant - upkeep(33, 63));
+    expect(Array.from(migrated.stats.money.treasury)).toEqual([0, 0, ECONOMY.startingGrant - upkeep(33, 59)]);
   });
 
   it("leaves a current state as it is", () => {
