@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { HISTORY_LENGTH, STAT_TOTALS, deserialize, sampleCount, serialize } from "../packages/sim/src/index";
+import { HISTORY_LENGTH, MONEY_SERIES, STAT_TOTALS, deserialize, sampleCount, serialize } from "../packages/sim/src/index";
 import { writeReport, openFixture, scaleCity } from "./building-lod-helpers";
 import { perfFigures } from "./measure";
 
@@ -16,7 +16,8 @@ import { perfFigures } from "./measure";
 //
 // The history is written in Node, not stepped: a hundred game years of the
 // scale town would take hours. Each sample is a ramp up to the total's
-// value today with a wobble, so the line has 1,200 distinct points.
+// value today with a wobble, so the line has 1,200 distinct points. The
+// money series get the same, in whole dollars.
 
 declare const window: {
   cityCouncil: { view: Promise<{ renderer: { render: (...args: unknown[]) => void } }> };
@@ -47,6 +48,12 @@ function townWithFullHistory(): Uint8Array {
     const series = new Int32Array(HISTORY_LENGTH);
     for (let m = 0; m < HISTORY_LENGTH; m++) series[m] = Math.round((top * (m + 1)) / HISTORY_LENGTH) + ((m * 37) % 23);
     stats.history[name] = series;
+  });
+  // The money series (M4-02) are as long as the history and written at the same position; a load refuses a city whose are not.
+  MONEY_SERIES.forEach((name, i) => {
+    const series = new Float64Array(HISTORY_LENGTH);
+    for (let m = 0; m < HISTORY_LENGTH; m++) series[m] = 1000 * (i + 1) * (m + 1) + ((m * 37) % 23);
+    stats.money[name] = series;
   });
   // Wrapped: the next sample overwrites the middle of the arrays.
   stats.next = HISTORY_LENGTH / 2 + 7;
