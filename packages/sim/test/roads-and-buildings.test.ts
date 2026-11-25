@@ -68,6 +68,8 @@ function command(type: string, payload: unknown, playerId = "p1"): Command {
 function ok(state: SimState, c: Command): void {
   expect(submit(state, c), c.type).toEqual({ ok: true });
   step(state);
+  // A command that reads the cells waits while a change of roads settles.
+  while (state.pending.length > 0) step(state);
   expect(state.log.at(-1)?.seq, `${c.type} should apply`).toBe(c.seq);
 }
 const road = (from: [number, number], to: [number, number], type = "street") =>
@@ -152,7 +154,10 @@ function expectSameGrid(kept: Int32Array, fresh: Int32Array): void {
 
 function expectSound(state: SimState): void {
   expect(checkBuildings(state.buildings, state.roads, state.tick)).toBeNull();
-  if (cellsSettled(state)) for (const id of live(state)) expect(lotStands(state, id), `building ${id} stands`).toBe(true);
+  // Once the step on the tick the cells settle by has run: that step removes
+  // what a change blocked (upkeep.ts), so between the step before it and it
+  // the cells are settled and those buildings still stand.
+  if (cellsSettled(state) && state.tick > state.cellsReadyAt) for (const id of live(state)) expect(lotStands(state, id), `building ${id} stands`).toBe(true);
   const { kept, fresh } = buildingIndexSets(state);
   expect(kept.chunks).toEqual(fresh.chunks);
   expect(Array.from(kept.cells)).toEqual(Array.from(fresh.cells));

@@ -47,7 +47,7 @@ describe("the balance stamp", () => {
     expect(BALANCE_STAMP).toBe(balanceStampOf(BALANCE_FILES));
     // Moves with any balance number. Update it with the replay fixtures and say which number moved.
     // M3-21 moved it: the first tuning pass over demand.json and pops.json.
-    expect(BALANCE_STAMP).toBe("ee59f5383ffe4031");
+    expect(BALANCE_STAMP).toBe("c84e4df20e958e7b");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

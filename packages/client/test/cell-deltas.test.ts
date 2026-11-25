@@ -77,7 +77,11 @@ function setup() {
     if (!mirror.state) throw new Error("no state");
     return mirror.state as SimState;
   };
-  return { mirror, updates, tick, hostSnapshot, deltas, state };
+  /** Ticks until a change of roads has settled, so a stroke after it applies at once (zoning.json, #358). */
+  const settle = () => {
+    while (mirror.state && mirror.state.tick < mirror.state.cellsReadyAt) tick();
+  };
+  return { mirror, updates, tick, settle, hostSnapshot, deltas, state };
 }
 
 const road = (from: [number, number], to: [number, number], type = "street") => ({
@@ -111,9 +115,10 @@ const STRIP = {
 
 describe("cell deltas", () => {
   it("carries a painted strip of 100 cells and nothing else", async () => {
-    const { mirror, tick, deltas, state, hostSnapshot } = setup();
+    const { mirror, tick, deltas, state, hostSnapshot, settle } = setup();
     await mirror.sendCommand("BuildRoad", STREET);
     tick();
+    settle();
     const plan = planZoneCells(state(), STRIP);
     expect(plan.ok && plan.plan.cells.length).toBe(100);
     const before = deltas().length;
@@ -133,21 +138,25 @@ describe("cell deltas", () => {
   });
 
   it("adds no cell data to a delta on a tick where no cell changed", async () => {
-    const { mirror, tick, deltas } = setup();
+    const { mirror, tick, deltas, settle } = setup();
     await mirror.sendCommand("BuildRoad", STREET);
     tick();
+    settle();
+    // The road's delta, then the steps its cells settle over, which change no zone.
+    const settling = deltas().length - 1;
     await mirror.sendCommand("NoOp");
     tick();
     await mirror.sendCommand("ZoneCells", STRIP);
     tick();
     tick();
-    expect(deltas().map((d) => "cells" in d)).toEqual([true, false, true, false]);
+    expect(deltas().map((d) => "cells" in d)).toEqual([true, ...Array<boolean>(settling).fill(false), false, true, false]);
   });
 
   it("carries a cleared cell as unzoned", async () => {
-    const { mirror, tick, deltas, state, hostSnapshot } = setup();
+    const { mirror, tick, deltas, state, hostSnapshot, settle } = setup();
     await mirror.sendCommand("BuildRoad", STREET);
     tick();
+    settle();
     await mirror.sendCommand("ZoneCells", STRIP);
     tick();
     expect(zoned(state())).toBe(100);
@@ -160,11 +169,12 @@ describe("cell deltas", () => {
   });
 
   it("keeps the mirror equal to the sim when a road is built across zoned cells", async () => {
-    const { mirror, tick, deltas, state, hostSnapshot } = setup();
+    const { mirror, tick, deltas, state, hostSnapshot, settle } = setup();
     // Ask about cells first, so the mirror keeps its cell index current through the deltas.
     expect(mirror.cellAt(4400, 4500 - HALF - 1)).toBeNull();
     await mirror.sendCommand("BuildRoad", STREET);
     tick();
+    settle();
     await mirror.sendCommand("ZoneCells", STRIP);
     tick();
     const at = mirror.cellAt(4400, 4500 - HALF - 1);
@@ -173,7 +183,9 @@ describe("cell deltas", () => {
     // Across the street and through the strip, which cuts the street in two.
     await mirror.sendCommand("BuildRoad", road([4400, 4400], [4400, 4600]));
     tick();
-    const cells = deltas().at(-1)?.cells as CellDelta;
+    settle();
+    // The delta that brought the road; the ones its cells settled over carry no cells.
+    const cells = deltas().filter((d) => d.cells !== undefined).at(-1)?.cells as CellDelta;
     // Both halves of the street and the new road were laid out again.
     expect(cells.relaid.length).toBeGreaterThanOrEqual(3);
     // Every zone the sim kept on its ground came with them.
@@ -245,10 +257,11 @@ describe("cell deltas", () => {
   });
 
   it("answers which cells are in a chunk and which is under a point", async () => {
-    const { mirror, tick, state } = setup();
+    const { mirror, tick, state, settle } = setup();
     expect(mirror.cellsInChunk(chunk(4200, 4450))).toEqual([]);
     await mirror.sendCommand("BuildRoad", STREET);
     tick();
+    settle();
     await mirror.sendCommand("ZoneCells", STRIP);
     tick();
     // The street runs along the line between two chunks in z and crosses x = 4500.
@@ -263,16 +276,18 @@ describe("cell deltas", () => {
   });
 
   it("tells listeners which chunks' cells changed, once something has asked about cells", async () => {
-    const { mirror, updates, tick } = setup();
+    const { mirror, updates, tick, settle } = setup();
     const cellChunks = () => updates.map((u) => (u.kind === "delta" ? u.cellChunks : null));
     await mirror.sendCommand("BuildRoad", road([4150, 4700], [4350, 4700]));
     tick();
+    settle();
     // Nothing has asked yet, so nothing drawn can be out of date.
     expect(cellChunks()).toEqual([[]]);
     mirror.cellsInChunk(chunk(4200, 4700));
     // A street along the line between two chunks in z, across x = 4500.
     await mirror.sendCommand("BuildRoad", STREET);
     tick();
+    settle();
     tick();
     // The strip lies north of the street, on both sides of x = 4500.
     await mirror.sendCommand("ZoneCells", STRIP);
@@ -280,18 +295,18 @@ describe("cell deltas", () => {
     // One rectangle wholly inside one chunk.
     await mirror.sendCommand("ZoneCells", { zone: "commercial", density: 2, rects: [rect([4200, 4700 + HALF + CELL], [4300, 4700 + HALF + CELL], 2 * CELL)] });
     tick();
-    expect(cellChunks().slice(1)).toEqual([
-      [chunk(4200, 4450), chunk(4600, 4450), chunk(4200, 4550), chunk(4600, 4550)],
-      [],
-      [chunk(4200, 4450), chunk(4600, 4450)],
-      [chunk(4200, 4700)],
-    ]);
+    const after = cellChunks().slice(1);
+    expect(after[0]).toEqual([chunk(4200, 4450), chunk(4600, 4450), chunk(4200, 4550), chunk(4600, 4550)]);
+    // The steps the street's cells settled over, and one more, change no zone.
+    expect(after.slice(1, -2).every((c) => c?.length === 0)).toBe(true);
+    expect(after.slice(-2)).toEqual([[chunk(4200, 4450), chunk(4600, 4450)], [chunk(4200, 4700)]]);
   });
 
   it("refuses a delta that cannot belong to the copy, and leaves the cells as they were", async () => {
-    const { mirror, tick, deltas, state } = setup();
+    const { mirror, tick, deltas, state, settle } = setup();
     await mirror.sendCommand("BuildRoad", STREET);
     tick();
+    settle();
     await mirror.sendCommand("ZoneCells", STRIP);
     tick();
     const good = deltas().at(-1)?.cells as CellDelta;
@@ -318,9 +333,10 @@ describe("cell deltas", () => {
   });
 
   it("asks for a snapshot when a delta's cells do not fit, and catches up", async () => {
-    const { mirror, tick, updates, state, hostSnapshot } = setup();
+    const { mirror, tick, updates, state, hostSnapshot, settle } = setup();
     await mirror.sendCommand("BuildRoad", STREET);
     tick();
+    settle();
     // The copy loses its cells behind the mirror's back.
     state().cells = { offset: Int32Array.of(0, 0), zone: new Uint8Array(0), density: new Uint8Array(0) };
     await mirror.sendCommand("ZoneCells", STRIP);

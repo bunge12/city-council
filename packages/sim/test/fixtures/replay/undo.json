@@ -1,7 +1,7 @@
 {
   "description": "Two players undo their own road changes on seed 2026. p1 builds two parallel streets, p2 builds an avenue across both, p1 makes a piece a one-way and p2 bulldozes the avenue's middle. p1 undoes the upgrade and p2 the bulldoze. p1 builds a street across the pieces p2's avenue made, so p2's next undo is refused and not logged. Then p1 undoes that street and p2 its avenue.",
   "seed": 2026,
-  "untilTick": 16,
+  "untilTick": 18,
   "log": [
     {
       "tick": 0,
@@ -100,14 +100,14 @@
       }
     },
     {
-      "tick": 6,
+      "tick": 7,
       "seq": 6,
       "playerId": "p1",
       "type": "Undo",
       "payload": {}
     },
     {
-      "tick": 7,
+      "tick": 8,
       "seq": 7,
       "playerId": "p2",
       "type": "Undo",
@@ -131,20 +131,20 @@
       }
     },
     {
-      "tick": 11,
+      "tick": 13,
       "seq": 10,
       "playerId": "p1",
       "type": "Undo",
       "payload": {}
     },
     {
-      "tick": 12,
+      "tick": 16,
       "seq": 11,
       "playerId": "p2",
       "type": "Undo",
       "payload": {}
     }
   ],
-  "balance": "ee59f5383ffe4031",
-  "hash": "4686da6b734983f1"
+  "balance": "c84e4df20e958e7b",
+  "hash": "30481d24f34411fd"
 }

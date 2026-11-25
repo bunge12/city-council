@@ -62,6 +62,8 @@ function command(type: string, payload: unknown, playerId = "p1"): Command {
 function ok(state: SimState, c: Command): void {
   expect(submit(state, c), `${c.type} ${JSON.stringify(c.payload)}`).toEqual({ ok: true });
   step(state);
+  // A command that reads the cells waits while a change of roads settles.
+  while (state.pending.length > 0) step(state);
   expect(state.log.at(-1)?.seq, `${c.type} should apply`).toBe(c.seq);
 }
 const road = (from: [number, number], to: [number, number]) =>
@@ -343,6 +345,9 @@ describe("a through-lot and its roads", () => {
     const corners = buildingInfo(state, id)?.corners as number[];
     const x = Math.round(((corners[0] as number) + (corners[6] as number)) / 2);
     ok(state, road([x, NORTH], [x, south]));
+    // It goes in the step on the tick the road's cells settle by.
+    while (!cellsSettled(state)) step(state);
+    step(state);
     expect(isBuilding(state.buildings, id)).toBe(false);
     expectSound(state);
   });
