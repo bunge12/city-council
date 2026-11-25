@@ -193,9 +193,16 @@ export function createCameraControls(canvas: HTMLCanvasElement, rig: CameraRig, 
     return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable;
   }
 
+  /**
+   * The key goes to the field it was typed in. A number field, such as the
+   * grid's block sizes, keeps focus through a drag on the map, but takes no
+   * letters, so W A S D, Q and E still move the camera from it. Its arrows,
+   * Page Up, Page Down, + and - stay with it, to step or sign its value.
+   */
   function typing(e: KeyboardEvent): boolean {
     const el = e.target as HTMLElement | null;
-    return !!el && isField(el);
+    if (!el || !isField(el)) return false;
+    return !(el instanceof HTMLInputElement && el.type === "number" && e.code.startsWith("Key"));
   }
 
   function onKeyDown(e: KeyboardEvent): void {
