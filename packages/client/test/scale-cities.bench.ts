@@ -36,6 +36,7 @@ import {
   VACANCY_SYSTEM,
   budgetFigure,
   buildScaleCity,
+  buildingCount,
   deserialize,
   generateScaleCity,
   prepareDerived,
@@ -46,6 +47,7 @@ import {
   type ScaleCityResidents,
   type SystemTimer,
 } from "@city-council/sim";
+import { holdDemandBars } from "../src/protocol/held-demand";
 import { hold } from "./budget";
 
 /** Two game days. */
@@ -105,6 +107,30 @@ function generate(residents: ScaleCityResidents, shape: Omit<ScaleCity, "state">
   const city = generateScaleCity(residents, { ...shape, state: deserialize(base).state });
   const generateMs = performance.now() - t0;
   return { residents, bytes: serialize(city.state), totals: city.totals, generateMs };
+}
+
+/**
+ * A game day on a copy of `city`, untimed, with every bar held at 100, so
+ * the ticks timed after it are not the ones that compile the systems. The
+ * bars are held so the grower adds buildings and pops move in and take
+ * jobs on most of its ticks: a day at the city's own bars runs those paths
+ * a few times or not at all, and the timed run then met them on its first
+ * call. On the 500,000 city that put the grower's worst tick over its share
+ * on the tick it first added a workplace, its pass over the workplaces 3.8
+ * ms on the first call and 0.7 ms from the third (issue #354). Returns the
+ * buildings the day added.
+ */
+function warmUp(city: Generated): number {
+  const state = deserialize(city.bytes).state;
+  prepareDerived(state);
+  const before = buildingCount(state.buildings);
+  const letGo = holdDemandBars(100);
+  try {
+    for (let k = 0; k < TIME_BALANCE.ticksPerDay; k++) step(state);
+  } finally {
+    letGo();
+  }
+  return buildingCount(state.buildings) - before;
 }
 
 /** Loads `city` from its bytes as a city file opens and runs it for `ticks`, every system timed. */
@@ -216,8 +242,10 @@ function scaleCityBase(): { shape: Omit<ScaleCity, "state">; base: Uint8Array } 
 test("the scale cities, two game days each", () => {
   const { shape, base } = scaleCityBase();
   const cities = SCALE_CITY_RESIDENTS.map((residents) => generate(residents, shape, base));
-  // A game day on a copy of the first, untimed, so the first city's ticks are not the ones that compile the systems.
-  runCity(cities[0] as Generated, TIME_BALANCE.ticksPerDay);
+  // A day on a copy of the first, untimed, so no city's ticks are the ones that compile the systems.
+  const warmed = warmUp(cities[0] as Generated);
+  console.log(`The warm-up day added ${warmed} buildings.`);
+  expect(warmed, "the warm-up day added no buildings, so it compiled none of the grower's building paths").toBeGreaterThan(0);
   const runs = cities.map((city) => runCity(city));
   for (const run of runs) {
     // `cities.step` in the sim's budgets.json: the mean step inside the tick.

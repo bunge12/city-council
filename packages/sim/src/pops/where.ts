@@ -28,7 +28,7 @@ export interface PopIndex {
   homeTail: Int32Array;
   /** By building: the lowest pop id working there, or NONE. */
   workHead: Int32Array;
-  /** By building: the highest pop id working there, or NONE. Job matching adds workers in rising id order (M3-09). */
+  /** By building: the highest pop id working there, or NONE, so a pop with a higher id than any there, as a newcomer has, joins in one step (M3-09). */
   workTail: Int32Array;
   /** By building: the people living there, the sum of its pops' sizes. */
   people: Int32Array;

@@ -133,9 +133,9 @@ function sentAway(state: SimState, id: number, score: number): boolean {
 export function updateSatisfaction(state: SimState): void {
   if (state.tick % TIME_BALANCE.ticksPerDay === 0) planDepartures(state);
   const { leaveBelow, leaveAfterDays } = POPS_BALANCE.satisfaction;
-  const { from, to } = popSlice(state);
+  const { from, to, step } = popSlice(state);
   const p = state.pops;
-  for (let id = from; id < to; id++) {
+  for (let id = from; id < to; id += step) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0) continue;
     const score = p.satisfaction[id] ?? 0;
     if (p.leaveScore !== NO_LEAVING && sentAway(state, id, score)) {
