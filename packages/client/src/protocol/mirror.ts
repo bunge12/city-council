@@ -45,7 +45,9 @@ import {
   type Occupancy,
   type SimState,
   type SystemTiming,
+  checkBudget,
   checkDemand,
+  copyBudget,
   copyDemand,
   holdsHomes,
   reachableRoomWith,
@@ -505,6 +507,11 @@ export class SimMirror {
       this.outOfStep();
       return;
     }
+    // And the treasury and ledger, when they came, which must add up.
+    if (delta.budget && checkBudget(delta.budget) !== null) {
+      this.outOfStep();
+      return;
+    }
     // Roads first: a delta whose rows do not fit the copy changes nothing.
     let roadChunks: readonly number[] = [];
     let roadNodes: readonly number[] = [];
@@ -565,6 +572,7 @@ export class SimMirror {
     state.travelLast = null;
     state.demand = copyDemand(delta.demand);
     state.redevelopedToday = delta.redevelopedToday;
+    if (delta.budget) state.budget = copyBudget(delta.budget);
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
     state.centre = { ...delta.centre };

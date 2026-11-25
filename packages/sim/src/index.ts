@@ -170,12 +170,30 @@ export { GROWER_SYSTEM, dayOf, dayQuotas, holdsHomes, homesHeld, freeFrontCells,
 export { ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
 export type { DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
 export { floorSpaceOf, propertyValue, propertyValueOf, propertyValues, type FloorSpace } from "./economy/value";
+export {
+  BUDGET_SYSTEM,
+  INCOME_LINES,
+  LEDGER_LINES,
+  LINE,
+  TAX_LINES,
+  checkBudget,
+  copyBudget,
+  dailyShare,
+  expensesOf,
+  incomeOf,
+  isIncome,
+  sameBudget,
+  taxIncomeOf,
+  type BudgetState,
+  type LedgerLine,
+} from "./economy/budget";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";
 export { prepareWaterMap } from "./landvalue/water";
 export {
   HISTORY_LENGTH,
+  MONEY_SERIES,
   STATS_SYSTEM,
   STAT_TOTALS,
   YEAR_COUNTS,
@@ -189,6 +207,8 @@ export {
   type StatTotals,
   type StatsDelta,
   type StatsState,
+  type MoneySample,
+  type MoneySeries,
   type YearCount,
   type YearCounts,
 } from "./stats/stats";

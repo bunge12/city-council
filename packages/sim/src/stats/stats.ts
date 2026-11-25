@@ -18,11 +18,18 @@
 // The yearly counts of births, deaths, arrivals and departures are added to
 // by the systems that move people (M3-08, M3-10, M3-11) through `noteYear`.
 // On 1 January the running year becomes the last one and starts again at 0.
+//
+// Each sample also holds the money (M4-02): the treasury, and the income,
+// expenses and tax income of the month the budget system has just closed
+// (economy/budget.ts). Money is whole dollars that pass the 2.1 billion an
+// Int32Array holds, so those series are Float64Arrays, kept apart from the
+// counts but written at the same position.
 
 import { BUILDINGS_BALANCE, BUILDING_TYPES, JOB_KINDS, type JobKind } from "../buildings/balance";
 import { BUILDING_ALIVE, OFFERS_JOBS, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByKind, type JobsByKind } from "../buildings/jobs";
 import { isMonthStart, isYearStart } from "../calendar";
+import { expensesOf, incomeOf, taxIncomeOf, type BudgetState } from "../economy/budget";
 import { NO_HOME, NO_WORK, POP_ALIVE, POP_LEVELS, workersFor, type PopState } from "../pops/pops";
 import { popIndexOf } from "../pops/where";
 import type { SimState } from "../state";
@@ -81,6 +88,15 @@ export const STAT_TOTALS: readonly string[] = [
   ...BUILDINGS_BY_ZONE.flat(),
 ];
 
+/**
+ * The money series of the history, in the order state holds them: the
+ * treasury as the month opened, and the closed month's income, expenses
+ * and tax income, whole dollars (M4-02).
+ */
+export const MONEY_SERIES = ["treasury", "income", "expenses", "taxIncome"] as const;
+export type MoneySeries = (typeof MONEY_SERIES)[number];
+export type MoneySample = Record<MoneySeries, number>;
+
 /** A number for each name in `STAT_TOTALS`. */
 export type StatTotals = Record<string, number>;
 
@@ -107,12 +123,26 @@ export interface StatsState {
   history: Record<string, Int32Array>;
   /** Where the next sample goes in every history array: their length until they are full. The newest sample is just before it. */
   next: number;
+  /** By money series: its monthly samples, as long as `history`'s and written at the same position. */
+  money: Record<MoneySeries, Float64Array>;
 }
 
 /** Every total at 0. */
 export function zeroTotals(): StatTotals {
   return Object.fromEntries(STAT_TOTALS.map((name) => [name, 0]));
 }
+
+/** Every money series as `length` samples of 0. */
+export function emptyMoney(length: number): Record<MoneySeries, Float64Array> {
+  return Object.fromEntries(MONEY_SERIES.map((name) => [name, new Float64Array(length)])) as Record<MoneySeries, Float64Array>;
+}
+
+/** The money sample of `budget`: its treasury and its last closed month. */
+export function moneySample(budget: BudgetState): MoneySample {
+  return { treasury: budget.treasury, income: incomeOf(budget.lastMonth), expenses: expensesOf(budget.lastMonth), taxIncome: taxIncomeOf(budget.lastMonth) };
+}
+
+const NO_MONEY: MoneySample = { treasury: 0, income: 0, expenses: 0, taxIncome: 0 };
 
 function zeroYear(): YearCounts {
   return { births: 0, deaths: 0, arrivals: 0, departures: 0 };
@@ -127,6 +157,7 @@ export function createStats(): StatsState {
     lastYear: zeroYear(),
     history: Object.fromEntries(STAT_TOTALS.map((name) => [name, new Int32Array(0)])),
     next: 0,
+    money: emptyMoney(0),
   };
 }
 
@@ -343,12 +374,16 @@ export function sampleCount(stats: StatsState): number {
   return stats.history["population"]?.length ?? 0;
 }
 
-/** Writes one sample of every total at the write position and moves it on: onto the end until the history is full, then over the oldest. */
-export function takeSample(stats: StatsState): void {
-  writeSample(stats, stats.totals);
+/**
+ * Writes one sample of every total, and of `money`, at the write position
+ * and moves it on: onto the end until the history is full, then over the
+ * oldest.
+ */
+export function takeSample(stats: StatsState, money: MoneySample = NO_MONEY): void {
+  writeSample(stats, stats.totals, money);
 }
 
-function writeSample(stats: StatsState, values: StatTotals): void {
+function writeSample(stats: StatsState, values: StatTotals, money: MoneySample): void {
   const grow = sampleCount(stats) < HISTORY_LENGTH;
   for (const name of STAT_TOTALS) {
     let series = stats.history[name] ?? new Int32Array(0);
@@ -360,12 +395,22 @@ function writeSample(stats: StatsState, values: StatTotals): void {
     }
     series[stats.next] = values[name] ?? 0;
   }
+  for (const name of MONEY_SERIES) {
+    let series = stats.money[name];
+    if (grow) {
+      const longer = new Float64Array(series.length + 1);
+      longer.set(series);
+      series = longer;
+      stats.money[name] = series;
+    }
+    series[stats.next] = money[name];
+  }
   stats.next = (stats.next + 1) % HISTORY_LENGTH;
 }
 
-/** The samples of total `name`, oldest first. */
+/** The samples of total or money series `name`, oldest first. */
 export function historyOf(stats: StatsState, name: string): number[] {
-  const series = stats.history[name];
+  const series: Int32Array | Float64Array | undefined = stats.history[name] ?? (MONEY_SET.has(name) ? stats.money[name as MoneySeries] : undefined);
   if (!series) throw new RangeError(`no total "${name}"`);
   const count = series.length;
   // Until the history is full `next` is its length, so the oldest is at 0.
@@ -375,13 +420,13 @@ export function historyOf(stats: StatsState, name: string): number[] {
   return out;
 }
 
-/** On 1 January, the year that ended is kept and the running one starts at 0. Then, on a month's first tick, a sample. */
+/** On 1 January, the year that ended is kept and the running one starts at 0. Then, on a month's first tick, a sample, with the month the budget has just closed. */
 function keepStats(state: SimState): void {
   if (isYearStart(state.tick)) {
     state.stats.lastYear = state.stats.year;
     state.stats.year = zeroYear();
   }
-  if (isMonthStart(state.tick)) takeSample(state.stats);
+  if (isMonthStart(state.tick)) takeSample(state.stats, moneySample(state.budget));
 }
 
 /** The name the timer hook reports for the statistics system. */
@@ -389,8 +434,9 @@ export const STATS_SYSTEM = "stats";
 
 /**
  * The step's system for the yearly roll and the monthly sample. It runs
- * first, so the counts the other systems add on 1 January go to the new
- * year, and a month's sample is the city as that month opens.
+ * first but for the budget's close, so the counts the other systems add on
+ * 1 January go to the new year, a month's sample is the city as that month
+ * opens, and its money is the month just closed.
  */
 export const STATS: System = { name: STATS_SYSTEM, run: keepStats };
 
@@ -411,6 +457,8 @@ export interface StatsDelta {
   lastYear: YearCounts;
   /** `STAT_TOTALS.length` values for each sample taken since the last delta, oldest first. */
   samples: Int32Array;
+  /** `MONEY_SERIES.length` values for each of the same samples (M4-02, protocol version 24). */
+  moneySamples: Float64Array;
 }
 
 /**
@@ -423,24 +471,31 @@ export interface StatsDelta {
 export function encodeStatsDelta(stats: StatsState, sentNext: number, sentTotals?: Readonly<StatTotals>): StatsDelta {
   const count = (stats.next - sentNext + HISTORY_LENGTH) % HISTORY_LENGTH;
   const samples = new Int32Array(count * STAT_TOTALS.length);
+  const moneySamples = new Float64Array(count * MONEY_SERIES.length);
   const length = sampleCount(stats);
   for (let k = 0; k < count; k++) {
     const at = (sentNext + k) % HISTORY_LENGTH;
     STAT_TOTALS.forEach((name, i) => (samples[k * STAT_TOTALS.length + i] = at < length ? (stats.history[name]?.[at] ?? 0) : 0));
+    MONEY_SERIES.forEach((name, i) => (moneySamples[k * MONEY_SERIES.length + i] = at < length ? (stats.money[name][at] ?? 0) : 0));
   }
   const totals: StatTotals = {};
   for (const name of STAT_TOTALS) {
     const value = stats.totals[name] ?? 0;
     if (!sentTotals || sentTotals[name] !== value) totals[name] = value;
   }
-  return { totals, highestPopulation: stats.highestPopulation, year: { ...stats.year }, lastYear: { ...stats.lastYear }, samples };
+  return { totals, highestPopulation: stats.highestPopulation, year: { ...stats.year }, lastYear: { ...stats.lastYear }, samples, moneySamples };
 }
 
 const TOTAL_NAMES = new Set(STAT_TOTALS);
+const MONEY_SET: ReadonlySet<string> = new Set(MONEY_SERIES);
 
 /** Why `delta` cannot apply to any copy's statistics, or null if it can. Changes nothing. */
 export function statsDeltaProblem(delta: StatsDelta): string | null {
   if (!(delta.samples instanceof Int32Array) || delta.samples.length % STAT_TOTALS.length !== 0) return "the statistics delta's samples are not whole rows";
+  if (!(delta.moneySamples instanceof Float64Array) || delta.moneySamples.length !== (delta.samples.length / STAT_TOTALS.length) * MONEY_SERIES.length) {
+    return "the statistics delta's money samples are not a row for each sample";
+  }
+  for (const value of delta.moneySamples) if (!Number.isSafeInteger(value)) return "the statistics delta's money samples are not whole dollars";
   if (!isRecord(delta.totals)) return "the statistics delta's totals are not an object";
   for (const [name, value] of Object.entries(delta.totals)) {
     if (!TOTAL_NAMES.has(name)) return `the statistics delta names an unknown total "${name}"`;
@@ -472,9 +527,11 @@ export function applyStatsDelta(stats: StatsState, delta: StatsDelta): string[] 
   stats.lastYear = { ...delta.lastYear };
   const rows = delta.samples.length / STAT_TOTALS.length;
   const sample = zeroTotals();
+  const money: MoneySample = { ...NO_MONEY };
   for (let k = 0; k < rows; k++) {
     STAT_TOTALS.forEach((name, i) => (sample[name] = delta.samples[k * STAT_TOTALS.length + i] ?? 0));
-    writeSample(stats, sample);
+    MONEY_SERIES.forEach((name, i) => (money[name] = delta.moneySamples[k * MONEY_SERIES.length + i] ?? 0));
+    writeSample(stats, sample, money);
   }
   return changed;
 }
@@ -496,14 +553,15 @@ function wholeCounts(value: unknown, names: readonly string[]): boolean {
  * Why `value` is not a well-formed `StatsState`, or null if it is. For
  * loading a save: every total and yearly count a whole number of at least
  * 0, a highest population no lower than today's, one history array per
- * total, all the same length of at most `HISTORY_LENGTH`, and a write
- * position that is the end of the history until it is full. Whether the totals match the pops and buildings is not checked: a
+ * total, all the same length of at most `HISTORY_LENGTH`, a write
+ * position that is the end of the history until it is full, and one
+ * Float64Array of whole dollars per money series, as long as the others. Whether the totals match the pops and buildings is not checked: a
  * test recounts them, and a load should not pay for it.
  */
 export function checkStats(value: unknown): string | null {
   if (!isRecord(value)) return "it is not an object";
-  const { totals, highestPopulation, year, lastYear, history, next } = value;
-  if (Object.keys(value).length !== 6) return "it has missing or unknown fields";
+  const { totals, highestPopulation, year, lastYear, history, next, money } = value;
+  if (Object.keys(value).length !== 7) return "it has missing or unknown fields";
   if (!wholeCounts(totals, STAT_TOTALS)) return "its totals are not the totals this build keeps";
   if (!Number.isSafeInteger(highestPopulation) || (highestPopulation as number) < ((totals as StatTotals)["population"] ?? 0)) {
     return "its highest population is below today's";
@@ -518,5 +576,13 @@ export function checkStats(value: unknown): string | null {
   }
   if (!Number.isSafeInteger(next) || (next as number) < 0 || (next as number) >= HISTORY_LENGTH) return "its write position is out of range";
   if (count < HISTORY_LENGTH && next !== count) return "its write position is not the end of a history that is not full";
+  if (!isRecord(money)) return "its money history is not an object";
+  const moneyKeys = Object.keys(money);
+  if (moneyKeys.length !== MONEY_SERIES.length || MONEY_SERIES.some((name, i) => moneyKeys[i] !== name)) return "its money history does not have one series per money series";
+  for (const name of MONEY_SERIES) {
+    const series = money[name];
+    if (!(series instanceof Float64Array) || series.length !== count) return "its money history is not one Float64Array per series, as long as the others";
+    for (const dollars of series) if (!Number.isSafeInteger(dollars)) return "its money history is not whole dollars";
+  }
   return null;
 }

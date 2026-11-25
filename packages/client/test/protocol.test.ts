@@ -200,7 +200,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "redevelop", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "budget", "stats", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "redevelop", "grower"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -233,6 +233,26 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     const snap = received.at(-1);
     expect(snap?.type === "snapshot" && hashMirrored(snap.state)).toBe(mirrored);
     expect(snap?.type === "snapshot" && snap.state.stats.history).toEqual(state.stats.history);
+    // And the money: the treasury, the ledger and the history's money series (M4-02).
+    expect(snap?.type === "snapshot" && snap.state.budget).toEqual(state.budget);
+    expect(snap?.type === "snapshot" && snap.state.stats.money).toEqual(state.stats.money);
+  });
+
+  it("sends the treasury and the ledger in a delta when they change, and not otherwise", async () => {
+    const { mirror, run, received } = setup();
+    run(100);
+    // Tick 0 closed the month of the starting grant, so a delta since the snapshot carried the budget.
+    const deltas = () => received.filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    expect(deltas().filter((d) => d.budget !== undefined)).toHaveLength(1);
+    expect(mirror.state?.budget.opening).toBe(mirror.state?.budget.treasury);
+    const seen = deltas().length;
+    run(1000);
+    expect(deltas().length).toBeGreaterThan(seen);
+    expect(deltas().slice(seen).every((d) => d.budget === undefined)).toBe(true);
+    // A pause changes nothing in it either.
+    await mirror.sendCommand("SetSpeed", { speed: 0 });
+    run(500);
+    expect(deltas().slice(seen).every((d) => d.budget === undefined)).toBe(true);
   });
 
   it("keeps the host's full log after live state pages entries out", () => {
@@ -885,6 +905,10 @@ describe("snapshot transfer", () => {
     const popBuffers = Object.values(state.pops).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
     // One history series a total.
     const statBuffers = Object.values(state.stats.history).map((value) => value.buffer);
+    // One money series each, the treasury and the month's income, expenses and tax income (M4-02).
+    const moneyBuffers = Object.values(state.stats.money).map((value) => value.buffer);
+    // The ledger's two months and the tax rates.
+    const budgetBuffers = [state.budget.month.buffer, state.budget.lastMonth.buffer, state.budget.taxRates.buffer];
     expect(typedArrayBuffers(state)).toEqual([
       state.rng.buffer,
       ...roadBuffers,
@@ -893,7 +917,10 @@ describe("snapshot transfer", () => {
       ...buildingBuffers,
       ...popBuffers,
       ...statBuffers,
+      ...moneyBuffers,
+      ...budgetBuffers,
     ]);
+    expect(moneyBuffers).toHaveLength(4);
     expect(buildingBuffers).toHaveLength(20);
     // Eleven pop arrays, the days of grace among them (#361), and the queue of displaced pops (M3-12).
     expect(popBuffers).toHaveLength(12);

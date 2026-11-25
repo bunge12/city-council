@@ -18,6 +18,7 @@ import {
   type SimState,
   applyStatsDelta,
   encodeStatsDelta,
+  copyBudget,
   copyDemand,
 } from "../src/index";
 import { submit } from "./seen-ends";
@@ -70,6 +71,8 @@ function pair() {
     copy.travelReadyAt = sim.travelReadyAt;
     // And the demand bars (M3-06).
     copy.demand = copyDemand(sim.demand);
+    // And the treasury and ledger (M4-02).
+    copy.budget = copyBudget(sim.budget);
     return cells;
   };
   return { sim, copy, run, send };
