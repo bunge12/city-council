@@ -1,7 +1,7 @@
 name: Deploy
 
 # Publishes the built client to GitHub Pages on every push to main, then runs
-# the M0, M1 and M2 walkthroughs against the public address.
+# the M0, M1, M2 and M3 walkthroughs against the public address.
 #
 # One-time setup: in the repository settings, Pages, set Source to
 # "GitHub Actions".
@@ -72,7 +72,7 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
-  # The M0, M1 and M2 walkthroughs against the public address, a job each,
+  # The M0, M1, M2 and M3 walkthroughs against the public address, a job each,
   # as in ci.yml's e2e job: each runs on WebGPU in software, which takes most
   # of a runner's CPU. One after another in one job they took 17 to 30
   # minutes. The M0 walkthrough holds the cold load to its 5 s budget here
@@ -104,6 +104,7 @@ jobs:
           - { id: m0, timeout: 35, limit: 15, grep: "M0 walkthrough" }
           - { id: m1, timeout: 35, limit: 25, grep: "M1 walkthrough" }
           - { id: m2, timeout: 60, limit: 48, grep: "M2 walkthrough" }
+          - { id: m3, timeout: 80, limit: 68, grep: "M3 walkthrough" }
     name: walkthrough (${{ matrix.id }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

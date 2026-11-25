@@ -8,7 +8,7 @@ Play the current build at <https://bunge12.github.io/city-council/>. It is redep
 
 ## Where it stands
 
-It is early. You can lay out a road network on a generated map, zone the land along it and watch buildings go up. Nobody lives in them yet.
+It is early. You can lay out a road network on a generated map, zone the land along it and watch a town grow. People move in, take jobs and leave when there are none. There is no money yet.
 
 M0, the foundation, is done:
 
@@ -38,7 +38,20 @@ M2, zoning and buildings, is done:
 - Three levels of detail for buildings, by how far out the camera is
 - A scale check on that network grown out to 57,000 buildings
 
-M3, demand, is next. People move into the buildings, take jobs and leave when there are none, and four demand bars decide what grows. It also brings a first land value, the population count with its history, and the first sound. The spec is [docs/milestones/M3.md](docs/milestones/M3.md) and the work is in the [issues labelled M3](https://github.com/bunge12/city-council/issues?q=is%3Aissue+label%3AM3).
+M3, demand, is done:
+
+- People move in from the outside connections, take the jobs their education allows, nearer ones first, and leave after a month without work
+- Four demand bars, for residential, commercial, office and industrial, decide what grows and how fast, and their tooltips say why
+- An all-residential town stalls until it has work. Each cell builds at the density it is zoned for, so an R3 lot gets a tower straight away
+- Births, deaths, children leaving home and households moving on, a little every game day
+- Homes and workplaces that people leave stand vacant, then abandoned, and come back when demand does
+- Built ground zoned up is redeveloped over game months, and people in a bulldozed home move to others with room
+- A first land value from road access, water, the city centre and industry, with an overlay, which decides which lots fill first
+- The population and its trend in the top bar, and a statistics panel that graphs a hundred years of history
+- Sounds for the tools, wind and construction, with volume settings
+- Scale checks on generated cities of 50,000, 200,000 and 500,000 residents
+
+M4, the economy, is next: taxes, upkeep, construction costs and one treasury, a monthly budget, and the first population milestones. The spec will be in `docs/milestones/M4.md`.
 
 ## Roadmap
 
@@ -49,8 +62,8 @@ Twelve milestones, built in order. There are no dates. The full table, with the 
 | M0 | Foundation and terrain | Done |
 | M1 | Road networks | Done |
 | M2 | Zoning and buildings | Done |
-| M3 | Demand | Next |
-| M4 | Economy | |
+| M3 | Demand | Done |
+| M4 | Economy | Next |
 | M5 | Traffic | |
 | M6 | Public transport: buses | |
 | M7 | Rail transport | |
