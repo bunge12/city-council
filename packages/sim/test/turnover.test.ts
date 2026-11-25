@@ -491,15 +491,18 @@ describe("over game decades", () => {
     expect(troughYear).toBeLessThanOrEqual(25);
     expect(mean[19] ?? 0).toBeLessThan(0.92 * filled);
     // Then the climb back: the last ten years sit above the ten around the
-    // trough, and well below the fill. The starting rates give a climb of
-    // only two or three percent, the replacement rate against the children
-    // leaving, which M3-21 tunes; a street that dips and stays flat fails.
+    // trough, and well below the fill. The climb is small, the replacement
+    // rate against the children leaving: about 2% of the street since M3-21
+    // (the four runs' mean went from 136 around the trough to 138.5, of 150
+    // filled, in the M3 review). A street that dips and stays flat fails.
     const around = average(mean.slice(Math.max(0, troughYear - 6), troughYear + 4));
     const late = average(mean.slice(-10));
     expect(mean.length - 10).toBeGreaterThanOrEqual(troughYear + 4);
     expect(late).toBeGreaterThan(1.01 * around);
-    // One seed is one sample: M3-25 moved the draws and this from 0.95 to 0.953 of the fill.
-    expect(late).toBeLessThan(0.96 * filled);
+    // About 0.92 of the fill in the M3 review. M3-25 had loosened this to
+    // 0.96 when the four runs' mean read 0.953; since M3-21 raised the
+    // replacement rate the street settles lower, well inside 0.95 again.
+    expect(late).toBeLessThan(0.95 * filled);
   }, 180_000);
 
   it("finds a city held at steady demand keeps its population for fifty game years, and each year's counts add up to its change (scenario test)", () => {
@@ -531,8 +534,10 @@ describe("over game decades", () => {
       // Within a few percent of where it started, every year: no wave.
       note(`started ${start}, pops ${state.stats.totals["pops"]}, by year ${years.join(" ")}`);
       for (const p of years) expect(Math.abs(p - start) / start).toBeLessThan(0.04);
-      // One seed is one sample: M3-25 moved the draws, and the last year from under 3% to 3.4% off.
-      expect(Math.abs((years.at(-1) ?? 0) - start) / start).toBeLessThan(0.04);
+      // And it ends where it began: about 1% off in the M3 review. M3-25 had
+      // loosened this to 4% when the last year read 3.4%, the same bound as
+      // every year above, which left it checking nothing of its own.
+      expect(Math.abs((years.at(-1) ?? 0) - start) / start).toBeLessThan(0.03);
       // Turnover did its work: people were born and died along the way.
       expect(births).toBeGreaterThan(20);
       expect(deaths).toBeGreaterThan(50);

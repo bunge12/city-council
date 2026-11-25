@@ -7,6 +7,7 @@ import {
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
   PROTOCOL_VERSION,
+  ROUTING_BALANCE,
   createBareState,
   createState,
   STAT_TOTALS,
@@ -505,16 +506,18 @@ describe("road deltas", () => {
         host.pump();
       }
     };
-    /** The host's network now, from a snapshot that goes only to the test. */
-    const hostRoads = () => {
+    /** The host's state now, from a snapshot that goes only to the test. */
+    const hostState = () => {
       const before = drop;
       drop = () => true;
       filtered.send({ v: PROTOCOL_VERSION, type: "requestSnapshot" });
       drop = before;
       const snap = received.at(-1);
       if (snap?.type !== "snapshot") throw new Error("no snapshot");
-      return snap.state.roads;
+      return snap.state;
     };
+    /** The host's network now. */
+    const hostRoads = () => hostState().roads;
     /**
      * Another player on the same host. The host here trusts the id each
      * message claims, as a server trusts the id it stamps on a connection.
@@ -522,7 +525,7 @@ describe("road deltas", () => {
     const join = (playerId: string) =>
       // Its own copy of each message, as its own connection would give it.
       new SimMirror({ send: (m, t) => client.send(m, t), onMessage: (h) => client.onMessage((m) => h(structuredClone(m))) }, playerId);
-    return { mirror, received, updates, tick, hostRoads, join, setDrop: (f: typeof drop) => (drop = f) };
+    return { mirror, received, updates, tick, hostState, hostRoads, join, setDrop: (f: typeof drop) => (drop = f) };
   }
 
   const arrays = (net: unknown) =>
@@ -661,6 +664,29 @@ describe("road deltas", () => {
     expect(snap?.type === "snapshot" && snap.state.undo).toEqual(mirror.state?.undo);
     // Enough happened for this to mean something.
     expect(mirror.state?.log.filter((e) => e.type === "Undo").length).toBeGreaterThan(50);
+  });
+
+  it("agrees with the host's hash while the travel table rebuilds", async () => {
+    // A rebuild slow enough to watch: on a city this small it is otherwise whole at once.
+    const was = ROUTING_BALANCE.travelTimes.rebuildSettlesPerTick;
+    ROUTING_BALANCE.travelTimes.rebuildSettlesPerTick = 1;
+    try {
+      const { mirror, tick, hostState } = roadSetup();
+      await mirror.sendCommand("BuildRoad", road([4200, 4500], [4600, 4500]));
+      for (let i = 0; i < 50 && (mirror.state?.tick ?? 0) <= (mirror.state?.travelReadyAt ?? 0); i++) tick();
+      expect(hostState().travelLast).toBeNull();
+      await mirror.sendCommand("BuildRoad", road([4400, 4420], [4400, 4900]));
+      tick();
+      const host = hostState();
+      // Mid-rebuild the sim holds the last whole table for job matching
+      // (#313) and the copy does not, so the hash a copy is judged by leaves it out.
+      expect(host.tick).toBeLessThan(host.travelReadyAt);
+      expect(host.travelLast).not.toBeNull();
+      expect(mirror.state?.travelLast).toBeNull();
+      expect(hashMirrored(mirror.state)).toBe(hashMirrored(host));
+    } finally {
+      ROUTING_BALANCE.travelTimes.rebuildSettlesPerTick = was;
+    }
   });
 
   it("sends the undo history only in a delta where it changed", async () => {

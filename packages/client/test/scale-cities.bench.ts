@@ -128,8 +128,10 @@ function generate(residents: ScaleCityResidents, shape: Omit<ScaleCity, "state">
  * a few times or not at all, and the timed run then met them on its first
  * call. On the 500,000 city that put the grower's worst tick over its share
  * on the tick it first added a workplace, its pass over the workplaces 3.8
- * ms on the first call and 0.7 ms from the third (issue #354). Returns the
- * buildings the day added.
+ * ms on the first call and 0.7 ms from the third (issue #354). That pass
+ * is gone since #366, which found the engine threw its compiled code away
+ * when the warm-up's city was collected; the day still compiles the rest.
+ * Returns the buildings the day added.
  */
 function warmUp(city: Generated): number {
   const state = deserialize(city.bytes).state;
@@ -446,7 +448,7 @@ function table(runs: readonly CityRun[]): string {
     row("Step, mean ms", runs.map((r) => `${round(r.stepMeanMs)}`)),
     row("Worst tick, ms", runs.map((r) => `${round(r.worstStepMs)} (tick ${r.worstStepTick})`)),
     "",
-    "Each system's mean / worst ms over the two days, against its share of the 20 ms tick where it has one. **Over** marks a worst past its share.",
+    "Each system's mean / worst ms over the two days, and the tick of its worst, against its share of the 20 ms tick where it has one. **Over** marks a worst past its share.",
     "",
     row("System", [...runs.map((r) => `${r.residents.toLocaleString("en")}`), "Share, ms"]),
     `|---|${runs.map(() => "---:").join("|")}|---:|`,
@@ -457,7 +459,7 @@ function table(runs: readonly CityRun[]): string {
       const s = r.systems.get(name);
       if (!s) return "";
       const over = share !== null && s.worst > share ? " **over**" : "";
-      return `${round(s.total / TICKS, 3)} / ${round(s.worst)}${over}`;
+      return `${round(s.total / TICKS, 3)} / ${round(s.worst)} (tick ${s.worstTick})${over}`;
     });
     lines.push(row(name, [...cells, share === null ? "" : `${share}`]));
   }

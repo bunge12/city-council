@@ -47,13 +47,25 @@ export const DISPLACED_SYSTEM = "displaced";
 const ONE_HOUSEHOLD = Uint8Array.from(BUILDING_TYPES, (t) => (t.oneHousehold ? 1 : 0));
 
 /** By type index: the most people one pop may hold in a home of that type. */
-const SIZE_CAP = Int32Array.from(BUILDING_TYPES, (t) => popSizeCap(t.density));
+let SIZE_CAP = Int32Array.from(BUILDING_TYPES, (t) => popSizeCap(t.density));
 
-/** The most room for one pop any home can have: the largest size cap. */
-const MOST_ROOM = SIZE_CAP.reduce((a, b) => Math.max(a, b), 1);
+/** Room classes: a home is filed under the room it has for one pop, from 1 to the largest size cap. */
+let ROOMS = SIZE_CAP.reduce((a, b) => Math.max(a, b), 1) + 1;
 
-/** Room classes: a home is filed under the room it has for one pop, from 1 to MOST_ROOM. */
-const ROOMS = MOST_ROOM + 1;
+/** The size caps SIZE_CAP and ROOMS were worked out from. */
+let capsFrom: readonly number[] = POPS_BALANCE.popSizeCap;
+
+/**
+ * Works SIZE_CAP and ROOMS out again when the size caps are replaced, as a
+ * test may replace them (M3 review, #365). A change inside the caps' own
+ * list is not seen.
+ */
+function keepCapsCurrent(): void {
+  if (capsFrom === POPS_BALANCE.popSizeCap) return;
+  SIZE_CAP = Int32Array.from(BUILDING_TYPES, (t) => popSizeCap(t.density));
+  ROOMS = SIZE_CAP.reduce((a, b) => Math.max(a, b), 1) + 1;
+  capsFrom = POPS_BALANCE.popSizeCap;
+}
 
 /**
  * The homes with room for one more pop as a tick's placing starts, kept
@@ -107,6 +119,7 @@ function pieceOf(state: SimState, pieces: Int32Array, id: number): number {
 
 /** The people live home `id` may still take as one pop: its room left within its size cap, none for a single family home anyone lives in. */
 function roomForOnePop(state: SimState, people: Int32Array, id: number): number {
+  keepCapsCurrent();
   const b = state.buildings;
   const t = b.type[id] ?? 0;
   const living = people[id] ?? 0;
@@ -169,6 +182,7 @@ function findHomes(state: SimState): Finder {
   const reach = outsideReachByNode(state);
   const { flags, residents, firstSeg, type } = b;
   const { segNetwork, segA } = state.roads;
+  keepCapsCurrent();
   const n = flags.length;
   const s = scratchFor(n, pieces.length);
   const { room: roomOf, group: groupOf, atOutside, groupOfNode, stampOfNode, homes } = s;

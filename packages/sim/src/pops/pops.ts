@@ -294,11 +294,17 @@ function checkGraceDays(days: number): void {
   if (!Number.isInteger(days) || days < 0 || days > GRACE_DAYS_LIMIT) throw new RangeError(`grace days must be a whole number from 0 to ${GRACE_DAYS_LIMIT}`);
 }
 
-/** Throws unless `size` people fit one pop in building `home`, beside the `others` people already there. */
-function checkHomeRoom(state: SimState, home: number, size: number, others: number): void {
+/**
+ * Throws unless `size` people fit one pop in building `home`, beside the
+ * `others` people already there. `from` is the size of the pop these
+ * people were before, when they were one: a pop past its home's size cap,
+ * which a city saved under a higher cap may hold (PRD, "Pops"), can still
+ * shrink or split, and only growth past the cap is refused (M3 review, #365).
+ */
+function checkHomeRoom(state: SimState, home: number, size: number, others: number, from = 0): void {
   const b = state.buildings;
   const cap = popSizeCap(homeDensity(b, home));
-  if (!Number.isInteger(size) || size < 1 || size > cap) throw new RangeError(`a pop in building ${home} holds 1 to ${cap} people, not ${size}`);
+  if (!Number.isInteger(size) || size < 1 || (size > cap && size > from)) throw new RangeError(`a pop in building ${home} holds 1 to ${cap} people, not ${size}`);
   const room = homeRoom(b, home);
   if (others + size > room) throw new RangeError(`building ${home} has room for ${room} people, not ${others + size}`);
 }
@@ -321,6 +327,19 @@ function checkJobs(state: SimState, work: number, addLevel: number, add: number,
  * for that many more, or if the profile or satisfaction is out of range.
  */
 export function addPop(state: SimState, spec: NewPop): number {
+  return insertPop(state, spec, 0);
+}
+
+/**
+ * `addPop` for the rest of a pop split in two, by job matching or turnover,
+ * from a pop of `from` people: it may be past the size cap when the pop it
+ * came from was (M3 review, #365). Internal to the pop systems.
+ */
+export function addSplitPop(state: SimState, spec: NewPop, from: number): number {
+  return insertPop(state, spec, from);
+}
+
+function insertPop(state: SimState, spec: NewPop, splitFrom: number): number {
   if (!isBuilding(state.buildings, spec.home) || (state.buildings.residents[spec.home] ?? 0) <= 0) {
     throw new RangeError(`building ${spec.home} is not a home`);
   }
@@ -330,7 +349,7 @@ export function addPop(state: SimState, spec: NewPop): number {
   checkDaysLow(spec.daysLow ?? 0);
   checkGraceDays(spec.graceDays ?? 0);
   const index = popIndexOf(state);
-  checkHomeRoom(state, spec.home, spec.size, index.people[spec.home] ?? 0);
+  checkHomeRoom(state, spec.home, spec.size, index.people[spec.home] ?? 0, splitFrom);
   const p = state.pops;
   let id: number;
   if (p.free.length > 0) {
@@ -470,7 +489,7 @@ export function setPopSize(state: SimState, id: number, size: number): void {
   const home = p.home[id] ?? 0;
   if (home === NO_HOME) throw new RangeError(`pop ${id} has no home, so its size waits until it finds one`);
   const old = p.size[id] ?? 0;
-  checkHomeRoom(state, home, size, (index.people[home] ?? 0) - old);
+  checkHomeRoom(state, home, size, (index.people[home] ?? 0) - old, old);
   const work = p.work[id] ?? NO_WORK;
   const children = p.children[id] ?? 0;
   const education = p.education[id] ?? 0;
@@ -503,7 +522,7 @@ export function setPopHousehold(state: SimState, id: number, size: number, child
   const home = p.home[id] ?? 0;
   if (home === NO_HOME) throw new RangeError(`pop ${id} has no home, so its household waits until it finds one`);
   const old = p.size[id] ?? 0;
-  checkHomeRoom(state, home, size, (index.people[home] ?? 0) - old);
+  checkHomeRoom(state, home, size, (index.people[home] ?? 0) - old, old);
   const work = p.work[id] ?? NO_WORK;
   if (work !== NO_WORK) checkJobs(state, work, education, workersFor(size, children), education, popWorkers(p, id));
   uncount(state, id, work, NO_WORK);

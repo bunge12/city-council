@@ -4,7 +4,7 @@ dist/
 test-results/
 playwright-report/
 .DS_Store
-soak-report.json
+soak-report*.json
 walkthrough-screenshots/
 bench-results/
 budget-rows/

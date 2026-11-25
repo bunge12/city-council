@@ -14,7 +14,7 @@
 // less workers at or below it. A count per level of each building's
 // workers is in the pop index (where.ts), so this reads no pop rows.
 
-import { BUILDING_TYPES, EDUCATION_LEVELS } from "../buildings/balance";
+import { BUILDINGS_BALANCE, BUILDING_TYPES, EDUCATION_LEVELS } from "../buildings/balance";
 import { BUILDING_ABANDONED, BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByEducation, jobsByKind } from "../buildings/jobs";
 import { DEMAND_BALANCE } from "../demand/balance";
@@ -25,11 +25,22 @@ import { ZONING_BALANCE } from "../zoning/balance";
 import { POP_LEVELS } from "./pops";
 import { popIndexOf } from "./where";
 
-/** By type, then by jobs: the building's jobs at each level and below, lowest first. A function of the balance alone. */
-const upToCache: (Int32Array | undefined)[][] = BUILDING_TYPES.map(() => []);
+/**
+ * By type, then by jobs: the building's jobs at each level and below,
+ * lowest first. A function of the balance alone, made again when the job
+ * mix or the education split it was made from is replaced whole, as
+ * `withValue(BUILDINGS_BALANCE, "jobKinds", ...)` in a test does (M3
+ * review, #365). A change inside either is not seen. Read only.
+ */
+let upToCache: (Int32Array | undefined)[][] = BUILDING_TYPES.map(() => []);
+let upToFrom: readonly unknown[] = [BUILDINGS_BALANCE.jobMix, BUILDINGS_BALANCE.jobKinds];
 
 /** The jobs of a building of type `type` offering `jobs`, at each education level or below, lowest first. */
 export function jobsUpToLevel(type: number, jobs: number): Int32Array {
+  if (upToFrom[0] !== BUILDINGS_BALANCE.jobMix || upToFrom[1] !== BUILDINGS_BALANCE.jobKinds) {
+    upToCache = BUILDING_TYPES.map(() => []);
+    upToFrom = [BUILDINGS_BALANCE.jobMix, BUILDINGS_BALANCE.jobKinds];
+  }
   const cache = upToCache[type];
   const kind = BUILDING_TYPES[type];
   if (!cache || !kind) return new Int32Array(POP_LEVELS);
@@ -111,22 +122,24 @@ export interface ZoneJobs {
   open: Float64Array;
 }
 
-/** By type index: its `jobsPerCell`, 0 for a type with no jobs. Read by `zoneJobs` in place of the type's row. */
+/** By type index: its `jobsPerCell`, 0 for a type with no jobs. Read by `countZoneJobs` in place of the type's row. */
 const JOBS_PER_CELL = Float64Array.from(BUILDING_TYPES, (t) => (t.jobsPerCell > 0 ? t.jobsPerCell : 0));
 
 /**
  * The jobs offered and open in each zone's workplaces on a road that
- * reaches an outside connection, by zone number, education aside. One pass
- * over the buildings, for the grower on a tick it adds a workplace (M3-09):
+ * reaches an outside connection, by zone number, education aside (M3-09):
  * a shop on a street joined to nothing never fills, and should not hold
- * the rest of the city's shops back.
+ * the rest of the city's shops back. One pass over the buildings. The
+ * grower reads the same counts as the openings keep them
+ * (openings.ts, `zoneJobs`, issue #366), and `openingsProblem` checks
+ * those against this.
  *
  * Kept tight, as `eachReachableHome` is (room.ts): each building's jobs are
  * `buildingJobs` worked out inline from a table by type, and the imported
  * constants are locals. Through `buildingJobs` the pass took 4 to 6 ms on
- * the 500,000 scale city, more than the grower's whole share (issue #324).
+ * the 500,000 scale city (issue #324).
  */
-export function zoneJobs(state: SimState): ZoneJobs {
+export function countZoneJobs(state: SimState): ZoneJobs {
   const b = state.buildings;
   const net = state.roads;
   const reach = outsideReachByNode(state);
@@ -173,5 +186,5 @@ export function workplacesHeldBy(jobs: ZoneJobs, zone: number): boolean {
 
 /** Whether the grower holds new workplaces of zone number `zone` back now. One pass over the buildings. */
 export function workplacesHeld(state: SimState, zone: number): boolean {
-  return workplacesHeldBy(zoneJobs(state), zone);
+  return workplacesHeldBy(countZoneJobs(state), zone);
 }

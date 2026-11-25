@@ -17,7 +17,9 @@
 // moved on in a way it cannot follow: a road it would remove has been
 // changed or bulldozed by someone else, another road now joins a junction it
 // would remove, or a road it would put back would cross or touch one built
-// since. A refused undo changes nothing and its record stays at the top of
+// since, or buildings stand on a road it would remove or on ground a road
+// it would put back would take (undo never clears a building, #369). A
+// refused undo changes nothing and its record stays at the top of
 // the player's history (PRD, "Undo").
 //
 // Each player keeps at most `undoSteps` records. Past that the oldest is
@@ -29,7 +31,8 @@
 import type { SimState } from "./state";
 import { noteFrontCells } from "./buildings/candidates";
 import { noteCellsPainted } from "./zoning/cell-changes";
-import { buildingsOnCells } from "./buildings/where";
+import { NO_BUILDING, buildingsOnCells, segmentBuildings } from "./buildings/where";
+import { buildingCount } from "./buildings/buildings";
 import { CELL_KEY_STRIDE } from "./zoning/cell-changes";
 import { laidOutCells, openCellsTakenBy, readyCells, restoreZones, syncCells, type ReturningSegment } from "./zoning/cell-index";
 import { ZONING_BALANCE } from "./zoning/balance";
@@ -107,6 +110,7 @@ const IN_THE_WAY = "Cannot undo: a road built since is in the way";
 const ROAD_GONE = "Cannot undo: someone has changed or removed a road those cells are on";
 const REZONED = "Cannot undo: someone has rezoned those cells since";
 const BUILT_ON = "Cannot undo: buildings now stand on ground that road would take back";
+const STANDS_ON = "Cannot undo: buildings stand on that road";
 
 /** The ids a record holds: everything it removed and left removed, which waits for it to come back. */
 export function heldBy(record: UndoRecord): HeldIds {
@@ -197,10 +201,16 @@ export function recordUndo(state: SimState, record: UndoRecord): void {
   state.undo = history;
 }
 
-/** Whether `playerId`'s next undo would put back roads its command removed, so it reads the cells (`takesBuiltGround`). */
-export function undoPutsRoadsBack(state: SimState, playerId: string): boolean {
+/**
+ * Whether `playerId`'s next undo reads the cells: it puts back roads its
+ * command removed (`takesBuiltGround`), or it removes roads while buildings
+ * stand in the city, which could stand on them (`clearsBuildings`).
+ */
+export function undoReadsCells(state: SimState, playerId: string): boolean {
   const record = state.undo[newestStep(state.undo, playerId)[0] ?? -1];
-  return record !== undefined && record.type !== ZONE_CELLS && returningSegments(state.roads, record.ops).back.length > 0;
+  if (record === undefined || record.type === ZONE_CELLS) return false;
+  if (returningSegments(state.roads, record.ops).back.length > 0) return true;
+  return record.ops.some((op) => op.op === "addSeg") && buildingCount(state.buildings) > 0;
 }
 
 /** Whether `playerId` has any record to undo, without checking it still applies. */
@@ -222,7 +232,7 @@ export function planUndo(state: SimState, playerId: string): UndoPlanResult {
   const record = state.undo[index];
   if (!record) return { ok: false, reason: NOTHING };
   if (record.type !== ZONE_CELLS) {
-    const reason = rehearse(state.roads, record.ops) ?? takesBuiltGround(state, record.ops);
+    const reason = rehearse(state.roads, record.ops) ?? clearsBuildings(state, record.ops) ?? takesBuiltGround(state, record.ops);
     return reason === null ? { ok: true, index, indices } : { ok: false, reason };
   }
   // The parts are taken back one after another, so they must not share a
@@ -288,8 +298,8 @@ function returningSegments(net: RoadNetwork, ops: readonly NetworkOp[]): { back:
  * it was, so its cells win the ground back from any newer road's built
  * since, and its surface blocks what grew under it. With two players that
  * would clear another player's buildings without a word, so the undo is
- * refused instead. Buildings on the segments the undo removes go as for any
- * undo of a build. The cells must be settled: the step holds an Undo while
+ * refused instead. Buildings on the segments the undo removes refuse it too
+ * (`clearsBuildings`). The cells must be settled: the step holds an Undo while
  * they settle (commands.ts).
  */
 function takesBuiltGround(state: SimState, ops: readonly NetworkOp[]): string | null {
@@ -297,6 +307,63 @@ function takesBuiltGround(state: SimState, ops: readonly NetworkOp[]): string | 
   if (back.length === 0) return null;
   const keys = openCellsTakenBy(syncCells(state), back, touched);
   return keys.length > 0 && buildingsOnCells(state, keys, CELL_KEY_STRIDE).length > 0 ? BUILT_ON : null;
+}
+
+/**
+ * Why taking away the roads `ops` added would clear buildings, or null
+ * (#369). Undo never clears a building, as it never brings one back, so an
+ * undo is refused while any building, occupied, vacant or abandoned, and
+ * whoever's, stands on a segment it would remove. A segment whose ground a
+ * road the same undo puts back carries on, as when the undo joins the
+ * pieces of a road the command split, keeps its buildings (`columnMover`)
+ * and does not count. A piece that comes back wider moves its cells out,
+ * and this does not check that ground: see PRD, "An undo that would remove
+ * a built road is refused too". Only after `rehearse` passed, so every segment the
+ * command added and left is there as it added it. The cells must be
+ * settled, as for `takesBuiltGround`.
+ */
+function clearsBuildings(state: SimState, ops: readonly NetworkOp[]): string | null {
+  const net = state.roads;
+  // The segments the reverse removes: added by the command and still there.
+  const removed: number[] = [];
+  const added = new Set<number>();
+  for (const op of ops) {
+    if (op.op === "addSeg") added.add(op.id);
+    else if (op.op === "removeSeg") added.delete(op.id);
+  }
+  for (const id of added) if (isSegment(net, id)) removed.push(id);
+  if (removed.length === 0 || buildingCount(state.buildings) === 0) return null;
+  const { back } = returningSegments(net, ops);
+  const bySeg = segmentBuildings(state);
+  for (const id of removed) {
+    const cells = bySeg[id];
+    if (!cells || !cells.some((b) => b !== NO_BUILDING)) continue;
+    if (!carriedOn(readSegment(net, id), back)) return STANDS_ON;
+  }
+  return null;
+}
+
+/**
+ * Whether the ground of segment `row` comes back on the segments `back`
+ * puts back: together they cover its stretch of its cell anchor, with the
+ * same build order, so its cells stay on their anchor cells (`relayout`).
+ */
+function carriedOn(row: SegmentRow, back: readonly ReturningSegment[]): boolean {
+  const a = row.anchor;
+  const spans: [number, number][] = [];
+  for (const seg of back) {
+    const o = seg.row.anchor;
+    if (seg.row.order !== row.order || o.ax !== a.ax || o.az !== a.az || o.cx !== a.cx || o.cz !== a.cz || o.bx !== a.bx || o.bz !== a.bz) continue;
+    spans.push([Math.min(o.tA, o.tB), Math.max(o.tA, o.tB)]);
+  }
+  spans.sort((p, q) => p[0] - q[0]);
+  let at = Math.min(a.tA, a.tB);
+  const end = Math.max(a.tA, a.tB);
+  for (const [lo, hi] of spans) {
+    if (lo > at) break;
+    if (hi > at) at = hi;
+  }
+  return spans.length > 0 && at >= end;
 }
 
 // What an undo of a paint puts back: the slot of each cell and the zone

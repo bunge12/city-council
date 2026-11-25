@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cellsSettled,
   BUILDING_TYPES,
+  BUILDINGS_BALANCE,
   CONNECTION_BALANCE,
   DEMAND_BALANCE,
   NONE,
@@ -33,6 +34,7 @@ import {
   workersFor,
   workplacesHeld,
   workplacesHeldBy,
+  countZoneJobs,
   zoneJobs,
   type Command,
   type SimState,
@@ -209,6 +211,14 @@ describe("which jobs a pop may take", () => {
     expect(openJobsFor(state, 0, 0)).toBe(0);
   });
 
+  it("splits jobs by the education shares in force, not the ones it first split them by (M3 review, #365)", () => {
+    const shop = BUILDING_TYPES.findIndex((t) => t.id === "shop-row");
+    expect(Array.from(jobsUpToLevel(shop, 10))).toEqual([6, 10, 10]);
+    const kinds = { ...BUILDINGS_BALANCE.jobKinds, commercial: { low: 0.2, medium: 0.4, high: 0.4 } };
+    withValue(BUILDINGS_BALANCE, "jobKinds", kinds, () => expect(Array.from(jobsUpToLevel(shop, 10))).toEqual([2, 6, 10]));
+    expect(Array.from(jobsUpToLevel(shop, 10))).toEqual([6, 10, 10]);
+  });
+
   it("weights a job by travel time, half at halfWeightSeconds and falling faster with a larger power", () => {
     const half = DEMAND_BALANCE.jobMatching.halfWeightSeconds;
     expect(jobWeight(0)).toBe(1);
@@ -367,6 +377,39 @@ describe("job matching", () => {
     }
     expect(moved).toBeGreaterThan(0);
     expectRecount(state);
+  });
+
+  it("counts its totals again when loaded under other worker shares, so they never drift or go below zero (M3 review, #365)", () => {
+    const { state, near } = nearAndFar();
+    scaledTimes(() => holdDemand(NEAR_FAR_BARS, () => runDays(state, 8)));
+    expect(popsAtWork(state, near).length).toBeGreaterThan(0);
+    // Saved by a build with other balance numbers, and loaded by one where more of each pop works.
+    const bytes = serialize({ ...state, balance: "0123456789abcdef" });
+    withValue(POPS_BALANCE, "workerShare", { withoutChildren: 1, withChildren: 0.9 }, () => {
+      const loaded = deserialize(bytes).state;
+      prepareDerived(loaded);
+      expectRecount(loaded);
+      expect(loaded.stats.highestPopulation).toBeGreaterThanOrEqual(loaded.stats.totals["population"] ?? 0);
+      scaledTimes(() => holdDemand(NEAR_FAR_BARS, () => runDays(loaded, 3)));
+      const b = loaded.buildings;
+      holdDemand(NEAR_FAR_BARS, () =>
+        ok(loaded, "BulldozeBuilding", { buildings: [{ id: near, segment: b.firstSeg[near], side: b.firstSide[near], place: b.firstPlace[near], builtAt: b.builtAt[near] }] }),
+      );
+      holdDemand(NEAR_FAR_BARS, () => runDays(loaded, 1));
+      expectRecount(loaded);
+      for (const [key, value] of Object.entries(loaded.stats.totals)) expect(value, key).toBeGreaterThanOrEqual(0);
+      // And it saves again: totals below zero would be refused as damage.
+      expect(() => deserialize(serialize(loaded))).not.toThrow();
+    });
+    // A save an older build wrote after its totals had already gone below zero loads, counted again.
+    const drifted = structuredClone(state);
+    drifted.balance = "0123456789abcdef";
+    drifted.stats.totals["workersEmployed"] = -69;
+    const repaired = deserialize(serialize(drifted)).state;
+    prepareDerived(repaired);
+    expectRecount(repaired);
+    // Under the same numbers nothing is counted again, and the load hashes as the save.
+    expect(hashState(deserialize(serialize(state)).state)).toBe(hashState(state));
   });
 
   it("splits a tower's pops by where they work, and never puts a building over its jobs", () => {
@@ -536,6 +579,11 @@ describe("a long session", () => {
       runDays(state, 10, check);
     });
     expect(openingsProblem(state)).toBeNull();
+    // The grower reads each zone's jobs as the openings keep them, and they
+    // are what a pass over the buildings counts (#366).
+    const kept = zoneJobs(state);
+    expect(kept).toEqual(countZoneJobs(state));
+    expect(kept.jobs.reduce((sum, jobs) => sum + jobs, 0)).toBeGreaterThan(0);
     expect(state.stats.totals["workersEmployed"]).toBeGreaterThan(0);
     expectRecount(state);
   });
