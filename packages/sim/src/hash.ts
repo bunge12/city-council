@@ -171,14 +171,16 @@ export function hashState(value: unknown): string {
 }
 
 /**
- * `hashState` of `state` with its pops left out: the pop table and the
- * sweep's cursor. A client's copy holds pop rows only as of its last
- * snapshot, since deltas carry each building's people and jobs filled and
- * not the rows (M3-05), so this is what a copy must agree with the sim on
- * after deltas. Straight after a snapshot the full `hashState` agrees too.
+ * `hashState` of `state` with its pops and its last whole travel table left
+ * out. A client's copy holds pop rows only as of its last snapshot, since
+ * deltas carry each building's people and jobs filled and not the rows
+ * (M3-05). It lets go of `travelLast` on the first delta, since only job
+ * matching in the sim reads it and no delta carries it (#313). So this is
+ * what a copy must agree with the sim on after deltas, a travel rebuild
+ * included. Straight after a snapshot the full `hashState` agrees too.
  */
-export function hashMirrored(state: { readonly pops: unknown } | null): string {
-  return hashState({ ...state, pops: null });
+export function hashMirrored(state: { readonly pops: unknown; readonly travelLast?: unknown } | null): string {
+  return hashState({ ...state, pops: null, travelLast: null });
 }
 
 /** 64-bit FNV-1a of raw bytes, as 16 hex digits. Exposed for tests. */

@@ -59,7 +59,7 @@ import { BUILDING_TYPES } from "../buildings/balance";
 import { homeRoom } from "../buildings/buildings";
 import { partThatFits } from "./matching";
 import { jobsProblem, openJobsFor } from "./open-jobs";
-import { NO_HOME, NO_WORK, POP_ALIVE, addPop, popSizeCap, removePop, setPopHousehold, setPopSize, setPopWork, workersFor } from "./pops";
+import { NO_HOME, NO_WORK, POP_ALIVE, addPop, addSplitPop, popSizeCap, removePop, setPopHousehold, setPopSize, setPopWork, workersFor } from "./pops";
 import { homeReachesOutside, homeRoomLeft } from "./room";
 import { popSlice } from "./sweep";
 import { popIndexOf } from "./where";
@@ -157,7 +157,7 @@ function reshape(state: SimState, id: number, size: number, children: number): v
   if (part === 0) return;
   setPopSize(state, id, part);
   // The rest keeps the household's score, its days low and its grace, as a split in job matching does.
-  addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0, graceDays: p.graceDays[id] ?? 0 });
+  addSplitPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0, graceDays: p.graceDays[id] ?? 0 }, size);
   setPopWork(state, id, work);
 }
 

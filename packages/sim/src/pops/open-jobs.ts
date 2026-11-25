@@ -14,7 +14,7 @@
 // less workers at or below it. A count per level of each building's
 // workers is in the pop index (where.ts), so this reads no pop rows.
 
-import { BUILDING_TYPES, EDUCATION_LEVELS } from "../buildings/balance";
+import { BUILDINGS_BALANCE, BUILDING_TYPES, EDUCATION_LEVELS } from "../buildings/balance";
 import { BUILDING_ABANDONED, BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByEducation, jobsByKind } from "../buildings/jobs";
 import { DEMAND_BALANCE } from "../demand/balance";
@@ -25,11 +25,22 @@ import { ZONING_BALANCE } from "../zoning/balance";
 import { POP_LEVELS } from "./pops";
 import { popIndexOf } from "./where";
 
-/** By type, then by jobs: the building's jobs at each level and below, lowest first. A function of the balance alone. */
-const upToCache: (Int32Array | undefined)[][] = BUILDING_TYPES.map(() => []);
+/**
+ * By type, then by jobs: the building's jobs at each level and below,
+ * lowest first. A function of the balance alone, made again when the job
+ * mix or the education split it was made from is replaced whole, as
+ * `withValue(BUILDINGS_BALANCE, "jobKinds", ...)` in a test does (M3
+ * review, #365). A change inside either is not seen. Read only.
+ */
+let upToCache: (Int32Array | undefined)[][] = BUILDING_TYPES.map(() => []);
+let upToFrom: readonly unknown[] = [BUILDINGS_BALANCE.jobMix, BUILDINGS_BALANCE.jobKinds];
 
 /** The jobs of a building of type `type` offering `jobs`, at each education level or below, lowest first. */
 export function jobsUpToLevel(type: number, jobs: number): Int32Array {
+  if (upToFrom[0] !== BUILDINGS_BALANCE.jobMix || upToFrom[1] !== BUILDINGS_BALANCE.jobKinds) {
+    upToCache = BUILDING_TYPES.map(() => []);
+    upToFrom = [BUILDINGS_BALANCE.jobMix, BUILDINGS_BALANCE.jobKinds];
+  }
   const cache = upToCache[type];
   const kind = BUILDING_TYPES[type];
   if (!cache || !kind) return new Int32Array(POP_LEVELS);

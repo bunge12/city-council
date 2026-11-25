@@ -19,7 +19,7 @@
 // by the systems that move people (M3-08, M3-10, M3-11) through `noteYear`.
 // On 1 January the running year becomes the last one and starts again at 0.
 
-import { BUILDING_TYPES, JOB_KINDS, type JobKind } from "../buildings/balance";
+import { BUILDINGS_BALANCE, BUILDING_TYPES, JOB_KINDS, type JobKind } from "../buildings/balance";
 import { BUILDING_ALIVE, OFFERS_JOBS, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByKind, type JobsByKind } from "../buildings/jobs";
 import { isMonthStart, isYearStart } from "../calendar";
@@ -162,11 +162,22 @@ function addPop(t: StatTotals, p: PopState, b: BuildingState, id: number, sign: 
   if (children) bump(t, "popsWithChildren", sign);
 }
 
-/** By type, then by jobs: `jobsByKind`, which job matching asks for on every take (M3-09). A function of the balance alone; read only. */
-const kindCache: (JobsByKind | undefined)[][] = BUILDING_TYPES.map(() => []);
+/**
+ * By type, then by jobs: `jobsByKind`, which job matching asks for on every
+ * take (M3-09). A function of the balance alone, made again when the job
+ * mix it was made from is replaced whole, as `withValue(BUILDINGS_BALANCE,
+ * "jobMix", ...)` in a test does (M3 review, #365). A change inside the
+ * mix is not seen. Read only.
+ */
+let kindCache: (JobsByKind | undefined)[][] = BUILDING_TYPES.map(() => []);
+let kindCacheMix: unknown = BUILDINGS_BALANCE.jobMix;
 
 /** `jobs` of a building of type index `type` split by kind, or null for no such type. */
 function kindsOf(type: number, jobs: number): JobsByKind | null {
+  if (kindCacheMix !== BUILDINGS_BALANCE.jobMix) {
+    kindCache = BUILDING_TYPES.map(() => []);
+    kindCacheMix = BUILDINGS_BALANCE.jobMix;
+  }
   const kind = BUILDING_TYPES[type];
   const cache = kindCache[type];
   if (!kind || !cache) return null;
