@@ -285,7 +285,8 @@ describe("road balance", () => {
   it("brings every price to whole 2026 dollars", () => {
     for (const type of ROAD_TYPES) {
       expect(Number.isSafeInteger(type.buildCostPerMetre), type.id).toBe(true);
-      expect(Number.isSafeInteger(type.upkeepPerMetrePerYear), type.id).toBe(true);
+      expect(type.upkeepShare, type.id).toBeGreaterThan(0);
+      expect(type.upkeepShare, type.id).toBeLessThan(1);
     }
     const esc = { ...ROAD_BALANCE.escalation, toYear: 2026, annualFactor: 1.5 };
     expect(escalate({ amount: 100, sourceYear: 2024, source: "x" }, esc)).toBe(225);
@@ -312,13 +313,21 @@ describe("road balance", () => {
   });
 
   it("fails when a price has no source year or no source", () => {
-    for (const price of ["buildCostPerMetre", "upkeepPerMetrePerYear", "demolitionCostPerMetre"] as const) {
+    for (const price of ["buildCostPerMetre", "demolitionCostPerMetre"] as const) {
       for (const field of ["sourceYear", "source", "amount"]) {
         const copy = copyBalance() as unknown as { types: Record<string, Record<string, unknown>>[] };
         delete copy.types[1]?.[price]?.[field];
         expect(checkRoadBalance(copy).join()).toContain(`types[1].${price}.${field}`);
       }
     }
+    for (const field of ["sourceYear", "source", "share"]) {
+      const copy = copyBalance() as unknown as { types: Record<string, Record<string, unknown>>[] };
+      delete copy.types[1]?.["upkeepShare"]?.[field];
+      expect(checkRoadBalance(copy).join()).toContain(`types[1].upkeepShare.${field}`);
+    }
+    const whole = copyBalance() as unknown as { types: { upkeepShare: { share: number } }[] };
+    (whole.types[0] as { upkeepShare: { share: number } }).upkeepShare.share = 1.5;
+    expect(checkRoadBalance(whole).join()).toContain("types[0].upkeepShare.share must be a number from 0 to 1");
     const fractional = copyBalance();
     (fractional.types[0] as { buildCostPerMetre: { amount: number } }).buildCostPerMetre.amount = 1.5;
     expect(checkRoadBalance(fractional).join()).toMatch(/whole number of dollars/);

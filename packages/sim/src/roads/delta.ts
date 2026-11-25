@@ -46,6 +46,7 @@ import {
 } from "./spatial";
 import { addBlockSegment, existingBlockIndex, removeBlockSegment } from "./blocks";
 import { markOutsideStale } from "./outside";
+import { markRoadUpkeepStale } from "../economy/upkeep";
 import { NO_EDGE, existingRoutingGraph, refreshRoutingSegment } from "./routing";
 
 type NodeKey = (typeof NODE_ARRAYS)[number];
@@ -298,6 +299,8 @@ export function applyRoadDelta(net: RoadNetwork, delta: RoadDelta): number[] | s
   }
   // Which pieces reach outside is worked out afresh on the next read.
   markOutsideStale(net);
+  // And the yearly upkeep is counted again on its next read.
+  markRoadUpkeepStale(net);
   touchedChunks(net, delta.nodeIds, delta.segIds, chunks);
   return [...chunks].sort((a, b) => a - b);
 }

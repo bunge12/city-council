@@ -204,6 +204,14 @@
       "mode": "blocks",
       "source": "M3-24"
     },
+    "upkeep.tick": {
+      "name": "the upkeep system on a day's first tick on the scale city of 500,000 residents, the tick it charges the day's road upkeep from the running sum; a twentieth of the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 1,
+      "mode": "blocks",
+      "source": "M4-04"
+    },
     "demand.outside": {
       "name": "working out which of the scale town's 30,000 segments reach outside again, in the step after a change of roads",
       "unit": "ms",

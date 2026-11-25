@@ -37,6 +37,7 @@ import {
   TIME_BALANCE,
   TRAVEL_SYSTEM,
   TURNOVER_SYSTEM,
+  UPKEEP_SYSTEM,
   VACANCY_SYSTEM,
   budgetFigure,
   buildScaleCity,
@@ -74,6 +75,7 @@ const SHARES: Readonly<Record<string, string>> = {
   [VACANCY_SYSTEM]: "vacancy.tick",
   [LAND_VALUE_SYSTEM]: "landvalue.tick",
   [GROWER_SYSTEM]: "grower.share",
+  [UPKEEP_SYSTEM]: "upkeep.tick",
 };
 
 interface SystemTimes {
