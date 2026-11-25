@@ -14,6 +14,7 @@ import {
   VACANCY_SYSTEM,
   REDEVELOP_SYSTEM,
   STATS_SYSTEM,
+  BUDGET_SYSTEM,
   DEMAND_SYSTEM,
   LAND_VALUE_SYSTEM,
   LOG_PAGE_SIZE,
@@ -113,6 +114,8 @@ describe("step", () => {
       `end ${REDEVELOP_SYSTEM}`,
       `start ${GROWER_SYSTEM}`,
       `end ${GROWER_SYSTEM}`,
+      `start ${BUDGET_SYSTEM}`,
+      `end ${BUDGET_SYSTEM}`,
     ]);
   });
 });

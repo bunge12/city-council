@@ -1,7 +1,9 @@
 import { createBuildings } from "./buildings/buildings";
 import { TIME_BALANCE } from "./calendar";
 import { NO_LEAVING, createPops } from "./pops/pops";
-import { STAT_TOTALS, recountTotals, statsFor } from "./stats/stats";
+import { STAT_TOTALS, emptyMoney, recountTotals, statsFor } from "./stats/stats";
+import { ECONOMY } from "./economy/balance";
+import { emptyBudget } from "./economy/budget";
 import { DEMAND_PARTS, createDemand } from "./demand/demand";
 import { placeConnections } from "./roads/connections";
 import { NO_TIER, createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
@@ -143,7 +145,21 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // of zeros as long as the others. A city saved before it had no grace, so
   // every pop has settled in, none is left, and the bar reads what it did.
   28: (old) => ({ ...old, version: 29, pops: popsWithGrace(old["pops"]), stats: statsWithNewcomers(old["stats"]) }),
+  // Version 30 adds the treasury and the ledger (M4-02), and the money
+  // series of the statistics' history. A city saved before it had no money:
+  // it is given the starting grant, as its opening balance and on no line,
+  // an empty ledger, the tax rates at their defaults, and money series of
+  // zeros as long as the rest of its history.
+  29: (old) => ({ ...old, version: 30, stats: statsWithMoney(old["stats"]), budget: emptyBudget(ECONOMY.startingGrant) }),
 };
+
+/** Version 29 statistics with money series of zeros as long as the history, after `next`. */
+function statsWithMoney(value: unknown): Record<string, unknown> {
+  const stats = value as Record<string, unknown> & { history: Record<string, Int32Array> };
+  // A save from before version 18 got its statistics from today's `statsFor`, which has the money already.
+  if (stats["money"] !== undefined) return stats;
+  return { ...stats, money: emptyMoney(stats.history["population"]?.length ?? 0) };
+}
 
 /** A version 28 set of pops with the days of grace version 29 adds, none, in the order a new state has them. */
 function popsWithGrace(value: unknown): Record<string, unknown> {

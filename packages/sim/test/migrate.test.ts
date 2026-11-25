@@ -5,7 +5,9 @@ import { LEVEL_BRIDGE, NO_TIER, addNode, addSegment, createRoadNetwork, isNode, 
 import { terrainOf } from "../src/terrain/cache";
 import { checkUndoHistory } from "../src/undo";
 import { createDemand } from "../src/demand/demand";
-import { STAT_TOTALS, createStats, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
+import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
+import { ECONOMY } from "../src/economy/balance";
+import { emptyBudget } from "../src/economy/budget";
 import { addBuilding } from "../src/buildings/buildings";
 import { addPop, setPopWork } from "../src/pops/pops";
 import { withEnds } from "./seen-ends";
@@ -23,9 +25,19 @@ import { withoutVacancy } from "./before-vacancy";
  * the tick the travel times are ready by and every version before 20 the
  * demand bars. Versions 13 to 20 held the grower's plan, which version 21
  * dropped: they get a new city's, with nothing planned.
+ *
+ * Every version before 30 had no money (M4-02), and its migration gives a
+ * city the starting grant as its opening balance, an empty ledger and money
+ * series of zeros. `older` gives `state` the same, in place, before it
+ * drops them, so the city a test compares the migrated one with, or steps
+ * beside it, is the one the migration means.
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
+  if (version < 30) {
+    withOldMoney(state);
+    gone.push("budget");
+  }
   if (version < 10) gone.push("cells", "cellsReadyAt");
   if (version < 11) gone.push("buildings");
   if (version < 13) gone.push("growth");
@@ -38,6 +50,11 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 26) gone.push("redevelopedToday");
   if (version < 27) gone.push("travelLast");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  if (version < 30 && typeof kept["stats"] === "object" && kept["stats"] !== null) {
+    const { money, ...stats } = kept["stats"] as SimState["stats"];
+    void money;
+    kept["stats"] = stats;
+  }
   // Before version 28 no segment kept the tiers of its strips (#341).
   if (version < 28 && kept["roads"]) {
     const { segTierL, segTierR, ...roads } = kept["roads"] as SimState["roads"];
@@ -101,6 +118,13 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   return { ...kept, version };
 }
 
+/** Gives `state`, in place, the money the version 30 migration gives a city saved before it, and returns it. */
+function withOldMoney(state: SimState): SimState {
+  state.budget = emptyBudget(ECONOMY.startingGrant);
+  state.stats.money = emptyMoney(sampleCount(state.stats));
+  return state;
+}
+
 /** An undo history as the version 14 migration leaves it, from one of today's: no ZoneCells records, and no zoning on any other. */
 function withoutZones(undo: SimState["undo"]): SimState["undo"] {
   return undo
@@ -116,6 +140,7 @@ function withoutZones(undo: SimState["undo"]): SimState["undo"] {
 function asMigrated(state: SimState): SimState {
   return {
     ...state,
+    budget: emptyBudget(ECONOMY.startingGrant),
     undo: withoutZones(state.undo),
     centre: { x: 0, z: 0, weight: 0, due: state.tick },
     stats: statsFor(state),
@@ -153,7 +178,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(29);
+    expect(SNAPSHOT_VERSION).toBe(30);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -175,6 +200,7 @@ describe("migrateState", () => {
       demand: createDemand(),
       redevelopedToday: 0,
       travelLast: null,
+      budget: emptyBudget(ECONOMY.startingGrant),
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -201,6 +227,7 @@ describe("migrateState", () => {
       demand: createDemand(),
       redevelopedToday: 0,
       travelLast: null,
+      budget: emptyBudget(ECONOMY.startingGrant),
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -439,7 +466,7 @@ describe("migrateState", () => {
     const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
     expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
     while (state.tick < 250) step(state);
-    const v20 = older(structuredClone(state), 20);
+    const v20 = older(structuredClone(withOldMoney(state)), 20);
     v20["growth"] = { quota: 40, day: 2, deadline: 30, free: 48, used: 3 };
     const migrated = migrateState(v20);
     expect(migrated.version).toBe(SNAPSHOT_VERSION);
@@ -459,7 +486,7 @@ describe("migrateState", () => {
     expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
     while (state.tick < 20) step(state);
     expect(state.travelLast).toBeNull();
-    const v26 = older(structuredClone(state), 26);
+    const v26 = older(structuredClone(withOldMoney(state)), 26);
     expect("travelLast" in v26).toBe(false);
     const migrated = migrateState(v26);
     expect(migrated.version).toBe(SNAPSHOT_VERSION);
@@ -467,7 +494,7 @@ describe("migrateState", () => {
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
     expect(hashState(migrated)).toBe(hashState(state));
     // Saved mid-rebuild, it still has none: nobody is matched until the rebuild is ready, as before.
-    const midRebuild = migrateState({ ...older(structuredClone(state), 26), travelReadyAt: state.tick + 50 });
+    const midRebuild = migrateState({ ...older(structuredClone(withOldMoney(state)), 26), travelReadyAt: state.tick + 50 });
     expect(midRebuild.travelLast).toBeNull();
     expect(midRebuild.travelReadyAt).toBe(state.tick + 50);
   });
@@ -483,7 +510,7 @@ describe("migrateState", () => {
     for (let id = 0; id < state.buildings.flags.length; id++) if (state.buildings.flags[id] && (state.buildings.residents[id] ?? 0) > 0) homes.push(id);
     for (const home of homes) addPop(state, { home, size: 1, education: 0, wealth: 0, children: 0, satisfaction: 60 });
     expect(popCount(state.pops)).toBeGreaterThan(0);
-    const v24 = older(structuredClone(state), 24);
+    const v24 = older(structuredClone(withOldMoney(state)), 24);
     expect("displaced" in (v24["pops"] as object)).toBe(false);
     const migrated = migrateState(v24);
     expect(migrated.version).toBe(SNAPSHOT_VERSION);
@@ -503,7 +530,7 @@ describe("migrateState", () => {
     while (state.tick < 450) step(state);
     const built = Array.from(state.buildings.flags).filter((f) => f !== 0).length;
     expect(built).toBeGreaterThan(1);
-    const v23 = older(structuredClone(state), 23);
+    const v23 = older(structuredClone(withOldMoney(state)), 23);
     expect("statusSince" in (v23["buildings"] as object)).toBe(false);
     const migrated = migrateState(v23);
     expect(migrated.version).toBe(SNAPSHOT_VERSION);
@@ -528,7 +555,7 @@ describe("migrateState", () => {
     for (let id = 0; id < state.buildings.flags.length; id++) if (state.buildings.flags[id] && (state.buildings.residents[id] ?? 0) > 0) homes.push(id);
     expect(homes.length).toBeGreaterThan(0);
     for (const [i, home] of homes.entries()) addPop(state, { home, size: 1, education: 0, wealth: 0, children: 0, satisfaction: 10 + i, daysLow: 3 });
-    const v22 = older(structuredClone(state), 22);
+    const v22 = older(structuredClone(withOldMoney(state)), 22);
     expect("daysLow" in (v22["pops"] as object)).toBe(false);
     const migrated = migrateState(v22);
     expect(migrated.version).toBe(SNAPSHOT_VERSION);
@@ -590,7 +617,7 @@ describe("migrateState", () => {
     const migrated = migrateState(v16);
     const { growth, ...kept } = v16;
     void growth;
-    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null });
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null, budget: emptyBudget(ECONOMY.startingGrant) });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 
@@ -650,6 +677,40 @@ describe("migrateState", () => {
     expect(sampleCount(migrated.stats)).toBe(0);
     step(migrated);
     expect(sampleCount(migrated.stats)).toBe(1);
+  });
+
+  it("upgrades a version 29 city by giving it the starting grant, an empty ledger and money series of zeros, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    // Into the second month, so the history holds two samples and the ledger a closed month.
+    const day = TIME_BALANCE.ticksPerDay;
+    while (state.tick < 33 * day) step(state);
+    expect(sampleCount(state.stats)).toBe(2);
+    const v29 = older(structuredClone(state), 29);
+    expect("budget" in v29).toBe(false);
+    expect("money" in (v29["stats"] as object)).toBe(false);
+    const migrated = migrateState(v29);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(Object.keys(migrated.stats)).toEqual(Object.keys(state.stats));
+    expect(migrated.budget).toEqual(emptyBudget(ECONOMY.startingGrant));
+    expect(migrated.budget.treasury).toBe(ECONOMY.startingGrant);
+    expect(Object.keys(migrated.stats.money)).toEqual([...MONEY_SERIES]);
+    for (const name of MONEY_SERIES) expect(Array.from(migrated.stats.money[name])).toEqual([0, 0]);
+    // Apart from the money, the city as it was.
+    const { budget, stats, ...rest } = migrated;
+    const { budget: wasBudget, stats: wasStats, ...wasRest } = state;
+    void budget;
+    void wasBudget;
+    expect(rest).toEqual(wasRest);
+    expect({ ...stats, money: null }).toEqual({ ...wasStats, money: null });
+    // And it steps on, closing its months from the grant.
+    while (migrated.tick < 63 * day) step(migrated);
+    expect(migrated.budget.treasury).toBe(ECONOMY.startingGrant);
+    expect(Array.from(migrated.stats.money.treasury)).toEqual([0, 0, ECONOMY.startingGrant]);
   });
 
   it("leaves a current state as it is", () => {

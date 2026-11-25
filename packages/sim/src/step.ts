@@ -6,6 +6,7 @@ import { JOBS } from "./pops/matching";
 import { SATISFACTION } from "./pops/satisfaction";
 import { TURNOVER } from "./pops/turnover";
 import { STATS } from "./stats/stats";
+import { BUDGET_SYSTEM, closeMonthOn } from "./economy/budget";
 import { DEMAND } from "./demand/demand";
 import { keepBuildings } from "./buildings/upkeep";
 import { VACANCY } from "./buildings/vacancy";
@@ -91,7 +92,8 @@ export const BUILDINGS_SYSTEM = "buildings";
  * zoning cells still settling and brings derived data up to date with the
  * step's changes, rebuilds a slice of the travel times after a change of
  * roads, then, unless the game is paused, runs every
- * system and advances exactly one tick.
+ * system, advances exactly one tick and, when the new tick is a month's
+ * first, closes the month (economy/budget.ts).
  *
  * Returns the queued commands it dropped, with why, for the host to pass
  * on to their senders. Replay has no one to tell and ignores them.
@@ -121,5 +123,9 @@ export function step(state: SimState, timer?: SystemTimer): DroppedCommand[] {
   endTravelStep(state);
   state.tick += 1;
   state.cellReads = 0;
+  // On the new tick, before anything else happens on it: money a command
+  // moves on a month's first tick, paused or not, is the new month's, and
+  // the statistics' sample on it holds the month just filed (M4-02).
+  timed(timer, BUDGET_SYSTEM, () => closeMonthOn(state));
   return dropped;
 }

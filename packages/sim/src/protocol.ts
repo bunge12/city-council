@@ -7,6 +7,7 @@ import type { BuildingDelta } from "./buildings/delta";
 import type { Command, CommandResult, DroppedCommand } from "./commands";
 import type { CentreState } from "./landvalue/centre";
 import type { DemandState } from "./demand/demand";
+import type { BudgetState } from "./economy/budget";
 import type { LogEntry } from "./log";
 import type { PopDelta } from "./pops/delta";
 import type { StatsDelta } from "./stats/stats";
@@ -16,7 +17,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 23;
+export const PROTOCOL_VERSION = 24;
 
 // ---- Client to sim ----
 
@@ -167,6 +168,11 @@ export interface DeltaMessage {
    * version 21).
    */
   redevelopedToday: number;
+  /**
+   * The treasury, the ledger and the tax rates, a copy, when any changed
+   * since the last delta (M4-02, protocol version 24). Left out otherwise.
+   */
+  budget?: BudgetState;
   /**
    * The commands still queued, the ones waiting for the cells to settle,
    * when the queue changed since the last delta. Left out otherwise: a

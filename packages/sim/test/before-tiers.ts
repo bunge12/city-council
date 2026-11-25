@@ -3,10 +3,16 @@
 // migration and snapshot tests, which check that a version 26 save loads to
 // the same city with only those added.
 
+import { withoutMoney } from "./before-money";
+
 type Loose = Record<string, unknown>;
 
 /** `state` with the fields version 28 added taken out. Leaves a state that has none as it is. */
 export function withoutTiers<T extends object>(state: T): T {
+  return withoutTiersOnly(withoutMoney(state));
+}
+
+function withoutTiersOnly<T extends object>(state: T): T {
   const out: Loose = { ...(state as Loose) };
   if (out["roads"] && typeof out["roads"] === "object") {
     const roads: Loose = { ...(out["roads"] as Loose) };

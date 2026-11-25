@@ -3,10 +3,16 @@
 // which check that a version 26 save loads to the same city with only that
 // added.
 
+import { withoutMoney } from "./before-money";
+
 type Loose = Record<string, unknown>;
 
 /** `state` with the field version 27 added taken out. Leaves a state that has none as it is. */
 export function withoutTravelLast<T extends object>(state: T): T {
+  return withoutTravelLastOnly(withoutMoney(state));
+}
+
+function withoutTravelLastOnly<T extends object>(state: T): T {
   const out: Loose = { ...(state as Loose) };
   delete out["travelLast"];
   return out as T;

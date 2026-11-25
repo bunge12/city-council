@@ -94,8 +94,10 @@ function cityHash(state: SimState): string {
     undo: [],
     cellsReadyAt: 0,
     centre: { ...state.centre, due: 0 },
-    stats: { ...state.stats, history: {}, next: 0 },
+    stats: { ...state.stats, history: {}, next: 0, money: {} },
     travelReadyAt: 0,
+    // The ledger is a record of the month so far and the month before, like the history; the treasury is kept.
+    budget: { ...state.budget, opening: 0, month: new Float64Array(0), lastMonth: new Float64Array(0) },
     // Held while the travel times rebuild, like the tick they are rebuilt by (#313).
     travelLast: null,
     // The bars move a share of the way each day, so they follow the days passed too.

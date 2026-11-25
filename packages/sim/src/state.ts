@@ -3,6 +3,7 @@ import { createBuildings, type BuildingState } from "./buildings/buildings";
 import type { Command } from "./commands";
 import { createCentre, type CentreState } from "./landvalue/centre";
 import { createDemand, type DemandState } from "./demand/demand";
+import { createBudget, type BudgetState } from "./economy/budget";
 import type { LogEntry } from "./log";
 import { createPops, type PopState } from "./pops/pops";
 import { createStats, type StatsState } from "./stats/stats";
@@ -18,7 +19,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 29;
+export const SNAPSHOT_VERSION = 30;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -134,6 +135,13 @@ export interface SimState {
    * (travel-times.ts, #313). Null at other times.
    */
   travelLast: TravelLast | null;
+  /**
+   * The treasury, the month's ledger and the month before's, and the four
+   * tax rates (economy/budget.ts, M4-02). Only `moveMoney` writes the
+   * treasury or the ledger. A new city starts with the starting grant on
+   * the grants line.
+   */
+  budget: BudgetState;
 }
 
 /**
@@ -189,6 +197,8 @@ export function createBareState(seed: number): SimState {
     redevelopedToday: 0,
     // After it, where the version 27 migration puts it.
     travelLast: null,
+    // After it, where the version 30 migration puts it.
+    budget: createBudget(),
   };
 }
 

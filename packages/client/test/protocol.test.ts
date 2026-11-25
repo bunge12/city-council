@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   CHUNKS_PER_SIDE,
   CHUNK_SIZE,
+  LINE,
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
   PROTOCOL_VERSION,
@@ -200,7 +201,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "redevelop", "grower"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "redevelop", "grower", "budget"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -233,6 +234,49 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     const snap = received.at(-1);
     expect(snap?.type === "snapshot" && hashMirrored(snap.state)).toBe(mirrored);
     expect(snap?.type === "snapshot" && snap.state.stats.history).toEqual(state.stats.history);
+    // And the money: the treasury, the ledger and the history's money series (M4-02).
+    expect(snap?.type === "snapshot" && snap.state.budget).toEqual(state.budget);
+    expect(snap?.type === "snapshot" && snap.state.stats.money).toEqual(state.stats.money);
+  });
+
+  it("sends the treasury and the ledger in a delta when they change, and not otherwise", async () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    // A city with tax already taken in January, set as a save would hold it, so the close on 1 February changes the ledger.
+    const state = createBareState(7);
+    state.budget.month[LINE.taxResidential] = 500;
+    state.budget.treasury += 500;
+    const host = new SimHost(state, hostEnd, () => now);
+    const mirror = new SimMirror(client, "p1");
+    const runUntil = (tick: number) => {
+      while (host.tick < tick) {
+        now += PUMP_INTERVAL_MS;
+        host.pump();
+      }
+      now += PUMP_INTERVAL_MS;
+      host.pump();
+    };
+    const deltas = () => received.filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    await mirror.sendCommand("SetSpeed", { speed: 4 });
+    const day = TIME_BALANCE.ticksPerDay;
+    // Through January nothing moves money, so no delta carries the budget.
+    runUntil(31 * day - 50);
+    expect(deltas().length).toBeGreaterThan(0);
+    expect(deltas().filter((d) => d.budget !== undefined)).toHaveLength(0);
+    // The close on 1 February changes it, and one delta carries it.
+    runUntil(31 * day + 50);
+    expect(deltas().filter((d) => d.budget !== undefined)).toHaveLength(1);
+    expect(mirror.state?.budget.lastMonth[LINE.taxResidential]).toBe(500);
+    expect(mirror.state?.budget.month[LINE.taxResidential]).toBe(0);
+    expect(mirror.state?.budget.treasury).toBe(state.budget.treasury);
+    expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
+    // After it, nothing again.
+    const seen = deltas().length;
+    runUntil(33 * day);
+    expect(deltas().length).toBeGreaterThan(seen);
+    expect(deltas().slice(seen).every((d) => d.budget === undefined)).toBe(true);
   });
 
   it("keeps the host's full log after live state pages entries out", () => {
@@ -885,6 +929,10 @@ describe("snapshot transfer", () => {
     const popBuffers = Object.values(state.pops).flatMap((value) => (ArrayBuffer.isView(value) ? [value.buffer] : []));
     // One history series a total.
     const statBuffers = Object.values(state.stats.history).map((value) => value.buffer);
+    // One money series each, the treasury and the month's income, expenses and tax income (M4-02).
+    const moneyBuffers = Object.values(state.stats.money).map((value) => value.buffer);
+    // The ledger's two months and the tax rates.
+    const budgetBuffers = [state.budget.month.buffer, state.budget.lastMonth.buffer, state.budget.taxRates.buffer];
     expect(typedArrayBuffers(state)).toEqual([
       state.rng.buffer,
       ...roadBuffers,
@@ -893,7 +941,10 @@ describe("snapshot transfer", () => {
       ...buildingBuffers,
       ...popBuffers,
       ...statBuffers,
+      ...moneyBuffers,
+      ...budgetBuffers,
     ]);
+    expect(moneyBuffers).toHaveLength(4);
     expect(buildingBuffers).toHaveLength(20);
     // Eleven pop arrays, the days of grace among them (#361), and the queue of displaced pops (M3-12).
     expect(popBuffers).toHaveLength(12);
