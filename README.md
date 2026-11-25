@@ -51,7 +51,7 @@ M3, demand, is done:
 - Sounds for the tools, wind and construction, with volume settings
 - Scale checks on generated cities of 50,000, 200,000 and 500,000 residents
 
-M4, the economy, is next: taxes, upkeep, construction costs and one treasury, a monthly budget, and the first population milestones. The spec will be in `docs/milestones/M4.md`.
+M4, the economy, is in progress: one treasury, construction costs and upkeep, property and business taxes, development charges, borrowing, the price of clearing an occupied building, and the first population milestones, which pay grants and unlock densities 2 and 3 and City Hall. The spec and its issues are in [docs/milestones/M4.md](docs/milestones/M4.md).
 
 ## Roadmap
 
@@ -63,7 +63,7 @@ Twelve milestones, built in order. There are no dates. The full table, with the 
 | M1 | Road networks | Done |
 | M2 | Zoning and buildings | Done |
 | M3 | Demand | Done |
-| M4 | Economy | Next |
+| M4 | Economy | In progress |
 | M5 | Traffic | |
 | M6 | Public transport: buses | |
 | M7 | Rail transport | |
@@ -110,8 +110,8 @@ The whole plan rests on one rule. `sim` takes commands and produces state, and i
 ## Read more
 
 - The plan and every design decision: [docs/PRD.md](docs/PRD.md)
-- The next milestone: [docs/milestones/M3.md](docs/milestones/M3.md)
-- The ones before it: [M2](docs/milestones/M2.md), [M1](docs/milestones/M1.md) and [M0](docs/milestones/M0.md)
+- The milestone in progress: [docs/milestones/M4.md](docs/milestones/M4.md)
+- The ones before it: [M3](docs/milestones/M3.md), [M2](docs/milestones/M2.md), [M1](docs/milestones/M1.md) and [M0](docs/milestones/M0.md)
 - How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 MIT licensed.
