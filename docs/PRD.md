@@ -1104,7 +1104,7 @@ None adds state: each reads what the sim keeps, so the snapshot version does not
 
 The close-out's first runs found four things over the budget, and three issues fixed them before M3 closed:
 
-- **`BulldozeBuilding` at its cap over occupied buildings** (#353). At 5,000 buildings with people in them, the applying tick took 32 to 62 ms. The cap is 1,000 now and the bulldozer splits a bigger drag, and the tick takes 9 to 12 ms.
+- **`BulldozeBuilding` at its cap over occupied buildings** (#353). At 5,000 buildings with people in them, the applying tick took 32 to 62 ms. The cap is 1,000 now and the bulldozer splits a bigger drag, and the tick takes 8 to 16 ms.
 - **The 500,000 city's tick 4899** (#354). The grower and job matching passed their shares on one tick of every run. The pop sweep is strided now, so the day's newcomers no longer land in its last tick, and the bench warms the grower on a day it builds. One run of two since still had the grower at 7.5 ms on the 500,000 city; the other had it at 2.8 ms.
 - **A 259 to 267 ms pause in the worker's tick** (#355). It was a full collection of the bench's own heap, which held the base city's state. The worker's own heap is far smaller.
 
