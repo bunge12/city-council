@@ -348,7 +348,10 @@ describe("job matching", () => {
     holdDemand(NEAR_FAR_BARS, () =>
       ok(state, "BulldozeBuilding", { buildings: [{ id: near, segment: b.firstSeg[near], side: b.firstSide[near], place: b.firstPlace[near], builtAt: b.builtAt[near] }] }),
     );
-    for (const id of workers) expect(readPop(state.pops, id).work).toBe(NO_WORK);
+    // Nobody works at the shop that went. The step's own slice may already
+    // have found one of them work elsewhere (#354 strides the sweep).
+    for (const id of workers) expect(readPop(state.pops, id).work).not.toBe(near);
+    expect(workers.some((id) => readPop(state.pops, id).work === NO_WORK)).toBe(true);
     expectRecount(state);
     // The far podium has room for them: no shop grows back on the near lot while its jobs are open.
     withValue(DEMAND_BALANCE, "openJobsShareMax", 0, () => holdDemand({ residential: 0, commercial: -10 }, () => runDays(state, 2, () => expectJobsWithinOffers(state))));

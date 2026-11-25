@@ -259,10 +259,10 @@ function takeJob(m: Matcher, id: number, work: number): void {
 export function matchJobs(state: SimState): void {
   // While a change of roads is rebuilt, the last whole table (#313).
   if (!travelTimesReady(state) && !state.travelLast) return;
-  const { from, to } = popSlice(state);
+  const { from, to, step } = popSlice(state);
   const p = state.pops;
   let m: Matcher | null = null;
-  for (let id = from; id < to; id++) {
+  for (let id = from; id < to; id += step) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0 || p.work[id] !== NO_WORK) continue;
     if (workersFor(p.size[id] ?? 0, p.children[id] ?? 0) === 0) continue;
     if (!m) {
