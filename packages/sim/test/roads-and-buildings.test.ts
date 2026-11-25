@@ -42,7 +42,7 @@ import { submit, withEnds } from "./seen-ends";
 import { enqueue } from "../src/commands";
 import fixtureJson from "./fixtures/replay/roads-and-buildings.json";
 import { expectReplay, runFixture, type ReplayFixture } from "./replay-helper";
-import { addBuilding, checkBuildings } from "../src/buildings/buildings";
+import { BUILDING_ABANDONED, BUILDING_VACANT, addBuilding, checkBuildings } from "../src/buildings/buildings";
 import { addPop } from "../src/pops/pops";
 import { candidateSets } from "../src/buildings/candidates";
 import { buildingIndexSets, lotStands, segmentBuildings } from "../src/buildings/where";
@@ -200,14 +200,13 @@ describe("a road that goes", () => {
     expectSound(state);
   });
 
-  it("takes its buildings when the build is undone", () => {
+  it("is not taken by an undo of the build while its buildings stand (#369)", () => {
     const { state, ids } = housesBothSides();
-    // The first undo takes back the zoning and leaves the houses (issue 111), the second the street.
+    // The first undo takes back the zoning and leaves the houses (issue 111). The second, of the street, is refused.
     ok(state, command("Undo", {}));
     expect(live(state)).toEqual(ids);
-    ok(state, command("Undo", {}));
-    expect(live(state)).toEqual([]);
-    expect(state.cells.zone.length).toBe(0);
+    expect(submit(state, command("Undo", {}))).toEqual({ ok: false, reason: "Cannot undo: buildings stand on that road" });
+    expect(live(state)).toEqual(ids);
     expectSound(state);
   });
 
@@ -804,5 +803,99 @@ describe("undo of a narrowing over ground built on since (M2 review, #147)", () 
     while (state.tick < until && deep(state).length === 0) step(state);
     expect(deep(state).length).toBeGreaterThan(0);
     expect(submit(state, command("Undo", {}))).toEqual({ ok: false, reason: "Cannot undo: buildings now stand on ground that road would take back" });
+  });
+});
+
+describe("undo of a road buildings stand on (#369)", () => {
+  const STANDS_ON = { ok: false, reason: "Cannot undo: buildings stand on that road" };
+  const ref = (s: SimState, id: number) => {
+    const b = s.buildings;
+    return { id, segment: b.firstSeg[id], side: b.firstSide[id], place: b.firstPlace[id], builtAt: b.builtAt[id] };
+  };
+  /** Steps until houses stand, at most 20 game days. */
+  function grow(state: SimState): void {
+    const until = state.tick + 20 * DAY;
+    while (state.tick < until && live(state).length === 0) step(state);
+    expect(live(state).length).toBeGreaterThan(0);
+  }
+
+  it("is refused while houses grown on the street stand, and goes through once they are bulldozed", () => {
+    const state = street();
+    zone(state, "residential", 1, 0, 24, 3, "both");
+    grow(state);
+    // The zone stroke is newest and comes back without touching the houses.
+    const houses = live(state);
+    ok(state, command("Undo", {}));
+    expect(live(state)).toEqual(houses);
+    const records = state.undo.length;
+    const before = hashState(state);
+    expect(submit(state, command("Undo", {}))).toEqual(STANDS_ON);
+    expect(hashState(state)).toBe(before);
+    expect(state.undo.length).toBe(records);
+    ok(state, command("BulldozeBuilding", { buildings: live(state).map((id) => ref(state, id)) }));
+    ok(state, command("Undo", {}));
+    expect(cellAt(state, 4300, 4591)).toBeNull();
+    expect(state.undo.length).toBe(0);
+    expectSound(state);
+  });
+
+  it("counts vacant and abandoned buildings", () => {
+    const state = street();
+    zone(state, "residential", 1, 0, 24, 3, "north");
+    const ids = fill(state);
+    expect(ids.length).toBeGreaterThan(0);
+    // Only the street's record is left; every building on it empty.
+    ok(state, command("Undo", {}));
+    for (const id of ids) {
+      state.buildings.residents[id] = 0;
+      state.buildings.flags[id] = (state.buildings.flags[id] ?? 0) | BUILDING_VACANT | BUILDING_ABANDONED;
+    }
+    expect(submit(state, command("Undo", {}))).toEqual(STANDS_ON);
+  });
+
+  it("is refused to one player when another's houses stand on their street", () => {
+    const state = street();
+    // p2 zones along p1's street and houses grow.
+    ok(state, command("ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4580 }, to: { x: 4390, z: 4580 }, width: 26 }] }, "p2"));
+    grow(state);
+    const before = hashState(state);
+    expect(submit(state, command("Undo", {}))).toEqual(STANDS_ON);
+    expect(hashState(state)).toBe(before);
+    ok(state, command("BulldozeBuilding", { buildings: live(state).map((id) => ref(state, id)) }, "p2"));
+    ok(state, command("Undo", {}));
+    expectSound(state);
+  });
+
+  it("goes through for an upgrade of a built road: narrowing it back keeps its buildings", () => {
+    const state = street();
+    zone(state, "residential", 1, 0, 24, 3, "north");
+    const ids = fill(state);
+    expect(ids.length).toBeGreaterThan(0);
+    const seg = cellAt(state, 4300, 4591)?.segment as number;
+    ok(state, command("UpgradeRoad", withEnds(state.roads, { segments: [seg], type: "avenue" })));
+    while (!cellsSettled(state)) step(state);
+    const kept = live(state);
+    // Taking back the widening narrows the road in place: its buildings follow their ground.
+    ok(state, command("Undo", {}));
+    while (!cellsSettled(state)) step(state);
+    expect(live(state)).toEqual(kept);
+    expectSound(state);
+  });
+
+  it("goes through for a road that crossed a built street: the street's pieces join again and keep their buildings", () => {
+    const state = street();
+    zone(state, "residential", 1, 0, 24, 3, "north");
+    const ids = fill(state);
+    expect(ids.length).toBeGreaterThan(0);
+    // Only the street's record is p1's; p2's crossing road splits the street.
+    ok(state, command("Undo", {}));
+    ok(state, command("BuildRoad", { from: { x: 4296, z: 4700 }, to: { x: 4296, z: 4600 }, type: "street" }, "p2"));
+    while (!cellsSettled(state)) step(state);
+    const kept = live(state);
+    expect(kept.length).toBeGreaterThan(0);
+    ok(state, command("Undo", {}, "p2"));
+    while (!cellsSettled(state)) step(state);
+    expect(live(state)).toEqual(kept);
+    expectSound(state);
   });
 });
