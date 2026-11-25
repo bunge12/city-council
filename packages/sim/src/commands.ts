@@ -107,11 +107,10 @@ function undoable(state: SimState, command: Command, price: number, run: () => v
     run();
     built = true;
   } finally {
-    const ops = endJournal(state.roads);
-    const spent = built ? price : 0;
-    if (spent !== 0) moveMoney(state, undoLine(command.type), spent);
-    recordRoadUndo(state, command, ops, spent);
+    recordRoadUndo(state, command, endJournal(state.roads), built ? price : 0);
   }
+  // Only reached once the roads are built and their record kept.
+  if (price !== 0) moveMoney(state, undoLine(command.type), price);
 }
 
 /**
