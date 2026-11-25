@@ -22,7 +22,7 @@ import {
 } from "../src/index";
 import economyJson from "../balance/economy.json" with { type: "json" };
 import { BALANCE_FILES } from "../src/balance-stamp";
-import { addBuilding, removeBuilding } from "../src/buildings/buildings";
+import { BUILDING_ABANDONED, addBuilding, removeBuilding } from "../src/buildings/buildings";
 import { buildingValue } from "../src/landvalue/land-value";
 
 // M4-01: the economy's balance file and what a building is worth in dollars.
@@ -189,7 +189,20 @@ describe("a building's value", () => {
     expect(land).toBeGreaterThan(0);
     expect(info.value).toBe(propertyValueOf(t, 4, info.jobs, land));
     expect(propertyValue(state, id)).toBe(info.value);
+    // Abandoned, it keeps the value of what was built: its readers decide what that means.
+    state.buildings.flags[id] = (state.buildings.flags[id] ?? 0) | BUILDING_ABANDONED;
+    expect(propertyValue(state, id)).toBe(info.value);
     removeBuilding(state, id);
     expect(propertyValue(state, id)).toBe(0);
+  });
+});
+
+describe("the economy as the sim reads it", () => {
+  it("is frozen, so nothing writes a balance number by mistake", () => {
+    expect(Object.isFrozen(ECONOMY)).toBe(true);
+    expect(Object.isFrozen(ECONOMY.taxRates.residential)).toBe(true);
+    expect(() => {
+      (ECONOMY.taxRates.residential as { default: number }).default = 0.5;
+    }).toThrow(TypeError);
   });
 });

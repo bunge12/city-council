@@ -342,5 +342,18 @@ export function resolveEconomy(data: unknown): Economy {
 /** The economy balance file as written. */
 export const ECONOMY_BALANCE_FILE = balance as EconomyBalanceFile;
 
-/** The economy, checked, with every price in whole 2026 dollars. */
-export const ECONOMY: Economy = resolveEconomy(balance);
+/** `value` and everything in it frozen, so a slider cannot write a balance number by mistake. */
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null) {
+    for (const inner of Object.values(value)) deepFreeze(inner);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/**
+ * The economy, checked, with every price in whole 2026 dollars. Frozen: the
+ * rates a player sets live in state (M4-02, M4-07), and these are only the
+ * defaults and ranges.
+ */
+export const ECONOMY: Economy = deepFreeze(resolveEconomy(balance));

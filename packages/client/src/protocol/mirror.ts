@@ -14,6 +14,7 @@ import {
   applyUndoDelta,
   blockIndexOf,
   buildingGround,
+  buildingChunk,
   buildingInfo,
   buildingOnSlot,
   buildingsInChunk,
@@ -297,7 +298,8 @@ export class SimMirror {
 
   /** The chunk building `id`'s lot's centre is in, or -1 if there is none. */
   buildingChunk(id: number): number {
-    return this.current ? (buildingInfo(this.current, id)?.chunk ?? -1) : -1;
+    // Not through buildingInfo, which also works out the building's value (M4-01).
+    return this.current ? buildingChunk(this.current, id) : -1;
   }
 
   /**

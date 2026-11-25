@@ -193,7 +193,7 @@ export {
   type YearCounts,
 } from "./stats/stats";
 export { LAND_VALUE_SYSTEM, falloff, findCentre, landValueAt, landValueAtPoint, landValuesOfShapes, nextMonth, type LandValue } from "./landvalue/land-value";
-export { NO_BUILDING, buildingGround, buildingInfo, buildingOnSlot, buildingsInChunk, buildingsOnSlots, cellBuildings, zonedUpTo, type BuildingGround } from "./buildings/where";
+export { NO_BUILDING, buildingChunk, buildingGround, buildingInfo, buildingOnSlot, buildingsInChunk, buildingsOnSlots, cellBuildings, zonedUpTo, type BuildingGround } from "./buildings/where";
 export type { BuildingInfo } from "./buildings/where";
 export {
   BUILDING_CHANGED,

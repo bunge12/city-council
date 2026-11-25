@@ -62,9 +62,12 @@ export function propertyValueOf(type: Pick<BuildingType, "zone" | "density">, re
 
 /**
  * The value of building `id` in whole dollars, from its row's type, room
- * and lot and the land value at its lot's centre. 0 for a free id. An
- * abandoned building keeps the floor space it was built with: what it pays
- * and what clearing it costs are for the issues that read this.
+ * and lot and the land value at its lot's centre. 0 for a free id.
+ *
+ * An abandoned or vacant building keeps the value of the floor space it was
+ * built with. A reader that should treat it differently checks the flags
+ * itself: eminent domain charges demolition only for one (M4-09), and the
+ * property tax sweep (M4-05) must decide whether an abandoned building pays.
  */
 export function propertyValue(state: SimState, id: number): number {
   return propertyValues(state, [id])[0] ?? 0;

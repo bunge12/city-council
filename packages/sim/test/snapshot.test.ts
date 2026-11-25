@@ -1233,8 +1233,8 @@ describe("snapshots with a road network", () => {
     const v29 = { ...old, balance: "b4bf13924505f870" } as SimState;
     expect(digest(serialize(v29))).toBe("20216:79e42e6b91dbf347");
     expect(digest(serializeDetached(v29))).toBe("20192:1f85133032e1067d");
-    expect(digest(serialize(old))).toBe("20216:a35c0440382b89ca");
-    expect(digest(serializeDetached(old))).toBe("20192:0158e678f99201e9");
+    expect(digest(serialize(old))).toBe("20216:263e43c5690bf011");
+    expect(digest(serializeDetached(old))).toBe("20192:21d7d9a8cfeb65bf");
     expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 
