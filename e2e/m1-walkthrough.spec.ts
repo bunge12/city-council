@@ -57,7 +57,7 @@ interface SaveStatus {
 declare const window: {
   cityCouncil: {
     saves: { status: SaveStatus | null };
-    mirror: { state: ({ tick: number; log: LogEntry[]; roads: Net; connections: ArrayLike<number> } & Record<string, unknown>) | null };
+    mirror: { state: ({ tick: number; log: LogEntry[]; roads: Net; connections: ArrayLike<number>; budget: { treasury: number } } & Record<string, unknown>) | null };
     renderStatus(): { backend: string } | null;
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
@@ -488,6 +488,9 @@ for (const variant of [
     });
 
     await test.step("5. the preview shows the length and the cost before the click; nothing is charged", async () => {
+      const treasury = () => page.evaluate(() => window.cityCouncil.mirror.state?.budget.treasury);
+      const before = await treasury();
+      expect(before).toBeGreaterThan(0);
       await look(page, 4372, 4800, 330);
       await click(page, 4200, 4900);
       await hover(page, 4440, 4900);
@@ -499,12 +502,11 @@ for (const variant of [
       await expect(page.locator("#road-cost")).toHaveText(formatMoneyShort(cost));
       await expect(readout).toContainText(`${length.toFixed(0)} m`);
       await shot(page, info, dir, "5-length-and-cost");
-      // There is no treasury in the state to charge, until M4.
-      const keys = await page.evaluate(() => Object.keys(window.cityCouncil.mirror.state ?? {}));
-      for (const key of keys) expect(key).not.toMatch(/money|treasury|cash|funds|budget/i);
       await page.keyboard.press("Escape");
       await expect(readout).toHaveCount(0);
       expect((await log(page)).length).toBe(5);
+      // The preview moves no money: the treasury (M4-02) is what it was before the click.
+      expect(await treasury()).toBe(before);
       await noTool(page);
     });
 
