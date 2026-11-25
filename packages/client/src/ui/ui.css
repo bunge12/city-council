@@ -928,9 +928,20 @@ kbd {
   font-weight: 600;
 }
 
-/* A building on ground zoned for something else, or zoned up (M3-14): wraps inside the readout. */
+/*
+ * A building's detail line does not wrap, and a mixed tower's
+ * ("Mixed M3 (6 × 6 lot) · 798/800 residents · 168/216 jobs") is wider than
+ * the readouts' 280px, so the box grows to fit it rather than letting it run
+ * past the border.
+ */
+.building-readout {
+  max-width: none;
+}
+
+/* A building on ground zoned for something else, or zoned up (M3-14): wraps inside the readout, at no more than the readouts' usual width unless the detail line is wider. */
 .building-readout .ground {
   white-space: normal;
+  max-width: 280px;
 }
 
 /* The buildings a road or grid would clear (issue M2-15), in the red of their marks on the map. */
@@ -1015,7 +1026,12 @@ kbd {
   transform: translate(-50%, -100%);
   pointer-events: none;
   border-color: #ff8a1f;
-  /* A house's line says the people living there against its room (M3-12), wider than the readouts' 280px. */
+  /* A building's line does not wrap and grows with its counts (M3-12), so the tag grows to fit it. */
+  max-width: none;
+}
+
+/* Why a click would be refused wraps, at no more than 400px unless a line above is wider. */
+.bulldoze-tag .reason {
   max-width: 400px;
 }
 
