@@ -34,7 +34,7 @@ import {
 import { addBuilding, removeBuilding } from "../src/buildings/buildings";
 import { checkPopsBalance } from "../src/pops/balance";
 import { withValue } from "./with-value";
-import { POP_ARRAYS, addPop, checkPops, createPops, rehomePop, removePop, setPopGraceDays, setPopHousehold, setPopProfile, setPopSatisfaction, setPopSize, setPopWork, type NewPop } from "../src/pops/pops";
+import { POP_ARRAYS, addPop, addSplitPop, checkPops, createPops, rehomePop, removePop, setPopGraceDays, setPopHousehold, setPopProfile, setPopSatisfaction, setPopSize, setPopWork, type NewPop } from "../src/pops/pops";
 import { nextInt, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
 import { recountTotals } from "../src/stats/stats";
@@ -271,13 +271,13 @@ describe("pops in state", () => {
       expect(readPop(state.pops, id).size).toBe(99);
       // A split, as job matching and turnover make one: the part, then the rest.
       setPopSize(state, id, 60);
-      const rest = addPop(state, pop(tower, 39), 99);
+      const rest = addSplitPop(state, pop(tower, 39), 99);
       expect(readPop(state.pops, rest).size).toBe(39);
       // Growth past the cap is still refused, and so is a new pop past it.
       expect(() => setPopSize(state, id, 61)).toThrow(/holds 1 to 40/);
       expect(() => setPopHousehold(state, id, 61, 1)).toThrow(/holds 1 to 40/);
       expect(() => addPop(state, pop(tower, 41))).toThrow(/holds 1 to 40/);
-      expect(() => addPop(state, pop(tower, 61), 60)).toThrow(/holds 1 to 40/);
+      expect(() => addSplitPop(state, pop(tower, 61), 60)).toThrow(/holds 1 to 40/);
     });
     expectConsistent(state);
   });

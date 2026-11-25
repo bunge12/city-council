@@ -773,6 +773,8 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   const popProblem = checkPops(pops, buildings as BuildingState);
   if (popProblem !== null) throw corrupt(`its pops are malformed: ${popProblem}`);
   if (!isCentre(centre)) throw corrupt("its city centre is malformed");
+  // Before the statistics are checked: totals that drifted below zero under a build's other numbers are counted again, not refused.
+  if (!replaysUnderThisBalance({ balance }) && isRecord(stats)) recountUnderThisBalance(stats, pops as SimState["pops"], buildings as BuildingState);
   const statsProblem = checkStats(stats);
   if (statsProblem !== null) throw corrupt(`its statistics are malformed: ${statsProblem}`);
   if (!Number.isSafeInteger(travelReadyAt) || (travelReadyAt as number) < 0) throw corrupt("the tick its travel times are rebuilt by is not a whole number");
@@ -817,21 +819,24 @@ export function deserialize(bytes: Uint8Array): Snapshot {
     throw corrupt(`it could not be upgraded (${error instanceof Error ? error.message : String(error)})`);
   }
   checkState(state as unknown as Record<string, unknown>, pagedLog, header);
-  if (!replaysUnderThisBalance(state)) recountUnderThisBalance(state);
   return { header, state, pagedLog: (pagedLog ?? []) as LogEntry[], logDetached };
 }
 
 /**
- * Counts the running totals again for a city saved under other balance
- * numbers (M3 review, #365). Workers per pop, jobs per building and the
- * split of jobs by kind come from the balance files, and every later change
- * takes out what the numbers this build runs give: totals added under the
- * old numbers would drift, below zero for a raised `workerShare`, and the
- * next save would be refused as damaged. Under the same numbers a recount
- * gives the totals the save holds.
+ * Counts the running totals of a city saved under other balance numbers
+ * again from its pops and buildings, which are checked already (M3 review,
+ * #365). Workers per pop, jobs per building and the split of jobs by kind
+ * come from the balance files, and every later change takes out what the
+ * numbers this build runs give: totals added under the old numbers would
+ * drift, below zero for a raised `workerShare`, and the next save would be
+ * refused as damaged. A save an older build wrote after its totals went
+ * below zero loads too. Under the same numbers a recount gives the totals
+ * the save holds.
  */
-function recountUnderThisBalance(state: SimState): void {
-  state.stats.totals = recountTotals(state);
-  const population = state.stats.totals["population"] ?? 0;
-  if (population > state.stats.highestPopulation) state.stats.highestPopulation = population;
+function recountUnderThisBalance(stats: Record<string, unknown>, pops: SimState["pops"], buildings: BuildingState): void {
+  const totals = recountTotals({ pops, buildings });
+  stats["totals"] = totals;
+  const highest = stats["highestPopulation"];
+  const population = totals["population"] ?? 0;
+  if (typeof highest === "number" && highest < population) stats["highestPopulation"] = population;
 }

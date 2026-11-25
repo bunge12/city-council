@@ -28,8 +28,9 @@ import { popIndexOf } from "./where";
 /**
  * By type, then by jobs: the building's jobs at each level and below,
  * lowest first. A function of the balance alone, made again when the job
- * mix or the education split it was made from is replaced, as a test or
- * the balance script may replace them (M3 review, #365); read only.
+ * mix or the education split it was made from is replaced whole, as
+ * `withValue(BUILDINGS_BALANCE, "jobKinds", ...)` in a test does (M3
+ * review, #365). A change inside either is not seen. Read only.
  */
 let upToCache: (Int32Array | undefined)[][] = BUILDING_TYPES.map(() => []);
 let upToFrom: readonly unknown[] = [BUILDINGS_BALANCE.jobMix, BUILDINGS_BALANCE.jobKinds];

@@ -12,7 +12,7 @@
 // rebuilds are slowed to 15 to 22 ticks so several save points fall inside
 // one, with the last whole table held (#313), and owners redevelop at once.
 // Two cities stepped in turn in one process must not touch each other.
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   CONNECTION_BALANCE,
   DEMAND_BALANCE,
@@ -197,20 +197,25 @@ function loadAsHost(bytes: Uint8Array): SimState {
 
 describe("a town saved and resumed at any point ends as the uninterrupted run does (M3 review, #365)", () => {
   const saves = new Map<string, Uint8Array>();
-  const straight = createState(SEED);
-  inBalance(() => {
-    for (let i = 0; i < END; i++) {
-      const at = POINTS.includes(i - W) ? i - W : -1;
-      if (at >= 0) {
-        saves.set(`plain@${at}`, serialize(straight));
-        saves.set(`autosave@${at}`, autosaveBytes(straight));
+  let straight = createState(SEED);
+  let want = "";
+  // In a hook, not the describe body, so the test time limit stops a hang here too.
+  beforeAll(() => {
+    straight = createState(SEED);
+    inBalance(() => {
+      for (let i = 0; i < END; i++) {
+        const at = POINTS.includes(i - W) ? i - W : -1;
+        if (at >= 0) {
+          saves.set(`plain@${at}`, serialize(straight));
+          saves.set(`autosave@${at}`, autosaveBytes(straight));
+        }
+        commands(straight, i);
+        if (at >= 0) saves.set(`queued@${at}`, autosaveBytes(straight));
+        step(straight);
       }
-      commands(straight, i);
-      if (at >= 0) saves.set(`queued@${at}`, autosaveBytes(straight));
-      step(straight);
-    }
+    });
+    want = hashState(straight);
   });
-  const want = hashState(straight);
 
   it("grows a town with people and keeps its totals", () => {
     expect(straight.stats.totals).toEqual(recountTotals(straight));

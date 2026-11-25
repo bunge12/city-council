@@ -325,10 +325,21 @@ function checkJobs(state: SimState, work: number, addLevel: number, add: number,
  * changing nothing, if the home is not a live building people live in, if
  * the size is past the cap for the home's density, if the home has no room
  * for that many more, or if the profile or satisfaction is out of range.
- * A pop split off another (`splitFrom`, that pop's size before the split)
- * may be past the cap when the pop it came from was.
  */
-export function addPop(state: SimState, spec: NewPop, splitFrom = 0): number {
+export function addPop(state: SimState, spec: NewPop): number {
+  return insertPop(state, spec, 0);
+}
+
+/**
+ * `addPop` for the rest of a pop split in two, by job matching or turnover,
+ * from a pop of `from` people: it may be past the size cap when the pop it
+ * came from was (M3 review, #365). Internal to the pop systems.
+ */
+export function addSplitPop(state: SimState, spec: NewPop, from: number): number {
+  return insertPop(state, spec, from);
+}
+
+function insertPop(state: SimState, spec: NewPop, splitFrom: number): number {
   if (!isBuilding(state.buildings, spec.home) || (state.buildings.residents[spec.home] ?? 0) <= 0) {
     throw new RangeError(`building ${spec.home} is not a home`);
   }

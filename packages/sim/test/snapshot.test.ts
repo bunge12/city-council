@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { syncCells } from "../src/zoning/cell-index";
 import {
   BALANCE_STAMP,
+  recountTotals,
   DEMAND_BALANCE,
   replaysUnderThisBalance,
   LOG_LIVE_LIMIT,
@@ -996,11 +997,24 @@ describe("committed snapshots", () => {
     ];
     for (const breakIt of breaks) {
       const { state } = deserialize(fromHex(v29Fixture.hex));
+      // Under this build's numbers: a city from another balance has its totals counted again instead (below).
+      state.balance = BALANCE_STAMP;
       breakIt(state.stats as unknown as Record<string, unknown>);
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");
       expect(error.message).toMatch(/statistics/);
     }
+  });
+
+  it("counts the totals of a city from another balance again as it loads, whatever they were (M3 review, #365)", () => {
+    const { state } = deserialize(fromHex(v29Fixture.hex));
+    expect(state.balance).not.toBe(BALANCE_STAMP);
+    const recounted = recountTotals(state);
+    expect(state.stats.totals).toEqual(recounted);
+    const totals = state.stats.totals as Record<string, number>;
+    totals["population"] = -1;
+    delete totals["pops"];
+    expect(deserialize(serialize(state)).state.stats.totals).toEqual(recounted);
   });
 
   it("refuses a save whose city centre is malformed", () => {

@@ -500,7 +500,8 @@ describe("over game decades", () => {
     expect(mean.length - 10).toBeGreaterThanOrEqual(troughYear + 4);
     expect(late).toBeGreaterThan(1.01 * around);
     // About 0.92 of the fill in the M3 review. M3-25 had loosened this to
-    // 0.96 when one run read 0.953; the mean of four runs does not need it.
+    // 0.96 when the four runs' mean read 0.953; since M3-21 raised the
+    // replacement rate the street settles lower, well inside 0.95 again.
     expect(late).toBeLessThan(0.95 * filled);
   }, 180_000);
 

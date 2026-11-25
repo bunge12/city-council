@@ -400,6 +400,13 @@ describe("job matching", () => {
       // And it saves again: totals below zero would be refused as damage.
       expect(() => deserialize(serialize(loaded))).not.toThrow();
     });
+    // A save an older build wrote after its totals had already gone below zero loads, counted again.
+    const drifted = structuredClone(state);
+    drifted.balance = "0123456789abcdef";
+    drifted.stats.totals["workersEmployed"] = -69;
+    const repaired = deserialize(serialize(drifted)).state;
+    prepareDerived(repaired);
+    expectRecount(repaired);
     // Under the same numbers nothing is counted again, and the load hashes as the save.
     expect(hashState(deserialize(serialize(state)).state)).toBe(hashState(state));
   });

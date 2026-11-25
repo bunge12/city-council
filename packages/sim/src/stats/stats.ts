@@ -165,8 +165,9 @@ function addPop(t: StatTotals, p: PopState, b: BuildingState, id: number, sign: 
 /**
  * By type, then by jobs: `jobsByKind`, which job matching asks for on every
  * take (M3-09). A function of the balance alone, made again when the job
- * mix it was made from is replaced, as a test or the balance script may
- * replace it (M3 review, #365); read only.
+ * mix it was made from is replaced whole, as `withValue(BUILDINGS_BALANCE,
+ * "jobMix", ...)` in a test does (M3 review, #365). A change inside the
+ * mix is not seen. Read only.
  */
 let kindCache: (JobsByKind | undefined)[][] = BUILDING_TYPES.map(() => []);
 let kindCacheMix: unknown = BUILDINGS_BALANCE.jobMix;
