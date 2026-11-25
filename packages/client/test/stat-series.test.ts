@@ -71,10 +71,12 @@ describe("the series reader", () => {
 });
 
 describe("the series list", () => {
-  it("offers every total the sim keeps a history of, but the satisfaction sum, each once", () => {
+  it("offers every total the sim keeps a history of, but the satisfaction sum and the unemployed newcomers, each once", () => {
     const ids = STAT_SERIES.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect([...ids].sort()).toEqual(STAT_TOTALS.filter((t) => t !== "residentSatisfaction").sort());
+    // The unemployed newcomers are the residential bar's bookkeeping (#361), already among the unemployed workers.
+    const internal = ["residentSatisfaction", "workersUnemployedNew"];
+    expect([...ids].sort()).toEqual(STAT_TOTALS.filter((t) => !internal.includes(t)).sort());
   });
 
   it("reads each series' value now and its history from the totals of the same name", () => {

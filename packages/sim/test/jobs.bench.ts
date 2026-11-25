@@ -97,6 +97,7 @@ function copyPops(p: PopState): PopState {
     children: p.children.slice(),
     satisfaction: p.satisfaction.slice(),
     daysLow: p.daysLow.slice(),
+    graceDays: p.graceDays.slice(),
     free: p.free.slice(),
     sweep: p.sweep,
     owed: p.owed,

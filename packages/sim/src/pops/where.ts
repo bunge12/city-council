@@ -256,17 +256,20 @@ export function emptyHome(index: PopIndex, p: PopState, home: number, out: numbe
 /**
  * Takes every pop off workplace `work`'s list and sets its work to NO_WORK,
  * as `unlinkWork` and then the write of NO_WORK do each, and returns their
- * workers added up. One walk and one note of each kind for the building.
+ * workers added up, and those of them in pops with days of grace left
+ * (#361). One walk and one note of each kind for the building.
  */
-export function emptyWork(index: PopIndex, p: PopState, work: number): number {
+export function emptyWork(index: PopIndex, p: PopState, work: number): { all: number; newcomers: number } {
   const { workHead, workTail, workNext, workPrev, filled, filledByEducation } = index;
   let id = workHead[work] ?? NONE;
-  if (id === NONE) return 0;
+  if (id === NONE) return { all: 0, newcomers: 0 };
   let all = 0;
+  let newcomers = 0;
   while (id !== NONE) {
     const after = workNext[id] ?? NONE;
     const workers = popWorkers(p, id);
     all += workers;
+    if ((p.graceDays[id] ?? 0) > 0) newcomers += workers;
     filled[work] = (filled[work] ?? 0) - workers;
     const at = work * POP_LEVELS + Math.min(POP_LEVELS - 1, p.education[id] ?? 0);
     filledByEducation[at] = (filledByEducation[at] ?? 0) - workers;
@@ -279,7 +282,7 @@ export function emptyWork(index: PopIndex, p: PopState, work: number): number {
   workTail[work] = NONE;
   notePopBuilding(p, work);
   noteOpening(p, work);
-  return all;
+  return { all, newcomers };
 }
 
 /** Adds `people` to the count at satisfaction `score`, or takes them away when negative. pops.ts calls it around every change of a pop's size or score. */

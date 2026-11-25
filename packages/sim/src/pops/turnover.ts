@@ -123,7 +123,7 @@ function replace(state: SimState, id: number): void {
   const size = drawSize(rng, state.buildings.density[home] ?? 1, room);
   const profile = drawProfile(rng, buildingValue(state, home));
   // The id just freed is the last on the free list, so the newcomer takes it.
-  addPop(state, { home, size, ...profile, satisfaction: POPS_BALANCE.newcomer.satisfaction });
+  addPop(state, { home, size, ...profile, satisfaction: POPS_BALANCE.newcomer.satisfaction, graceDays: POPS_BALANCE.newcomer.graceDays });
   noteYear(state, "arrivals", size);
 }
 
@@ -156,8 +156,8 @@ function reshape(state: SimState, id: number, size: number, children: number): v
   const part = partThatFits(size, children, openJobsFor(state, work, education));
   if (part === 0) return;
   setPopSize(state, id, part);
-  // The rest keeps the household's score and its days low, as a split in job matching does.
-  addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0 });
+  // The rest keeps the household's score, its days low and its grace, as a split in job matching does.
+  addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0, graceDays: p.graceDays[id] ?? 0 });
   setPopWork(state, id, work);
 }
 

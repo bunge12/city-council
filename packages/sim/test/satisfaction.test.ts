@@ -266,23 +266,53 @@ describe("leaving for lack of work", () => {
     expectRecount(state);
   });
 
-  it("finds an all-residential city grows, stalls and then holds or shrinks, and never passes a set population", () => {
+  it("finds a town with no jobs that never had the pull's residents grow, then lose population and stall (#361, scenario test)", () => {
     const { state } = homesOnly();
+    const until = DEMAND_BALANCE.outsidePull.untilResidents;
     let highest = 0;
-    let atDay60 = 0;
-    runDays(state, 200, (day) => {
+    let lowestBar = 0;
+    let atDay15 = 0;
+    let arrivedWhileBelow = 0;
+    runDays(state, 70, (day) => {
+      const arrivals = state.stats.year.arrivals;
       highest = Math.max(highest, population(state));
-      if (day === 60) atDay60 = population(state);
-      // Never far past the residents the pull from outside holds the bar up for. Since M3-21 the bar
-      // takes about 20 game days to fall (dailyShare 0.05) and the day's arrivals follow the empty
-      // room, so a few households more come while it falls.
-      expect(population(state)).toBeLessThanOrEqual(1.1 * DEMAND_BALANCE.outsidePull.untilResidents);
+      lowestBar = Math.min(lowestBar, state.demand.residential.value);
+      if (day === 15) atDay15 = population(state);
+      // The bar is set on a day's first tick, so a day that opened below zero brings nobody.
+      if (state.demand.residential.value <= 0) arrivedWhileBelow += state.stats.year.arrivals - arrivals;
     });
-    expect(atDay60).toBeGreaterThan(100);
-    // It stalled: no higher at the end than it was at two months, give or take a household.
-    expect(population(state)).toBeLessThanOrEqual(Math.max(atDay60, highest) + 20);
-    // People have come and gone.
-    expect(state.stats.year.departures).toBeGreaterThan(state.stats.year.arrivals / 2);
+    // It grows on the pull while its newcomers look for work.
+    expect(atDay15).toBeGreaterThan(100);
+    // It never reaches the pull's number, so the pull never stops on its own.
+    expect(highest).toBeLessThan(until);
+    // Then their unemployment outweighs the pull: the bar falls below zero and the town empties.
+    expect(lowestBar).toBeLessThan(-20);
+    expect(population(state)).toBeLessThan(highest / 4);
+    expect(state.stats.year.departures).toBeGreaterThan(highest / 2);
+    expect(arrivedWhileBelow).toBe(0);
+    expectRecount(state);
+  });
+
+  it("counts a newcomer's grace down once a game day, and counts its workers as unemployed in the residential bar when it ends (#361)", () => {
+    const grace = POPS_BALANCE.newcomer.graceDays;
+    expect(grace).toBeGreaterThan(0);
+    // Below the month a newcomer with no job takes to leave, so the bar sees them before they give up.
+    expect(grace).toBeLessThan(SAT.leaveAfterDays);
+    const { state } = homesOnly();
+    holdDemand({ residential: 50 }, () => runDays(state, 1));
+    const first = livePops(state).filter((id) => popWorkers(state.pops, id) > 0);
+    expect(first.length).toBeGreaterThan(0);
+    const days = (id: number) => state.pops.graceDays[id] ?? 0;
+    for (const id of first) expect(days(id)).toBeGreaterThanOrEqual(grace - 1);
+    expect(state.stats.totals["workersUnemployedNew"]).toBe(state.stats.totals["workersUnemployed"]);
+    const before = first.map(days);
+    // Nobody more arrives, so only the first day's pops are left.
+    holdDemand({ residential: 0 }, () => runDays(state, 1));
+    first.forEach((id, i) => expect(days(id)).toBe((before[i] ?? 0) - 1));
+    holdDemand({ residential: 0 }, () => runDays(state, grace));
+    for (const id of first) expect(days(id)).toBe(0);
+    expect(state.stats.totals["workersUnemployedNew"]).toBe(0);
+    expect(state.stats.totals["workersUnemployed"]).toBeGreaterThan(0);
     expectRecount(state);
   });
 
@@ -290,6 +320,8 @@ describe("leaving for lack of work", () => {
     const state = workingCity();
     const working = livePops(state).filter((id) => state.pops.work[id] !== NO_WORK);
     expect(working.length).toBeGreaterThan(5);
+    // Some still in their grace, so the bulldozer moves workers into the unemployed newcomers too (#361).
+    expect(working.some((id) => (state.pops.graceDays[id] ?? 0) > 0)).toBe(true);
     const people = new Map(working.map((id) => [id, readPop(state.pops, id)]));
     // Their scores have reached the target a fitting or other job sets.
     for (const id of working) expect(state.pops.satisfaction[id]).toBeGreaterThanOrEqual(SAT.leaveBelow);
@@ -300,6 +332,7 @@ describe("leaving for lack of work", () => {
     });
     for (const id of working) expect(state.pops.work[id]).toBe(NO_WORK);
     expect(workplaces(state)).toEqual([]);
+    expectRecount(state);
     // The bar is held at zero, so the only way out is a low score for long enough.
     const left = new Map<number, number>();
     holdDemand({ residential: 0, commercial: 0 }, () =>

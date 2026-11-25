@@ -33,7 +33,7 @@ import {
 } from "../src/index";
 import { addBuilding, removeBuilding } from "../src/buildings/buildings";
 import { checkPopsBalance } from "../src/pops/balance";
-import { POP_ARRAYS, addPop, checkPops, createPops, rehomePop, removePop, setPopProfile, setPopSatisfaction, setPopSize, setPopWork, type NewPop } from "../src/pops/pops";
+import { POP_ARRAYS, addPop, checkPops, createPops, rehomePop, removePop, setPopGraceDays, setPopProfile, setPopSatisfaction, setPopSize, setPopWork, type NewPop } from "../src/pops/pops";
 import { nextInt, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
 import { recountTotals } from "../src/stats/stats";
@@ -186,9 +186,9 @@ describe("the rules a pop row follows", () => {
     expect(checkPopsBalance(popsJson)).toEqual([]);
   });
 
-  it("keeps a pop row at 15 bytes", () => {
-    expect(POP_ARRAYS).toEqual(["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow"]);
-    expect(POP_ROW_BYTES).toBe(15);
+  it("keeps a pop row at 16 bytes", () => {
+    expect(POP_ARRAYS).toEqual(["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow", "graceDays"]);
+    expect(POP_ROW_BYTES).toBe(16);
   });
 });
 
@@ -256,7 +256,7 @@ describe("pops in state", () => {
     expect(jobsFilled(state, mall)).toBe(36);
     expect(() => setPopSatisfaction(state, id, -1)).toThrow(/satisfaction/);
     setPopSatisfaction(state, id, 100);
-    expect(readPop(state.pops, id)).toEqual({ id, home: tower, work: mall, size: 90, education: 2, wealth: 0, children: 1, satisfaction: 100, daysLow: 0 });
+    expect(readPop(state.pops, id)).toEqual({ id, home: tower, work: mall, size: 90, education: 2, wealth: 0, children: 1, satisfaction: 100, daysLow: 0, graceDays: 0 });
     expectConsistent(state);
   });
 
@@ -272,10 +272,14 @@ describe("pops in state", () => {
       const id = live.length > 0 ? pick(live) : -1;
       const before = hashState(state);
       try {
-        switch (nextInt(rng, 6)) {
+        switch (nextInt(rng, 7)) {
           case 0:
           case 1:
-            addPop(state, pop(pick(homes), 1 + nextInt(rng, 100), { children: nextInt(rng, 2), education: nextInt(rng, 3) }));
+            addPop(state, { ...pop(pick(homes), 1 + nextInt(rng, 100), { children: nextInt(rng, 2), education: nextInt(rng, 3) }), graceDays: nextInt(rng, 3) });
+            break;
+          case 6:
+            // Days of grace running out, or a pop given more (#361).
+            setPopGraceDays(state, id, nextInt(rng, 3));
             break;
           case 2:
             removePop(state, id);

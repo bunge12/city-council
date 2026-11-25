@@ -59,7 +59,9 @@ const BUILDINGS_BY_ZONE = ZONING_BALANCE.zones.map((zone) => ZONING_BALANCE.dens
  * pops. `residentSatisfaction` is the sum over the pops of their people
  * times their satisfaction, so over the population it is the residents'
  * average satisfaction weighted by pop size (M3-10). Workers are the people of a pop who work (`workersFor`), employed
- * if the pop has a job. Jobs are split by kind with `jobsByKind`, offered
+ * if the pop has a job. `workersUnemployedNew` are the unemployed workers
+ * of pops with days of grace left, newcomers the residential bar does not
+ * count as unemployed yet (#361). Jobs are split by kind with `jobsByKind`, offered
  * from a building's jobs and filled from its jobs filled, so a mixed
  * building counts commercial jobs, and office jobs too at density 3.
  */
@@ -72,6 +74,7 @@ export const STAT_TOTALS: readonly string[] = [
   "residentSatisfaction",
   "workersEmployed",
   "workersUnemployed",
+  "workersUnemployedNew",
   ...JOBS_BY_KIND,
   ...FILLED_BY_KIND,
   "popsWithChildren",
@@ -151,7 +154,11 @@ function addPop(t: StatTotals, p: PopState, b: BuildingState, id: number, sign: 
   bump(t, RESIDENTS_BY_EDUCATION[Math.min(POP_LEVELS - 1, p.education[id] ?? 0)], people);
   bump(t, RESIDENTS_BY_WEALTH[Math.min(POP_LEVELS - 1, p.wealth[id] ?? 0)], people);
   bump(t, "residentSatisfaction", people * (p.satisfaction[id] ?? 0));
-  bump(t, (p.work[id] ?? NO_WORK) === NO_WORK ? "workersUnemployed" : "workersEmployed", sign * workers);
+  const jobless = (p.work[id] ?? NO_WORK) === NO_WORK;
+  bump(t, jobless ? "workersUnemployed" : "workersEmployed", sign * workers);
+  // Pops from a save before version 29 have no days of grace: the migrations before it count them as settled.
+  const grace = p.graceDays as Uint8Array | undefined;
+  if (jobless && (grace?.[id] ?? 0) > 0) bump(t, "workersUnemployedNew", sign * workers);
   if (children) bump(t, "popsWithChildren", sign);
 }
 
@@ -231,11 +238,22 @@ export function countHomeDensity(state: SimState, home: number, people: number):
   bump(state.stats.totals, RESIDENTS_BY_DENSITY[Math.min(DENSITIES, Math.max(1, density)) - 1], people);
 }
 
-/** Moves `workers` from unemployed to employed in the running totals, or back with `sign` -1, as a pop takes a job or loses one. */
-export function countEmployment(state: SimState, workers: number, sign: 1 | -1): void {
+/**
+ * Moves `workers` from unemployed to employed in the running totals, or
+ * back with `sign` -1, as a pop takes a job or loses one. `newcomer` says
+ * the pop has days of grace left, so its workers are among the unemployed
+ * newcomers too while they have no job (#361).
+ */
+export function countEmployment(state: SimState, workers: number, sign: 1 | -1, newcomer: boolean): void {
   const t = state.stats.totals;
   bump(t, "workersEmployed", sign * workers);
   bump(t, "workersUnemployed", -sign * workers);
+  if (newcomer) bump(t, "workersUnemployedNew", -sign * workers);
+}
+
+/** Adds `workers` to the unemployed newcomers, or takes them away with `sign` -1, as a pop with no job comes to the end of its grace (#361). */
+export function countNewcomersUnemployed(state: SimState, workers: number, sign: 1 | -1): void {
+  bump(state.stats.totals, "workersUnemployedNew", sign * workers);
 }
 
 /** Adds live building `id` and the jobs it offers to the running totals, or takes it out with `sign` -1, while its row still says what it is. */
