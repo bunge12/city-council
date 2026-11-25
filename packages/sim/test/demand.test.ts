@@ -90,8 +90,8 @@ describe("each bar's sign", () => {
   it("does not want homes in a city of homes with no jobs", () => {
     const b = bars(city(2000, 1000, 1000));
     expect(b.residential).toBeLessThan(0);
-    // Still true while the city is small enough for the pull, which only lifts it to `outsidePull.bar` and never adds to it.
-    expect(bars(city(100, 50, 50)).residential).toBeLessThanOrEqual(DEMAND_BALANCE.outsidePull.bar);
+    // Still true while the city is small enough for the pull, which adds `outsidePull.bar` to the other parts and is not a floor under them (#361).
+    expect(bars(city(100, 50, 50)).residential).toBeLessThan(0);
     const state = createState(2026);
     runDays(state, city(2000, 1000, 1000), 10);
     expect(state.demand.residential.value).toBeLessThan(0);
@@ -153,6 +153,42 @@ describe("each bar's sign", () => {
     const at = demandTargets({ totals: totals(city(until, 0, 0)), segmentsOutside: 0 });
     expect(below.residential["outsidePull"]).toBe(DEMAND_BALANCE.outsidePull.bar);
     expect(at.residential["outsidePull"]).toBe(0);
+  });
+
+  it("adds the pull from outside to the other parts, so a small town's unemployment still pulls the bar below zero (#361)", () => {
+    const pull = DEMAND_BALANCE.outsidePull.bar;
+    // A fifth of its workers out of work.
+    const t = demandTargets({ totals: totals(city(300, 150, 30)), segmentsOutside: 0 }).residential;
+    expect(t["outsidePull"]).toBe(pull);
+    expect(t["unemployment"]).toBeCloseTo(DEMAND_BALANCE.residential.unemployment / 5, 9);
+    expect(sum(t)).toBeCloseTo(DEMAND_BALANCE.residential.unemployment / 5 + pull, 9);
+    expect(sum(t)).toBeLessThan(0);
+  });
+
+  it("keeps the pull from outside off once the city has ever had its set number of residents, until it is empty (#361)", () => {
+    const until = DEMAND_BALANCE.outsidePull.untilResidents;
+    const pull = (residents: number, highestPopulation: number) =>
+      demandTargets({ totals: totals(city(residents, 0, 0)), segmentsOutside: 0, highestPopulation }).residential["outsidePull"];
+    // Never had the number: the pull, however it got here.
+    expect(pull(400, until - 1)).toBe(DEMAND_BALANCE.outsidePull.bar);
+    // Had it once and shrank back: no pull, as if it were a city of 5,000.
+    expect(pull(400, until)).toBe(0);
+    expect(pull(1, 5000)).toBe(0);
+    // Empty again: the pull comes back, so a city that lost everyone can start over.
+    expect(pull(0, 5000)).toBe(DEMAND_BALANCE.outsidePull.bar);
+  });
+
+  it("leaves newcomers still in their grace out of the residential bar's unemployment, and not out of the other bars' (#361)", () => {
+    const base = city(1000, 500, 200);
+    const settled = demandTargets({ totals: totals(base), segmentsOutside: 1 });
+    const newcomers = demandTargets({ totals: totals({ ...base, workersUnemployedNew: 150 }), segmentsOutside: 1 });
+    expect(newcomers.residential["unemployment"]).toBeCloseTo((DEMAND_BALANCE.residential.unemployment * 50) / 500, 9);
+    expect(settled.residential["unemployment"]).toBeCloseTo((DEMAND_BALANCE.residential.unemployment * 200) / 500, 9);
+    // Shops and factories still see them as workers to hire.
+    expect(newcomers.commercial).toEqual(settled.commercial);
+    expect(newcomers.industrial).toEqual(settled.industrial);
+    // All of them new: no unemployment part at all.
+    expect(demandTargets({ totals: totals({ ...base, workersUnemployedNew: 200 }), segmentsOutside: 1 }).residential["unemployment"]).toBeCloseTo(0, 9);
   });
 });
 

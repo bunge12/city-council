@@ -247,8 +247,8 @@ function takeJob(m: Matcher, id: number, work: number): void {
     const part = partThatFits(size, children, open);
     if (part === 0) return;
     setPopSize(state, id, part);
-    // The rest keeps the household's score and its days low (M3-10), so a split never resets the time to leaving.
-    addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0 });
+    // The rest keeps the household's score and its days low (M3-10), so a split never resets the time to leaving, and its grace (#361).
+    addPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0, graceDays: p.graceDays[id] ?? 0 });
   }
   setPopWork(state, id, work);
   refileOpening(state, openings, work, m.reach, m.chunks, m.filled);
