@@ -217,6 +217,7 @@ function fakeSource() {
       type,
       residents: 3,
       jobs: 0,
+      value: 0,
       variant,
       builtAt: 0,
       corners: lot(x, z, 2 * CELL, 3 * CELL),

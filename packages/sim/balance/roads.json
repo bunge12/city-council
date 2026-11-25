@@ -59,13 +59,15 @@
         "amount": 14,
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
-        "placeholder": true
+        "placeholder": true,
+        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear. M4-04 makes upkeep a yearly share of build cost."
       },
       "demolitionCostPerMetre": {
         "amount": 300,
         "sourceYear": 2026,
         "source": "Placeholder. $30 per square metre of pavement removed, times the 10 m width, until M4 prices demolition.",
-        "placeholder": true
+        "placeholder": true,
+        "note": "M4-01 checked state DOT bid averages for removing pavement: Louisiana DOTD lists removal of pavement structure at about $12.69 a square yard ($15 a square metre) and Mississippi DOT removal of asphalt pavement at about $40.79 ($49), both over the last four quarters with no year given. $30 sits between them, and stays a placeholder until a dated figure is found."
       },
       "bridge": {
         "maxLength": 38400,
@@ -99,13 +101,15 @@
         "amount": 28,
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
-        "placeholder": true
+        "placeholder": true,
+        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear. M4-04 makes upkeep a yearly share of build cost."
       },
       "demolitionCostPerMetre": {
         "amount": 540,
         "sourceYear": 2026,
         "source": "Placeholder. $30 per square metre of pavement removed, times the 18 m width, until M4 prices demolition.",
-        "placeholder": true
+        "placeholder": true,
+        "note": "M4-01 checked state DOT bid averages for removing pavement: Louisiana DOTD lists removal of pavement structure at about $12.69 a square yard ($15 a square metre) and Mississippi DOT removal of asphalt pavement at about $40.79 ($49), both over the last four quarters with no year given. $30 sits between them, and stays a placeholder until a dated figure is found."
       },
       "bridge": {
         "maxLength": 38400,
@@ -139,13 +143,15 @@
         "amount": 14,
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
-        "placeholder": true
+        "placeholder": true,
+        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear. M4-04 makes upkeep a yearly share of build cost."
       },
       "demolitionCostPerMetre": {
         "amount": 240,
         "sourceYear": 2026,
         "source": "Placeholder. $30 per square metre of pavement removed, times the 8 m width, until M4 prices demolition.",
-        "placeholder": true
+        "placeholder": true,
+        "note": "M4-01 checked state DOT bid averages for removing pavement: Louisiana DOTD lists removal of pavement structure at about $12.69 a square yard ($15 a square metre) and Mississippi DOT removal of asphalt pavement at about $40.79 ($49), both over the last four quarters with no year given. $30 sits between them, and stays a placeholder until a dated figure is found."
       },
       "bridge": {
         "maxLength": 38400,
@@ -179,13 +185,15 @@
         "amount": 180,
         "sourceYear": 2026,
         "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
-        "placeholder": true
+        "placeholder": true,
+        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear. M4-04 makes upkeep a yearly share of build cost."
       },
       "demolitionCostPerMetre": {
         "amount": 900,
         "sourceYear": 2026,
         "source": "Placeholder. $30 per square metre of pavement removed, times the 30 m width, until M4 prices demolition.",
-        "placeholder": true
+        "placeholder": true,
+        "note": "M4-01 checked state DOT bid averages for removing pavement: Louisiana DOTD lists removal of pavement structure at about $12.69 a square yard ($15 a square metre) and Mississippi DOT removal of asphalt pavement at about $40.79 ($49), both over the last four quarters with no year given. $30 sits between them, and stays a placeholder until a dated figure is found."
       },
       "bridge": {
         "maxLength": 38400,

@@ -167,6 +167,9 @@ export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
 export { GROWER_SYSTEM, dayOf, dayQuotas, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
+export { ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
+export type { DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
+export { floorSpaceOf, propertyValue, propertyValueOf, propertyValues, type FloorSpace } from "./economy/value";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";
@@ -190,7 +193,7 @@ export {
   type YearCounts,
 } from "./stats/stats";
 export { LAND_VALUE_SYSTEM, falloff, findCentre, landValueAt, landValueAtPoint, landValuesOfShapes, nextMonth, type LandValue } from "./landvalue/land-value";
-export { NO_BUILDING, buildingGround, buildingInfo, buildingOnSlot, buildingsInChunk, buildingsOnSlots, cellBuildings, zonedUpTo, type BuildingGround } from "./buildings/where";
+export { NO_BUILDING, buildingChunk, buildingGround, buildingInfo, buildingOnSlot, buildingsInChunk, buildingsOnSlots, cellBuildings, zonedUpTo, type BuildingGround } from "./buildings/where";
 export type { BuildingInfo } from "./buildings/where";
 export {
   BUILDING_CHANGED,

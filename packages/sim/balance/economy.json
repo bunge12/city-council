@@ -1,0 +1,200 @@
+{
+  "_about": "The economy (PRD, \"M4 Economy\", \"Eminent domain\" and \"Prices in 2026 dollars\"; M4-01). Every number M4 runs on, read by the issues after M4-01. Money is whole dollars. A price is an `amount` in whole dollars of its `sourceYear`, with a `source`, and `index` says how it is raised to 2026: `construction` by the highway construction index in roads.json, `general` by `generalEscalation` here, since property values, relocation payments, charges and grants are not construction. A figure with no usable source says `placeholder: true`, and its `source` says what it stands in for. Shares and rates are fractions, 0.01 for one percent, and each says where it came from the same way. `taxRates` are the four sliders' defaults and ranges: residential is a yearly rate on property value, commercial a rate on sales, office and industrial a rate on output, and mixed pays the residential and commercial rates (M4.md). `developmentCharges` are dollars per square metre of floor space a new building adds, a default and a range per slider; mixed pays the residential charge on its homes and the commercial one on its shops. A building's value (`value`, economy/value.ts) is its floor space by use times that use's dollars per square metre, times a land value factor: `1 - landValueWeight + landValueWeight × landValue / landValueReference`, so at the reference land value a square metre is worth its price, and the weight is the share of the price that follows the land. Floor space follows room and jobs, not lot area: `perResident` square metres for each resident a building holds room for, and `perJob` for each job by kind, so a mixed building adds its homes and its shops. `eminentDomain` prices clearing an occupied building: its value, plus `relocationPerResident` for each resident and `relocationPerJob` for each job it holds room for, plus `premium.share` times the value. A vacant or abandoned building costs `demolitionPerSquareMetre` of its floor space only. Clearing something the city owns costs its demolition less `refundShare.share` of its build cost. `loans` are what the city may borrow: at most `maxOpen` at once, each on one of `offers`. The credit limit is `perResident` dollars for each resident plus `lastYearTaxMultiple` times last year's tax income. `generalEscalation` is one year of the consumer price index, the 12 months to September 2026, applied to every year before 2026 as roads.json's index is; that is a stand-in for the years before, which only matters for prices more than a year old. Every number here is a starting value to tune in M4-19.",
+  "generalEscalation": {
+    "toYear": 2026,
+    "annualFactor": 1.037,
+    "source": "US Bureau of Labor Statistics, Consumer Price Index news release of 14 October 2026: the all items index rose 3.7 percent over the 12 months to September 2026.",
+    "sourceUrl": "https://www.bls.gov/news.release/archives/cpi_10142026.htm",
+    "sourceYear": 2026
+  },
+  "startingGrant": {
+    "amount": 20000000,
+    "sourceYear": 2026,
+    "index": "general",
+    "source": "Placeholder. Enough for about 10 km of street at the 2026 street price, so a first town can be laid out before any tax comes in (PRD, \"One thing to watch is the early game\").",
+    "placeholder": true
+  },
+  "overdraft": {
+    "amount": 1000000,
+    "sourceYear": 2026,
+    "index": "general",
+    "source": "Placeholder. How far below zero the treasury may fall (PRD: \"a small overdraft\").",
+    "placeholder": true
+  },
+  "taxRates": {
+    "residential": {
+      "default": 0.01,
+      "min": 0,
+      "max": 0.03,
+      "source": "Placeholder. A yearly rate on property value. US effective property tax rates sit near one percent of home value; no single source was read.",
+      "placeholder": true
+    },
+    "commercial": {
+      "default": 0.02,
+      "min": 0,
+      "max": 0.05,
+      "source": "Placeholder. A rate on sales, about what a US city or county adds to the state sales tax; no single source was read.",
+      "placeholder": true
+    },
+    "office": {
+      "default": 0.01,
+      "min": 0,
+      "max": 0.03,
+      "source": "Placeholder. A rate on output, which no real city levies; set so an office pays about what a home of the same floor space does, to tune in M4-19.",
+      "placeholder": true
+    },
+    "industrial": {
+      "default": 0.01,
+      "min": 0,
+      "max": 0.03,
+      "source": "Placeholder. A rate on output, as office.",
+      "placeholder": true
+    }
+  },
+  "developmentCharges": {
+    "residential": {
+      "amount": 100,
+      "min": 0,
+      "max": 300,
+      "sourceYear": 2026,
+      "index": "general",
+      "source": "Placeholder. Dollars per square metre of floor space added; a 200 square metre house pays $20,000. No source read for North American charges per square metre.",
+      "placeholder": true
+    },
+    "commercial": {
+      "amount": 150,
+      "min": 0,
+      "max": 450,
+      "sourceYear": 2026,
+      "index": "general",
+      "source": "Placeholder. Dollars per square metre of floor space added.",
+      "placeholder": true
+    },
+    "office": {
+      "amount": 150,
+      "min": 0,
+      "max": 450,
+      "sourceYear": 2026,
+      "index": "general",
+      "source": "Placeholder. Dollars per square metre of floor space added.",
+      "placeholder": true
+    },
+    "industrial": {
+      "amount": 50,
+      "min": 0,
+      "max": 150,
+      "sourceYear": 2026,
+      "index": "general",
+      "source": "Placeholder. Dollars per square metre of floor space added, lower than shops and offices since factories cover more ground for each job.",
+      "placeholder": true
+    }
+  },
+  "value": {
+    "perSquareMetre": {
+      "residential": {
+        "amount": 2045,
+        "sourceYear": 2025,
+        "index": "general",
+        "source": "US Census Bureau, Characteristics of New Housing, 2025 highlights: median sales price of a new single-family house $417,400, median size 2,194 square feet. $190 a square foot, $2,045 a square metre, land included.",
+        "sourceUrl": "https://www.census.gov/construction/chars/highlights.html",
+        "note": "A ratio of two medians, not a median of prices per square foot. A sale price, not an assessed value; assessments run below sale prices in many places."
+      },
+      "commercial": {
+        "amount": 2370,
+        "sourceYear": 2025,
+        "index": "general",
+        "source": "Crexi National CRE Report, September 2025: median sold price of retail property $220.23 a square foot, $2,370 a square metre.",
+        "sourceUrl": "https://www.crexi.com/blog/crexi-national-cre-report-september-2025",
+        "note": "Sales on one listing platform, not assessed values."
+      },
+      "office": {
+        "amount": 1870,
+        "sourceYear": 2025,
+        "index": "general",
+        "source": "Crexi National CRE Report, September 2025: median sold price of office property $173.71 a square foot, $1,870 a square metre.",
+        "sourceUrl": "https://www.crexi.com/blog/crexi-national-cre-report-september-2025",
+        "note": "Sales on one listing platform, not assessed values, in a year office prices were low."
+      },
+      "industrial": {
+        "amount": 1158,
+        "sourceYear": 2025,
+        "index": "general",
+        "source": "Crexi National CRE Report, September 2025: median sold price of industrial property $107.56 a square foot, $1,158 a square metre.",
+        "sourceUrl": "https://www.crexi.com/blog/crexi-national-cre-report-september-2025",
+        "note": "Sales on one listing platform, not assessed values."
+      }
+    },
+    "landValueReference": 50,
+    "landValueWeight": 0.5,
+    "source": "Placeholder. The prices above are national medians, so they are taken to hold at land value 50, a middling lot. Half the price follows land value, about the land's share of US home values in the national accounts; no single source was read.",
+    "placeholder": true
+  },
+  "floorSpace": {
+    "perResident": 51,
+    "perJob": { "commercial": 85, "office": 56, "industrial": 139 },
+    "source": "Per resident: the 2025 median new single-family house, 2,194 square feet (US Census Bureau, Characteristics of New Housing), over the four residents a single family home holds room for in buildings.json. Per job: Metropolitan Council, How to Measure Employment Intensity and Capacity: 920 square feet a retail job, 600 an office job and 1,500 a warehouse job.",
+    "sourceUrl": "https://metrocouncil.org/Handbook/Files/Resources/Fact-Sheet/LAND-USE/How-to-Measure-Employment-Intensity-and-Capacity.aspx",
+    "note": "The house size is from 2025. The Metropolitan Council's figures per job carry no year, so the block has no source year."
+  },
+  "eminentDomain": {
+    "relocationPerResident": {
+      "amount": 3828,
+      "sourceYear": 2024,
+      "index": "general",
+      "source": "FHWA final rule on the Uniform Relocation Act, effective 3 June 2024: the rental assistance payment for a tenant household rose to $9,570, from $7,200. Over the 2.5 people of an average US household, $3,828 a resident.",
+      "sourceUrl": "https://wsdot.wa.gov/sites/default/files/2024-06/2024-02-RES-Relocation-Monetary-Entitlements-Changes.pdf",
+      "placeholder": true,
+      "note": "The cap has a source; the household size does not. Read from WSDOT's summary of the federal changes, not the rule itself. A homeowner's replacement housing payment is up to $41,200; the tenant figure is taken because most displaced residents in a dense city rent. The cap is a most, and moving costs come on top. The household size is from memory, not a source read."
+    },
+    "relocationPerJob": {
+      "amount": 3320,
+      "sourceYear": 2024,
+      "index": "general",
+      "source": "FHWA final rule on the Uniform Relocation Act, effective 3 June 2024: reestablishment expenses for a displaced business rose to $33,200. Spread over a placeholder business of ten jobs, $3,320 a job.",
+      "sourceUrl": "https://wsdot.wa.gov/sites/default/files/2024-06/2024-02-RES-Relocation-Monetary-Entitlements-Changes.pdf",
+      "placeholder": true,
+      "note": "The cap has a source; ten jobs a business does not."
+    },
+    "premium": {
+      "share": 0.25,
+      "source": "Michigan Constitution, Article X, section 2 (2006): a principal residence taken for public use is paid at least 125 percent of its fair market value. Applied to every building, not only homes.",
+      "sourceUrl": "https://law.justia.com/constitution/michigan/article-x/section-2/",
+      "sourceYear": 2006
+    },
+    "demolitionPerSquareMetre": {
+      "amount": 65,
+      "sourceYear": 2026,
+      "index": "construction",
+      "source": "Placeholder. Cost guides put commercial demolition at $4 to $8 a square foot of floor space (HelloData, Average Demolition Cost Per Square Foot in Commercial Real Estate); $6, $65 a square metre. Not a primary source.",
+      "sourceUrl": "https://www.hellodata.ai/help-articles/average-demolition-cost-per-square-foot-in-commercial-real-estate",
+      "placeholder": true
+    },
+    "refundShare": {
+      "share": 0.1,
+      "source": "Placeholder. The share of a city-owned road's or building's build cost paid back when it is cleared, for salvage. No source.",
+      "placeholder": true
+    }
+  },
+  "loans": {
+    "maxOpen": 3,
+    "offers": [
+      { "termMonths": 120, "annualRate": 0.04 },
+      { "termMonths": 240, "annualRate": 0.045 },
+      { "termMonths": 360, "annualRate": 0.05 }
+    ],
+    "source": "Placeholder. Terms of 10, 20 and 30 years, about what US municipal bonds run, at rates a little above high-grade municipal yields; no source read.",
+    "placeholder": true
+  },
+  "creditLimit": {
+    "perResident": {
+      "amount": 1000,
+      "sourceYear": 2026,
+      "index": "general",
+      "source": "Placeholder. Dollars of borrowing for each resident.",
+      "placeholder": true
+    },
+    "lastYearTaxMultiple": 3,
+    "source": "Placeholder. Borrowing of three years of tax income; no source read.",
+    "placeholder": true
+  }
+}
