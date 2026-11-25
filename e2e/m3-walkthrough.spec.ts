@@ -32,9 +32,10 @@ import { HALF, HOMES, MAIN, REZONED, SEED, SHOPS, SHORE, UPPER, X0, X1, XM, aban
 // in Node, so step 11 opens a city built in Node a game day short of the
 // first tower, as the issue's notes ask, in a browser context of its own so
 // the town's saves are untouched. Step 9 does the same for abandonment,
-// after the bulldoze, the departures and the vacant homes in the town: the
-// pull from outside refills a town of under 500 residents faster than a
-// home can stand vacant for 90 game days. The page still runs the day, and every
+// after the bulldoze, the departures and the vacant homes in the town: a
+// home is abandoned after 90 game days vacant with the residential bar at
+// or below zero, and until #361 the pull from outside refilled the town's
+// homes before that came. The page still runs the day, and every
 // check goes through its tools. Screenshots of each step land in
 // walkthrough-screenshots/m3-<backend>/ and are attached to the report.
 
@@ -413,7 +414,16 @@ async function readout(page: Page, id: number): Promise<Record<string, string>> 
   await noTool(page);
   const top = await page.evaluate(async (id) => (await window.cityCouncil.view).buildingTop(id), id);
   if (!top) throw new Error(`building ${id} is not drawn`);
-  await look(page, top.x, top.z, 160);
+  // From nearly straight above, so no taller building stands between the camera and this one.
+  const g = groundAt(top.x, top.z);
+  await page.evaluate(
+    async ([p, t]) => (await window.cityCouncil.camera).rig.setPose(p, t),
+    [
+      [top.x, g + 200, top.z + 40],
+      [top.x, g, top.z],
+    ] as const,
+  );
+  await frames(page);
   await settleBuilt(page);
   await hoverBuilding(page, id);
   const r = page.locator("#building-readout");
@@ -844,15 +854,15 @@ for (const variant of [
       await shot(page, info, dir, "9-vacant");
       await away(page);
 
-      // Abandonment comes 90 game days of vacancy later, with the residential bar at or below zero. In this town the
-      // pull from outside refills homes while it has under 500 residents, so the wait runs on a city built in Node
-      // the same way, a game day short of its first abandoned home, in a context of its own.
+      // Abandonment comes 90 game days of vacancy later, with the residential bar at or below zero, so the wait runs on
+      // a city built in Node the same way, a game day short of its first abandoned home, in a context of its own.
       const context = await browser.newContext({ ...devices["Desktop Chrome"], viewport: VIEWPORT, storageState: PLAYER_STATE, ...(info.project.use.baseURL ? { baseURL: info.project.use.baseURL } : {}) });
       const other = await context.newPage();
       await openOn(other, info, abandonment().bytes, variant, "M3 walkthrough, abandonment");
-      // Next to no work: a shop may have grown on a cell at a strip's end that the erase left zoned.
+      // Next to no work: a shop may have grown on a cell at a strip's end that the erase left zoned. Since #361 the town may
+      // have emptied by now, with nobody in work or out of it.
       const t = (await stats(other)).totals;
-      expect(t["workersEmployed"] ?? 0, "workers in jobs").toBeLessThan((t["workersUnemployed"] ?? 0) / 4);
+      expect(t["workersEmployed"] ?? 0, "workers in jobs").toBeLessThanOrEqual((t["workersUnemployed"] ?? 0) / 4);
       expect(await bar(other, "residential")).toBeLessThanOrEqual(0);
       const uses = async () => {
         const ids = (await buildings(other)).map((b) => b.id);
@@ -865,8 +875,19 @@ for (const variant of [
       const later = await growUntil(other, "a home abandoned", uses, (v) => v.abandoned.length > 0, 2 * DAY, 10);
       // Each one abandoned stood vacant the day before.
       for (const id of later.abandoned) expect(before.vacant, `home ${id} was vacant first`).toContain(id);
-      const abandonedId = later.abandoned[0] ?? -1;
-      const a = await readout(other, abandonedId);
+      // The first abandoned home the pointer reaches: a taller building can stand in front of one.
+      let abandonedId = -1;
+      let a: Record<string, string> = {};
+      for (const id of later.abandoned) {
+        try {
+          a = await readout(other, id);
+          abandonedId = id;
+          break;
+        } catch {
+          continue;
+        }
+      }
+      if (abandonedId < 0) throw new Error(`the pointer reached none of the abandoned homes ${later.abandoned.join(", ")}`);
       expect(a["use"]).toBe("abandoned");
       await drawnAs(other, abandonedId, ABANDONED);
       expect(a["text"]).toContain("Abandoned");

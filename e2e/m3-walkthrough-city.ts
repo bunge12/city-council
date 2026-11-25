@@ -203,9 +203,9 @@ export function stripOpen(state: SimState, s: Strip, depth: number): { open: num
  * then every workplace bulldozed and its ground unzoned, and run on until
  * the first home is about to be abandoned. Returned at the start of that
  * game day, paused. A home is abandoned after 90 game days vacant while the
- * residential bar is at or below zero, and in the page the pull from outside
- * kept refilling the town's homes for over a game year, so the walkthrough
- * cannot wait for it there.
+ * residential bar is at or below zero: game months the walkthrough does not
+ * wait for in the page. Until #361 the pull from outside also refilled the
+ * town's homes before any stood vacant that long.
  */
 export function abandonmentCity(): { bytes: Uint8Array; bulldozedOnDay: number } {
   const state = createState(SEED);
@@ -214,7 +214,7 @@ export function abandonmentCity(): { bytes: Uint8Array; bulldozedOnDay: number }
     zone(state, { z: HOMES, piece, side: "north" }, "residential", 1, 6);
     zone(state, { z: HOMES, piece, side: "south" }, "residential", 1, 6);
     zone(state, { z: UPPER, piece, side: "north" }, "residential", 1, 6);
-    // Apartments and towers, so the town grows well past the 500 residents the pull from outside holds a city to: below that the pull refills empty homes faster than they can be abandoned.
+    // Apartments and towers, so the town grows well past the 500 residents of the pull from outside, and plenty of homes stand empty once the work goes.
     zone(state, { z: UPPER, piece, side: "south" }, "residential", 3, 5);
     zone(state, { z: SHORE, piece, side: "north" }, "residential", 2, 4);
   }
