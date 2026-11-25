@@ -9,9 +9,10 @@ The player sets four tax rates, and each one pushes back on the zone it taxes. S
 ## Scope
 
 - A `SetTaxRate` command with a zone and a rate, refused outside the range in `economy.json`. It carries the player id and is logged like every command
-- Each rate is a signed part of its zone's demand bar: zero at the default rate, below zero above it, above zero below it, with the weight in `demand.json`. The part shows in the bar's tooltip from M3-15 with no client change
+- Each rate is a signed part of its zone's demand bar: zero at the default rate, below zero above it, above zero below it, with the weight in `demand.json`. The part shows in the bar's tooltip from M3-15, with its words added to `PART_WORDS` in the client
 - The residential rate is an input to each pop's satisfaction, on its daily visit, with the weight in `pops.json`. A higher rate lowers the score, more for a wealthy pop, as the PRD's satisfaction section says
-- The rates go in the delta, and the protocol version goes up. They are state since issue 02, so the snapshot version does not
+- The rates go in the delta, and the protocol version goes up
+- The demand parts are state (`BarState.parts`), so a tax part on each bar bumps `SNAPSHOT_VERSION`, with a migration that adds it at zero and a test, as M3-10 did for satisfaction
 
 ## Out of scope
 
@@ -24,6 +25,7 @@ The player sets four tax rates, and each one pushes back on the zone it taxes. S
 - [ ] A scenario test raises the residential rate in a growing town and finds arrivals slow and tax income per resident rise
 - [ ] A test finds a wealthy pop's score fall more than a poor one's for the same rate
 - [ ] `SetTaxRate` outside the range is refused with a reason
+- [ ] A screenshot of a bar's tooltip with the tax part in the pull request
 - [ ] A replay gives the same state hash
 
 ## Notes

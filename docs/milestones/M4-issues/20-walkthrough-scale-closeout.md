@@ -31,6 +31,6 @@ The M4 exit test runs automatically, the three scale cities hold up with money i
 
 ## Notes
 
-Several exit steps wait on the sim: a month's close in step 4, a milestone in step 9. Start those from city files built in Node that are a game day short of the event, as the M3 walkthrough does, and run at 4x. Everything the step itself checks still goes through the page's own tools.
+Several exit steps wait on the sim: a month's close in step 4, a milestone in step 9. The budget overlay's cul-de-sac in step 13 needs a city file that isolates it, as issue 18 says. Start those from city files built in Node that are a game day short of the event, as the M3 walkthrough does, and run at 4x. Everything the step itself checks still goes through the page's own tools.
 
 Steps 2, 7 and 9 read sounds from the test hook M3-02 added. A headless browser plays nothing.

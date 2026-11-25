@@ -9,7 +9,7 @@ The player can place City Hall, see it grow, and click it to open the budget. Se
 ## Scope
 
 - A landmark tool in the build dock, shown once City Hall unlocks. It shows the footprint on the road side under the pointer, green or red from `planPlaceLandmark`, with the price and the reason, and sends `PlaceLandmark` on the click
-- A model for City Hall made in code like the other buildings, at three stages, and in each zoom band: the near model, the plain box in the district band and the city band's block
+- A model for City Hall made in code like the other buildings, at four stages, and in each zoom band: the near model, the plain box in the district band and the city band's block
 - The construction animation from issue 136 when it is placed and at each stage
 - A click on City Hall with no tool on opens the budget panel
 - City Hall is a bulldoze target as a building. Its tag says "City-owned: demolition only" and gives the refund

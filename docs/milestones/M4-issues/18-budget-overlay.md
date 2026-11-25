@@ -23,11 +23,13 @@ The player can see which districts pay for which. See "A budget overlay" under "
 
 - [ ] Unit tests on a small city give a compact block of density 2 a net above zero and a block on a long cul-de-sac one below it
 - [ ] A test finds the blocks' and chunks' sums equal to the city's yearly tax less its road upkeep
-- [ ] The overlay builds in under 50 ms on the 500,000 resident city, with the number in the pull request
+- [ ] The overlay's build time on the 500,000 resident city is in the pull request. The aim is under 50 ms. No test asserts it
 - [ ] A Playwright test turns the overlay on and reads a block's figures against the sim's
 - [ ] Screenshots of the overlay on a mixed town in the pull request
 
 ## Notes
+
+A cul-de-sac inside a block shares that block's figure (roads/blocks.ts), and one on open ground shares its 500 m chunk's. The test city and the M4 walkthrough's city file isolate a long cul-de-sac so its loss shows on its own.
 
 This overlay is what makes "low density roughly breaks even" visible. Issue 19's tuning reads it.
 

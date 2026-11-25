@@ -10,7 +10,9 @@ Clearing an occupied building means paying its owner and its people, and the pri
 
 - A function gives a building's compensation: for an occupied building, its value from issue 01, plus the relocation payment per resident or job displaced, plus the premium; for a vacant or abandoned one, the demolition cost only
 - `BulldozeBuilding` charges it to the compensation line. So do `BulldozeRoad`, and `BuildRoad`, `BuildRoadGrid` and `UpgradeRoad` when they take buildings with them
-- The plan functions return the compensation and its parts, so the bulldozer's tag and the road tool give the same number the command charges. The overdraft check from issue 03 counts it
+- The plan functions return the compensation and its parts, so the bulldozer's tag and the road tool give the same number the command charges. For roads that is the state-level preview from issue 03, over the buildings `roadClears` finds. The overdraft check from issue 03 counts it
+- A road command's compensation is charged on the tick it applies, from that same rehearsal, though its buildings go only when the cells settle, a few ticks later on a big change. The price shown is then the price charged. Record what the rehearsal costs inside `validate` for a grid at its cap
+- A bulldoze drag over more than `bulldozeMaxBuildings` (1,000) goes as several commands, one a step. Pops moved by the first part can land in buildings of the next, so each part's charge equals its own plan, and the drag's total can drift from the tag. The tag says so for a split drag
 - Rezoning charges nothing, and redevelopment by an owner charges nothing
 - An expropriation record in state for each building removed this way with people in it: the tick, the lot's centre, the people displaced and the player. Records older than a game year are dropped. The list is capped, with the cap in `economy.json`
 - `SNAPSHOT_VERSION` goes up, with a migration that gives an older city an empty list, and a test
@@ -27,7 +29,7 @@ Clearing an occupied building means paying its owner and its people, and the pri
 - [ ] A test bulldozes a road with buildings on it and finds the treasury moved by the road's cost plus every building's compensation
 - [ ] A test finds the plan's price equal to the charge for every command that removes buildings
 - [ ] A test steps a game year past a record and finds it dropped
-- [ ] `BulldozeBuilding` at its cap of 5,000 over occupied buildings stays inside the tick, with the time in the pull request
+- [ ] `BulldozeBuilding` at its cap of 1,000 over occupied buildings, with the step's time on the scale cities in the pull request
 - [ ] A replay gives the same state hash
 
 ## Notes

@@ -9,8 +9,8 @@ Every metre of road costs money every year, so a sprawling network is a cost the
 ## Scope
 
 - An upkeep system charges road upkeep once a game day, on the day's first tick, to the road upkeep line, with the exact daily share from issue 02
-- The yearly total is a running sum the road network keeps as segments come, go and change type: length times the type's `upkeepPerMetrePerYear`, times the bridge multiplier on a bridge. No pass over the segments
-- Upkeep in `roads.json` becomes a share of build cost per type, as the PRD says, unless issue 01 found a sourced figure per metre
+- Upkeep in `roads.json` becomes a yearly share of build cost per type, as the PRD says, in place of `upkeepPerMetrePerYear`
+- The yearly total is a running sum the road network keeps as segments come, go and change type: each segment's build cost, with the bridge multiplier on a bridge, times its type's share. No pass over the segments
 - A function gives each segment's yearly upkeep, for the road readout and for the budget overlay in issue 18
 - Building upkeep for city-owned buildings uses the same daily charge. Issue 13 adds City Hall to it
 
@@ -24,7 +24,7 @@ Every metre of road costs money every year, so a sprawling network is a cost the
 - [ ] Unit tests build roads of each type and a bridge and find the yearly total equal to a sum over the segments
 - [ ] A test charges a full year of days and finds the road upkeep line equal to the yearly total exactly
 - [ ] A test of the running sum against a recount after builds, upgrades, bulldozes, splits and undos
-- [ ] The system's tick time shows in the debug panel and is under 0.1 ms on the 500,000 resident city
+- [ ] The system's tick time shows in the debug panel. Its mean and worst on the 500,000 resident city are in the pull request and held by the bench in `budgets.json`, not asserted in a test
 - [ ] A replay gives the same state hash
 
 ## Notes

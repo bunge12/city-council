@@ -24,7 +24,7 @@ Shops, offices and factories pay tax on what they do, so a workplace with nobody
 - [ ] Unit tests give a shop, an office and a factory a yearly tax from known jobs filled and rates
 - [ ] A test cuts a factory's road off from the outside and finds its tax stop, then join it again and find it back
 - [ ] A test with more shop jobs than spending power finds each shop's sales scaled down
-- [ ] The TAX system's worst tick on the 500,000 resident city stays under 1 ms, with the number in the pull request
+- [ ] The TAX system's mean and worst tick on the 500,000 resident city are in the pull request, against the share issue 05 set in `budgets.json`
 - [ ] A replay gives the same state hash
 
 ## Notes

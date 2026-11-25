@@ -10,10 +10,12 @@ Roads cost what their plan says, and a city that has spent its money stops build
 
 - `BuildRoad`, `BuildRoadGrid` and `UpgradeRoad` charge the cost their plan functions already work out, on the tick they apply, to the construction line
 - `BulldozeRoad` charges its plan's demolition cost, less the refund share of the road's build cost from `economy.json`, to the demolition line. A bulldoze that refunds more than it costs pays into the treasury
-- A command that would take the treasury below the overdraft is refused, with a reason that gives the price and what is left: "Costs $4.2M, $1.1M available". The check is in `validate`, so the tool's preview refuses it too
+- A command that would take the treasury below the overdraft is refused, with a reason that gives the price and what is left: "Costs $4.2M, $1.1M available". The check is in `validate`, and in the state-level previews the tools call: `previewBuildRoad` and `previewBuildRoadGrid` (buildings/bulldoze.ts) and one for upgrades, which return the price and the refusal. The plain `planRoad` has no treasury to check
 - Zoning stays open past the overdraft, as the proposal in M4.md says. If the decision goes the other way, `ZoneCells` is refused instead. Either way, the PRD's overdraft paragraph is updated in this pull request
-- Undo reverses exactly the money the undone command moved: a road undone is refunded in full, and a bulldoze undone takes its refund back. An undo that cannot pay is refused like any other command
-- The activity log entry of every command that moved money records the amount, so the log can name who spent it. If that changes the log entry's shape, `SNAPSHOT_VERSION` goes up with a migration and a test
+- Undo reverses exactly the money the undone command moved: a road undone is refunded in full, and a bulldoze undone takes its refund back. The amount goes on the undo record, since the log entry it points to can page out of live state. An undo that cannot pay is refused like any other command
+- The amount every command moved is kept beside its log entry, in an array that pages with the live log, so the log can name who spent it. Not inside the entry: the log is the replay input, and a result does not belong in it
+- A way for generators and tests to fund a city. `generateScaleCity`, the standard balance cities and the test builders set the treasury through a test helper, like the one that holds the demand bars, so they build what they built before
+- `SNAPSHOT_VERSION` goes up for the undo amounts and the log's amounts, with a migration and a test
 
 ## Out of scope
 
@@ -27,6 +29,7 @@ Roads cost what their plan says, and a city that has spent its money stops build
 - [ ] A test brings the treasury to the overdraft and finds each costing command refused with the reason, and zoning not refused, or refused if the decision went that way
 - [ ] A test undoes a build and a bulldoze and finds the money reversed exactly
 - [ ] Two commands in one step that together pass the overdraft: the first applies and the second is dropped with the reason
+- [ ] The three scale cities still meet their targets, and the M3 walkthroughs and balance cities still build what they built
 - [ ] Replay fixtures with roads are recorded again, and the pull request says why
 - [ ] A replay gives the same state hash
 

@@ -1,6 +1,6 @@
 # M4-13: City Hall in the sim
 
-Milestone: M4 Economy. Spec: [M4.md](../M4.md). Depends on: 03, 04, 12.
+Milestone: M4 Economy. Spec: [M4.md](../M4.md). Depends on: 04, 09, 12.
 
 ## Goal
 
@@ -14,9 +14,10 @@ The player can place one City Hall, the city's first landmark. See "Landmarks" a
 - Its price goes on the construction line. Its upkeep joins the building upkeep from issue 04
 - Its cells leave the zoning and cannot be painted while it stands. `ZoneCells` passes over them
 - `BulldozeBuilding` on it charges demolition only, less the refund share, and the cells come back unzoned
-- Its stage, 1 to 3, follows the milestones reached, with the milestones in `progression.json`. Derived, not stored
+- Its stage, 1 to 4, follows the milestones reached: it grows at three of them after it is placed, with the milestones in `progression.json`. Derived, not stored
 - It offers no homes or jobs, pays no tax and no development charge
-- `SNAPSHOT_VERSION` goes up if a building row gains a field, with a migration and a test
+- The M3 building systems pass over it: vacancy and abandonment, redevelopment, the grower, job matching, arrivals, the statistics by zone and density, and the tax sweep. Each gets a test that City Hall is left alone
+- The landmark flag goes on the building row and in the delta. `SNAPSHOT_VERSION` and the protocol version go up, with a migration and a test
 
 ## Out of scope
 
@@ -29,8 +30,11 @@ The player can place one City Hall, the city's first landmark. See "Landmarks" a
 - [ ] A test finds it refused before the first milestone, without frontage, and over a building
 - [ ] A test bulldozes it and finds the refund paid and the cells free
 - [ ] A test finds its stage follow the milestones reached
+- [ ] A scenario test runs a game year with City Hall standing and finds it never vacant, abandoned, redeveloped or counted as a zone's building
 - [ ] A replay gives the same state hash
 
 ## Notes
+
+If this grows past one pull request, split the stages and upkeep off into their own issue and say so on GitHub.
 
 The PRD has eight landmarks over v1. Build the kind, not one special case, so the central station in M7 only adds data and a model.

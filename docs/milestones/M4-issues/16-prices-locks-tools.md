@@ -1,6 +1,6 @@
 # M4-16: Prices and locks in the tools
 
-Milestone: M4 Economy. Spec: [M4.md](../M4.md). Depends on: 09, 12, 14.
+Milestone: M4 Economy. Spec: [M4.md](../M4.md). Depends on: 06, 09, 12, 14.
 
 ## Goal
 
@@ -8,7 +8,7 @@ Every tool says what an action costs before the click, and the zone tool says wh
 
 ## Scope
 
-- The road, grid and upgrade tools show the price in the warning colour, with the reason, when the treasury cannot cover it, from the plan's refusal. They add the compensation for buildings the road would take
+- The road, grid and upgrade tools show the price in the warning colour, with the reason, when the treasury cannot cover it, from the state-level preview issue 03 added. They add the compensation for buildings the road would take, from the same preview
 - The bulldozer's tag gives a building's compensation from the plan: its value, the relocation payment with the people and jobs it covers, and the premium, then the total. A vacant or abandoned building shows demolition only. A road drag's tag gives the road's demolition less its refund, plus the buildings' compensation, then the total
 - The zone tool shows a locked density greyed out, with "Unlocks at 2,500 residents" or the milestone's own figure
 - The hover readout gives a building's value and its yearly tax

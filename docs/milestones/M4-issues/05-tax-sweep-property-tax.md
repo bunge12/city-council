@@ -24,7 +24,7 @@ Homes pay a yearly property tax on their value, a day at a time, and the cost of
 
 - [ ] Unit tests give a house and a tower a yearly tax from a known value and rate
 - [ ] A scenario test runs a town for a game year and finds the residential tax line equal to the sum of each building's yearly tax over the days it was occupied
-- [ ] The system's worst tick on the 500,000 resident city is under 1 ms, with its mean and worst recorded in the pull request
+- [ ] The system's mean and worst tick on the 500,000 resident city are in the pull request, with a share of the tick held in `budgets.json` by the scale cities' bench. The aim is under 1 ms. No test asserts a time
 - [ ] A city saved half way through a day resumes to the same hash
 - [ ] A replay gives the same state hash. Replay fixtures with buildings are recorded again
 
