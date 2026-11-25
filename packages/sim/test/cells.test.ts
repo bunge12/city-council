@@ -748,6 +748,25 @@ describe("settling a big change over a few ticks", () => {
     expect(state.cellsReadyAt).toBeLessThanOrEqual(state.tick + 22);
   });
 
+  it("gives the step that applies a change a tick of its own, so a change of two slices gets two steps to walk them (#358)", () => {
+    const state = createState(SEED);
+    // 400 m of street on open ground: more than one slice of work and no more than two (zoning.json).
+    ok(state, road([4150, 4500], [4550, 4500]));
+    const applied = state.log.at(-1)?.tick ?? -1;
+    // The applying tick, then two slices. Counted as one of the slices, as before #358, it was applied + 2,
+    // and the one step after it, the last, walked the whole change with no limit.
+    expect(state.cellsReadyAt).toBe(applied + 3);
+    // The applying step walked none of it.
+    expect(cellsWalked(state)).toBe(false);
+    // The next step walks a slice; the step after it, on the last tick before the ready tick, finishes.
+    step(state);
+    expect(cellsSettled(state)).toBe(false);
+    step(state);
+    expect(cellsWalked(state)).toBe(true);
+    expect(cellsSettled(state)).toBe(true);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
+  });
+
   it("gives a grid too big for one tick the tick it settles by, and walks it a slice a step", () => {
     const state = createState(SEED);
     const tick = state.tick;
