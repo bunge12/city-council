@@ -8,7 +8,8 @@ import {
   hashState,
   hashTerrain,
   heightAt,
-  replay,
+  fundCity,
+  replayFrom,
   snapToGrid,
   terrainOf,
   ZONING_BALANCE,
@@ -1466,11 +1467,14 @@ function terrainCheck(seed: number): TerrainCheck {
  * thread and hashes the result, so Playwright can check a replay fixture
  * gives the same hash here as in Node.
  */
-function replayCheck(seed: number, log: LogEntry[], untilTick: number, heldDemand: number | null = null): { hash: string; logLength: number } {
+function replayCheck(seed: number, log: LogEntry[], untilTick: number, heldDemand: number | null = null, treasury: number | null = null): { hash: string; logLength: number } {
   // A fixture recorded with every bar held (M3-07) replays with them held the same way.
   const release = heldDemand === null ? null : holdDemandBars(heldDemand);
   try {
-    const state = replay(seed, log, untilTick);
+    // And one recorded on a funded city (M4-03) replays onto one funded the same way.
+    const start = createState(seed);
+    if (treasury !== null) fundCity(start, treasury);
+    const state = replayFrom(start, log, untilTick);
     return { hash: hashState(state), logLength: state.log.length };
   } finally {
     release?.();

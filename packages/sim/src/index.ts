@@ -26,7 +26,7 @@ export {
 } from "./travel-times";
 export type { System, SystemTimer } from "./step";
 export { RNG_WORDS, nextFloat, nextInt, nextU32, seedRng } from "./rng";
-export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, isLogEntry, logLength, readLog } from "./log";
+export { LOG_LIVE_LIMIT, LOG_PAGE_SIZE, isLogEntry, logLength, readLog, readLogSpent } from "./log";
 export type { LogEntry } from "./log";
 export { TIME_BALANCE, gameDate, isMonthStart, isYearStart, yearDays } from "./calendar";
 export type { GameDate, TimeBalance } from "./calendar";
@@ -180,6 +180,7 @@ export {
   copyBudget,
   dailyShare,
   expensesOf,
+  fundCity,
   incomeOf,
   isIncome,
   sameBudget,
@@ -187,6 +188,7 @@ export {
   type BudgetState,
   type LedgerLine,
 } from "./economy/budget";
+export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";
@@ -224,11 +226,12 @@ export {
   previewBuildRoad,
   previewBuildRoadGrid,
   previewBulldozeRoad,
+  previewUpgradeRoad,
   roadEffects,
   roadClears,
   seeBuilding,
 } from "./buildings/bulldoze";
-export type { BuildingSeen, BuildingsInTheWay, RoadEffects, BulldozeBuildingPayload, PeopleIn } from "./buildings/bulldoze";
+export type { BuildingSeen, BuildingsInTheWay, RoadEffects, BulldozeBuildingPayload, PeopleIn, Refusal } from "./buildings/bulldoze";
 export { applyBuildingDelta, drainBuildingDelta, recordBuildingChanges } from "./buildings/delta";
 export type { BuildingDelta } from "./buildings/delta";
 export type { ZoneCellsPayload, ZonePlan, ZonePlanResult, ZonePoint, ZoneRect } from "./zoning/zone";
@@ -354,7 +357,7 @@ export {
   reachesOutside,
 } from "./roads/connections";
 export type { ConnectionBalance, ConnectionSite } from "./roads/connections";
-export { SCALE_BUILDINGS, SCALE_CITY_RESIDENTS, SCALE_PLAYER, SCALE_SEED, SCALE_SEGMENTS, buildScaleCity, generateScaleCity, growScaleCity } from "./scale";
+export { SCALE_BUILDINGS, SCALE_CITY_RESIDENTS, SCALE_PLAYER, SCALE_SEED, SCALE_SEGMENTS, SCALE_TREASURY, buildScaleCity, createScaleState, generateScaleCity, growScaleCity } from "./scale";
 export type { GeneratedScaleCity, ScaleCity, ScaleCityResidents, ScaleCityTotals, ScaleCounts, ScaleTown } from "./scale";
 export { BLOCK_MIN_AREA, blockById, blockIndexOf, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
 export type { Block, BlockIndex } from "./roads/blocks";

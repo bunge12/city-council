@@ -53,7 +53,7 @@ import { checkBudget } from "./economy/budget";
 import { replaysUnderThisBalance } from "./balance-stamp";
 import { checkDemand } from "./demand/demand";
 import { Fnv64 } from "./hash";
-import { isLogEntry, type LogEntry } from "./log";
+import { checkLogSpent, isLogEntry, type LogEntry } from "./log";
 import { migrateState } from "./migrate";
 import { RNG_WORDS } from "./rng";
 import { checkConnections } from "./roads/connections";
@@ -744,7 +744,7 @@ function isCentre(value: unknown): boolean {
 
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
-  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, cellReads, buildings, pops, centre, stats, travelReadyAt, demand, redevelopedToday, travelLast, budget } = state;
+  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, cellReads, buildings, pops, centre, stats, travelReadyAt, demand, redevelopedToday, travelLast, budget, logSpent } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");
   if (!isUint32(seed)) throw corrupt("its seed is not a 32-bit integer");
   if (tick !== header.tick || seed !== header.seed) throw corrupt("its header does not match its contents");
@@ -757,6 +757,8 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   }
   pagedLog?.forEach((entry, i) => checkLogEntry(entry, `paged log entry ${i}`));
   log.forEach((entry, i) => checkLogEntry(entry, `log entry ${i}`));
+  const spentProblem = checkLogSpent(logSpent, log.length);
+  if (spentProblem !== null) throw corrupt(`the money its log entries moved is malformed: ${spentProblem}`);
   pending.forEach((command, i) => checkPendingCommand(command, `queued command ${i}`));
   const undoProblem = checkUndoHistory(undo);
   if (undoProblem !== null) throw corrupt(`its undo history is malformed: ${undoProblem}`);

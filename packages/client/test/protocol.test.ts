@@ -9,7 +9,9 @@ import {
   MAX_PENDING_COMMANDS,
   PROTOCOL_VERSION,
   ROUTING_BALANCE,
+  SCALE_TREASURY,
   createBareState,
+  fundCity,
   createState,
   STAT_TOTALS,
   TIME_BALANCE,
@@ -192,7 +194,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     expect(received.length).toBe(before);
     const delta = received.filter((m) => m.type === "delta").at(-1);
     expect(delta && Object.keys(delta).sort()).toEqual(
-      ["cellReads", "centre", "log", "logFrom", "rng", "seq", "speed", "stats", "steps", "tick", "demand", "redevelopedToday", "timings", "travelReadyAt", "type", "v"].sort(),
+      ["cellReads", "centre", "log", "logFrom", "logSpent", "rng", "seq", "speed", "stats", "steps", "tick", "demand", "redevelopedToday", "timings", "travelReadyAt", "type", "v"].sort(),
     );
     // No month began since the last delta, so it carries no sample.
     expect(delta?.type === "delta" && delta.stats.samples.length).toBe(0);
@@ -313,6 +315,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
       speed: 1,
       logFrom: 99,
       log: [],
+      logSpent: [],
       rng: new Uint32Array(4),
       stats: encodeStatsDelta(createStats(), 0),
       cellReads: 0,
@@ -540,7 +543,10 @@ describe("road deltas", () => {
         }),
     };
     let now = 0;
-    const host = new SimHost(createBareState(2026), hostEnd, () => now);
+    // Funded (M4-03): a thousand ticks of random roads cost more than the starting grant.
+    const city = createBareState(2026);
+    fundCity(city, SCALE_TREASURY);
+    const host = new SimHost(city, hostEnd, () => now);
     const mirror = new SimMirror(filtered, "p1");
     const updates: MirrorUpdate[] = [];
     mirror.subscribe((u) => updates.push(u));

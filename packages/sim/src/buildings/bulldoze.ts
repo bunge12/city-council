@@ -9,9 +9,15 @@
 // again on the lot it was cleared from: the new building can take the freed
 // id and the same first cell (M2 review, #147). A cleared lot is free at once, and the grower may build on it
 // under the cells' current zoning. Clearing costs nothing until the
-// treasury and the eminent domain price arrive in M4.
+// eminent domain price arrives in M4-09.
+//
+// The previews give a road command's plan, whose `cost` is what the
+// command charges, and `refusal`: why the treasury cannot pay it, or null
+// (M4-03). A refused plan is still a plan, so the tools can show its price
+// and the reason together.
 
-import { planBulldoze, type BulldozePlan } from "../roads/edit";
+import { spendingRefusal } from "../economy/spend";
+import { planBulldoze, planUpgrade, type BulldozePlan, type UpgradePlan } from "../roads/edit";
 import { buildRoad, planRoad, type RoadPlan } from "../roads/build";
 import { buildRoadGrid, planRoadGrid, type GridPlan } from "../roads/grid";
 import { endJournal, reverseOps, startJournal, type NetworkOp, type RoadNetwork } from "../roads/network";
@@ -236,32 +242,44 @@ export function gridClears(state: SimState, plan: GridPlan, people: PeopleIn = p
   return inTheWay(buildingsOnCells(state, keys, CELL_KEY_STRIDE), people);
 }
 
-/** `planRoad` on `state`, with the buildings the road would clear. For the road tool's preview. */
+/** Why the treasury of `state` cannot pay a plan's cost, or null: what the command would be refused with. */
+export type Refusal = string | null;
+
+/**
+ * `planRoad` on `state`, with the buildings the road would clear and why
+ * the treasury cannot pay its cost, or null. For the road tool's preview.
+ */
 export function previewBuildRoad(
   state: SimState,
   payload: unknown,
   people: PeopleIn = peopleOf(state),
-): { ok: true; plan: RoadPlan; clears: BuildingsInTheWay } | { ok: false; reason: string } {
+): { ok: true; plan: RoadPlan; clears: BuildingsInTheWay; refusal: Refusal } | { ok: false; reason: string } {
   const result = planRoad(state.roads, terrainOf(state.seed), payload);
-  return result.ok ? { ...result, clears: roadClears(state, result.plan, people) } : result;
+  return result.ok ? { ...result, clears: roadClears(state, result.plan, people), refusal: spendingRefusal(state, result.plan.cost) } : result;
 }
 
-/** `planRoadGrid` on `state`, with the buildings the grid would clear. For the grid tool's preview. */
+/** `planRoadGrid` on `state`, with the buildings the grid would clear and why the treasury cannot pay it. For the grid tool's preview. */
 export function previewBuildRoadGrid(
   state: SimState,
   payload: unknown,
   people: PeopleIn = peopleOf(state),
-): { ok: true; plan: GridPlan; clears: BuildingsInTheWay } | { ok: false; reason: string } {
+): { ok: true; plan: GridPlan; clears: BuildingsInTheWay; refusal: Refusal } | { ok: false; reason: string } {
   const result = planRoadGrid(state.roads, terrainOf(state.seed), payload);
-  return result.ok ? { ...result, clears: gridClears(state, result.plan, people) } : result;
+  return result.ok ? { ...result, clears: gridClears(state, result.plan, people), refusal: spendingRefusal(state, result.plan.cost) } : result;
 }
 
-/** `planBulldoze` on `state`, with the buildings the bulldoze would clear. For the bulldoze tool's preview. */
+/** `planBulldoze` on `state`, with the buildings the bulldoze would clear and why the treasury cannot pay it. For the bulldoze tool's preview. */
 export function previewBulldozeRoad(
   state: SimState,
   payload: unknown,
   people: PeopleIn = peopleOf(state),
-): { ok: true; plan: BulldozePlan; clears: BuildingsInTheWay } | { ok: false; reason: string } {
+): { ok: true; plan: BulldozePlan; clears: BuildingsInTheWay; refusal: Refusal } | { ok: false; reason: string } {
   const result = planBulldoze(state.roads, payload);
-  return result.ok ? { ...result, clears: bulldozeClears(state, result.plan, people) } : result;
+  return result.ok ? { ...result, clears: bulldozeClears(state, result.plan, people), refusal: spendingRefusal(state, result.plan.cost) } : result;
+}
+
+/** `planUpgrade` on `state`, with why the treasury cannot pay it. For the upgrade tool's preview. */
+export function previewUpgradeRoad(state: SimState, payload: unknown): { ok: true; plan: UpgradePlan; refusal: Refusal } | { ok: false; reason: string } {
+  const result = planUpgrade(state.roads, terrainOf(state.seed), payload);
+  return result.ok ? { ...result, refusal: spendingRefusal(state, result.plan.cost) } : result;
 }

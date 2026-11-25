@@ -34,6 +34,12 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
+  // Before version 31 nothing kept the money a command moved (M4-03), and
+  // its migration gives every amount as 0. `state` gets the same in place.
+  if (version < 31) {
+    gone.push("logSpent");
+    withNoSpending(state);
+  }
   if (version < 30) {
     withOldMoney(state);
     gone.push("budget");
@@ -50,6 +56,13 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 26) gone.push("redevelopedToday");
   if (version < 27) gone.push("travelLast");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  if (version < 31) {
+    kept["undo"] = state.undo.map((record) => {
+      const { spent, ...rest } = record;
+      void spent;
+      return rest;
+    });
+  }
   if (version < 30 && typeof kept["stats"] === "object" && kept["stats"] !== null) {
     const { money, ...stats } = kept["stats"] as SimState["stats"];
     void money;
@@ -122,6 +135,18 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
 function withOldMoney(state: SimState): SimState {
   state.budget = emptyBudget(ECONOMY.startingGrant);
   state.stats.money = emptyMoney(sampleCount(state.stats));
+  return withNoSpending(state);
+}
+
+/** Gives `state`, in place, the amounts the version 31 migration gives a city saved before it, all 0, and returns it. */
+function withNoSpending(state: SimState): SimState {
+  state.logSpent = state.log.map(() => 0);
+  // Last on each record, where the migration puts it: the hash reads keys in order.
+  state.undo = state.undo.map((record) => {
+    const { spent, ...rest } = record;
+    void spent;
+    return { ...rest, spent: 0 };
+  });
   return state;
 }
 
@@ -178,7 +203,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(30);
+    expect(SNAPSHOT_VERSION).toBe(31);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -201,6 +226,7 @@ describe("migrateState", () => {
       redevelopedToday: 0,
       travelLast: null,
       budget: emptyBudget(ECONOMY.startingGrant),
+      logSpent: [],
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -228,6 +254,7 @@ describe("migrateState", () => {
       redevelopedToday: 0,
       travelLast: null,
       budget: emptyBudget(ECONOMY.startingGrant),
+      logSpent: [],
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -617,7 +644,7 @@ describe("migrateState", () => {
     const migrated = migrateState(v16);
     const { growth, ...kept } = v16;
     void growth;
-    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null, budget: emptyBudget(ECONOMY.startingGrant) });
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null, budget: emptyBudget(ECONOMY.startingGrant), logSpent: [] });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 
@@ -689,6 +716,8 @@ describe("migrateState", () => {
     const day = TIME_BALANCE.ticksPerDay;
     while (state.tick < 33 * day) step(state);
     expect(sampleCount(state.stats)).toBe(2);
+    // A version 29 city never paid for its street: no command moved money before version 31.
+    withNoSpending(state);
     const v29 = older(structuredClone(state), 29);
     expect("budget" in v29).toBe(false);
     expect("money" in (v29["stats"] as object)).toBe(false);
@@ -711,6 +740,34 @@ describe("migrateState", () => {
     while (migrated.tick < 63 * day) step(migrated);
     expect(migrated.budget.treasury).toBe(ECONOMY.startingGrant);
     expect(Array.from(migrated.stats.money.treasury)).toEqual([0, 0, ECONOMY.startingGrant]);
+  });
+
+  it("upgrades a version 30 city by giving every log entry and undo record the money it moved as 0, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    while (state.tick < 300) step(state);
+    // The street cost money under this build; a version 30 city kept no record of it.
+    expect(state.logSpent[0]).toBeGreaterThan(0);
+    withNoSpending(state);
+    const v30 = older(structuredClone(state), 30);
+    expect("logSpent" in v30).toBe(false);
+    for (const record of v30["undo"] as Record<string, unknown>[]) expect("spent" in record).toBe(false);
+    const migrated = migrateState(v30);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(migrated.logSpent).toEqual([0, 0]);
+    expect(migrated.undo.map((r) => r.spent)).toEqual([0, 0]);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(migrated).toEqual(state);
+    expect(hashState(migrated)).toBe(hashState(state));
+    // An undo of a command from before moves no money: the treasury stays where it is.
+    const treasury = migrated.budget.treasury;
+    expect(submit(migrated, { seq: 3, playerId: "p1", type: "Undo", payload: {} })).toEqual({ ok: true });
+    step(migrated);
+    expect(migrated.undo).toHaveLength(1);
+    expect(migrated.budget.treasury).toBe(treasury);
   });
 
   it("leaves a current state as it is", () => {

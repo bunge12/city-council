@@ -63,6 +63,7 @@ function pair() {
     expect(typeof applyCellDelta(copy, cells, roadDelta ? roadDelta.segIds : [])).not.toBe("string");
     copy.tick = sim.tick;
     copy.log = sim.log.slice();
+    copy.logSpent = sim.logSpent.slice();
     copy.undo = sim.undo;
     copy.centre = { ...sim.centre };
     // So do the statistics.

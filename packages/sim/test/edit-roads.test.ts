@@ -1,3 +1,4 @@
+import { ECONOMY } from "../src/economy/balance";
 import { describe, expect, it } from "vitest";
 import {
   LEVEL_BRIDGE,
@@ -288,7 +289,11 @@ describe("BulldozeRoad", () => {
     const result = planBulldoze(state.roads, withEnds(state.roads, { segments: [0] }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.plan).toEqual({ segments: [0], sections: [], nodes: [0, 1], length: 300, cost: 300 * typeOf("avenue").demolitionCostPerMetre });
+    // The demolition less the refund share of what the avenue cost to build (M4-03).
+    const avenue = typeOf("avenue");
+    const demolition = 300 * avenue.demolitionCostPerMetre;
+    const refund = Math.round(300 * avenue.buildCostPerMetre * ECONOMY.eminentDomain.refundShare);
+    expect(result.plan).toEqual({ segments: [0], sections: [], nodes: [0, 1], length: 300, demolition, refund, cost: demolition - refund });
     expect(Number.isSafeInteger(result.plan.cost)).toBe(true);
   });
 

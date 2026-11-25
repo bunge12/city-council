@@ -19,7 +19,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 30;
+export const SNAPSHOT_VERSION = 31;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -142,6 +142,13 @@ export interface SimState {
    * the grants line.
    */
   budget: BudgetState;
+  /**
+   * Whole dollars each live log entry's command took from the treasury,
+   * below zero for one that paid in: `logSpent[i]` belongs to `log[i]`, and
+   * pages out with it (log.ts, M4-03). Beside the log and not in its
+   * entries, since the log is the replay input and this is a result.
+   */
+  logSpent: number[];
 }
 
 /**
@@ -199,6 +206,8 @@ export function createBareState(seed: number): SimState {
     travelLast: null,
     // After it, where the version 30 migration puts it.
     budget: createBudget(),
+    // After it, where the version 31 migration puts it.
+    logSpent: [],
   };
 }
 
@@ -219,8 +228,8 @@ export function cloneState(state: SimState): SimState {
 export function captureState(state: SimState, keep?: CaptureBuffers): SimState {
   // The spread keeps the keys in the order `state` has them, which is the
   // order a snapshot writes them in.
-  const rest = cloneValue({ ...state, log: [], undo: [] }, "", keep) as SimState;
-  return { ...rest, log: state.log.slice(), undo: state.undo };
+  const rest = cloneValue({ ...state, log: [], undo: [], logSpent: [] }, "", keep) as SimState;
+  return { ...rest, log: state.log.slice(), undo: state.undo, logSpent: state.logSpent.slice() };
 }
 
 /**

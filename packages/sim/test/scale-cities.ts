@@ -6,12 +6,12 @@
 import { expect } from "vitest";
 import {
   POPS_BALANCE,
-  SCALE_SEED,
   deserialize,
   generateScaleCity,
   hashState,
   recountTotals,
-  replay,
+  createScaleState,
+  replayFrom,
   serialize,
   type GeneratedScaleCity,
   type ScaleCityResidents,
@@ -64,7 +64,7 @@ export function checkRepeatable(city: GeneratedScaleCity, residents: ScaleCityRe
   expect(hashState(again.state)).toBe(hashState(city.state));
   expect(again.totals).toEqual(city.totals);
   if (!withReplay) return;
-  const replayed = replay(SCALE_SEED, city.state.log, city.state.tick);
+  const replayed = replayFrom(createScaleState(), city.state.log, city.state.tick);
   expect(hashState(replayed.roads)).toBe(hashState(city.state.roads));
   expect(hashState(replayed.cells)).toBe(hashState(city.state.cells));
 }

@@ -147,7 +147,7 @@ export interface RoadPlan {
   length: number;
   /** The part of `length` that is bridge, metres. */
   bridgeLength: number;
-  /** Whole 2026 dollars. Not charged until the treasury arrives in M4. */
+  /** Whole 2026 dollars, charged to the construction line on the tick the command applies (M4-03). */
   cost: number;
 }
 

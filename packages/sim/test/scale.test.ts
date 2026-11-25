@@ -9,13 +9,13 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   NETWORKS_ROAD,
-  SCALE_SEED,
   SCALE_SEGMENTS,
   buildScaleCity,
   deserialize,
   hashState,
   planRoad,
-  replay,
+  createScaleState,
+  replayFrom,
   serialize,
   step,
   type ScaleCity,
@@ -55,7 +55,7 @@ describe("the scale city", () => {
     expect(hashState(again.state)).toBe(hash);
     expect(again.counts).toEqual(city.counts);
     expect(again.grids).toEqual(city.grids);
-    expect(hashState(replay(SCALE_SEED, city.state.log, city.state.tick))).toBe(hash);
+    expect(hashState(replayFrom(createScaleState(), city.state.log, city.state.tick))).toBe(hash);
     // Builds the city twice more, keeping its 2.9 million zoning cells current through every command.
   }, 120_000);
 

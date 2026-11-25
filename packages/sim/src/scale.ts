@@ -5,7 +5,9 @@
 // every measurement is taken on the same city. No game code calls it.
 //
 // Each command goes through `submit` and `step`, so the city comes with its
-// log and replays from its seed. Refused commands (steep ground, water,
+// log and replays from its seed, onto a city funded as `createScaleState`
+// funds it: roads cost money from M4, far more than a starting grant pays
+// for (M4-03). Refused commands (steep ground, water,
 // a curve too tight where the terrain cuts a grid) are skipped. Everything
 // is laid out from fixed numbers, so every run builds the same city.
 
@@ -25,6 +27,7 @@ import { submit, type Command } from "./commands";
 import { isStraight, segmentQuad } from "./roads/curve";
 import { LEVEL_BRIDGE, NONE, isNode, isSegment, nextSegmentAt, nodeIdLimit, otherEnd, segmentCount, segmentIdLimit, type RoadNetwork } from "./roads/network";
 import { createState, type SimState } from "./state";
+import { fundCity } from "./economy/budget";
 import { step } from "./step";
 import { terrainOf } from "./terrain/cache";
 import { isWaterAt, mapSize, type Terrain } from "./terrain/terrain";
@@ -37,6 +40,21 @@ export const SCALE_SEED = 2026;
 export const SCALE_SEGMENTS = 30_000;
 /** The player id the generator builds as. */
 export const SCALE_PLAYER = "scale";
+
+/**
+ * The treasury a scale city starts with: a trillion dollars, so every
+ * command the generators send and every one a test or a walkthrough sends
+ * on the city after is paid for, and the city builds what it built before
+ * roads cost money (M4-03). Far from the 2^53 a float64 holds exactly.
+ */
+export const SCALE_TREASURY = 1_000_000_000_000;
+
+/** A new city on `seed` funded as the scale city is, at `SCALE_TREASURY`: what a replay of a scale city's log starts from. */
+export function createScaleState(seed = SCALE_SEED): SimState {
+  const state = createState(seed);
+  fundCity(state, SCALE_TREASURY);
+  return state;
+}
 
 /** Street grids: blocks 86 m between road edges put grid lines 96 m apart. */
 const BLOCK = 86;
@@ -83,7 +101,7 @@ const at = (v: number): number => Math.round(v * 8) / 8;
  * of room first, which the tests catch.
  */
 export function buildScaleCity(target = SCALE_SEGMENTS, seed = SCALE_SEED): ScaleCity {
-  const state = createState(seed);
+  const state = createScaleState(seed);
   const terrain = terrainOf(seed);
   const size = mapSize(terrain);
   let seq = 0;
