@@ -893,7 +893,6 @@ kbd {
 /* Next to the cursor while a road is drawn. Clicks pass through to the map. */
 .road-readout {
   position: absolute;
-  max-width: 280px;
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -902,6 +901,18 @@ kbd {
   line-height: 1.35;
   pointer-events: none;
   white-space: nowrap;
+}
+
+/*
+ * Every readout grows to fit its lines, which do not wrap: a mixed tower's
+ * "Mixed M3 (6 × 6 lot) · 798/800 residents · 168/216 jobs" ran past a
+ * fixed width. The lines written as sentences wrap instead, at 280px, the
+ * width they wrapped at when the readout was capped at 280px.
+ */
+.road-readout .reason,
+.road-readout .lot-note,
+.building-readout .ground {
+  max-width: 280px;
 }
 
 .road-readout .reason {
@@ -928,20 +939,9 @@ kbd {
   font-weight: 600;
 }
 
-/*
- * A building's detail line does not wrap, and a mixed tower's
- * ("Mixed M3 (6 × 6 lot) · 798/800 residents · 168/216 jobs") is wider than
- * the readouts' 280px, so the box grows to fit it rather than letting it run
- * past the border.
- */
-.building-readout {
-  max-width: none;
-}
-
-/* A building on ground zoned for something else, or zoned up (M3-14): wraps inside the readout, at no more than the readouts' usual width unless the detail line is wider. */
+/* A building on ground zoned for something else, or zoned up (M3-14): wraps inside the readout. */
 .building-readout .ground {
   white-space: normal;
-  max-width: 280px;
 }
 
 /* The buildings a road or grid would clear (issue M2-15), in the red of their marks on the map. */
@@ -1026,11 +1026,9 @@ kbd {
   transform: translate(-50%, -100%);
   pointer-events: none;
   border-color: #ff8a1f;
-  /* A building's line does not wrap and grows with its counts (M3-12), so the tag grows to fit it. */
-  max-width: none;
 }
 
-/* Why a click would be refused wraps, at no more than 400px unless a line above is wider. */
+/* Why the bulldozer is refused wraps at 400px, its width when the tag was capped at 400px. */
 .bulldoze-tag .reason {
   max-width: 400px;
 }
