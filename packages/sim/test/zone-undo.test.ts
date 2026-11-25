@@ -27,7 +27,7 @@ import { candidateSets } from "../src/buildings/candidates";
 import { segmentBuildings } from "../src/buildings/where";
 import { checkRoadNetwork, isSegment, segmentIdLimit } from "../src/roads/network";
 import { checkUndoHistory, heldIds } from "../src/undo";
-import { syncCells } from "../src/zoning/cell-index";
+import { cellsSettled, syncCells } from "../src/zoning/cell-index";
 import { ZONE_UNTOUCHED, anchorHash, journalCells, journalLostZones, readJournals } from "../src/zoning/zone-undo";
 import { Fnv64 } from "../src/hash";
 
@@ -394,7 +394,9 @@ describe("Undo of a road change over zoned cells", () => {
     const segs = liveSegments(state);
     const zoned = zones(state);
     ok(state, road([4300, 4500], [4300, 4700]));
-    // The new road took the houses on its ground.
+    // The new road took the houses on its ground, in the step on the tick its cells settle by.
+    while (!cellsSettled(state)) step(state);
+    step(state);
     expect(liveBuildings(state).length).toBeLessThan(houses.length);
     ok(state, undo());
     expect(liveSegments(state)).toEqual(segs);

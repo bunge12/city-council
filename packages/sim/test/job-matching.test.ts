@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cellsSettled,
   BUILDING_TYPES,
   CONNECTION_BALANCE,
   DEMAND_BALANCE,
@@ -62,6 +63,8 @@ function ok(state: SimState, type: string, payload: unknown): void {
   const c: Command = { seq: ++seq, playerId: "p1", type, payload };
   expect(submit(state, c), c.type).toEqual({ ok: true });
   step(state);
+  // A command that reads the cells waits while a change of roads settles.
+  while (state.pending.length > 0) step(state);
   expect(state.log.at(-1)?.seq, `${c.type} should apply`).toBe(c.seq);
 }
 
@@ -515,6 +518,14 @@ describe("a long session", () => {
       // A street across the strips, which moves the zones and the reach of
       // what stands by it, then the workplaces with the most workers bulldozed.
       ok(state, "BuildRoad", { from: { x: s.x + s.dx * CELL * 18.5 - s.dz * 60, z: s.z + s.dz * CELL * 18.5 + s.dx * 60 }, to: { x: s.x + s.dx * CELL * 18.5 + s.dz * 60, z: s.z + s.dz * CELL * 18.5 - s.dx * 60 }, type: "street" });
+      check();
+      // Its cells settle first, so the bulldoze names buildings the street left standing.
+      while (!cellsSettled(state)) {
+        step(state);
+        check();
+      }
+      // The step on that tick removes what the street blocked.
+      step(state);
       check();
       const busy = workplaces(state)
         .sort((a, b) => jobsFilled(state, b) - jobsFilled(state, a))

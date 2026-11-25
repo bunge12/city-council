@@ -726,13 +726,15 @@ describe("settling a big change over a few ticks", () => {
     // About 550 m of curve from north of it to south, cutting it.
     ok(state, curve([4200, 4350], [4550, 4750], [4600, 4350]));
     expect(live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).length).toBe(before + 3);
-    // 3 at 3,000 cells a tick with the rewalk allowance (zoning.json).
-    expect(state.cellsReadyAt).toBeLessThanOrEqual(state.tick + 3);
+    // 13 at 1,400 cells a tick with the rewalk allowance, counting the
+    // step that applies it (zoning.json, #358). It was 3 at 3,000, before
+    // surface pieces were weighed as measured.
+    expect(state.cellsReadyAt).toBeLessThanOrEqual(state.tick + 13);
     while (!cellsSettled(state)) step(state);
     expect(state.tick).toBe(state.cellsReadyAt);
   });
 
-  it("gives a long curved street through two curved streets well under a second of game time", () => {
+  it("gives a long curved street through two curved streets a few seconds of game time at most", () => {
     const state = createState(SEED);
     ok(state, curve([4150, 4500], [4650, 4500], [4400, 4300]));
     ok(state, curve([4150, 4900], [4650, 4900], [4400, 4700]));
@@ -740,8 +742,29 @@ describe("settling a big change over a few ticks", () => {
     // About 750 m of curve, from north of the first to south of the second, cutting both.
     ok(state, curve([4200, 4350], [4600, 4980], [4650, 4350]));
     expect(live(state.roads).filter((seg) => placesAlong(state.roads, seg) > 0).length).toBe(before + 5);
-    // 6 at 3,000 cells a tick with the rewalk allowance (zoning.json).
-    expect(state.cellsReadyAt).toBeLessThanOrEqual(state.tick + 6);
+    // 22 at 1,400 cells a tick with the rewalk allowance, counting the
+    // step that applies it (zoning.json, #358): 2.2 s at 1x. It was 6 at
+    // 3,000, before surface pieces were weighed as measured.
+    expect(state.cellsReadyAt).toBeLessThanOrEqual(state.tick + 22);
+  });
+
+  it("gives the step that applies a change a tick of its own, so a change of two slices gets two steps to walk them (#358)", () => {
+    const state = createState(SEED);
+    // 400 m of street on open ground: more than one slice of work and no more than two (zoning.json).
+    ok(state, road([4150, 4500], [4550, 4500]));
+    const applied = state.log.at(-1)?.tick ?? -1;
+    // The applying tick, then two slices. Counted as one of the slices, as before #358, it was applied + 2,
+    // and the one step after it, the last, walked the whole change with no limit.
+    expect(state.cellsReadyAt).toBe(applied + 3);
+    // The applying step walked none of it.
+    expect(cellsWalked(state)).toBe(false);
+    // The next step walks a slice; the step after it, on the last tick before the ready tick, finishes.
+    step(state);
+    expect(cellsSettled(state)).toBe(false);
+    step(state);
+    expect(cellsWalked(state)).toBe(true);
+    expect(cellsSettled(state)).toBe(true);
+    expect(rebuilt(state)).toEqual(cellStatuses(state));
   });
 
   it("gives a grid too big for one tick the tick it settles by, and walks it a slice a step", () => {
@@ -848,8 +871,7 @@ describe("settling a big change over a few ticks", () => {
     const later = road([4150, 4548], [4650, 4548]);
     for (const s of [state, loaded]) {
       expect(submit(s, { ...later, payload: JSON.parse(JSON.stringify(later.payload)) as unknown })).toEqual({ ok: true });
-      for (let i = 0; i < 6; i++) step(s);
-      expect(cellsSettled(s)).toBe(true);
+      while (!cellsSettled(s)) step(s);
     }
     expect(hashState(loaded)).toBe(hashState(state));
     expect(cellStatuses(loaded)).toEqual(cellStatuses(state));

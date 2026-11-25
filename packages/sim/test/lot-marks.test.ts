@@ -38,6 +38,8 @@ function ok(state: SimState, type: string, payload: unknown): void {
   const c: Command = { seq: ++seq, playerId: "p1", type, payload };
   expect(submit(state, c), type).toEqual({ ok: true });
   step(state);
+  // A command that reads the cells waits while a change of roads settles.
+  while (state.pending.length > 0) step(state);
   expect(state.log.at(-1)?.seq, `${type} should apply`).toBe(c.seq);
 }
 

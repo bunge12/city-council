@@ -63,6 +63,8 @@ function road(from: [number, number], to: [number, number], type = "street", con
 function ok(state: SimState, c: Command): void {
   expect(submit(state, c), c.type).toEqual({ ok: true });
   step(state);
+  // A command that reads the cells waits while a change of roads settles.
+  while (state.pending.length > 0) step(state);
   expect(state.log.at(-1)?.seq, `${c.type} should apply`).toBe(c.seq);
 }
 

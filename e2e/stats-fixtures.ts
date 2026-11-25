@@ -17,6 +17,8 @@ function apply(state: SimState, type: string, payload: unknown): void {
   const result = submit(state, { seq: ++seq, playerId: "fixture", type, payload });
   if (!result.ok) throw new Error(`${type}: ${result.reason}`);
   step(state);
+  // A stroke waits for a change of roads to settle before it applies.
+  while (state.pending.length > 0) step(state);
   if (state.log.at(-1)?.seq !== seq) throw new Error(`${type} did not apply`);
 }
 

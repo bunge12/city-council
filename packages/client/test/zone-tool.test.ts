@@ -43,6 +43,8 @@ function run(state: SimState, type: string, payload: unknown): void {
   const result = submit(state, { seq: ++seq, playerId: "p1", type, payload });
   expect(result, `${type} ${JSON.stringify(payload)}`).toEqual({ ok: true });
   step(state);
+  // A stroke waits while a change of roads settles.
+  while (state.pending.length > 0) step(state);
 }
 
 function road(state: SimState, from: [number, number], to: [number, number], control?: [number, number]): void {
