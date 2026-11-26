@@ -19,6 +19,11 @@
 // would change sends nothing. Each click or drag sends one `ZoneCells`; one
 // with more rectangles than a command takes is cut into several.
 //
+// A fill or brush leaves out cells a building stands on, so zoning the empty
+// ground beside a building leaves the building's ground as it was (#417).
+// With Shift held it takes them too, which is how built ground is zoned up
+// for its owners to redevelop.
+//
 // A sent stroke stays on screen until the delta that paints it arrives, as
 // the road tool's roads do. Tool state lives in the UI store (ui/store.ts);
 // nothing here writes sim state.
@@ -29,8 +34,10 @@ import {
   CELL_ROAD,
   CELL_TAKEN,
   NONE,
+  NO_BUILDING,
   ZONE_CLEAR,
   ZONING_BALANCE,
+  buildingsOnSlots,
   cellAt,
   cellCorners,
   cellsInBox,
@@ -78,6 +85,14 @@ export interface ZonePreview {
   cells: readonly ZoneTarget[];
   /** The commands a click would send, each within the sim's cap on rectangles. Empty when refused. */
   payloads: readonly ZoneCellsPayload[];
+  /** Whether cells under buildings are taken: Shift was held. */
+  whole: boolean;
+  /**
+   * Cells under buildings this stroke would change. Left out of `cells`
+   * unless `whole`, so the readout can say Shift takes them; counted in
+   * `cells` when `whole`.
+   */
+  built: number;
 }
 
 /** A stroke the tool has sent and the sim has not yet painted. */
@@ -405,7 +420,7 @@ export function previewZone(
   sent: ReadonlySet<number> = new Set(),
 ): ZonePreview {
   const base = { zone, density };
-  if (cells.length === 0) return { ...base, ok: false, reason: null, cells: [], payloads: [] };
+  if (cells.length === 0) return { ...base, ok: false, reason: null, cells: [], payloads: [], whole: true, built: 0 };
   const payloads = zonePayloads(zone, density, cells);
   const changing = new Set<number>();
   let reason: string | null = null;
@@ -425,9 +440,49 @@ export function previewZone(
     going.push(payload);
     for (const slot of fresh) changing.add(slot);
   }
-  if (changing.size === 0) return { ...base, ok: false, reason, cells: [], payloads: [] };
+  if (changing.size === 0) return { ...base, ok: false, reason, cells: [], payloads: [], whole: true, built: 0 };
   const shown = [...changing].sort((a, b) => a - b).flatMap((slot) => targetOfSlot(city, slot) ?? []);
-  return { ...base, ok: true, reason: null, cells: shown, payloads: going };
+  return { ...base, ok: true, reason: null, cells: shown, payloads: going, whole: true, built: 0 };
+}
+
+/** Why a click sends nothing when every cell it would change has a building on it. */
+export const ONLY_BUILT = "every cell here has a building on it; hold Shift to zone under buildings";
+
+/** Whether each of `cells` has a building standing on it, in the same order. */
+function builtOn(city: City, cells: readonly ZoneTarget[]): boolean[] {
+  const ids = buildingsOnSlots(asState(city), cells.map((c) => c.slot));
+  return cells.map((_, i) => (ids[i] ?? NO_BUILDING) !== NO_BUILDING);
+}
+
+/**
+ * What painting `cells` would do, as `previewZone` says, with the cells a
+ * building stands on left out unless `whole` (#417). `built` counts the
+ * cells under buildings the stroke would change: those left out, or with
+ * `whole` those taken.
+ */
+export function previewZoneAround(
+  city: City,
+  zone: string,
+  density: number,
+  cells: readonly ZoneTarget[],
+  whole: boolean,
+  sent: ReadonlySet<number> = new Set(),
+): ZonePreview {
+  const on = builtOn(city, cells);
+  const all = previewZone(city, zone, density, cells, sent);
+  if (!on.includes(true)) return { ...all, whole };
+  const underBuildings = new Set(cells.filter((_, i) => on[i]).map((c) => c.slot));
+  const built = all.cells.filter((c) => underBuildings.has(c.slot)).length;
+  if (whole) return { ...all, whole, built };
+  const empty = previewZone(
+    city,
+    zone,
+    density,
+    cells.filter((_, i) => !on[i]),
+    sent,
+  );
+  if (!empty.ok && built > 0) return { ...empty, reason: ONLY_BUILT, whole, built };
+  return { ...empty, whole, built };
 }
 
 /** What the controller needs from the page. */
@@ -438,6 +493,8 @@ export interface ZoneToolHost {
   city(): City | null;
   /** A number that changes whenever the copy does, so the tool can keep what it worked out from it. */
   version(): number;
+  /** Whether Shift is held, so a stroke takes cells under buildings too (#417). Never when left out. */
+  whole?(): boolean;
   /** Sends a `ZoneCells` and resolves once the sim has applied it, or with why it did not. */
   send(payload: ZoneCellsPayload): Promise<CommandResult>;
   /**
@@ -691,7 +748,7 @@ export class ZoneToolController {
     const city = this.host.city();
     if (!this.active() || !city || cells.length === 0) return null;
     const { zone, density } = this.paint();
-    return previewZone(city, zone, density, cells, this.sentSlots());
+    return previewZoneAround(city, zone, density, cells, this.host.whole?.() ?? false, this.sentSlots());
   }
 
   /** What the tool shows with the pointer over `hover`, or null when there is nothing to show. */

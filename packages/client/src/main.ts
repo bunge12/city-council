@@ -395,11 +395,14 @@ mirror.subscribe(() => cityVersion++);
 mirror.subscribe((update) => {
   if (update.kind === "snapshot") setTimeout(() => mirror.prepareTools(), 0);
 });
+/** Whether Shift is held on the map, once the camera controls exist. */
+let controlsShift: () => boolean = () => false;
 const zoneTool = new ZoneToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
   city: () => mirror.state,
   version: () => cityVersion,
+  whole: () => controlsShift(),
   send: (payload) => sendCommand("ZoneCells", payload),
   strokeId: () => mirror.upcomingSeq,
 });
@@ -849,6 +852,7 @@ viewReady.catch((error: unknown) => {
 function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): CameraHooks {
   const rig = createCameraRig(view.camera, terrain, () => ({ width: canvas.clientWidth, height: canvas.clientHeight }));
   const controls = createCameraControls(canvas, rig, view.scene);
+  controlsShift = () => controls.shiftHeld();
   const v = new Vector3();
   let lastSnap: Snap | null = null;
   const hooks: CameraHooks = {
@@ -976,8 +980,8 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   let gridDragStarting = false;
   controls.setToolDrag({
     active: () => editTool.active() !== null || bulldozeTool.active() || gridTool.active() || zoneTool.brushing(),
-    // Shift takes whole roads with these two (issue 86), so a Shift drag is theirs; the right drag orbits.
-    takesShift: () => editTool.active() !== null || bulldozeTool.active(),
+    // Shift takes whole roads with these two (issue 86), and ground under buildings with the zone tool (#417), so a Shift drag is theirs; the right drag orbits.
+    takesShift: () => editTool.active() !== null || bulldozeTool.active() || zoneTool.active(),
     start: () => {
       if (gridTool.active()) gridDragStarting = true;
       else if (zoneTool.brushing()) zoneTool.dragStart();
@@ -1141,7 +1145,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       return null;
     }
     const targets = zoneTool.targets(hover);
-    const key = `${ui.zoneErase ? "erase" : `${ui.zonePick},${ui.zoneDensity}`},${mirrorVersion},${ui.zonePending.map((p) => p.id).join(";")}`;
+    const key = `${ui.zoneErase ? "erase" : `${ui.zonePick},${ui.zoneDensity}`},${controls.shiftHeld() ? "whole" : "empty"},${mirrorVersion},${ui.zonePending.map((p) => p.id).join(";")}`;
     if (targets !== zoneTargets || key !== zoneKey) {
       zoneTargets = targets;
       zoneKey = key;

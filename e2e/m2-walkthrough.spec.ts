@@ -362,12 +362,18 @@ async function pick(page: Page, zone: string, density: number, depth = DEPTH): P
 }
 
 /** Fills `strip` with the zone tool's current pick: one ZoneCells, checked in the log. */
-async function fill(page: Page, strip: Strip): Promise<void> {
+/** Fills `strip` with the zone tool. With `whole`, Shift is held, so cells under buildings are zoned too (#417). */
+async function fill(page: Page, strip: Strip, whole = false): Promise<void> {
   const before = (await log(page)).filter((e) => e.type === "ZoneCells").length;
   const [x, z] = fillPoint(strip);
-  await hover(page, x, z);
-  await expect(page.locator("#zone-readout")).toHaveAttribute("data-ok", "true");
-  await click(page, x, z);
+  if (whole) await page.keyboard.down("Shift");
+  try {
+    await hover(page, x, z);
+    await expect(page.locator("#zone-readout")).toHaveAttribute("data-ok", "true");
+    await click(page, x, z);
+  } finally {
+    if (whole) await page.keyboard.up("Shift");
+  }
   await expect.poll(async () => (await log(page)).filter((e) => e.type === "ZoneCells").length).toBe(before + 1);
 }
 
@@ -830,7 +836,21 @@ for (const variant of [
       await look(page, centre(R1_STRIP)[0], centre(R1_STRIP)[1] - 20, 220);
       await zoneTool(page);
       await pick(page, "commercial", 2);
-      await fill(page, R1_STRIP);
+      // Without Shift the fill leaves the houses' ground alone and says Shift takes it (#417).
+      await hover(page, ...fillPoint(R1_STRIP));
+      const readout = page.locator("#zone-readout");
+      await expect(readout).toHaveAttribute("data-whole", "false");
+      const under = Number(await readout.getAttribute("data-built"));
+      expect(under).toBeGreaterThan(0);
+      await expect(page.locator("#zone-built-note")).toHaveText(`Hold Shift to include ${under === 1 ? "1 cell" : `${under} cells`} under buildings`);
+      await shot(page, info, dir, "6-fill-leaves-the-houses-ground");
+      await page.keyboard.down("Shift");
+      await frames(page, 3);
+      await expect(readout).toHaveAttribute("data-whole", "true");
+      await expect(page.locator("#zone-built-note")).toContainText("under buildings, which stand until redeveloped");
+      await shot(page, info, dir, "6-shift-fill-takes-the-houses-ground");
+      await page.keyboard.up("Shift");
+      await fill(page, R1_STRIP, true);
       for (let depth = 0; depth < DEPTH; depth++) expect(await cellZone(page, ...stripCell(R1_STRIP, depth))).toMatchObject({ zone: zoneNumber("commercial"), density: 2 });
       // Every house on it still stands, as it was.
       const after = (await buildings(page)).filter((b) => b.strip === strip);
