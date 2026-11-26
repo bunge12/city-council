@@ -137,9 +137,14 @@ export function emptyMoney(length: number): Record<MoneySeries, Float64Array> {
   return Object.fromEntries(MONEY_SERIES.map((name) => [name, new Float64Array(length)])) as Record<MoneySeries, Float64Array>;
 }
 
-/** The money sample of `budget`: its treasury and its last closed month. */
+/**
+ * The money sample of `budget`: its treasury as the month opened, and its
+ * last closed month. The opening balance, not the treasury now: the sample
+ * runs after the commands of the month's first tick, and a road built on
+ * that tick is the new month's spending (M4-03).
+ */
 export function moneySample(budget: BudgetState): MoneySample {
-  return { treasury: budget.treasury, income: incomeOf(budget.lastMonth), expenses: expensesOf(budget.lastMonth), taxIncome: taxIncomeOf(budget.lastMonth) };
+  return { treasury: budget.opening, income: incomeOf(budget.lastMonth), expenses: expensesOf(budget.lastMonth), taxIncome: taxIncomeOf(budget.lastMonth) };
 }
 
 const NO_MONEY: MoneySample = { treasury: 0, income: 0, expenses: 0, taxIncome: 0 };

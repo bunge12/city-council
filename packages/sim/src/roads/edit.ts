@@ -64,6 +64,7 @@ import {
   type RoadNetwork,
 } from "./network";
 import { heightAt, type Terrain } from "../terrain/terrain";
+import { ECONOMY } from "../economy/balance";
 
 /** What a BulldozeRoad command carries besides the player id. */
 export interface BulldozeRoadPayload {
@@ -150,7 +151,15 @@ export interface BulldozePlan {
   nodes: number[];
   /** Plan length removed, metres. */
   length: number;
-  /** Whole 2026 dollars. Not charged until the treasury arrives in M4. */
+  /** Whole 2026 dollars to take the roads up. */
+  demolition: number;
+  /** Whole 2026 dollars paid back: `refundShare` in economy.json of what the roads cost to build. */
+  refund: number;
+  /**
+   * What the bulldoze charges, `demolition` less `refund`, to the
+   * demolition line (M4-03). Below zero when the refund is the larger, and
+   * the bulldoze then pays into the treasury. The tools show this number.
+   */
   cost: number;
 }
 
@@ -194,7 +203,7 @@ export interface UpgradePlan {
   sections: (SectionPlan | null)[];
   /** Plan length changed, metres. */
   length: number;
-  /** Whole 2026 dollars. Not charged until the treasury arrives in M4. */
+  /** Whole 2026 dollars, charged to the construction line on the tick the upgrade applies (M4-03). */
   cost: number;
 }
 
@@ -439,7 +448,8 @@ export function planBulldoze(net: RoadNetwork, payload: unknown): BulldozePlanRe
   const removing = new Set(segments);
   const ends = new Set<number>();
   let length = 0;
-  let cost = 0;
+  let demolition = 0;
+  let built = 0;
   for (const seg of segments) {
     const a = net.segA[seg] ?? NONE;
     const b = net.segB[seg] ?? NONE;
@@ -449,7 +459,8 @@ export function planBulldoze(net: RoadNetwork, payload: unknown): BulldozePlanRe
     length += segLength;
     if (net.segNetwork[seg] === NETWORK_ROAD) {
       const type = typeAt(net, seg);
-      cost += segLength * perMetre(net, seg, type, type.demolitionCostPerMetre);
+      demolition += segLength * perMetre(net, seg, type, type.demolitionCostPerMetre);
+      built += segLength * perMetre(net, seg, type, type.buildCostPerMetre);
     }
   }
   const nodes: number[] = [];
@@ -469,9 +480,21 @@ export function planBulldoze(net: RoadNetwork, payload: unknown): BulldozePlanRe
       sections: sections.sort((p, q) => p.seg - q.seg),
       nodes: nodes.sort(ascending),
       length,
-      cost: Math.round(cost),
+      ...bulldozePrice(demolition, built),
     },
   };
+}
+
+/**
+ * The demolition, the refund and the charge of a bulldoze whose roads cost
+ * `demolition` to take up and `built` to build, both unrounded: each
+ * rounded to whole dollars once, and the charge their difference, so the
+ * three always agree.
+ */
+function bulldozePrice(demolition: number, built: number): Pick<BulldozePlan, "demolition" | "refund" | "cost"> {
+  const taken = Math.round(demolition);
+  const refund = Math.round(built * ECONOMY.eminentDomain.refundShare);
+  return { demolition: taken, refund, cost: taken - refund };
 }
 
 /**

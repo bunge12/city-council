@@ -151,6 +151,15 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // an empty ledger, the tax rates at their defaults, and money series of
   // zeros as long as the rest of its history.
   29: (old) => ({ ...old, version: 30, stats: statsWithMoney(old["stats"]), budget: emptyBudget(ECONOMY.startingGrant) }),
+  // Version 31 keeps the money each command moved (M4-03): beside each live
+  // log entry, and on each undo record. Nothing cost money before it, so
+  // every amount is 0, and an undo of an older command moves none.
+  30: (old) => ({
+    ...old,
+    version: 31,
+    undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, spent: 0 })),
+    logSpent: (old["log"] as unknown[]).map(() => 0),
+  }),
 };
 
 /** Version 29 statistics with money series of zeros as long as the history, after `next`. */

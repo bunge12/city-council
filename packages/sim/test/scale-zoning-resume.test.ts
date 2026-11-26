@@ -4,12 +4,12 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  SCALE_SEED,
   buildingCount,
   cellsSettled,
   deserialize,
   hashState,
-  replay,
+  createScaleState,
+  replayFrom,
   seeBuilding,
   serialize,
   step,
@@ -137,6 +137,6 @@ describe("save and resume with zoning and growth on the scale city (issue M2-17)
     // A replay of the whole log grows the same buildings.
     // Both runs above start from the saved snapshot, so this replay is the one run here built from
     // the first road with every piece of derived data kept current. Keep it.
-    expect(hashState(replay(SCALE_SEED, [...straight.log], straight.tick))).toBe(hashState(straight));
+    expect(hashState(replayFrom(createScaleState(), [...straight.log], straight.tick))).toBe(hashState(straight));
   }), 300_000);
 });

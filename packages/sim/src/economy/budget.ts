@@ -128,6 +128,18 @@ function moveInto(budget: BudgetState, line: LedgerLine, amount: number): void {
   budget.month[index] = total;
 }
 
+/**
+ * Sets the treasury of `state` to `treasury` whole dollars, the difference
+ * on the grants line. For the generators, tests and walkthroughs that build
+ * more than a starting grant pays for (M4-03): the scale cities, the
+ * balance check's standard cities and the test builders, so they build
+ * what they built before M4. Not a command and not in the log, so a replay
+ * of a funded city starts from one funded the same way (`replayFrom`).
+ */
+export function fundCity(state: SimState, treasury: number): void {
+  moveMoney(state, "grants", treasury - state.budget.treasury);
+}
+
 /** The sum of the income lines of `ledger`, a `month` or `lastMonth`. */
 export function incomeOf(ledger: Float64Array): number {
   let sum = 0;

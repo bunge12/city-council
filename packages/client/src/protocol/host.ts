@@ -13,6 +13,7 @@ import {
   parseToSimMessage,
   prepareDerived,
   readLog,
+  readLogSpent,
   recordBuildingChanges,
   recordCellChanges,
   recordPopChanges,
@@ -101,6 +102,8 @@ export class SimHost {
   readonly fullLog: LogEntry[];
   /** Entries read since the last delta. */
   private unsent: LogEntry[] = [];
+  /** The money each of `unsent` moved, one per entry (M4-03). */
+  private unsentSpent: number[] = [];
   /** Commands the steps since the last delta dropped. */
   private unsentDropped: DroppedCommand[] = [];
   /** Road ids changed since the last delta. */
@@ -377,6 +380,7 @@ export class SimHost {
     this.stepsSinceDelta++;
     // Read after every step so no entry pages out of live state unread.
     const entries = readLog(this.state, this.logCursor);
+    for (const spent of readLogSpent(this.state, this.logCursor)) this.unsentSpent.push(spent);
     this.logCursor += entries.length;
     for (const entry of entries) {
       this.fullLog.push(entry);
@@ -442,6 +446,7 @@ export class SimHost {
       speed: this.state.speed,
       logFrom: this.sentLogFrom,
       log,
+      logSpent: this.unsentSpent,
       ...(roads ? { roads } : {}),
       ...(cells ? { cells } : {}),
       ...(buildings ? { buildings } : {}),
@@ -462,6 +467,7 @@ export class SimHost {
     };
     this.deltaSeq++;
     this.unsent = [];
+    this.unsentSpent = [];
     this.unsentDropped = [];
     this.unsentRoads = null;
     this.sentTick = this.state.tick;

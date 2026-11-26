@@ -1,3 +1,4 @@
+import { funded } from "./funds";
 import { describe, expect, it } from "vitest";
 import { cellsSettled, syncCells } from "../src/zoning/cell-index";
 import {
@@ -91,6 +92,7 @@ function cityHash(state: SimState): string {
     ...state,
     tick: 0,
     log: [],
+    logSpent: [],
     logOffset: 0,
     undo: [],
     cellsReadyAt: 0,
@@ -459,7 +461,8 @@ describe("An undo that is no longer valid", () => {
 
 describe("Undo history", () => {
   it(`keeps at most ${UNDO_STEPS} steps per player and frees what the forgotten ones held`, () => {
-    const state = createBareState(SEED);
+    // Fifty-one streets built and bulldozed cost more than the starting grant.
+    const state = funded(createBareState(SEED));
     ok(state, road([4200, 4500], [4500, 4500], "street", "p2"));
     for (let i = 0; i <= UNDO_STEPS; i++) {
       // Bulldoze and rebuild, so each record holds ids.

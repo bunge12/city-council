@@ -171,8 +171,9 @@ describe("the monthly close", () => {
   it("holds a treasury past what an Int32Array holds in the history", () => {
     const state = createBareState(7);
     moveMoney(state, "loansTaken", 5_000_000_000);
-    step(state);
-    expect(historyOf(state.stats, "treasury")).toEqual([ECONOMY.startingGrant + 5_000_000_000]);
+    // The sample holds the treasury each month opened with: January's the grant, February's the grant and the loan.
+    while (state.tick <= JANUARY * DAY) step(state);
+    expect(historyOf(state.stats, "treasury")).toEqual([ECONOMY.startingGrant, ECONOMY.startingGrant + 5_000_000_000]);
   });
 
   it("files money moved on a month's first tick in the new month, paused steps and all", () => {

@@ -17,7 +17,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 24;
+export const PROTOCOL_VERSION = 25;
 
 // ---- Client to sim ----
 
@@ -90,6 +90,8 @@ export interface DeltaMessage {
   speed: Speed;
   logFrom: number;
   log: LogEntry[];
+  /** The whole dollars each entry of `log` took from the treasury, one per entry, as `SimState.logSpent` holds them (M4-03). */
+  logSpent: number[];
   /** Road rows added, changed or removed. Left out when no road changed. */
   roads?: RoadDelta;
   /**

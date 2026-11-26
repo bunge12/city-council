@@ -81,7 +81,7 @@ for (const spec of options.sets) applySet(spec);
 // Only now import the sim and the cities, so the sim reads the changed files as it loads.
 const sim = await import("../../src/index");
 const { CITIES, Player, SEED } = await import("./cities");
-const { BUILDING_TYPES, DEMAND_BARS, TIME_BALANCE, buildingIdLimit, buildingOnSlot, createState, homeRoom, isAbandoned, isBuilding, isVacant, step, yearDays, ZONING_BALANCE } = sim;
+const { BUILDING_TYPES, DEMAND_BARS, SCALE_TREASURY, TIME_BALANCE, buildingIdLimit, buildingOnSlot, createState, fundCity, homeRoom, isAbandoned, isBuilding, isVacant, step, yearDays, ZONING_BALANCE } = sim;
 type SimState = import("../../src/index").SimState;
 
 const city: City | undefined = CITIES.find((c) => c.name === options.city);
@@ -136,6 +136,8 @@ function builtShare(state: SimState, zone: string, density: number): number {
 const pad = (value: string | number, width: number): string => String(value).padStart(width);
 
 const state = createState(SEED);
+// Funded as the scale cities are (M4-03), so each city builds what it built before roads cost money.
+fundCity(state, SCALE_TREASURY);
 const player = new Player(state);
 city.setup(player);
 

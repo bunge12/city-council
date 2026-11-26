@@ -1,7 +1,7 @@
 // Vitest helper for replay fixtures. A fixture is a seed, a command log and
 // the tick to replay to, plus the state hash that replay must produce.
 import { expect } from "vitest";
-import { BALANCE_STAMP, hashState, replay, type LogEntry, type SimState } from "../src/index";
+import { BALANCE_STAMP, createState, fundCity, hashState, replayFrom, type LogEntry, type SimState } from "../src/index";
 import { holdDemand } from "./demand-helper";
 
 export interface ReplayFixture {
@@ -20,11 +20,25 @@ export interface ReplayFixture {
    * holds them the same way.
    */
   heldDemand?: number;
+  /**
+   * When set, the city starts with this treasury, in whole dollars, set as
+   * `fundCity` sets it (M4-03), so a fixture whose roads cost more than the
+   * starting grant still builds them. The browser's replay check funds it
+   * the same way.
+   */
+  treasury?: number;
+}
+
+/** A new city on `fixture`'s seed, funded if the fixture says so: what its log replays onto. */
+export function fixtureStart(fixture: ReplayFixture): SimState {
+  const state = createState(fixture.seed);
+  if (fixture.treasury !== undefined) fundCity(state, fixture.treasury);
+  return state;
 }
 
 /** Replays `fixture` to `untilTick`, or to its end, with its bars held if it says so. */
 export function replayFixture(fixture: ReplayFixture, untilTick = fixture.untilTick): SimState {
-  const run = () => replay(fixture.seed, fixture.log, untilTick);
+  const run = () => replayFrom(fixtureStart(fixture), fixture.log, untilTick);
   const v = fixture.heldDemand;
   return v === undefined ? run() : holdDemand({ residential: v, commercial: v, office: v, industrial: v }, run);
 }

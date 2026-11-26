@@ -40,6 +40,7 @@ import { terrainOf } from "../src/terrain/cache";
 import fixtureJson from "./fixtures/replay/intersections.json";
 import { expectReplay, type ReplayFixture } from "./replay-helper";
 import { unjoinedCrossings } from "./unjoined";
+import { funded } from "./funds";
 
 // Seed 2026 has a dry, nearly flat square from (4100, 4400) to (4700, 5000).
 // build-road.test.ts checks it is still there.
@@ -357,7 +358,7 @@ describe("the crossing point", () => {
 
 describe("after any accepted road", () => {
   it("no two segments on the same level cross without a shared node, over 500 random roads, half of them curved", () => {
-    const state = createBareState(SEED);
+    const state = funded(createBareState(SEED));
     const rng = seedRng(2026);
     const net = state.roads;
     let accepted = 0;

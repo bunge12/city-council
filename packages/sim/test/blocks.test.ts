@@ -36,6 +36,7 @@ import {
 } from "../src/roads/network";
 import { deserialize, serialize } from "../src/snapshot";
 import { cloneState, createState, type SimState } from "../src/state";
+import { funded } from "./funds";
 import { churnNetwork, growNetwork } from "./road-network-helper";
 
 // Issue M1-18: blocks enclosed by roads.
@@ -377,7 +378,8 @@ function commandChurn(state: SimState, seed: number, count: number): number {
 
 describe("blocks kept current", () => {
   it("equal a fresh rebuild, ids included, after a long run of builds, bulldozes, upgrades and undos", () => {
-    const state = createState(SEED);
+    const state = funded(createState(SEED));
+    // Funded (M4-03): the run of random roads costs more than the starting grant.
     const index = blockIndexOf(state.roads);
     let applied = 0;
     let most = 0;

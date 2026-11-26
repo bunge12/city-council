@@ -4,11 +4,13 @@
 // with only those added. Every older `without...` helper takes them out too,
 // since a state from before any earlier version is from before this one.
 
+import { withoutSpending } from "./before-spending";
+
 type Loose = Record<string, unknown>;
 
 /** `state` with the fields version 30 added taken out. Leaves a state that has none as it is. */
 export function withoutMoney<T extends object>(state: T): T {
-  const out: Loose = { ...(state as Loose) };
+  const out: Loose = { ...(withoutSpending(state) as Loose) };
   delete out["budget"];
   if (out["stats"] && typeof out["stats"] === "object") {
     const stats: Loose = { ...(out["stats"] as Loose) };

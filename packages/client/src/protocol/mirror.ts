@@ -486,7 +486,8 @@ export class SimMirror {
   private applyDelta(delta: Extract<FromSimMessage, { type: "delta" }>): void {
     const state = this.current;
     if (state === null) return;
-    if (delta.seq !== this.deltaSeq || delta.logFrom !== this.logFrom || delta.tick < state.tick) {
+    const spentFits = Array.isArray(delta.logSpent) && delta.logSpent.length === delta.log.length;
+    if (delta.seq !== this.deltaSeq || delta.logFrom !== this.logFrom || delta.tick < state.tick || !spentFits) {
       this.outOfStep();
       return;
     }
@@ -578,10 +579,12 @@ export class SimMirror {
     state.centre = { ...delta.centre };
     const statTotals = applyStatsDelta(state.stats, delta.stats);
     for (const entry of delta.log) state.log.push(entry);
+    for (const spent of delta.logSpent) state.logSpent.push(spent);
     this.logFrom += delta.log.length;
     // Same paging as live state, so the copy stays the same shape.
     while (state.log.length > LOG_LIVE_LIMIT) {
       state.log.splice(0, LOG_PAGE_SIZE);
+      state.logSpent.splice(0, LOG_PAGE_SIZE);
       state.logOffset += LOG_PAGE_SIZE;
     }
     this.hostStats = { timings: delta.timings };

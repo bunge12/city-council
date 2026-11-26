@@ -1,3 +1,4 @@
+import { ECONOMY } from "../src/economy/balance";
 import { describe, expect, it } from "vitest";
 import {
   BUILDING_TYPES,
@@ -176,7 +177,9 @@ describe("BulldozeRoad of part of a segment", () => {
     const c = bulldoze(state, [seg], [[0.4, 0.6]]);
     const plan = planBulldoze(state.roads, c.payload);
     expect(plan.ok && plan.plan.length).toBe(60);
-    expect(plan.ok && plan.plan.cost).toBe(Math.round(60 * typeOf("street").demolitionCostPerMetre));
+    const type = typeOf("street");
+    expect(plan.ok && plan.plan.demolition).toBe(Math.round(60 * type.demolitionCostPerMetre));
+    expect(plan.ok && plan.plan.refund).toBe(Math.round(60 * type.buildCostPerMetre * ECONOMY.eminentDomain.refundShare));
     ok(state, c);
     expect(shapes(state.roads)).toEqual(["4200,4600 -> 4320,4600 street", "4380,4600 -> 4500,4600 street"]);
     expect(liveNodes(state.roads)).toHaveLength(4);

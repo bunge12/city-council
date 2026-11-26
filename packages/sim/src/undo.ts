@@ -22,6 +22,13 @@
 // refused undo changes nothing and its record stays at the top of
 // the player's history (PRD, "Undo").
 //
+// A record keeps the money its command moved (M4-03), and the undo moves
+// it back on the same line: a road undone is refunded in full, and a
+// bulldoze undone takes its refund back. The amount is on the record, not
+// read from the log entry it points to, which can page out of live state.
+// Upkeep paid in between stays paid. An undo that cannot pay is refused as
+// any costing command is (economy/spend.ts).
+//
 // Each player keeps at most `undoSteps` records. Past that the oldest is
 // forgotten and the ids it held go on the free list.
 //
@@ -29,6 +36,8 @@
 // changed by comparing references.
 
 import type { SimState } from "./state";
+import { isIncome, moveMoney, type LedgerLine } from "./economy/budget";
+import { spendingRefusal } from "./economy/spend";
 import { noteFrontCells } from "./buildings/candidates";
 import { noteCellsPainted } from "./zoning/cell-changes";
 import { NO_BUILDING, buildingsOnCells, segmentBuildings } from "./buildings/where";
@@ -90,6 +99,12 @@ export interface UndoRecord {
   /** For a ZoneCells only: the zone and density it painted. */
   painted?: ZoneValue;
   /**
+   * Whole dollars the command moved on its ledger line (`undoLine`), as
+   * `moveMoney` takes them: above zero for a charge, below for a bulldoze
+   * that paid in. 0 for a ZoneCells, which is free.
+   */
+  spent: number;
+  /**
    * For a ZoneCells that is one part of a stroke too big for one command:
    * the stroke's id, the same on every part. One undo takes back the run of
    * the sender's newest records that share it (M2 review, #147).
@@ -99,6 +114,27 @@ export interface UndoRecord {
 
 /** The command type whose records hold a paint, not road changes. */
 const ZONE_CELLS = "ZoneCells";
+
+/** The ledger line a record of command type `type` moved its money on: demolition for a bulldoze, construction for the rest. */
+export function undoLine(type: string): LedgerLine {
+  return type === "BulldozeRoad" ? "demolition" : "construction";
+}
+
+/**
+ * Whole dollars undoing the records at `indices` of `state.undo` takes from
+ * the treasury: what each moved, moved back. Below zero when it pays in,
+ * as the undo of a build does.
+ */
+export function undoPrice(state: SimState, indices: readonly number[]): number {
+  let price = 0;
+  for (const i of indices) {
+    const record = state.undo[i];
+    if (!record || record.spent === 0) continue;
+    // Money back out of the treasury for an income line, back into it for an expense.
+    price += isIncome(undoLine(record.type)) ? record.spent : -record.spent;
+  }
+  return price;
+}
 
 /** Most records each player keeps. */
 export const UNDO_STEPS = ROAD_BUILD.undoSteps;
@@ -232,7 +268,8 @@ export function planUndo(state: SimState, playerId: string): UndoPlanResult {
   const record = state.undo[index];
   if (!record) return { ok: false, reason: NOTHING };
   if (record.type !== ZONE_CELLS) {
-    const reason = rehearse(state.roads, record.ops) ?? clearsBuildings(state, record.ops) ?? takesBuiltGround(state, record.ops);
+    const reason =
+      rehearse(state.roads, record.ops) ?? clearsBuildings(state, record.ops) ?? takesBuiltGround(state, record.ops) ?? spendingRefusal(state, undoPrice(state, indices));
     return reason === null ? { ok: true, index, indices } : { ok: false, reason };
   }
   // The parts are taken back one after another, so they must not share a
@@ -253,11 +290,15 @@ export function planUndo(state: SimState, playerId: string): UndoPlanResult {
   return { ok: true, index, indices };
 }
 
-/** Applies a plan from `planUndo`: reverses each record's changes, newest first, and drops them from the history. */
+/**
+ * Applies a plan from `planUndo`: reverses each record's changes, newest
+ * first, moves back the money each moved, and drops them from the history.
+ */
 export function applyUndo(state: SimState, indices: readonly number[]): void {
   for (const index of indices) {
     const record = state.undo[index];
     if (!record) continue;
+    if (record.spent !== 0) moveMoney(state, undoLine(record.type), -record.spent);
     if (record.type === ZONE_CELLS) unpaint(state, record);
     else {
       // The cells must be laid out for the roads as they are before the
@@ -627,6 +668,7 @@ function isOp(value: unknown): boolean {
 
 function isRecordZones(record: Record<string, unknown>): boolean {
   const zones = record["zones"];
+  if (!Number.isSafeInteger(record["spent"]) || (record["type"] === ZONE_CELLS && record["spent"] !== 0)) return false;
   if (record["type"] !== ZONE_CELLS) return record["painted"] === undefined && record["stroke"] === undefined && checkJournals(zones, false);
   const painted = record["painted"];
   if (!isRecord(painted) || !isZoneValue(painted["zone"], painted["density"])) return false;
