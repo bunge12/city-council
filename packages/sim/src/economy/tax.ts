@@ -142,7 +142,7 @@ export function businessTaxOf(type: Pick<BuildingType, "zone">, filled: JobsFill
 }
 
 /** Whether building `flags` may pay: standing and not abandoned. Who lives or works in it is the sweep's question. */
-function mayPay(flags: number): boolean {
+export function mayPay(flags: number): boolean {
   return (flags & BUILDING_ALIVE) !== 0 && (flags & BUILDING_ABANDONED) === 0;
 }
 
@@ -181,6 +181,34 @@ export function buildingTaxPerYear(state: SimState, id: number): number {
   return by[0] + by[1] + by[2] + by[3];
 }
 
+/**
+ * What live building `id` of `type` is charged a year, by line, into
+ * `out`, as the sweep charges it on a visit: business tax on its `workers`
+ * jobs filled, and residential tax at land value `land` when people live
+ * in it, or none when `land` is null. `terms.rates` and `terms.salesScale`
+ * are read as given; `terms.reachesOutside` is set from `reach`. For the
+ * sweep and the budget overlay (M4-18), so the two never disagree.
+ */
+export function yearlyTaxDue(
+  state: SimState,
+  id: number,
+  type: BuildingType,
+  workers: number,
+  land: number | null,
+  terms: BusinessTaxTerms,
+  reach: Uint8Array,
+  out: TaxByLine,
+): TaxByLine {
+  const b = state.buildings;
+  out.fill(0);
+  if (workers > 0) {
+    terms.reachesOutside = roadReaches(state, reach, id);
+    businessTaxOf(type, kindsOf(b.type[id] ?? 0, workers) ?? NO_JOBS, terms, out);
+  }
+  if (land !== null) out[RESIDENTIAL] = residentialTaxOf(type, b.residents[id] ?? 0, lotJobs(b, id), land, terms.rates[RESIDENTIAL] ?? 0);
+  return out;
+}
+
 /** The ids of the slice a tick pays, and their land values: reused across ticks. Derived scratch, never state. */
 const slice: number[] = [];
 const homes: number[] = [];
@@ -213,7 +241,6 @@ export function collectTax(state: SimState): void {
   if (landValues.length < homes.length) landValues = new Float64Array(Math.max(homes.length, landValues.length * 2));
   const land = homes.length > 0 ? buildingValues(state, homes, landValues) : landValues;
   const rates = state.budget.taxRates;
-  const rate = rates[RESIDENTIAL] ?? 0;
   const day = Math.floor(state.tick / perDay) % yearDays();
   const reach = outsideReachByNode(state);
   sweepTerms.rates = rates;
@@ -229,13 +256,7 @@ export function collectTax(state: SimState): void {
       if (isHome) h++;
       continue;
     }
-    yearly.fill(0);
-    const workers = filled[id] ?? 0;
-    if (workers > 0) {
-      terms.reachesOutside = roadReaches(state, reach, id);
-      businessTaxOf(type, kindsOf(b.type[id] ?? 0, workers) ?? NO_JOBS, terms, yearly);
-    }
-    if (isHome) yearly[RESIDENTIAL] = residentialTaxOf(type, residents[id] ?? 0, lotJobs(b, id), land[h++] ?? 0, rate);
+    yearlyTaxDue(state, id, type, filled[id] ?? 0, isHome ? (land[h++] ?? 0) : null, terms, reach, yearly);
     for (let line = 0; line < 4; line++) if (yearly[line] !== 0) due[line] = (due[line] as number) + dailyShare(yearly[line] as number, day);
   }
   for (let line = 0; line < 4; line++) if (due[line] !== 0) moveMoney(state, TAX_LINES[line] as (typeof TAX_LINES)[number], due[line] as number);

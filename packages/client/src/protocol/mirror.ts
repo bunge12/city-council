@@ -3,6 +3,11 @@ import {
   LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
   applyBuildingDelta,
+  areaBudget,
+  blockBudgetsWith,
+  budgetAreasOfSlots,
+  type AreaBudget,
+  type BlockBudgets,
   applyPopDelta,
   applyStatsDelta,
   countOccupancy,
@@ -59,6 +64,8 @@ import {
   type ReachableRoom,
 } from "@city-council/sim";
 import { countRoom, roomAfter, roomBefore } from "./room";
+import { budgetByte } from "../render/cell-geometry";
+import { blockContaining, cellChunkOf } from "./block-at";
 import type { ClientTransport } from "./transport";
 
 /** Deeply read-only view of sim state. The client never writes it. */
@@ -150,6 +157,9 @@ export class SimMirror {
   private roomTally: number | null = null;
   /** Every building's people and jobs filled, counted from the last snapshot's pops and moved by each delta. */
   private occupancy: Occupancy = { people: new Int32Array(0), filled: new Int32Array(0) };
+  /** The budget overlay's figures as last worked out (`refreshBudgets`), and the time that took. Derived, never state. */
+  private budgets: BlockBudgets | null = null;
+  private budgetsMs = 0;
 
   constructor(transport: ClientTransport, playerId: string) {
     this.transport = transport;
@@ -386,6 +396,66 @@ export class SimMirror {
    */
   landValuesOfShapes(shapes: ChunkCellShapes): Uint8Array | null {
     return this.current ? landValuesOfShapes(this.current, shapes) : null;
+  }
+
+  /**
+   * Works the budget overlay's figures out again from the copy, with the
+   * sim's own function and each building's people and jobs filled (issue
+   * M4-18), and keeps them for `budgetBytesOfShapes` and `budgetAt`. They
+   * move every tick as people come and go, so the page asks for them again
+   * now and then while the overlay shows, not on every delta. Returns them,
+   * or null before the first snapshot.
+   */
+  refreshBudgets(): BlockBudgets | null {
+    if (!this.current) return null;
+    const start = performance.now();
+    this.budgets = blockBudgetsWith(this.current, this.occupancy.people, this.occupancy.filled);
+    this.budgetsMs = performance.now() - start;
+    return this.budgets;
+  }
+
+  /** The budget figures `refreshBudgets` last worked out, or null, and how long that took in milliseconds. */
+  get budgetFigures(): { budgets: BlockBudgets | null; ms: number } {
+    return { budgets: this.budgets, ms: this.budgetsMs };
+  }
+
+  /**
+   * By the order of `shapes`, chunk `chunk`'s as `cellShapesInChunk` just
+   * gave them, each cell's budget byte: the net income of the block its side
+   * of the road faces, or of open ground in the chunk. Null before the
+   * figures are first worked out.
+   */
+  budgetBytesOfShapes(chunk: number, shapes: ChunkCellShapes): Uint8Array | null {
+    const state = this.current;
+    const budgets = this.budgets;
+    if (!state || !budgets) return null;
+    const areas = budgetAreasOfSlots(state, shapes.slots, chunk);
+    const out = new Uint8Array(areas.length);
+    for (let k = 0; k < areas.length; k++) out[k] = budgetByte(areaBudget(budgets, areas[k] ?? 0)?.net ?? 0);
+    return out;
+  }
+
+  /**
+   * The block or open ground at (x, z) and its figures: the block whose
+   * cell is under the point, or failing a cell the block whose boundary is
+   * round it, or the open ground of the chunk it is in. Null before the
+   * figures are worked out, or where there is none.
+   */
+  budgetAt(x: number, z: number): { area: number; budget: AreaBudget } | null {
+    const state = this.current;
+    const budgets = this.budgets;
+    if (!state || !budgets) return null;
+    const cell = cellAt(state, x, z);
+    let area: number;
+    if (cell) {
+      const chunk = cellChunkOf(x, z);
+      area = budgetAreasOfSlots(state, [cell.index], chunk)[0] ?? -1 - chunk;
+    } else {
+      const block = blockContaining(state.roads, x, z);
+      area = block >= 0 ? block : -1 - cellChunkOf(x, z);
+    }
+    const budget = areaBudget(budgets, area);
+    return budget ? { area, budget } : null;
   }
 
   /** The land value of the zoning cell at (x, z), its parts, and the type of road it fronts, or null where there is no cell. */

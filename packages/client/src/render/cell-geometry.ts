@@ -17,7 +17,7 @@
 // cells of one colour along a road.
 
 import { CELL_OPEN, DENSITY_NONE, LAND_VALUE_MAX, ZONE_NONE, ZONING_BALANCE, type ChunkCellShapes } from "@city-council/sim";
-import { CELLS, LAND_VALUE_SCALE, type LandValueStop } from "./config";
+import { BUDGET_SCALE, CELLS, LAND_VALUE_SCALE, type BudgetStop, type LandValueStop } from "./config";
 
 /** Typed arrays for one chunk's cells, ready for a BufferGeometry. Empty when no cell is drawn. */
 export interface CellArrays {
@@ -288,11 +288,57 @@ export function buildCityCells(
 }
 
 /**
- * What the overlay colours cells by: what each is zoned for (M2-06), or
- * what its land is worth (M3-18). The cells and their quads are the same
- * either way; only the colour each quad carries changes.
+ * What the overlay colours cells by: what each is zoned for (M2-06), what
+ * its land is worth (M3-18), or the net income a year of the block or open
+ * ground it is in (M4-18). The cells and their quads are the same for
+ * zoning and land value; only the colour each quad carries changes. The
+ * budget colouring draws the cells under buildings too, so a built-up
+ * block still shows its colour round its buildings.
  */
-export type CellColouring = "zoning" | "landValue";
+export type CellColouring = "zoning" | "landValue" | "budget";
+
+/** Steps on each arm of the budget scale: a cell's budget byte runs from 0, the largest loss, through `BUDGET_STEPS`, break-even, to twice it. */
+export const BUDGET_STEPS = 100;
+
+/**
+ * Where a net income of `net` dollars a year sits on the budget scale, from
+ * -1 to 1: 0 within `neutral` of break-even, then by the log of its size
+ * up to `full`, past which it is at the end of its arm.
+ */
+export function budgetPlace(net: number, scale: { neutral: number; full: number } = BUDGET_SCALE): number {
+  const size = Math.abs(net);
+  if (size <= scale.neutral) return 0;
+  const t = Math.min(1, Math.log(size / scale.neutral) / Math.log(scale.full / scale.neutral));
+  return net < 0 ? -t : t;
+}
+
+/** The budget byte of a net income of `net` dollars a year, as the overlay's cells carry it. */
+export function budgetByte(net: number): number {
+  return Math.round((budgetPlace(net) + 1) * BUDGET_STEPS);
+}
+
+/** The colour at place `at` on the budget scale, as sRGB hex, mixed in a straight line between the stops either side. */
+export function budgetColour(at: number, stops: readonly BudgetStop[] = BUDGET_SCALE.stops): number {
+  return mixStops(
+    at,
+    stops.map((s) => ({ value: s.at, colour: s.colour })),
+  );
+}
+
+/** The budget scale as r, g, b bytes, one entry per budget byte. */
+const BUDGET_RGB = (() => {
+  const out = new Uint8Array((2 * BUDGET_STEPS + 1) * 3);
+  for (let v = 0; v <= 2 * BUDGET_STEPS; v++) {
+    const hex = budgetColour(v / BUDGET_STEPS - 1);
+    out.set([(hex >> 16) & 255, (hex >> 8) & 255, hex & 255], v * 3);
+  }
+  return out;
+})();
+
+/** The r, g, b offset of budget byte `v` in `BUDGET_RGB`. */
+function budgetRgb(v: number): number {
+  return Math.min(2 * BUDGET_STEPS, Math.max(0, Math.round(v))) * 3;
+}
 
 /** The land value overlay's scale as r, g, b bytes, one entry per whole value from 0 to `LAND_VALUE_MAX`. */
 const VALUE_RGB = (() => {
@@ -311,6 +357,11 @@ const VALUE_RGB = (() => {
  * outside the stops take the nearest end.
  */
 export function landValueColour(value: number, stops: readonly LandValueStop[] = LAND_VALUE_SCALE.stops): number {
+  return mixStops(value, stops);
+}
+
+/** The colour at `value` between `stops`, in order of value, mixed in a straight line; the nearest end outside them. */
+function mixStops(value: number, stops: readonly LandValueStop[]): number {
   const first = stops[0];
   if (!first) return 0;
   if (value <= first.value) return first.colour;
@@ -340,7 +391,8 @@ function valueRgb(value: number): number {
  * and `cells` as `buildCellChunk` made them. By zoning, a cell takes its
  * zone's shade, filled, or the unzoned outline; by land value, every cell
  * is filled with the colour of `values[k]`, its value by the order of
- * `shapes`. Returns the mean value of the cells drawn, or 0 for none, for
+ * `shapes`; by budget, likewise with `values[k]` its budget byte
+ * (`budgetByte`). Returns the mean value of the cells drawn, or 0 for none, for
  * the city band (`paintCity`).
  */
 export function paintCells(
@@ -365,6 +417,10 @@ export function paintCells(
       p = valueRgb(v);
       filled = true;
       rgb = VALUE_RGB;
+    } else if (colouring === "budget") {
+      p = budgetRgb(values?.[k] ?? BUDGET_STEPS);
+      filled = true;
+      rgb = BUDGET_RGB;
     } else {
       const slot = shapes.slots[k] ?? 0;
       const z = zone[slot] ?? ZONE_NONE;
@@ -388,9 +444,18 @@ export function paintCells(
  * Colours a chunk's city band runs again, in place: `run` as
  * `buildCityCells` made it. By zoning, each run takes its first cell's
  * zone shade; by land value, every run in the chunk takes the colour of
- * `mean`, one colour per chunk (M3-18).
+ * `mean`, one colour per chunk (M3-18); by budget, its first cell's budget
+ * byte in `values` (M4-18).
  */
-export function paintCity(run: CityCellArrays, shapes: ChunkCellShapes, zone: ArrayLike<number>, density: ArrayLike<number>, colouring: CellColouring, mean: number): void {
+export function paintCity(
+  run: CityCellArrays,
+  shapes: ChunkCellShapes,
+  zone: ArrayLike<number>,
+  density: ArrayLike<number>,
+  colouring: CellColouring,
+  mean: number,
+  values: ArrayLike<number> | null = null,
+): void {
   const densities = ZONING_BALANCE.densities.length;
   for (let r = 0; r < run.runs; r++) {
     let p: number;
@@ -398,6 +463,10 @@ export function paintCity(run: CityCellArrays, shapes: ChunkCellShapes, zone: Ar
     if (colouring === "landValue") {
       p = valueRgb(mean);
       rgb = VALUE_RGB;
+    } else if (colouring === "budget") {
+      // Each run takes its first cell's budget byte: a run lies along one side of one road, so in one block.
+      p = budgetRgb(values?.[run.firsts[r] ?? 0] ?? BUDGET_STEPS);
+      rgb = BUDGET_RGB;
     } else {
       const slot = shapes.slots[run.firsts[r] ?? 0] ?? 0;
       p = ((zone[slot] ?? 1) - 1) * densities * 3 + ((density[slot] ?? 1) - 1) * 3;

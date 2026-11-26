@@ -1189,7 +1189,7 @@ So low density roughly breaks even and the dense core carries the city, as in re
 
 This comes from the cost model and not from a penalty on suburbs. Upkeep is charged per metre of road and per service building, and tax is collected per resident and per job. A suburb simply has few taxpayers per metre of road. A compact low-density grid can still pay for itself, and a sprawling one cannot.
 
-A budget overlay shows net income per block, tax minus the upkeep of the roads and services that block uses. The player can see which districts pay for which.
+A budget overlay shows net income per block, tax minus the upkeep of the roads and services that block uses. The player can see which districts pay for which. Half of each road's upkeep goes to the block on either side of it, and all of it to a block on one side only or to the block a cul-de-sac sits in. Roads and buildings outside any block count toward their 500 m chunk instead.
 
 One thing to watch is the early game. A new city is all density 1, so it must be able to break even before density 2 unlocks. The starting grant covers the first roads, and density 2 unlocks at a low population.
 
