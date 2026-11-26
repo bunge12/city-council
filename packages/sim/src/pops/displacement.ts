@@ -96,9 +96,11 @@ export interface ExpropriationGrid {
 
 const grids = new WeakMap<SimState, ExpropriationGrid>();
 
-// Cell coordinates fit well within ±2^20 for any map: a cell is metres wide.
-const OFFSET = 1 << 20;
-const SPAN = 1 << 21;
+// Cell coordinates fit within ±2^14 for any map: a cell is metres wide.
+// Keys stay below 2^30, small integers the engine keeps unboxed, so a
+// pop's visit allocates nothing on its lookups.
+const OFFSET = 1 << 14;
+const SPAN = 1 << 15;
 
 function cellOf(v: number, size: number): number {
   return Math.floor(v / size);
@@ -234,17 +236,23 @@ function sumsNear(grid: ExpropriationGrid, x: number, z: number, out: [number, n
   const reach = radius * radius;
   let people = 0;
   let ticks = 0;
-  cellsAround(grid, x, z, (cell) => {
-    const { x: xs, z: zs, people: ps, tick: ts } = cell;
-    for (let k = 0; k < xs.length; k++) {
-      const dx = (xs[k] as number) - x;
-      const dz = (zs[k] as number) - z;
-      if (dx * dx + dz * dz > reach) continue;
-      const p = ps[k] as number;
-      people += p;
-      ticks += p * (ts[k] as number);
+  const cx = cellOf(x, grid.size);
+  const cz = cellOf(z, grid.size);
+  for (let i = cx - 1; i <= cx + 1; i++) {
+    for (let j = cz - 1; j <= cz + 1; j++) {
+      const cell = grid.cells.get(keyOf(i, j));
+      if (!cell) continue;
+      const { x: xs, z: zs, people: ps, tick: ts } = cell;
+      for (let k = 0; k < xs.length; k++) {
+        const dx = (xs[k] as number) - x;
+        const dz = (zs[k] as number) - z;
+        if (dx * dx + dz * dz > reach) continue;
+        const p = ps[k] as number;
+        people += p;
+        ticks += p * (ts[k] as number);
+      }
     }
-  });
+  }
   out[0] = people;
   out[1] = ticks;
 }
