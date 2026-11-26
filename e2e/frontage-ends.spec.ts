@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { FULL_DEMAND, holdDemand } from "../packages/sim/test/demand-helper";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { TIME_BALANCE, buildingCount, createState, readBuilding, step, submit, type SimState } from "../packages/sim/src/index";
+import { TIME_BALANCE, buildingCount, createState, creditMilestones, readBuilding, step, submit, type SimState } from "../packages/sim/src/index";
 import { finishConstruction } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { buildingsDrawn, frames, openCity } from "./helpers";
@@ -41,6 +41,8 @@ const LOTS: [number, number][] = [
 
 function grownCity(): SimState {
   const state = createState(SEED);
+  // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start.
+  creditMilestones(state);
   buildRoads(state, [[[WEST, 4600], [WEST + 24 * CELL, 4600], "street"]]);
   const rect = ([p0, p1]: [number, number], z: number) => ({ from: { x: WEST + CELL * p0 + 2, z }, to: { x: WEST + CELL * p1 - 2, z }, width: 6 * CELL - 4 });
   let seq = 0;

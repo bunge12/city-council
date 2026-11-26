@@ -9,6 +9,7 @@ import {
   hashTerrain,
   heightAt,
   fundCity,
+  creditMilestones,
   replayFrom,
   snapToGrid,
   terrainOf,
@@ -118,7 +119,7 @@ function painted(): Promise<void> {
 const testSwitch = readTestSwitch(localStore());
 // Under the test switch only, the worker may hold every demand bar at one
 // value, so any zoning grows without a working economy (M3-07).
-const worker = createWorkerTransport(tabCity(), load.address !== null, testSwitch.autosave, testSwitch.heldDemand);
+const worker = createWorkerTransport(tabCity(), load.address !== null, testSwitch.autosave, testSwitch.heldDemand, testSwitch.milestones);
 if (load.address !== null) {
   // The worker waits for this message before it opens any city, so one is sent whatever happens.
   const address = load.address;
@@ -1467,13 +1468,22 @@ function terrainCheck(seed: number): TerrainCheck {
  * thread and hashes the result, so Playwright can check a replay fixture
  * gives the same hash here as in Node.
  */
-function replayCheck(seed: number, log: LogEntry[], untilTick: number, heldDemand: number | null = null, treasury: number | null = null): { hash: string; logLength: number } {
+function replayCheck(
+  seed: number,
+  log: LogEntry[],
+  untilTick: number,
+  heldDemand: number | null = null,
+  treasury: number | null = null,
+  credited = false,
+): { hash: string; logLength: number } {
   // A fixture recorded with every bar held (M3-07) replays with them held the same way.
   const release = heldDemand === null ? null : holdDemandBars(heldDemand);
   try {
     // And one recorded on a funded city (M4-03) replays onto one funded the same way.
     const start = createState(seed);
     if (treasury !== null) fundCity(start, treasury);
+    // And one recorded with every milestone credited (M4-12) onto one credited the same way.
+    if (credited) creditMilestones(start);
     const state = replayFrom(start, log, untilTick);
     return { hash: hashState(state), logLength: state.log.length };
   } finally {

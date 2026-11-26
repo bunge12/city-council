@@ -2,6 +2,7 @@
   "description": "Job matching on seed 2026, every bar held at 60. p1 builds a street from the first outside connection and zones R1 along its north side; p2 zones R2 along its south side. p1 zones C1 and I1 further along the north side and p2 O1 across from the C1. Homes fill with newcomers, who take the shop, factory and office jobs their education allows, nearer ones likelier, while the grower holds each workplace zone back until its open jobs fall to the share. Fifteen game days.",
   "seed": 2026,
   "untilTick": 1500,
+  "credited": true,
   "log": [
     {
       "tick": 0,
@@ -136,7 +137,7 @@
       }
     }
   ],
-  "balance": "8b9bac30b9f09d2b",
-  "hash": "fe5a9030f95e6c1e",
+  "balance": "f0f1745e108107c0",
+  "hash": "5c160c5dccf1d427",
   "heldDemand": 60
 }

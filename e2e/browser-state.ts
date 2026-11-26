@@ -11,7 +11,9 @@
 // autosave on an interval. The perf and evidence projects draw every frame
 // at the real settings, with no autosave. The roads and walkthrough projects
 // draw as a player's page does: roads compares WebGPU with WebGL 2 pixel for
-// pixel.
+// pixel. Every switch but the player's has a new city start with its
+// milestones credited (M4-12), so specs zone densities 2 and 3 on an empty
+// city as they did before the locks.
 
 import { TEST_SWITCH_KEY, type TestSwitch } from "../packages/client/src/test-switch";
 
@@ -41,7 +43,7 @@ function state(testSwitch: TestSwitch | null, origins: readonly string[] = ORIGI
 export const PLAYER_STATE = state(null);
 
 /** The chromium project's default: cheap frames, and saves only when a test asks. */
-export const TEST_STATE = state({ cheapFrames: true, autosave: false, heldDemand: null });
+export const TEST_STATE = state({ cheapFrames: true, autosave: false, heldDemand: null, milestones: true });
 
 /**
  * For the perf and evidence projects, and a chromium spec that times the
@@ -49,10 +51,10 @@ export const TEST_STATE = state({ cheapFrames: true, autosave: false, heldDemand
  * figures compare with earlier runs and pictures look as a player sees them.
  * Autosave stays off, so a save does not land in a measurement.
  */
-export const MEASURE_STATE = state({ cheapFrames: false, autosave: false, heldDemand: null });
+export const MEASURE_STATE = state({ cheapFrames: false, autosave: false, heldDemand: null, milestones: true });
 
 /** For a spec about saving: cheap frames, and the worker's autosave on as a player has it. */
-export const SAVING_STATE = state({ cheapFrames: true, autosave: true, heldDemand: null });
+export const SAVING_STATE = state({ cheapFrames: true, autosave: true, heldDemand: null, milestones: true });
 
 /** The bar the M2 walkthrough holds every demand bar at (M3-07). */
 export const WALKTHROUGH_DEMAND = 25;
@@ -65,6 +67,6 @@ export const WALKTHROUGH_DEMAND = 25;
  * empty city and step 4 waits in vain for shops and factories (issue #283).
  */
 export const HELD_DEMAND_STATE = state(
-  { cheapFrames: false, autosave: true, heldDemand: WALKTHROUGH_DEMAND },
+  { cheapFrames: false, autosave: true, heldDemand: WALKTHROUGH_DEMAND, milestones: true },
   REMOTE_ORIGIN === null ? ORIGINS : [...ORIGINS, REMOTE_ORIGIN],
 );

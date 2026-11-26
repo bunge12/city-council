@@ -3,7 +3,7 @@
 // monthly history holds about 600 samples. Built with the sim itself, as the M2
 // walkthrough's city is, and saved paused.
 
-import { CONNECTION_BALANCE, NONE, TIME_BALANCE, ZONING_BALANCE, connectionEnd, createState, step, submit, yearDays, type SimState } from "../packages/sim/src/index";
+import { CONNECTION_BALANCE, NONE, TIME_BALANCE, ZONING_BALANCE, connectionEnd, createState, creditMilestones, step, submit, yearDays, type SimState } from "../packages/sim/src/index";
 
 const SEED = 2026;
 const CELL = ZONING_BALANCE.cellSize;
@@ -67,6 +67,8 @@ function runTicks(state: SimState, ticks: number): void {
  */
 export function statsCity(): SimState {
   const state = createState(SEED);
+  // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start.
+  creditMilestones(state);
   const s = street(state, 64);
   zone(state, s, "commercial", 2, 0, 8, 3, 1);
   zone(state, s, "residential", 1, 16, 24, 2, 1);

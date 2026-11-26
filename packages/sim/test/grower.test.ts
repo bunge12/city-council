@@ -35,6 +35,7 @@ import { enqueue } from "../src/commands";
 import growthJson from "./fixtures/replay/growth.json";
 import { expectReplay, runFixture, type ReplayFixture } from "./replay-helper";
 import { holdEach } from "./hold-each";
+import { credited } from "./credited";
 
 const fixture = growthJson as ReplayFixture;
 
@@ -63,7 +64,7 @@ function ok(state: SimState, c: Command): void {
 
 /** A street running east from (4200, 4600) for `places` cells. Its north strip runs from z 4595 back, its south strip from z 4605 on. */
 function street(places = 24): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   ok(state, command("BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4200 + CELL * places, z: 4600 }, type: "street" }));
   return state;
 }
@@ -483,7 +484,7 @@ describe("replay fixture growth", () => {
 
   /** Replays the fixture, saving and loading the city at `at` and stepping on from the copy. */
   function replaySavedAt(at: number): SimState {
-    let state = createState(fixture.seed);
+    let state = credited(createState(fixture.seed));
     let next = 0;
     while (state.tick < fixture.untilTick) {
       if (state.tick === at && state.log.length === next) {

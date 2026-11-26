@@ -37,6 +37,7 @@ import {
   type StatTotals,
   type BudgetState,
   sameBudget,
+  sameMilestones,
   type SystemTimer,
   type SystemTiming,
   type ToSimMessage,
@@ -129,6 +130,8 @@ export class SimHost {
   private sentStatTotals: StatTotals;
   /** The treasury, ledger and tax rates as the last delta or snapshot left them, so the next delta sends them only when they changed. */
   private sentBudget: BudgetState;
+  /** The milestones reached as the last delta or snapshot left them, a copy (M4-12). */
+  private sentMilestones: Int32Array;
   private stepsSinceDelta = 0;
   /**
    * What an autosave copies the city into and writes it out to, kept from
@@ -186,6 +189,7 @@ export class SimHost {
     this.sentStatsNext = state.stats.next;
     this.sentStatTotals = { ...state.stats.totals };
     this.sentBudget = copyBudget(state.budget);
+    this.sentMilestones = state.milestones.slice();
     this.sentLogFrom = this.logCursor;
     this.lastPump = now();
     transport.onMessage((raw) => this.receive(raw));
@@ -411,8 +415,10 @@ export class SimHost {
     const people = drainPopDelta(this.state);
     const stats = encodeStatsDelta(this.state.stats, this.sentStatsNext, this.sentStatTotals);
     const budget = sameBudget(this.state.budget, this.sentBudget) ? undefined : copyBudget(this.state.budget);
+    const milestones = sameMilestones(this.state.milestones, this.sentMilestones) ? undefined : this.state.milestones.slice();
     const changed =
       budget !== undefined ||
+      milestones !== undefined ||
       this.unsent.length > 0 ||
       this.unsentDropped.length > 0 ||
       this.unsentRoads !== null ||
@@ -461,6 +467,7 @@ export class SimHost {
       demand: copyDemand(this.state.demand),
       redevelopedToday: this.state.redevelopedToday,
       ...(budget ? { budget } : {}),
+      ...(milestones ? { milestones } : {}),
       ...(queue !== this.sentQueue ? { pending: this.state.pending.map((c) => ({ ...c })) } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
@@ -477,13 +484,14 @@ export class SimHost {
     this.sentStatsNext = this.state.stats.next;
     this.sentStatTotals = { ...this.state.stats.totals };
     if (budget) this.sentBudget = copyBudget(budget);
+    if (milestones) this.sentMilestones = milestones.slice();
     this.sentLogFrom += log.length;
     this.stepsSinceDelta = 0;
     // Sent last, once the host has noted what it sent: over a transport
     // that delivers at once, the client can ask for a snapshot from inside
     // this call, and the snapshot must follow this delta, not repeat it.
     // The rows and the undo delta are fresh arrays, so a worker can move them.
-    this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings, people, undo, stats, budget }));
+    this.transport.send(delta, typedArrayBuffers({ roads, cells, buildings, people, undo, stats, budget, milestones }));
   }
 
   private sendSnapshot(): void {

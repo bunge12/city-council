@@ -31,6 +31,13 @@ import {
   type DemandBar,
   type SimState,
 } from "@city-council/sim";
+import { creditMilestones, type SimState as Credited } from "@city-council/sim";
+
+/** `state` with every milestone credited (M4-12), so the test zones densities 2 and 3 as it did before the locks. */
+function credited<S extends Credited>(state: S): S {
+  creditMilestones(state);
+  return state;
+}
 import { countRoom, roomBefore } from "../src/protocol/room";
 import { holdDemandBars } from "../src/protocol/held-demand";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
@@ -53,7 +60,7 @@ function run(state: SimState, type: string, payload: unknown, seq: { n: number }
  * and C1 on its south side, grown until at least six buildings stand.
  */
 function city(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const seq = { n: 0 };
   run(state, "BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" }, seq);
   run(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4571 }, to: { x: 4390, z: 4571 }, width: 44 }] }, seq);
@@ -184,7 +191,7 @@ describe("the room the homes hold", () => {
  * side and hold new homes back while they do.
  */
 function towerCity(north = "residential", south = "residential"): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const seq = { n: 0 };
   const r = state.roads;
   const edge = state.connections[0] ?? NONE;

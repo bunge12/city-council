@@ -51,7 +51,8 @@ describe("the balance stamp", () => {
     // #381 moved it again: economy.json gained the sales and output per job business tax is charged on.
     // #420 moved it again: demand.json's notes on the bars' waiting parts.
     // #383 moved it again: economy.json gained the mixed development charge and how a charge slows the grower.
-    expect(BALANCE_STAMP).toBe("8b9bac30b9f09d2b");
+    // #387 moved it again: progression.json, the population milestones, joined the stamp.
+    expect(BALANCE_STAMP).toBe("f0f1745e108107c0");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

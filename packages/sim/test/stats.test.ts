@@ -35,6 +35,7 @@ import { DAYS_LOW_LIMIT, POPS_BALANCE } from "../src/pops/balance";
 import { holdDemand } from "./demand-helper";
 import { withValue } from "./with-value";
 import { STATS, createStats, noteYear, takeSample } from "../src/stats/stats";
+import { credited } from "./credited";
 
 // M3-04: city statistics.
 
@@ -79,7 +80,7 @@ function build(state: SimState, p: number): number {
  * small factory. Paused, so the grower builds nothing else.
  */
 function town() {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   ok(state, "BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4600, z: 4600 }, type: "street" });
   state.speed = 0;
   zoneNorth(state, "residential", 1, 0, 2, 4);
@@ -228,7 +229,7 @@ describe("the monthly history", () => {
   });
 
   it("keeps 1,200 samples over 1,201 game months, the oldest gone", () => {
-    const state = createState(1);
+    const state = credited(createState(1));
     const stats = state.stats;
     let months = 0;
     for (state.tick = 0; months < 1201; state.tick++) {
@@ -260,7 +261,7 @@ describe("the monthly history", () => {
   });
 
   it("keeps the year that ended beside the running one, from 1 January", () => {
-    const state = createState(1);
+    const state = credited(createState(1));
     state.speed = 1;
     // After the first tick, which is 1 January and starts the year afresh.
     step(state);

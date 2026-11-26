@@ -47,6 +47,7 @@ import { expectReplay, replayFixture, type ReplayFixture } from "./replay-helper
 import { withValue } from "./with-value";
 import popsJson from "../balance/pops.json" with { type: "json" };
 import fixtureJson from "./fixtures/replay/turnover.json" with { type: "json" };
+import { credited } from "./credited";
 
 // M3-11: turnover. Every pop gets one draw a game day, which gives it at
 // most one of four events: its household is replaced, someone dies, a child
@@ -183,7 +184,7 @@ const SURE = yearDays();
  * children share at `childrenShare`. Steps to a day's first tick.
  */
 function housesStreet(childrenShare = POPS_BALANCE.newcomer.childrenShare, seed?: number): { state: SimState; s: Street } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   // A generator of its own, for a test that averages over streets filled with different households.
   if (seed !== undefined) state.rng = seedRng(seed);
   const s = street(state, 64);
@@ -330,7 +331,7 @@ describe("each event", () => {
   });
 
   it("leaves a home on a street joined to nothing empty when its household moves out", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 30);
     // A second street to the side of the first, joined to nothing.
     const off = 200;
@@ -379,7 +380,7 @@ describe("each event", () => {
 
 describe("a tower pop whose child leaves", () => {
   it("splits when its workplace has no job for the workers it gains: the part that fits keeps the job", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 30);
     zone(state, s, "residential", 3, 4, 4, 4, 1);
     zone(state, s, "commercial", 1, 12, 6, 2, -1);
@@ -428,7 +429,7 @@ describe("setPopHousehold", () => {
 
 describe("room for newcomers", () => {
   it("offers a home to newcomers only while its room left fits the least household for its density", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 30);
     zone(state, s, "residential", 3, 4, 4, 4, 1);
     holdDemand({ residential: 100 }, () => runTicks(state, 10 * DAY));
@@ -511,7 +512,7 @@ describe("over game decades", () => {
   }, 180_000);
 
   it("finds a city held at steady demand keeps its population for fifty game years, and each year's counts add up to its change (scenario test)", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 64);
     zone(state, s, "commercial", 3, 0, 14, 4, 1);
     zone(state, s, "commercial", 3, 0, 14, 4, -1);
@@ -572,7 +573,7 @@ describe("replay fixture turnover", () => {
     expect(isYearStart(at)).toBe(false);
     const held = fixture.heldDemand ?? 0;
     const state = holdDemand({ residential: held, commercial: held, office: held, industrial: held }, () => {
-      let state = createState(fixture.seed);
+      let state = credited(createState(fixture.seed));
       let next = 0;
       while (state.tick < fixture.untilTick) {
         if (state.tick === at && state.log.length === next) state = deserialize(serialize(state)).state;

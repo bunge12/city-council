@@ -25,6 +25,7 @@ import {
   ZONING_BALANCE,
   cellAt,
   createState,
+  creditMilestones,
   demandPull,
   deserialize,
   isAbandoned,
@@ -107,9 +108,20 @@ function zone(state: SimState, s: Strip, zoneId: string, density: number, depth:
   send(state, "ZoneCells", { zone: zoneId, density, rects: [{ from: { x: a + 6, z: mid }, to: { x: b - 6, z: mid }, width: depth * CELL - 2 }] });
 }
 
+/**
+ * A new city on the walkthrough's seed with every milestone credited, without
+ * grants (M4-12), so the town zones densities 2 and 3 as it did before the
+ * locks. The page's replay starts from one credited the same way.
+ */
+export function creditedCity(): SimState {
+  const state = createState(SEED);
+  creditMilestones(state);
+  return state;
+}
+
 /** The town as step 1 opens it: streets, nothing zoned, paused by a command so a replay pauses too. */
 export function townCity(): SimState {
-  const state = createState(SEED);
+  const state = creditedCity();
   townRoads(state);
   send(state, "SetSpeed", { speed: 0 });
   return state;
@@ -146,7 +158,7 @@ const runDay = (state: SimState): void => {
  * months on this town, which the walkthrough cannot wait for in the page.
  */
 export function redevelopmentCity(): { bytes: Uint8Array; rezonedOnDay: number; houses: number[] } {
-  const state = createState(SEED);
+  const state = creditedCity();
   townRoads(state);
   for (const piece of ["west", "east"] as const) {
     zone(state, { z: HOMES, piece, side: "north" }, "residential", 1, 6);
@@ -210,7 +222,7 @@ export function stripOpen(state: SimState, s: Strip, depth: number): { open: num
  * town's homes before any stood vacant that long.
  */
 export function abandonmentCity(): { bytes: Uint8Array; bulldozedOnDay: number } {
-  const state = createState(SEED);
+  const state = creditedCity();
   townRoads(state);
   for (const piece of ["west", "east"] as const) {
     zone(state, { z: HOMES, piece, side: "north" }, "residential", 1, 6);

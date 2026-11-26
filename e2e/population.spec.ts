@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, DEMAND_BALANCE, NONE, ROAD_TYPES, SCALE_TREASURY, TIME_BALANCE, WAITING_PART, ZONING_BALANCE, connectionEnd, createState, demandPull, fundCity, generateTerrain, heightAt, reachableRoom, step, syncCells, waitingShares, yearDays, type SimState } from "../packages/sim/src/index";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, DEMAND_BALANCE, NONE, ROAD_TYPES, SCALE_TREASURY, TIME_BALANCE, WAITING_PART, ZONING_BALANCE, connectionEnd, createState, creditMilestones, demandPull, fundCity, generateTerrain, heightAt, reachableRoom, step, syncCells, waitingShares, yearDays, type SimState } from "../packages/sim/src/index";
 import { formatDemandTitle } from "../packages/client/src/ui/top-figures";
 import { CITIES, Player, SEED as BALANCE_SEED } from "../packages/sim/test/balance/cities";
 import { buildEverySide, finishConstruction, zoneSides } from "./building-fixtures";
@@ -364,6 +364,8 @@ test("while six towers fill, the residential bar's tooltip says new homes are wa
  */
 function officesHeldCity(): SimState {
   const state = createState(BALANCE_SEED);
+  // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start.
+  creditMilestones(state);
   fundCity(state, SCALE_TREASURY);
   const balanced = CITIES.find((c) => c.name === "balanced");
   if (!balanced) throw new Error("no balanced town");

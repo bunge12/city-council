@@ -18,6 +18,13 @@ import {
   type SimState,
   type ZoneCellsPayload,
 } from "@city-council/sim";
+import { creditMilestones, type SimState as Credited } from "@city-council/sim";
+
+/** `state` with every milestone credited (M4-12), so the test zones densities 2 and 3 as it did before the locks. */
+function credited<S extends Credited>(state: S): S {
+  creditMilestones(state);
+  return state;
+}
 import {
   INITIAL_ZONE_TOOL,
   ZoneToolController,
@@ -55,7 +62,7 @@ function road(state: SimState, from: [number, number], to: [number, number], con
 
 /** A street east from (4200, 4600), 24 cells long, and a second one 120 m north of it. */
 function city(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   road(state, [4200, 4600], [4392, 4600]);
   road(state, [4200, 4480], [4392, 4480]);
   return state;
@@ -119,7 +126,7 @@ describe("fill", () => {
   });
 
   it("paints exactly the cells of a curved strip at full depth", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     road(state, [4200, 4800], [4440, 4800], [4320, 4660]);
     const seg = cellsInBox(state, 4100, 4600, 4700, 5000)[0]?.segment ?? -1;
     for (const side of [0, 1]) {
@@ -326,7 +333,7 @@ describe("the controller", () => {
   describe("a fill stops at a road across the strip (#196)", () => {
     /** The south street, and a street north from (4300, 4500) that stops 12 m short of it, through its north strip. */
     function stub(): SimState {
-      const state = createState(SEED);
+      const state = credited(createState(SEED));
       road(state, [4200, 4600], [4392, 4600]);
       road(state, [4300, 4588], [4300, 4500]);
       return state;
@@ -334,7 +341,7 @@ describe("the controller", () => {
 
     /** The street, and a back street the whole length of it, 32 m north, across the back rows of its north strip. */
     function backStreet(): SimState {
-      const state = createState(SEED);
+      const state = credited(createState(SEED));
       road(state, [4200, 4600], [4392, 4600]);
       road(state, [4180, 4568], [4412, 4568]);
       return state;
@@ -391,7 +398,7 @@ describe("the controller", () => {
 
     it("cuts the strip where a short road crosses its front rows, at any depth, since the rows behind are cut off (#341)", () => {
       // A stub 22 m long, 12 m short of the street: it covers the front four rows and no more.
-      const state = createState(SEED);
+      const state = credited(createState(SEED));
       road(state, [4200, 4600], [4392, 4600]);
       road(state, [4300, 4588], [4300, 4566]);
       const seg = segmentAt(state, 4250, 4600);
@@ -423,7 +430,7 @@ describe("the controller", () => {
       // An older street 80 m long, then a newer one 60 m south of it and the
       // whole width: the older street's south strip holds all of the newer
       // one's north strip behind its middle.
-      const state = createState(SEED);
+      const state = credited(createState(SEED));
       road(state, [4260, 4600], [4340, 4600]);
       road(state, [4200, 4660], [4392, 4660]);
       const seg = segmentAt(state, 4220, 4660);
@@ -443,7 +450,7 @@ describe("the controller", () => {
 
     it("keeps the inside of a tight bend whole", () => {
       // On the inside, cells fold or overlap each other with no road between them.
-      const state = createState(SEED);
+      const state = credited(createState(SEED));
       road(state, [4300, 4700], [4325, 4725], [4325, 4700]);
       const seg = cellsInBox(state, 4250, 4650, 4400, 4800)[0]?.segment ?? -1;
       const { tool } = setup(state);

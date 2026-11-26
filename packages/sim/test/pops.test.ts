@@ -40,6 +40,7 @@ import { cloneState } from "../src/state";
 import { recountTotals } from "../src/stats/stats";
 import popsJson from "../balance/pops.json" with { type: "json" };
 import { holdDemand } from "./demand-helper";
+import { credited } from "./credited";
 
 // M3-03: pops in state.
 
@@ -87,7 +88,7 @@ function build(state: SimState, p: number): number {
  * place 15. Paused, so the grower builds nothing else.
  */
 function town(): { state: SimState; house: number; mall: number; office: number; tower: number } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   ok(state, "BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" });
   state.speed = 0;
   zoneNorth(state, "residential", 1, 0, 2, 4);
@@ -506,7 +507,7 @@ describe("the daily sweep", () => {
 
   it("gives 150,000 pops a slice of 1,500 a tick and covers each once a day", () => {
     const perDay = TIME_BALANCE.ticksPerDay;
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     state.pops.sweep = 150_000;
     const visits = new Uint8Array(150_000);
     let largest = 0;
@@ -526,7 +527,7 @@ describe("the daily sweep", () => {
 
   it("spreads the newest ids, a day's newcomers, over the day's ticks (#354)", () => {
     const perDay = TIME_BALANCE.ticksPerDay;
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     // 140,000 pops from before and 1,000 that came yesterday, at the top of the ids.
     state.pops.sweep = 141_000;
     let most = 0;

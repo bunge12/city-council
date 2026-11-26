@@ -44,6 +44,7 @@ import { expectReplay, replayFixture, type ReplayFixture } from "./replay-helper
 import { withValue } from "./with-value";
 import demandJson from "../balance/demand.json" with { type: "json" };
 import fixtureJson from "./fixtures/replay/vacancy.json" with { type: "json" };
+import { credited } from "./credited";
 
 // M3-24: vacancy and abandonment. A building nobody uses stands vacant,
 // then abandoned three game months later, offering no room or jobs, and
@@ -131,7 +132,7 @@ function expectRecount(state: SimState): void {
 
 /** Homes and a retail podium on one street, filled with their bars held up until most pops work, as satisfaction.test.ts has it. */
 function workingCity(): { state: SimState; s: Street } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const s = street(state, 30);
   zone(state, s, "commercial", 3, 0, 4, 4, 1);
   zone(state, s, "commercial", 3, 0, 4, 4, -1);
@@ -177,7 +178,7 @@ describe("a street of houses joined to nothing", () => {
   // grow, but nobody can reach them. Commands only, no bars held: the
   // replay fixture below is this city.
   function unreachable(): SimState {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 16, false);
     zone(state, s, "residential", 1, 0, 16, 6, 1);
     zone(state, s, "residential", 1, 0, 16, 6, -1);
@@ -360,7 +361,7 @@ describe("factories with nobody to work in them", () => {
   // Factories on a street joined to the outside, grown with the industrial
   // bar held up and never staffed: there are no residents.
   function factories(): SimState {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 24);
     zone(state, s, "industrial", 1, 0, 24, 6, 1);
     zone(state, s, "industrial", 1, 0, 24, 6, -1);
@@ -445,7 +446,7 @@ describe("factories with nobody to work in them", () => {
 
 describe("in the delta and the save", () => {
   it("sends a building's row when it becomes vacant, abandoned or comes back, and a copy applies it", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 16, false);
     zone(state, s, "residential", 1, 0, 16, 6, 1);
     runDays(state, 6);
@@ -475,7 +476,7 @@ describe("in the delta and the save", () => {
   });
 
   it("refuses a delta row with both vacant and abandoned set, or an unknown bit", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 16, false);
     zone(state, s, "residential", 1, 0, 16, 6, 1);
     const copy = cloneState(state);
@@ -490,7 +491,7 @@ describe("in the delta and the save", () => {
   });
 
   it("refuses a save whose building flags or status tick are malformed", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 16, false);
     zone(state, s, "residential", 1, 0, 16, 6, 1);
     runDays(state, 3);
@@ -526,7 +527,7 @@ describe("replay fixture vacancy", () => {
   });
 
   it.each([2_000, 3_456, 9_050, 12_250])("hashes the same saved and loaded at tick %d", (at) => {
-    let state = createState(fixture.seed);
+    let state = credited(createState(fixture.seed));
     let next = 0;
     while (state.tick < fixture.untilTick) {
       if (state.tick === at && state.log.length === next) state = deserialize(serialize(state)).state;

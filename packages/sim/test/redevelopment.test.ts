@@ -42,6 +42,7 @@ import { buildingValue } from "../src/landvalue/land-value";
 import { submit } from "./seen-ends";
 import { holdDemand } from "./demand-helper";
 import { withValue } from "./with-value";
+import { credited } from "./credited";
 
 // M3-14: redevelopment. Built ground zoned up rebuilds on its own, sooner
 // where the land is worth more, a few buildings a day; a building on ground
@@ -151,7 +152,7 @@ const key = (state: SimState, id: number): string => {
  * the more valuable ground.
  */
 function houses(depth = 6): { state: SimState; street: Street; avenue: Street } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const s = stubEnd(state);
   const end = road(state, s, 24);
   road(state, end, 24, "avenue");

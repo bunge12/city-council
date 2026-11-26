@@ -5,6 +5,7 @@ import { STAT_TOTALS, emptyMoney, recountTotals, statsFor } from "./stats/stats"
 import { ECONOMY, ECONOMY_SLIDERS } from "./economy/balance";
 import { chargesAtDefaults } from "./economy/budget";
 import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "./demand/demand";
+import { creditedFor } from "./progression/milestones";
 import { placeConnections } from "./roads/connections";
 import { NO_TIER, createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -168,6 +169,11 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // mixed, after industrial's, at 0 in both months; the five rates at their
   // defaults. Nothing was charged before it.
   32: (old) => ({ ...old, version: 33, budget: budgetWithCharges(old["budget"]) }),
+  // Version 34 adds the milestones reached (M4-12). A city saved before them
+  // is credited with every milestone its highest population passed, without
+  // their grants, so a city zoned at densities 2 and 3 keeps painting them.
+  // Its starting grant it had from version 30.
+  33: (old) => ({ ...old, version: 34, milestones: creditedFor((old["stats"] as { highestPopulation: number }).highestPopulation) }),
 };
 
 /** Version 31 demand bars with each bar's waiting part, at 0, in `DEMAND_PARTS` order. */

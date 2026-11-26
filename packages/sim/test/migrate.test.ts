@@ -8,6 +8,9 @@ import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "../src/demand/demand";
 import { WAITING_PART, demandPull } from "../src/demand/pull";
 import { withoutWaiting } from "./before-waiting";
 import { withoutCharges } from "./before-charges";
+import { withoutMilestones } from "./before-milestones";
+import { credited } from "./credited";
+import { creditedFor } from "../src/progression/milestones";
 import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
 import { CHARGE_ZONES, ECONOMY } from "../src/economy/balance";
 import { dailyShare, emptyBudget } from "../src/economy/budget";
@@ -38,6 +41,10 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
+  // Before version 34 no city had milestones (M4-12), and its migration
+  // credits every one its highest population passed, without grants.
+  // `state` gets the same in place.
+  if (version < 34) state.milestones = creditedFor(state.stats.highestPopulation);
   // Before version 33 no city had development charges (M4-08), and its
   // migration gives the defaults and an empty mixed charge line. `state`
   // gets the same in place.
@@ -67,9 +74,10 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 26) gone.push("redevelopedToday");
   if (version < 27) gone.push("travelLast");
   let kept: Record<string, unknown> = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
-  // withoutWaiting takes out version 33's fields as well.
+  // withoutWaiting takes out version 33's and 34's fields as well, and withoutCharges version 34's.
   if (version < 32) kept = withoutWaiting(kept);
   else if (version < 33) kept = withoutCharges(kept);
+  else if (version < 34) kept = withoutMilestones(kept);
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
       const { spent, ...rest } = record;
@@ -239,7 +247,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(33);
+    expect(SNAPSHOT_VERSION).toBe(34);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -263,6 +271,7 @@ describe("migrateState", () => {
       travelLast: null,
       budget: emptyBudget(ECONOMY.startingGrant),
       logSpent: [],
+      milestones: new Int32Array(0),
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -291,6 +300,7 @@ describe("migrateState", () => {
       travelLast: null,
       budget: emptyBudget(ECONOMY.startingGrant),
       logSpent: [],
+      milestones: new Int32Array(0),
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -680,12 +690,13 @@ describe("migrateState", () => {
     const migrated = migrateState(v16);
     const { growth, ...kept } = v16;
     void growth;
-    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null, budget: emptyBudget(ECONOMY.startingGrant), logSpent: [] });
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null, budget: emptyBudget(ECONOMY.startingGrant), logSpent: [], milestones: new Int32Array(0) });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 
   it("upgrades a version 17 city with buildings and pops by counting them, with the history empty until the next month", () => {
-    const state = createState(SEED_WITH_FLAT_GROUND);
+    // Credited (M4-12), so it zones densities 2 and 3; `older` gives it the milestones the version 34 migration does.
+    const state = credited(createState(SEED_WITH_FLAT_GROUND));
     const send = (type: string, payload: unknown) => {
       expect(submit(state, { seq: state.log.length + 1, playerId: "p1", type, payload })).toEqual({ ok: true });
       step(state);

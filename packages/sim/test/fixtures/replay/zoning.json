@@ -2,6 +2,7 @@
   "description": "Roads and zoning on seed 2026. p1 builds a street and both players zone a strip each side of it. p2 lays a street grid, and both zone over it while its cells are still settling: the strokes wait for the cells to settle (M2 review, #147). A street cut through the first strip by p1 on tick 6 goes on, since a road command never waits behind a stroke, and its walk keeps the strokes waiting; p2's stroke over it, sent on tick 6, waits behind p2's first. The cells settle by tick 14, so the strokes are still waiting when p1 pauses on tick 9; while paused the walk finishes and they apply at once, p1's and both of p2's, with a stroke of two crossed rectangles. A clear and a rectangle at the size cap, sent on tick 12, wait for tick 14, where one stroke a tick applies (`cellCommandsPerTick`): the clear on tick 14 and the rectangle on tick 15. A bulldoze of a zoned piece of the first street on tick 14. Recorded again in #358, when the settle's slices were measured again and grew to more ticks.",
   "seed": 2026,
   "untilTick": 20,
+  "credited": true,
   "log": [
     {
       "tick": 0,
@@ -295,6 +296,6 @@
       }
     }
   ],
-  "balance": "8b9bac30b9f09d2b",
-  "hash": "17282dc5e1d40637"
+  "balance": "f0f1745e108107c0",
+  "hash": "f2047f9fd5218ee8"
 }

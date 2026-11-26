@@ -6,6 +6,7 @@ import { createDemand, type DemandState } from "./demand/demand";
 import { createBudget, type BudgetState } from "./economy/budget";
 import type { LogEntry } from "./log";
 import { createPops, type PopState } from "./pops/pops";
+import { createMilestones } from "./progression/milestones";
 import { createStats, type StatsState } from "./stats/stats";
 import { seedRng } from "./rng";
 import { placeConnections } from "./roads/connections";
@@ -19,7 +20,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 33;
+export const SNAPSHOT_VERSION = 34;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -150,6 +151,14 @@ export interface SimState {
    * entries, since the log is the replay input and this is a result.
    */
   logSpent: number[];
+  /**
+   * One entry per population milestone reached, in the order of
+   * progression.json, the tick each was reached on, or -1 for one credited
+   * without its grant (progression/milestones.ts, M4-12). Milestones rise
+   * in population, so these are always the first few. What they unlock is
+   * derived. Replaced, never changed in place.
+   */
+  milestones: Int32Array;
 }
 
 /**
@@ -209,6 +218,8 @@ export function createBareState(seed: number): SimState {
     budget: createBudget(),
     // After it, where the version 31 migration puts it.
     logSpent: [],
+    // After it, where the version 34 migration puts it.
+    milestones: createMilestones(),
   };
 }
 

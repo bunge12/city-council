@@ -5,7 +5,7 @@
 // fixtures write roads straight into the graph. Only open cells are zoned,
 // as `ZoneCells` would leave them.
 
-import { CELL_OPEN, ZONING_BALANCE, cellStatuses, serialize, syncCells, type SimState } from "../packages/sim/src/index";
+import { CELL_OPEN, ZONING_BALANCE, cellStatuses, creditMilestones, serialize, syncCells, type SimState } from "../packages/sim/src/index";
 import { fixtureCity, scaleCityState } from "./road-fixtures";
 
 const ZONES = ZONING_BALANCE.zones.length;
@@ -55,6 +55,8 @@ export function zoneEverySide(state: SimState, back = 4): number[] {
  */
 export function zonedFixtureCity(): { bytes: Buffer; state: SimState; counts: number[] } {
   const { state } = fixtureCity();
+  // Credited with every milestone (M4-12), so a test can paint densities 2 and 3 on it once it is open.
+  creditMilestones(state);
   const counts = zoneEverySide(state);
   state.speed = 0;
   return { bytes: Buffer.from(serialize(state)), state, counts };

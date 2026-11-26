@@ -21,7 +21,7 @@ import {
   deserialize,
   hashState,
   recountTotals,
-  replay,
+  replayFrom,
   seeBuilding,
   serialize,
   serializeDetachedSteps,
@@ -33,6 +33,7 @@ import {
 import { holdDemand, type HeldBars } from "./demand-helper";
 import { submit } from "./seen-ends";
 import { withValue } from "./with-value";
+import { credited } from "./credited";
 
 const SEED = 2026;
 const CELL = ZONING_BALANCE.cellSize;
@@ -162,7 +163,7 @@ interface Seen {
 }
 
 function straightRun(): { state: SimState; seen: Seen } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const seen: Seen = { employedMax: 0, jobsLost: false, towers: 0, housesAtRezone: 0, housesAtEnd: 0 };
   const houses = () => {
     let n = 0;
@@ -200,7 +201,7 @@ describe("M3 close-out: save and resume through arrivals, jobs, leaving, turnove
   });
 
   it("half way, save, load, the rest ends on the straight hash", () => {
-    let s = run(createState(SEED), 0, STEPS / 2);
+    let s = run(credited(createState(SEED)), 0, STEPS / 2);
     s = deserialize(serialize(s)).state;
     run(s, STEPS / 2, STEPS);
     expect(hashState(s)).toBe(want);
@@ -209,7 +210,7 @@ describe("M3 close-out: save and resume through arrivals, jobs, leaving, turnove
   // Mid-day and on a day's first tick, before and after the factories go and around the rezone.
   for (const at of [37, 1250, 4000, 4001, 4073, 4550, 6111, 9999, 12_345]) {
     it(`a save after step ${at} ends on the straight hash`, () => {
-      let s = run(createState(SEED), 0, at);
+      let s = run(credited(createState(SEED)), 0, at);
       s = deserialize(serialize(s)).state;
       run(s, at, STEPS);
       expect(hashState(s)).toBe(want);
@@ -219,7 +220,7 @@ describe("M3 close-out: save and resume through arrivals, jobs, leaving, turnove
   it("a reload every ten game days through the autosave path, with kept buffers, ends on the straight hash", () => {
     const capture = createCaptureBuffers();
     const out: SnapshotBuffer = { buffer: null };
-    let s = createState(SEED);
+    let s = credited(createState(SEED));
     for (let at = 0; at < STEPS; at += 10 * DAY) {
       run(s, at, at + 10 * DAY);
       s = deserialize(finish(serializeDetachedSteps(captureState(s, capture), out)).slice()).state;
@@ -229,14 +230,14 @@ describe("M3 close-out: save and resume through arrivals, jobs, leaving, turnove
 
   it("the log replays to the straight hash", () => {
     const replayed = withValue(DEMAND_BALANCE.redevelopment, "chancePerDay", 1, () =>
-      withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 0, () => holdDemand(BARS, () => replay(SEED, straight.log, straight.tick))),
+      withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 0, () => holdDemand(BARS, () => replayFrom(credited(createState(SEED)), straight.log, straight.tick))),
     );
     expect(hashState(replayed)).toBe(want);
   });
 });
 
 describe("M3 close-out: save and resume with the demand bars free", () => {
-  const straight = runFree(createState(SEED), 0, STEPS);
+  const straight = runFree(credited(createState(SEED)), 0, STEPS);
   const want = hashState(straight);
 
   it("the straight run's bars moved on their own, and people came, worked and left", () => {
@@ -250,7 +251,7 @@ describe("M3 close-out: save and resume with the demand bars free", () => {
 
   for (const at of [STEPS / 2, 4073, 9999]) {
     it(`a save after step ${at} ends on the straight hash`, () => {
-      let s = runFree(createState(SEED), 0, at);
+      let s = runFree(credited(createState(SEED)), 0, at);
       s = deserialize(serialize(s)).state;
       runFree(s, at, STEPS);
       expect(hashState(s)).toBe(want);
@@ -258,7 +259,7 @@ describe("M3 close-out: save and resume with the demand bars free", () => {
   }
 
   it("the log replays to the straight hash", () => {
-    const replayed = withValue(DEMAND_BALANCE.redevelopment, "chancePerDay", 1, () => withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 0, () => replay(SEED, straight.log, straight.tick)));
+    const replayed = withValue(DEMAND_BALANCE.redevelopment, "chancePerDay", 1, () => withValue(DEMAND_BALANCE.redevelopment, "valueFrom", 0, () => replayFrom(credited(createState(SEED)), straight.log, straight.tick)));
     expect(hashState(replayed)).toBe(want);
   });
 });

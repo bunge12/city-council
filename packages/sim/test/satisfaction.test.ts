@@ -45,6 +45,7 @@ import { enqueue } from "../src/commands";
 import popsJson from "../balance/pops.json" with { type: "json" };
 import demandJson from "../balance/demand.json" with { type: "json" };
 import fixtureJson from "./fixtures/replay/leaving.json" with { type: "json" };
+import { credited } from "./credited";
 
 // M3-10: satisfaction and leaving. Each pop's score heads once a game day
 // for a target set by its job. A pop whose score stays low for long enough
@@ -142,7 +143,7 @@ const population = (state: SimState): number => state.stats.totals["population"]
 
 /** An R2 street, both sides six deep, joined to the outside, and nothing else: a city with no jobs. */
 function homesOnly(): { state: SimState; s: Street } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const s = street(state, 24);
   zone(state, s, "residential", 2, 0, 24, 6, 1);
   zone(state, s, "residential", 2, 0, 24, 6, -1);
@@ -152,7 +153,7 @@ function homesOnly(): { state: SimState; s: Street } {
 
 /** Homes and a retail podium on one street, filled with its bars held up until most pops work. */
 function workingCity(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const s = street(state, 30);
   zone(state, s, "commercial", 3, 0, 4, 4, 1);
   zone(state, s, "commercial", 3, 0, 4, 4, -1);
@@ -429,7 +430,7 @@ describe("leaving while the residential bar is below zero", () => {
   });
 
   it("pays back what a large pop took past the plan on later days, so a city of towers loses people at the bar's rate", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 24);
     zone(state, s, "residential", 3, 0, 8, 4, 1);
     zone(state, s, "residential", 3, 10, 8, 4, 1);
@@ -495,7 +496,7 @@ describe("satisfaction and the residential bar", () => {
   });
 
   it("reads 0 for a city with nobody in it", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     expect(demandTargets({ totals: state.stats.totals, segmentsOutside: 0 }).residential["satisfaction"]).toBe(0);
   });
 });
@@ -543,7 +544,7 @@ describe("saving mid-exodus", () => {
 
 describe("a new pop's days low", () => {
   it("starts at 0, or at what the household had when it is the part of a split pop", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 12);
     zone(state, s, "residential", 3, 4, 4, 4, 1);
     holdDemand({ residential: 100 }, () => runDays(state, 2));
@@ -560,7 +561,7 @@ describe("a new pop's days low", () => {
   });
 
   it("keeps a household's days low in both parts when job matching splits it", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 30);
     zone(state, s, "residential", 3, 4, 4, 4, 1);
     zone(state, s, "commercial", 1, 12, 6, 2, -1);
@@ -602,7 +603,7 @@ describe("replay fixture leaving", () => {
   });
 
   it.each([2950, 3333, 4321])("hashes the same saved and loaded at tick %d", (at) => {
-    let state = createState(fixture.seed);
+    let state = credited(createState(fixture.seed));
     let next = 0;
     while (state.tick < fixture.untilTick) {
       if (state.tick === at && state.log.length === next) state = deserialize(serialize(state)).state;

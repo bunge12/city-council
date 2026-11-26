@@ -32,7 +32,7 @@ import {
   createDemand,
   deserialize,
   hashState,
-  replay,
+  replayFrom,
   serialize,
   createState,
   type Command,
@@ -46,6 +46,7 @@ import { holdDemand, setBars } from "./demand-helper";
 import { watchTreasury } from "./treasury-helper";
 import { withValue } from "./with-value";
 import economyJson from "../balance/economy.json" with { type: "json" };
+import { credited } from "./credited";
 
 const SEED = 2026;
 const CELL = ZONING_BALANCE.cellSize;
@@ -110,7 +111,7 @@ function zoneBoth(state: SimState, s: Street, zoneId: string, density: number, w
 
 /** A street from the stub, 24 places long, zoned `zoneId` at `density` six deep on both sides. */
 function zonedStreet(zoneId: string, density: number, places = 24): { state: SimState; street: Street } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const street = stubEnd(state);
   road(state, street, places);
   zoneBoth(state, street, zoneId, density, places, 6);
@@ -151,7 +152,7 @@ describe("economy.json's development charges", () => {
 
 describe("the development charge on a new building", () => {
   it("starts every zone at its default from economy.json, mixed included", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     expect(CHARGE_ZONES).toEqual(ZONING_BALANCE.zones.map((z) => z.id));
     expect(Array.from(state.budget.chargeRates)).toEqual(CHARGE_ZONES.map((z) => ECONOMY.developmentCharges[z].default));
     for (const line of CHARGE_LINES) expect(state.budget.month[LINE[line]]).toBe(0);
@@ -238,7 +239,7 @@ describe("the development charge on a redevelopment", () => {
 
 describe("SetDevelopmentCharge", () => {
   it("sets one zone's rate and leaves the others", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const was = Array.from(state.budget.chargeRates);
     ok(state, "SetDevelopmentCharge", { zone: "mixed", rate: ECONOMY.developmentCharges.mixed.max });
     expect(rateOf(state, MIXED)).toBe(ECONOMY.developmentCharges.mixed.max);
@@ -246,7 +247,7 @@ describe("SetDevelopmentCharge", () => {
   });
 
   it("refuses a rate outside the range in economy.json, one not whole, and a zone it does not know", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const { min, max } = ECONOMY.developmentCharges.commercial;
     expect(validateCommand(state, command("SetDevelopmentCharge", { zone: "commercial", rate: max }))).toEqual({ ok: true });
     expect(validateCommand(state, command("SetDevelopmentCharge", { zone: "commercial", rate: min }))).toEqual({ ok: true });
@@ -266,7 +267,7 @@ describe("SetDevelopmentCharge", () => {
 
 describe("how a charge slows the grower", () => {
   const held = (bars: Partial<Record<"residential" | "commercial" | "office" | "industrial", number>>): DemandState => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     state.demand = createDemand();
     setBars(state, bars);
     return state.demand;
@@ -300,7 +301,7 @@ describe("how a charge slows the grower", () => {
   });
 
   it("draws only on the day's last tick, and only for a zone with a free cell, so a city with nothing zoned never moves the generator", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     road(state, stubEnd(state), 24);
     holdDemand({ residential: 3 }, () => {
       const rng = Array.from(state.rng);
@@ -385,9 +386,9 @@ describe("a city that sets its charges as it grows", () => {
     const live = session();
     expect(live.log.filter((e) => e.type === "SetDevelopmentCharge")).toHaveLength(2);
     expect(charged(live, RESIDENTIAL) + (live.budget.lastMonth[LINE.chargeResidential] ?? 0)).toBeGreaterThan(0);
-    expect(hashState(replay(SEED, live.log, live.tick))).toBe(hashState(live));
+    expect(hashState(replayFrom(credited(createState(SEED)), live.log, live.tick))).toBe(hashState(live));
     // Saved and loaded at a tick between the two commands, mid-day, it steps on to the same city.
-    let state = createState(SEED);
+    let state = credited(createState(SEED));
     let next = 0;
     while (state.tick < live.tick) {
       if (state.tick === 7 * DAY + 41) state = deserialize(serialize(state)).state;

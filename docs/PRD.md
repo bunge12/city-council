@@ -1586,6 +1586,8 @@ No state changed shape, so the snapshot version stays at 25. The replay fixtures
 
 The milestone system is built in M4, where its first jobs are the starting grant and unlocking density 2. Each later module registers its own unlocks. Population milestones unlock road types, densities, rail modes, services, larger plants, landmarks and bigger loans. Each one also pays a grant from a higher level of government, and the later ones open cost-sharing programs for rail, freeways and hospitals. They pace the tutorial and stop the build menu overwhelming a new player. With a 500,000 ceiling there is room for about ten milestones, with density 3 and subways arriving in the middle of the curve.
 
+The milestones, their grants and what each opens are in `progression.json` (M4-12). A milestone is reached the first time the highest population the city has had passes it, and is never lost when the population falls. Each unlock is an id in one registry in the sim, opened by exactly one milestone; what is open is derived from the milestones reached, which is all the save holds. A lock on a density stops new painting at it and never stops growth on cells already zoned at it. A city saved before the milestones is credited with every one its highest population passed, without their grants.
+
 #### Landmarks
 
 A landmark is a unique building. There is one of each per city, the player places it, and it is paid for at honest prices. Milestones unlock them, so passing a milestone earns something to build and not only more tools.

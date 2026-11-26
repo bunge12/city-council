@@ -47,6 +47,7 @@ import { holdDemand, type HeldBars } from "./demand-helper";
 import { expectReplay, replayFixture, type ReplayFixture } from "./replay-helper";
 import fixtureJson from "./fixtures/replay/jobs.json" with { type: "json" };
 import { withValue } from "./with-value";
+import { credited } from "./credited";
 
 // M3-09: job matching. Pops without work look for it a slice a tick, and
 // take open jobs their education allows, nearer ones likelier. The grower
@@ -174,7 +175,7 @@ const NEAR_FAR_BARS: HeldBars = { residential: 100, commercial: 100 };
  * zone and half the weight at thirty (`scaledTimes`).
  */
 function nearAndFar(): { state: SimState; near: number; far: number } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const s = street(state, 99);
   zone(state, s, "commercial", 3, 0, 3, 4, 1);
   zone(state, s, "residential", 1, 6, 14, 6, 1);
@@ -202,7 +203,7 @@ function scaledTimes<R>(body: () => R): R {
 
 describe("which jobs a pop may take", () => {
   it("counts a job at the pop's education or below, so low education never works in an office", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const office = BUILDING_TYPES.findIndex((t) => t.id === "low-office-block");
     const shop = BUILDING_TYPES.findIndex((t) => t.id === "shop-row");
     // An office's jobs are half medium and half high; a shop's 60% low and 40% medium.
@@ -279,7 +280,7 @@ describe("job matching", () => {
   });
 
   it("leaves low education pops unemployed when only office jobs are offered", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 40);
     zone(state, s, "residential", 1, 0, 14, 6, 1);
     zone(state, s, "office", 1, 0, 14, 6, -1);
@@ -300,7 +301,7 @@ describe("job matching", () => {
   });
 
   it("stops building shops while open shop jobs are above the share, and starts again as they fill", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 40);
     zone(state, s, "residential", 1, 0, 30, 6, 1);
     zone(state, s, "residential", 1, 0, 30, 6, -1);
@@ -413,7 +414,7 @@ describe("job matching", () => {
   });
 
   it("splits a tower's pops by where they work, and never puts a building over its jobs", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 40);
     zone(state, s, "residential", 3, 4, 4, 4, 1);
     zone(state, s, "commercial", 3, 4, 3, 4, -1);
@@ -541,7 +542,7 @@ describe("job matching", () => {
 
 describe("a long session", () => {
   it("never has a building with more jobs filled than it offers, after any step, its openings equal ones built afresh, and its totals equal the recount", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 60);
     zone(state, s, "residential", 1, 0, 20, 6, 1);
     zone(state, s, "residential", 2, 20, 10, 6, 1);
@@ -609,7 +610,7 @@ describe("replay fixture jobs", () => {
   function replaySavedAt(at: number): SimState {
     const v = fixture.heldDemand ?? 0;
     return holdDemand({ residential: v, commercial: v, office: v, industrial: v }, () => {
-      let state = createState(fixture.seed);
+      let state = credited(createState(fixture.seed));
       let next = 0;
       while (state.tick < fixture.untilTick) {
         if (state.tick === at && state.log.length === next) {

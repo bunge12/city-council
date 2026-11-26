@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PER_SIDE, CHUNK_SIZE, ROAD_TYPES, ZONING_BALANCE, cellAt, cellCorners, cellStatuses, createState, deserialize, generateTerrain, hashState, heightAt, replay, step, submit, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PER_SIDE, CHUNK_SIZE, ROAD_TYPES, ZONING_BALANCE, cellAt, cellCorners, cellStatuses, createState, deserialize, generateTerrain, creditMilestones, hashState, heightAt, replayFrom, step, submit, syncCells, type SimState } from "../packages/sim/src/index";
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
@@ -117,6 +117,13 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 declare const navigator: { gpu?: { requestAdapter(): Promise<unknown> } };
 
 const VIEWPORT = { width: 1280, height: 800 };
+
+/** A new city on `seed` with every milestone credited, as the page's new city is under the walkthrough's test switch (M4-12). */
+function creditedState(seed: number): SimState {
+  const state = createState(seed);
+  creditMilestones(state);
+  return state;
+}
 test.use({ viewport: VIEWPORT, storageState: HELD_DEMAND_STATE });
 // Several page loads, game months of growth at 4x and many redraws, on a
 // machine that may have no GPU. On software WebGPU it took 9 to 14.5
@@ -185,6 +192,8 @@ const BULLDOZED = { x: 4602.5, z: 4570 };
 
 function walkthroughCity(): SimState {
   const state = createState(SEED);
+  // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start.
+  creditMilestones(state);
   buildRoads(state, [
     ...ROWS.map((z) => [[COLS[0], z], [COLS[4], z], "street"] as [[number, number], [number, number], string]),
     ...COLS.map((x) => [[x, ROWS[0]], [x, ROWS[2]], "street"] as [[number, number], [number, number], string]),
@@ -1245,9 +1254,9 @@ for (const variant of [
       expect(fullLog.map((e) => e.type)).toEqual(saved.log.map((e) => e.type));
       for (const e of fullLog) expect(["fixture", "local"]).toContain(e.playerId);
       for (const type of ["ZoneCells", "BuildRoad", "BulldozeBuilding", "BulldozeRoad", "Undo", "SetSpeed"]) expect(fullLog.map((e) => e.type)).toContain(type);
-      // The page held every bar, so the replay does too.
+      // The page held every bar, so the replay does too, and its new city was credited with every milestone (M4-12), so the replay's is.
       const v = WALKTHROUGH_DEMAND;
-      const rebuilt = holdDemand({ residential: v, commercial: v, office: v, industrial: v }, () => replay(header.seed, fullLog, header.tick));
+      const rebuilt = holdDemand({ residential: v, commercial: v, office: v, industrial: v }, () => replayFrom(creditedState(header.seed), fullLog, header.tick));
       const hash = hashState(rebuilt);
       expect(hash).toBe(hashState(state));
       info.annotations.push({ type: "replay", description: `seed ${header.seed}, ${fullLog.length} commands, tick ${header.tick}, ${state.buildings.flags.filter((f) => f !== 0).length} buildings, hash ${hash}` });

@@ -46,6 +46,7 @@ import {
   type SimState,
   type SystemTiming,
   checkBudget,
+  checkMilestones,
   checkDemand,
   copyBudget,
   copyDemand,
@@ -534,6 +535,11 @@ export class SimMirror {
       this.outOfStep();
       return;
     }
+    // And the milestones reached, when they came (M4-12).
+    if (delta.milestones && checkMilestones(delta.milestones, delta.tick) !== null) {
+      this.outOfStep();
+      return;
+    }
     // Roads first: a delta whose rows do not fit the copy changes nothing.
     let roadChunks: readonly number[] = [];
     let roadNodes: readonly number[] = [];
@@ -595,6 +601,7 @@ export class SimMirror {
     state.demand = copyDemand(delta.demand);
     state.redevelopedToday = delta.redevelopedToday;
     if (delta.budget) state.budget = copyBudget(delta.budget);
+    if (delta.milestones) state.milestones = delta.milestones.slice();
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
     state.centre = { ...delta.centre };
