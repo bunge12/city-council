@@ -53,7 +53,8 @@ describe("the balance stamp", () => {
     // #383 moved it again: economy.json gained the mixed development charge and how a charge slows the grower.
     // #384 moved it again: economy.json gained the cap on expropriation records.
     // #382 moved it again: demand.json gained a tax weight on each bar, and pops.json the tax weight on satisfaction by wealth.
-    expect(BALANCE_STAMP).toBe("bfce92a72429cfc5");
+    // #385 moved it again: pops.json gained the satisfaction hit from displacement.
+    expect(BALANCE_STAMP).toBe("171c0e4853668cbf");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

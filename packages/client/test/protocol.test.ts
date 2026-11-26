@@ -1006,8 +1006,8 @@ describe("snapshot transfer", () => {
     expect(moneyBuffers).toHaveLength(4);
     // Twenty-one building arrays, the mark of a building paid for (M4-09) among them.
     expect(buildingBuffers).toHaveLength(21);
-    // Eleven pop arrays, the days of grace among them (#361), and the queue of displaced pops (M3-12).
-    expect(popBuffers).toHaveLength(12);
+    // Fourteen pop arrays, the days of grace (#361) and the three of the displacement mark (M4-10) among them, and the queue of displaced pops.
+    expect(popBuffers).toHaveLength(15);
     expect(statBuffers).toHaveLength(STAT_TOTALS.length);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });

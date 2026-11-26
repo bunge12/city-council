@@ -27,6 +27,11 @@
 // a whole point and held from 0 to 100. Every home pays the residential
 // rate, a mixed building's flats too, so every pop reads it.
 //
+// Since M4-10 displacement is a third input (displacement.ts): the
+// expropriations near the pop's home in the last game year, and its own
+// displacement if it carries a mark, take points off the target from the
+// job along with the tax, faded over the year.
+//
 // The one other rule is the residential bar below zero. A bar of b below
 // zero sends ceil(-b / 100 × `departuresPerYearAtFullDemand` / days a year)
 // people away a day (demand.json), the least satisfied first. On the day's
@@ -61,6 +66,7 @@ import { taxPressure } from "../economy/tax-rates";
 import { ECONOMY, ECONOMY_SLIDERS } from "../economy/balance";
 import { EDUCATION_LEVELS } from "../buildings/balance";
 import { POPS_BALANCE } from "./balance";
+import { clearOldMark, displacementLoss, displacementView, type DisplacementView } from "./displacement";
 import { jobsUpToLevel } from "./open-jobs";
 import { NO_LEAVING, NO_WORK, POP_ALIVE, SATISFACTION_MAX, popWorkers, removePop, setPopDaysLow, setPopGraceDays, setPopSatisfaction } from "./pops";
 import { popSlice } from "./sweep";
@@ -113,11 +119,13 @@ export function targetAfterTax(job: number, loss: number): number {
 
 /**
  * Where pop `id`'s score heads today: its job's target, less what the
- * residential tax rate takes off for its wealth (M4-07). `losses` is
- * `taxLosses` of today's rate, worked out once a tick; left out, it is.
+ * residential tax rate takes off for its wealth (M4-07) and what
+ * displacement takes off (M4-10). `losses` is `taxLosses` of today's rate
+ * and `view` the tick's `displacementView`, each worked out once a tick;
+ * left out, they are. Reads state only.
  */
-export function satisfactionTarget(state: SimState, id: number, losses: readonly number[] = taxLosses(residentialRate(state))): number {
-  return targetAfterTax(jobTarget(state, id), losses[state.pops.wealth[id] ?? 0] ?? 0);
+export function satisfactionTarget(state: SimState, id: number, losses: readonly number[] = taxLosses(residentialRate(state)), view: DisplacementView = displacementView(state)): number {
+  return targetAfterTax(jobTarget(state, id), (losses[state.pops.wealth[id] ?? 0] ?? 0) + displacementLoss(state, id, view));
 }
 
 /** A score one day on from `score` toward `target`: `dailyShare` of the way, rounded to the nearest point, at least one and never past the target. */
@@ -181,6 +189,7 @@ export function updateSatisfaction(state: SimState): void {
   const { from, to, step } = popSlice(state);
   const p = state.pops;
   const losses = taxLosses(residentialRate(state));
+  const view = displacementView(state);
   for (let id = from; id < to; id += step) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0) continue;
     const score = p.satisfaction[id] ?? 0;
@@ -190,7 +199,8 @@ export function updateSatisfaction(state: SimState): void {
     }
     const grace = p.graceDays[id] ?? 0;
     if (grace > 0) setPopGraceDays(state, id, grace - 1);
-    const target = satisfactionTarget(state, id, losses);
+    clearOldMark(state, id);
+    const target = satisfactionTarget(state, id, losses, view);
     const next = stepScore(score, target);
     setPopSatisfaction(state, id, next);
     const days = next < leaveBelow && target < leaveBelow ? Math.min(leaveAfterDays, (p.daysLow[id] ?? 0) + 1) : 0;

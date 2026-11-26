@@ -3,14 +3,17 @@
 // that a version 34 save loads to the same city with only those added.
 // Every older `without...` helper takes them out too, through
 // `withoutExpropriations`, since a state from before any earlier version is from
-// before this one.
+// before this one. It takes out version 36's marks on the pops as well
+// (before-displaced-marks.ts).
+
+import { withoutDisplacedMarks } from "./before-displaced-marks";
 
 type Loose = Record<string, unknown>;
 type Bar = { value: number; parts: Record<string, number> };
 
 /** `state` with the tax part version 35 added taken out of each demand bar. Leaves a state that has none, or no bars, as it is. */
 export function withoutTax<T extends object>(state: T): T {
-  const out: Loose = { ...(state as Loose) };
+  const out: Loose = { ...(withoutDisplacedMarks(state) as Loose) };
   const demand = out["demand"] as Record<string, Bar> | undefined;
   if (!demand || typeof demand !== "object") return out as T;
   const bars: Record<string, Bar> = {};
