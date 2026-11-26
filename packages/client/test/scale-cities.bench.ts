@@ -34,6 +34,7 @@ import {
   LAND_VALUE_SYSTEM,
   SATISFACTION_SYSTEM,
   SCALE_CITY_RESIDENTS,
+  TAX_SYSTEM,
   TIME_BALANCE,
   TRAVEL_SYSTEM,
   TURNOVER_SYSTEM,
@@ -76,6 +77,7 @@ const SHARES: Readonly<Record<string, string>> = {
   [LAND_VALUE_SYSTEM]: "landvalue.tick",
   [GROWER_SYSTEM]: "grower.share",
   [UPKEEP_SYSTEM]: "upkeep.tick",
+  [TAX_SYSTEM]: "tax.tick",
 };
 
 interface SystemTimes {

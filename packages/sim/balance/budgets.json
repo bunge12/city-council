@@ -212,6 +212,14 @@
       "mode": "blocks",
       "source": "M4-04"
     },
+    "tax.tick": {
+      "name": "the tax sweep's ticks on the scale city of 500,000 residents, each tick visiting a hundredth of its buildings and charging each occupied home its day of property tax; a twentieth of the tick",
+      "unit": "ms",
+      "statistic": "mean",
+      "budget": 1,
+      "mode": "blocks",
+      "source": "M4-05"
+    },
     "demand.outside": {
       "name": "working out which of the scale town's 30,000 segments reach outside again, in the step after a change of roads",
       "unit": "ms",
