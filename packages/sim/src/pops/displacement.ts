@@ -91,6 +91,12 @@ export interface ExpropriationGrid {
   count: number;
   /** Counts the changes to the cells, so a home's sums know when they are stale. */
   version: number;
+  /**
+   * By cell key: the records in it and the eight cells around it. A home in
+   * a cell with none has no record within `radius`, which its visit finds
+   * with this one look-up.
+   */
+  around: Map<number, number>;
   near: NearCache;
 }
 
@@ -118,7 +124,22 @@ function emptyNear(n: number): NearCache {
   return { people: new Float64Array(n), ticks: new Float64Array(n), at: new Float64Array(n).fill(-1), x: new Float64Array(n), z: new Float64Array(n) };
 }
 
+/** Adds `by` to the records counted around the cell of `r` and its eight neighbours, dropping a count that reaches 0. */
+function countAround(grid: ExpropriationGrid, r: Expropriation, by: number): void {
+  const cx = cellOf(r.x, grid.size);
+  const cz = cellOf(r.z, grid.size);
+  for (let i = cx - 1; i <= cx + 1; i++) {
+    for (let j = cz - 1; j <= cz + 1; j++) {
+      const key = keyOf(i, j);
+      const n = (grid.around.get(key) ?? 0) + by;
+      if (n === 0) grid.around.delete(key);
+      else grid.around.set(key, n);
+    }
+  }
+}
+
 function file(grid: ExpropriationGrid, r: Expropriation): void {
+  countAround(grid, r, 1);
   const key = recordKey(r, grid.size);
   let cell = grid.cells.get(key);
   if (!cell) {
@@ -135,7 +156,7 @@ function file(grid: ExpropriationGrid, r: Expropriation): void {
 }
 
 function buildGrid(list: readonly Expropriation[], size: number): ExpropriationGrid {
-  const grid: ExpropriationGrid = { list, size, cells: new Map(), count: 0, version: 1, near: emptyNear(0) };
+  const grid: ExpropriationGrid = { list, size, cells: new Map(), count: 0, version: 1, around: new Map(), near: emptyNear(0) };
   for (const r of list) file(grid, r);
   return grid;
 }
@@ -167,6 +188,7 @@ function keepUp(grid: ExpropriationGrid, now: readonly Expropriation[]): boolean
     cell.tick.shift();
     cell.stamp = grid.version;
     grid.count--;
+    countAround(grid, r, -1);
   }
   for (let i = kept; i < now.length; i++) file(grid, now[i] as Expropriation);
   grid.list = now;
@@ -182,6 +204,11 @@ export function expropriationGridOf(state: SimState): ExpropriationGrid {
   grid = buildGrid(now, size);
   grids.set(state, grid);
   return grid;
+}
+
+/** The grid's counts of records around each cell as sorted [key, count] pairs, for comparing two grids. */
+export function expropriationGridAround(grid: ExpropriationGrid): [number, number][] {
+  return [...grid.around.entries()].sort((a, b) => a[0] - b[0]);
 }
 
 /** The grid's records by cell as sorted [key, records] pairs, cells with none left out, for comparing two grids. */
@@ -270,12 +297,14 @@ function homeSums(grid: ExpropriationGrid, home: number, x: number, z: number, o
     near = grid.near = grown;
   }
   const at = near.at[home] as number;
-  if (at >= 0 && near.x[home] === x && near.z[home] === z && newestStampAround(grid, x, z) <= at) {
+  if (at >= 0 && near.x[home] === x && near.z[home] === z) {
     out[0] = near.people[home] as number;
     out[1] = near.ticks[home] as number;
-    return;
-  }
-  sumsNear(grid, x, z, out);
+    // While the grid has not changed since, the sums hold without a look at the cells.
+    if (at === grid.version) return;
+    // Else they hold unless a cell around the home changed; either way they are current from here.
+    if (newestStampAround(grid, x, z) > at) sumsNear(grid, x, z, out);
+  } else sumsNear(grid, x, z, out);
   near.people[home] = out[0];
   near.ticks[home] = out[1];
   near.at[home] = grid.version;
@@ -298,7 +327,7 @@ const scratchSums: [number, number] = [0, 0];
  * by record instead.
  */
 export function neighbourLoss(grid: ExpropriationGrid, x: number, z: number, tick: number, home = -1): number {
-  if (grid.count === 0) return 0;
+  if (grid.count === 0 || !grid.around.has(keyOf(cellOf(x, grid.size), cellOf(z, grid.size)))) return 0;
   const { radius, neighbours } = POPS_BALANCE.satisfaction.displacement;
   const span = expropriationTicks();
   const oldest = grid.list[0];

@@ -21,6 +21,7 @@ import {
   connectionEnd,
   createState,
   deserialize,
+  expropriationGridAround,
   expropriationGridCells,
   expropriationGridOf,
   expropriationTicks,
@@ -376,6 +377,7 @@ describe("clearing a block (scenario test)", () => {
           const kept = expropriationGridCells(expropriationGridOf(state));
           const loaded = deserialize(serialize(state)).state;
           expect(kept).toEqual(expropriationGridCells(expropriationGridOf(loaded)));
+          expect(expropriationGridAround(expropriationGridOf(state))).toEqual(expropriationGridAround(expropriationGridOf(loaded)));
           grids.push(JSON.stringify(kept.map(([key, list]) => [key, list.length])));
         }
       });
@@ -406,6 +408,7 @@ describe("clearing a block (scenario test)", () => {
         bulldoze(state, [id]);
         expect(state.expropriations).toHaveLength(Math.min(most, state.expropriations.length));
         expect(expropriationGridCells(expropriationGridOf(state))).toEqual(expropriationGridCells(expropriationGridOf(cloneState(state))));
+        expect(expropriationGridAround(expropriationGridOf(state))).toEqual(expropriationGridAround(expropriationGridOf(cloneState(state))));
       }
       expect(state.expropriations).toHaveLength(most);
       expect(state.expropriations.slice(-5).every((r) => r.playerId === "p1")).toBe(true);

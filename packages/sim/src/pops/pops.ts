@@ -420,10 +420,19 @@ export function addPop(state: SimState, spec: NewPop): number {
 /**
  * `addPop` for the rest of a pop split in two, by job matching or turnover,
  * from a pop of `from` people: it may be past the size cap when the pop it
- * came from was (M3 review, #365). Internal to the pop systems.
+ * came from was (M3 review, #365). It takes the mark of the displacement
+ * of `source`, the pop it split from, when given (M4-10), copied row to
+ * row so a split allocates nothing for it. Internal to the pop systems.
  */
-export function addSplitPop(state: SimState, spec: NewPop, from: number): number {
-  return insertPop(state, spec, from);
+export function addSplitPop(state: SimState, spec: NewPop, from: number, source = -1): number {
+  const id = insertPop(state, spec, from);
+  if (source >= 0) {
+    const p = state.pops;
+    p.displacedBy[id] = p.displacedBy[source] ?? DISPLACED_BY_NONE;
+    p.displacedTick[id] = p.displacedTick[source] ?? 0;
+    p.displacedWith[id] = p.displacedWith[source] ?? 0;
+  }
+  return id;
 }
 
 function insertPop(state: SimState, spec: NewPop, splitFrom: number): number {
