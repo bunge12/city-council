@@ -38,7 +38,7 @@ import { withValue } from "./with-value";
 
 const DAY = TIME_BALANCE.ticksPerDay;
 const CELL = ZONING_BALANCE.cellSize;
-const RATES = [ECONOMY.taxRates.residential.default, ECONOMY.taxRates.commercial.default, ECONOMY.taxRates.office.default, ECONOMY.taxRates.industrial.default];
+const RATES: [number, number, number, number] = [ECONOMY.taxRates.residential.default, ECONOMY.taxRates.commercial.default, ECONOMY.taxRates.office.default, ECONOMY.taxRates.industrial.default];
 const [, C, O, I] = [0, 1, 2, 3] as const;
 const SALES = ECONOMY.business.salesPerJob;
 const OFFICE_OUTPUT = ECONOMY.business.outputPerJob.office;
