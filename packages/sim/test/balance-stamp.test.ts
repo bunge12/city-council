@@ -49,6 +49,7 @@ describe("the balance stamp", () => {
     // #376 moved it: economy.json joined the stamp, on top of #358's cell settle weights in zoning.json.
     // #379 moved it again: roads.json's upkeep became a yearly share of build cost.
     // #381 moved it again: economy.json gained the sales and output per job business tax is charged on.
+    // #420 moved it again: demand.json's notes on the bars' waiting parts.
     // #383 moved it again: economy.json gained the mixed development charge and how a charge slows the grower.
     expect(BALANCE_STAMP).toBe("8b9bac30b9f09d2b");
   });

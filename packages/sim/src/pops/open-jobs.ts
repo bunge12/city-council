@@ -140,10 +140,20 @@ const JOBS_PER_CELL = Float64Array.from(BUILDING_TYPES, (t) => (t.jobsPerCell > 
  * the 500,000 scale city (issue #324).
  */
 export function countZoneJobs(state: SimState): ZoneJobs {
+  return countZoneJobsWith(state, popIndexOf(state).filled);
+}
+
+/**
+ * `countZoneJobs`, with each building's jobs filled read from `filled`, by
+ * building id, and not from the pops. A client's copy holds no current pops,
+ * only each building's jobs filled (M3-05), so its demand tooltips ask this
+ * to say when new workplaces are held (#420), as `reachableRoomWith` does
+ * for homes.
+ */
+export function countZoneJobsWith(state: SimState, filled: ArrayLike<number>): ZoneJobs {
   const b = state.buildings;
   const net = state.roads;
   const reach = outsideReachByNode(state);
-  const filled = popIndexOf(state).filled;
   const zones = ZONING_BALANCE.zones.length + 1;
   const jobsOut = new Float64Array(zones);
   const openOut = new Float64Array(zones);

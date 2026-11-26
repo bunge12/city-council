@@ -3,8 +3,9 @@
 // Vitest does the timing; nothing here reads the clock (CLAUDE.md rule 3).
 //
 // The bars read the running totals and one count of roads that reach
-// outside, so the system's worst tick, a day's first, costs the same in any
-// city. The count is derived: the step that changes roads works it out again
+// outside, and since #420 the homes still filling, one pass over the
+// buildings, and each zone's open jobs, which job matching's openings keep.
+// The system's worst tick is a day's first. The count is derived: the step that changes roads works it out again
 // (derived.ts, `catchUpDerived`), and that rebuild is timed here too, on the
 // town's 30,000 segments, with what a load pays for it.
 

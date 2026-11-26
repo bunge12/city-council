@@ -45,6 +45,7 @@
 import { yearDays, TIME_BALANCE } from "../calendar";
 import { buildingJobs } from "../buildings/jobs";
 import { DEMAND_BALANCE } from "../demand/balance";
+import { demandPull } from "../demand/pull";
 import type { SimState } from "../state";
 import type { System } from "../step";
 import { noteYear } from "../stats/stats";
@@ -94,7 +95,7 @@ export function dayDepartures(bar: number): number {
 /** On a game day's first tick, the day's plan of departures from the residential bar and the people at each score, as the header says. */
 function planDepartures(state: SimState): void {
   const p = state.pops;
-  const today = dayDepartures(state.demand.residential.value);
+  const today = dayDepartures(demandPull(state.demand, "residential"));
   // What earlier days sent away past their plan, 0 or below, paid back first.
   const debt = today > 0 && p.leaveAtScore < 0 ? p.leaveAtScore : 0;
   const due = today + debt;

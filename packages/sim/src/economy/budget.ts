@@ -106,7 +106,7 @@ export function createBudget(): BudgetState {
  * A budget holding `treasury` with nothing on any line, the tax rates and
  * development charges at their defaults: what the
  * version 30 migration gives a city saved before the treasury, with the
- * starting grant as its opening balance, by way of version 32's.
+ * starting grant as its opening balance, by way of version 33's.
  */
 export function emptyBudget(treasury: number): BudgetState {
   return {
@@ -119,7 +119,7 @@ export function emptyBudget(treasury: number): BudgetState {
   };
 }
 
-/** The version 32 field (M4-08): the development charges at their defaults. */
+/** The version 33 field (M4-08): the development charges at their defaults. */
 export function chargesAtDefaults(): Pick<BudgetState, "chargeRates"> {
   return { chargeRates: Float64Array.from(CHARGE_ZONES, (zone) => ECONOMY.developmentCharges[zone].default) };
 }

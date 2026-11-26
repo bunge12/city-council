@@ -3,7 +3,9 @@
 // them and nowhere else.
 //
 // Each zone builds only while its demand bar is above zero, and mixed only
-// while the residential and commercial bars both are. Its pace follows the
+// while the residential and commercial bars both are. The grower reads each
+// bar without its waiting part (demand/pull.ts, #420), which shows what the
+// holds below are waiting for; the holds themselves stop it. Its pace follows the
 // bar and its development charge (M4-08): a zone whose bar reads b wants
 // b / 100 x its `buildingsPerDayAtFullDemand` (demand.json), at least one,
 // x its charge's share (economy/charges.ts, 1 at a charge of 0) buildings a
@@ -96,6 +98,7 @@
 import { TIME_BALANCE } from "../calendar";
 import { DEMAND_BALANCE } from "../demand/balance";
 import type { DemandState } from "../demand/demand";
+import { demandPull } from "../demand/pull";
 import { nextFloat, nextInt } from "../rng";
 import { chargeShares, payDevelopmentCharge } from "../economy/charges";
 import type { SimState } from "../state";
@@ -141,11 +144,11 @@ const ZONE_BARS: Readonly<Record<string, readonly (keyof DemandState)[]>> = {
   mixed: ["residential", "commercial"],
 };
 
-/** The bar zone `id` grows by: its own, or for mixed the lower of its two. */
+/** The bar zone `id` grows by: its own, or for mixed the lower of its two, each without its waiting part (`demandPull`, #420). */
 export function zoneBar(demand: DemandState, id: string): number {
   const bars = ZONE_BARS[id] ?? [];
   let least = bars.length > 0 ? Infinity : 0;
-  for (const bar of bars) least = Math.min(least, demand[bar].value);
+  for (const bar of bars) least = Math.min(least, demandPull(demand, bar));
   return least;
 }
 

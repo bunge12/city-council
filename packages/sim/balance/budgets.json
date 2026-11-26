@@ -133,12 +133,12 @@
       "source": "M3-13"
     },
     "demand.tick": {
-      "name": "the demand system's worst tick on the scale town, a day's first, from the issue's 0.1 ms",
+      "name": "the demand system's worst tick on the scale town, a day's first: from the issue's 0.1 ms while it read only running totals, a tenth of the tick since #420 made it count the homes still filling, one pass over the 54,000 buildings, and read the open jobs, about 0.25 ms on the development container",
       "unit": "ms",
       "statistic": "mean",
-      "budget": 0.1,
+      "budget": 2,
       "mode": "blocks",
-      "source": "M3-06"
+      "source": "M3-06, #420"
     },
     "arrivals.tick": {
       "name": "the arrivals system's worst tick on the scale town: every home empty, so its pass over the buildings finds them all and weighs each by its land value, and since M3-21 the people due follow that empty room, about 300 households moving in on the tick; a fifth of the tick, raised from three twentieths when M3-21 made the people due follow the empty room, and from a tenth when M3-25 weighted the draw",

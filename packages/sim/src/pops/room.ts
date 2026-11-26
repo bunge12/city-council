@@ -22,6 +22,7 @@ import { NETWORK_ROAD } from "../roads/network";
 import { outsideReachByNode } from "../roads/outside";
 import type { SimState } from "../state";
 import { DEMAND_BALANCE } from "../demand/balance";
+import { demandPull } from "../demand/pull";
 import { POPS_BALANCE } from "./balance";
 import { popIndexOf } from "./where";
 
@@ -208,6 +209,6 @@ export function whyNoNewcomers(state: SimState, id: number): "abandoned" | "noRo
   if (!isBuilding(state.buildings, id) || (state.buildings.residents[id] ?? 0) <= 0) return null;
   if (isAbandoned(state.buildings, id)) return "abandoned";
   if (!homeReachesOutside(state, id)) return "noRoute";
-  if (state.demand.residential.value <= 0) return "noDemand";
+  if (demandPull(state.demand, "residential") <= 0) return "noDemand";
   return null;
 }

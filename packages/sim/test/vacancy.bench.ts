@@ -17,7 +17,7 @@
 
 import { expect, test } from "vitest";
 import { collect, hold } from "./budget";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_VACANT, DEMAND_BALANCE, TIME_BALANCE, abandonedWaiting, cellsSettled, checkVacancy, prepareDerived, step, type BuildingState } from "../src/index";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_VACANT, DEMAND_BALANCE, TIME_BALANCE, WAITING_PART, abandonedWaiting, cellsSettled, checkVacancy, prepareDerived, step, type BuildingState } from "../src/index";
 import { buildingIdLimit } from "../src/buildings/buildings";
 import { createPops } from "../src/pops/pops";
 import { popIndexOf } from "../src/pops/where";
@@ -52,7 +52,11 @@ function reset(status: number, at: number, k: number, bar: number): void {
   b.flags = out.flags;
   b.statusSince = out.statusSince;
   state.stats.totals = status === BUILDING_ABANDONED ? recountTotals(state) : { ...totals };
-  for (const name of ["residential", "commercial", "office", "industrial"] as const) state.demand[name].value = bar;
+  // With no waiting part, so the systems read the bar as set (#420, `demandPull`).
+  for (const name of ["residential", "commercial", "office", "industrial"] as const) {
+    state.demand[name].value = bar;
+    state.demand[name].parts[WAITING_PART[name]] = 0;
+  }
   state.tick = firstTick + k;
 }
 

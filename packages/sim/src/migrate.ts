@@ -4,7 +4,7 @@ import { NO_LEAVING, createPops } from "./pops/pops";
 import { STAT_TOTALS, emptyMoney, recountTotals, statsFor } from "./stats/stats";
 import { ECONOMY, ECONOMY_SLIDERS } from "./economy/balance";
 import { chargesAtDefaults } from "./economy/budget";
-import { DEMAND_PARTS, createDemand } from "./demand/demand";
+import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "./demand/demand";
 import { placeConnections } from "./roads/connections";
 import { NO_TIER, createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -160,16 +160,34 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
     undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, spent: 0 })),
     logSpent: (old["log"] as unknown[]).map(() => 0),
   }),
-  // Version 32 adds the development charges (M4-08): a ledger line for
+  // Version 32 gives each demand bar a last part for what is already
+  // waiting, homes still filling or open jobs (#420), at 0. The bar reads
+  // what it did, and the part takes its first step on the next day.
+  31: (old) => ({ ...old, version: 32, demand: demandWithWaiting(old["demand"]) }),
+  // Version 33 adds the development charges (M4-08): a ledger line for
   // mixed, after industrial's, at 0 in both months; the five rates at their
   // defaults. Nothing was charged before it.
-  31: (old) => ({ ...old, version: 32, budget: budgetWithCharges(old["budget"]) }),
+  32: (old) => ({ ...old, version: 33, budget: budgetWithCharges(old["budget"]) }),
 };
 
-/** The ledger lines of version 30 and 31: 18, with no mixed charge line. */
+/** Version 31 demand bars with each bar's waiting part, at 0, in `DEMAND_PARTS` order. */
+function demandWithWaiting(value: unknown): Record<string, unknown> {
+  const demand = value as Record<string, { value: number; parts: Record<string, number> }>;
+  const out: Record<string, unknown> = {};
+  for (const bar of DEMAND_BARS) {
+    const state = demand[bar] as { value: number; parts: Record<string, number> };
+    const parts: Record<string, number> = {};
+    for (const name of DEMAND_PARTS[bar]) parts[name] = state.parts[name] ?? 0;
+    out[bar] = { value: state.value, parts };
+  }
+  return out;
+}
+
+
+/** The ledger lines of versions 30 to 32: 18, with no mixed charge line. */
 const VERSION_31_LINES = 18;
-/** Where version 32 puts the mixed charge line: after the four tax and four charge lines. Fixed, so a later change of lines cannot move it. */
-const VERSION_32_MIXED_LINE = 8;
+/** Where version 33 puts the mixed charge line: after the four tax and four charge lines. Fixed, so a later change of lines cannot move it. */
+const VERSION_33_MIXED_LINE = 8;
 
 /** What version 30 gave a city saved before the treasury: `treasury` as its opening balance, an empty ledger of version 30's lines and the tax rates at their defaults. */
 function version30Budget(treasury: number): Record<string, unknown> {
@@ -182,16 +200,16 @@ function version30Budget(treasury: number): Record<string, unknown> {
   };
 }
 
-/** `ledger` of version 31's lines with the mixed charge line version 32 adds, at 0, in its place after the industrial charge. */
+/** `ledger` of version 32's lines with the mixed charge line version 33 adds, at 0, in its place after the industrial charge. */
 function withMixedChargeLine(ledger: Float64Array): Float64Array {
-  const at = VERSION_32_MIXED_LINE;
+  const at = VERSION_33_MIXED_LINE;
   const out = new Float64Array(ledger.length + 1);
   out.set(ledger.subarray(0, at), 0);
   out.set(ledger.subarray(at), at + 1);
   return out;
 }
 
-/** A version 31 budget with the version 32 fields, in the order a new state has them. */
+/** A version 32 budget with the version 33 fields, in the order a new state has them. */
 function budgetWithCharges(value: unknown): Record<string, unknown> {
   const budget = value as Record<string, unknown> & { month: Float64Array; lastMonth: Float64Array };
   return { ...budget, month: withMixedChargeLine(budget.month), lastMonth: withMixedChargeLine(budget.lastMonth), ...chargesAtDefaults() };
