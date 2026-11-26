@@ -7,8 +7,9 @@ import { checkUndoHistory } from "../src/undo";
 import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "../src/demand/demand";
 import { WAITING_PART, demandPull } from "../src/demand/pull";
 import { withoutWaiting } from "./before-waiting";
+import { withoutCharges } from "./before-charges";
 import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
-import { ECONOMY } from "../src/economy/balance";
+import { CHARGE_ZONES, ECONOMY } from "../src/economy/balance";
 import { dailyShare, emptyBudget } from "../src/economy/budget";
 import { roadUpkeepPerYear } from "../src/economy/upkeep";
 import { addBuilding } from "../src/buildings/buildings";
@@ -37,6 +38,10 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
+  // Before version 33 no city had development charges (M4-08), and its
+  // migration gives the defaults and an empty mixed charge line. `state`
+  // gets the same in place.
+  if (version < 33) withNoCharges(state);
   // Before version 32 no bar had its waiting part (#420), and its migration
   // gives each as 0. `state` gets the same in place.
   if (version < 32) withNoWaiting(state);
@@ -62,7 +67,9 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 26) gone.push("redevelopedToday");
   if (version < 27) gone.push("travelLast");
   let kept: Record<string, unknown> = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  // withoutWaiting takes out version 33's fields as well.
   if (version < 32) kept = withoutWaiting(kept);
+  else if (version < 33) kept = withoutCharges(kept);
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
       const { spent, ...rest } = record;
@@ -150,6 +157,13 @@ function withOldMoney(state: SimState): SimState {
  * saved before it: each bar's waiting part at 0, the bar reading what it
  * pulled (#420). Returns it.
  */
+/** Gives `state`, in place, the development charges the version 33 migration gives a city saved before it, and returns it. */
+function withNoCharges(state: SimState): SimState {
+  if (state.budget.month[LINE.chargeMixed] !== 0 || state.budget.lastMonth[LINE.chargeMixed] !== 0) throw new Error("a city from before version 33 paid no mixed charge");
+  state.budget.chargeRates = Float64Array.from(CHARGE_ZONES, (zone) => ECONOMY.developmentCharges[zone].default);
+  return state;
+}
+
 function withNoWaiting(state: SimState): SimState {
   for (const bar of DEMAND_BARS) {
     const b = state.demand[bar];
@@ -225,7 +239,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(32);
+    expect(SNAPSHOT_VERSION).toBe(33);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -823,6 +837,33 @@ describe("migrateState", () => {
       expect(demandPull(migrated.demand, bar)).toBe(30);
     }
     expect(migrated).toEqual(withNoWaiting(state));
+    expect(hashState(migrated)).toBe(hashState(state));
+  });
+
+  it("upgrades a version 32 city by giving it the development charges at their defaults and an empty mixed charge line, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    // Into the second month, so the ledger has a closed month, and houses have paid their charges.
+    while (state.tick < 33 * TIME_BALANCE.ticksPerDay) step(state);
+    expect(state.budget.lastMonth[LINE.chargeResidential]).toBeGreaterThan(0);
+    // A version 32 city with other rates set: the migration gives the defaults.
+    state.budget.chargeRates.fill(0);
+    const v32 = older(structuredClone(state), 32);
+    // The city the migration means: this one with the rates at their defaults.
+    withNoCharges(state);
+    const budget = v32["budget"] as Record<string, unknown>;
+    expect("chargeRates" in budget).toBe(false);
+    expect((budget["month"] as Float64Array).length).toBe(18);
+    expect((budget["lastMonth"] as Float64Array)[LINE.chargeIndustrial + 1]).toBe(state.budget.lastMonth[LINE.grants]);
+    const migrated = migrateState(v32);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(Array.from(migrated.budget.chargeRates)).toEqual(CHARGE_ZONES.map((zone) => ECONOMY.developmentCharges[zone].default));
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(Object.keys(migrated.budget)).toEqual(Object.keys(state.budget));
+    expect(migrated).toEqual(state);
     expect(hashState(migrated)).toBe(hashState(state));
   });
 

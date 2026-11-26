@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ECONOMY,
   BUILDINGS_BALANCE,
   BUILDING_TYPES,
   GROWER_SYSTEM,
@@ -519,9 +520,13 @@ describe("the grower's queries make no garbage and change no answer (issue 166)"
     zone(state, "office", 3, 12, 2, 6, "south");
     // C3, where through-lot types grow.
     zone(state, "commercial", 3, 16, 14, 6, "south");
-    // Until a few have grown: since M3-21 houses come 50 a day at full demand, and a whole day fills the R1 strip, leaving no free cell too deep for a lot.
-    for (let t = 0; t < DAY && buildings(state).length <= 5; t++) step(state);
+    // Until a few have grown: since M3-21 houses come 50 a day at full demand, and a whole day can fill the R1 strip, leaving no free cell too deep for a lot.
+    // Since M4-08 industry at this bar builds one a day, on the day's last tick: houses go at the top development charge, so they leave the strip room until it comes.
+    ok(state, command("SetDevelopmentCharge", { zone: "residential", rate: ECONOMY.developmentCharges.residential.max }));
+    const factories = () => buildings(state).filter((b) => b.zone === ZONING_BALANCE.zones.findIndex((z) => z.id === "industrial") + 1).length;
+    for (let t = 0; t < DAY && (buildings(state).length <= 5 || factories() === 0); t++) step(state);
     expect(buildings(state).length).toBeGreaterThan(5);
+    expect(factories()).toBeGreaterThan(0);
     return state;
   }
 

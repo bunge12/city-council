@@ -976,9 +976,27 @@ for (const variant of [
       await click(page, x, ROWS[0]);
       await expect.poll(async () => (await log(page)).length).toBeGreaterThan(logBefore);
       expect((await log(page)).slice(logBefore).map((e) => e.type)).toContain("BuildRoad");
-      await expect.poll(async () => (await buildings(page)).length).toBe(standing.length - count);
-      const left = new Set((await buildings(page)).map((b) => b.id));
-      expect(left.has(target.id)).toBe(false);
+      // A change of roads too big to walk in one tick settles over the next few (zoning/cell-index.ts), and
+      // its buildings are cleared once it has. A paused game takes no ticks, so run it until the cells settle.
+      await page.evaluate(() => window.cityCouncil.holdClock());
+      await heldSpeed(page, "4x");
+      const settling = () => page.evaluate(() => {
+        const st = window.cityCouncil.mirror.state as unknown as Record<string, number>;
+        return (st["cellsReadyAt"] ?? 0) > (st["tick"] ?? 0);
+      });
+      for (let i = 0; i < 100 && (await settling()); i++) await page.evaluate(() => window.cityCouncil.advance(1));
+      await heldSpeed(page, "Pause");
+      await page.evaluate(() => window.cityCouncil.releaseClock());
+      // Of the buildings that stood before the click, the ones it counted are gone. The strips may
+      // still be filling since M4-08, so a house can grow while the cells settle: it is not counted.
+      const key = (b: Building) => `${b.id}/${b.builtAt}`;
+      await expect.poll(async () => {
+        const now = new Set((await buildings(page)).map(key));
+        return standing.filter((b) => now.has(key(b))).length;
+      }).toBe(standing.length - count);
+      const left = new Set((await buildings(page)).map(key));
+      const targetKey = standing.find((b) => b.id === target.id);
+      expect(targetKey && left.has(key(targetKey))).toBe(false);
       await noTool(page);
       await settleBuilt(page);
       await shot(page, info, dir, "8-after-the-click-they-are-gone");
