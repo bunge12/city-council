@@ -51,8 +51,12 @@ export function floorSpaceOf(type: Pick<BuildingType, "zone" | "density">, resid
  * `residents` and `jobs` jobs, on land of value `landValue` (0 to 100).
  */
 export function propertyValueOf(type: Pick<BuildingType, "zone" | "density">, residents: number, jobs: number, landValue: number): number {
+  return valueOfSpace(floorSpaceOf(type, residents, jobs), landValue);
+}
+
+/** The value in whole dollars of floor space `space` on land of value `landValue`: `propertyValueOf` for a caller that has the floor space already. */
+export function valueOfSpace(space: FloorSpace, landValue: number): number {
   const v = ECONOMY.value;
-  const space = floorSpaceOf(type, residents, jobs);
   let dollars = space.homes * v.perSquareMetre.residential;
   for (const kind of JOB_KINDS) dollars += space.jobs[kind] * v.perSquareMetre[JOB_PRICE[kind]];
   const ref = v.landValueReference;

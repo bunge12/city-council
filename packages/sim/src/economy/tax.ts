@@ -39,7 +39,7 @@ import type { SimState } from "../state";
 import type { System } from "../step";
 import { ECONOMY_SLIDERS } from "./balance";
 import { dailyShare, moveMoney } from "./budget";
-import { floorSpaceOf, propertyValueOf } from "./value";
+import { floorSpaceOf, valueOfSpace } from "./value";
 
 /** The residential rate's place in `BudgetState.taxRates`. */
 const RESIDENTIAL = ECONOMY_SLIDERS.indexOf("residential");
@@ -53,7 +53,7 @@ const RESIDENTIAL = ECONOMY_SLIDERS.indexOf("residential");
 export function residentialTaxOf(type: Pick<BuildingType, "zone" | "density">, residents: number, jobs: number, landValue: number, rate: number): number {
   const space = floorSpaceOf(type, residents, jobs);
   if (space.homes <= 0 || space.total <= 0) return 0;
-  const value = propertyValueOf(type, residents, jobs, landValue);
+  const value = valueOfSpace(space, landValue);
   return Math.max(0, Math.floor(((value * space.homes) / space.total) * rate));
 }
 
