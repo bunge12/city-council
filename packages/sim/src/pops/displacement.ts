@@ -50,6 +50,12 @@ export function clearOldMark(state: SimState, id: number): void {
   if (state.tick - (p.displacedTick[id] ?? 0) >= expropriationTicks()) clearPopDisplaced(state, id);
 }
 
+/** What `ExpropriationGrid.around` holds for one cell. */
+interface AroundCell {
+  count: number;
+  stamp: number;
+}
+
 /** One cell of the grid: its records, oldest first, with their place, people and tick laid out flat for the scan. */
 interface GridCell {
   records: Expropriation[];
@@ -57,8 +63,6 @@ interface GridCell {
   z: number[];
   people: number[];
   tick: number[];
-  /** `ExpropriationGrid.version` when a record last came or went here. */
-  stamp: number;
 }
 
 /**
@@ -85,18 +89,20 @@ export interface ExpropriationGrid {
   list: readonly Expropriation[];
   /** A cell's side, metres: `radius` as the grid was built. */
   size: number;
-  /** By cell key. A cell that has had records keeps its entry, empty or not, so its stamp stays. */
+  /** By cell key. A cell that has had records keeps its entry, empty or not. */
   cells: Map<number, GridCell>;
   /** Records filed. */
   count: number;
   /** Counts the changes to the cells, so a home's sums know when they are stale. */
   version: number;
   /**
-   * By cell key: the records in it and the eight cells around it. A home in
-   * a cell with none has no record within `radius`, which its visit finds
-   * with this one look-up.
+   * By cell key: the records in it and the eight cells around it, and the
+   * version at which one last came or went there. A home in a cell with no
+   * entry has no record within `radius`, and a home's sums are stale only
+   * when its cell's stamp is newer than they are, so a visit needs this
+   * one look-up.
    */
-  around: Map<number, number>;
+  around: Map<number, AroundCell>;
   near: NearCache;
 }
 
@@ -131,9 +137,13 @@ function countAround(grid: ExpropriationGrid, r: Expropriation, by: number): voi
   for (let i = cx - 1; i <= cx + 1; i++) {
     for (let j = cz - 1; j <= cz + 1; j++) {
       const key = keyOf(i, j);
-      const n = (grid.around.get(key) ?? 0) + by;
-      if (n === 0) grid.around.delete(key);
-      else grid.around.set(key, n);
+      const cell = grid.around.get(key);
+      if (!cell) grid.around.set(key, { count: by, stamp: grid.version });
+      else if (cell.count + by === 0) grid.around.delete(key);
+      else {
+        cell.count += by;
+        cell.stamp = grid.version;
+      }
     }
   }
 }
@@ -143,7 +153,7 @@ function file(grid: ExpropriationGrid, r: Expropriation): void {
   const key = recordKey(r, grid.size);
   let cell = grid.cells.get(key);
   if (!cell) {
-    cell = { records: [], x: [], z: [], people: [], tick: [], stamp: 0 };
+    cell = { records: [], x: [], z: [], people: [], tick: [] };
     grid.cells.set(key, cell);
   }
   cell.records.push(r);
@@ -151,7 +161,6 @@ function file(grid: ExpropriationGrid, r: Expropriation): void {
   cell.z.push(r.z);
   cell.people.push(r.people);
   cell.tick.push(r.tick);
-  cell.stamp = grid.version;
   grid.count++;
 }
 
@@ -186,7 +195,6 @@ function keepUp(grid: ExpropriationGrid, now: readonly Expropriation[]): boolean
     cell.z.shift();
     cell.people.shift();
     cell.tick.shift();
-    cell.stamp = grid.version;
     grid.count--;
     countAround(grid, r, -1);
   }
@@ -208,7 +216,7 @@ export function expropriationGridOf(state: SimState): ExpropriationGrid {
 
 /** The grid's counts of records around each cell as sorted [key, count] pairs, for comparing two grids. */
 export function expropriationGridAround(grid: ExpropriationGrid): [number, number][] {
-  return [...grid.around.entries()].sort((a, b) => a[0] - b[0]);
+  return [...grid.around.entries()].map(([key, cell]): [number, number] => [key, cell.count]).sort((a, b) => a[0] - b[0]);
 }
 
 /** The grid's records by cell as sorted [key, records] pairs, cells with none left out, for comparing two grids. */
@@ -236,20 +244,6 @@ function cellsAround(grid: ExpropriationGrid, x: number, z: number, each: (cell:
       if (cell && cell.records.length > 0) each(cell);
     }
   }
-}
-
-/** The newest stamp of the nine cells around (x, z), records or not. */
-function newestStampAround(grid: ExpropriationGrid, x: number, z: number): number {
-  const cx = cellOf(x, grid.size);
-  const cz = cellOf(z, grid.size);
-  let newest = 0;
-  for (let i = cx - 1; i <= cx + 1; i++) {
-    for (let j = cz - 1; j <= cz + 1; j++) {
-      const stamp = grid.cells.get(keyOf(i, j))?.stamp ?? 0;
-      if (stamp > newest) newest = stamp;
-    }
-  }
-  return newest;
 }
 
 /**
@@ -284,8 +278,12 @@ function sumsNear(grid: ExpropriationGrid, x: number, z: number, out: [number, n
   out[1] = ticks;
 }
 
-/** The sums near home building `home`, whose lot centre is (x, z): from the cache while none of its nine cells has changed, else worked out and kept. */
-function homeSums(grid: ExpropriationGrid, home: number, x: number, z: number, out: [number, number]): void {
+/**
+ * The sums near home building `home`, whose lot centre is (x, z) in a cell
+ * last touched at version `stamp`: from the cache while nothing near it has
+ * changed since they were worked out, else worked out and kept.
+ */
+function homeSums(grid: ExpropriationGrid, home: number, x: number, z: number, stamp: number, out: [number, number]): void {
   let near = grid.near;
   if (home >= near.at.length) {
     const grown = emptyNear(Math.max(64, home + 1, near.at.length * 2));
@@ -300,11 +298,9 @@ function homeSums(grid: ExpropriationGrid, home: number, x: number, z: number, o
   if (at >= 0 && near.x[home] === x && near.z[home] === z) {
     out[0] = near.people[home] as number;
     out[1] = near.ticks[home] as number;
-    // While the grid has not changed since, the sums hold without a look at the cells.
-    if (at === grid.version) return;
-    // Else they hold unless a cell around the home changed; either way they are current from here.
-    if (newestStampAround(grid, x, z) > at) sumsNear(grid, x, z, out);
-  } else sumsNear(grid, x, z, out);
+    if (stamp <= at) return;
+  }
+  sumsNear(grid, x, z, out);
   near.people[home] = out[0];
   near.ticks[home] = out[1];
   near.at[home] = grid.version;
@@ -327,7 +323,9 @@ const scratchSums: [number, number] = [0, 0];
  * by record instead.
  */
 export function neighbourLoss(grid: ExpropriationGrid, x: number, z: number, tick: number, home = -1): number {
-  if (grid.count === 0 || !grid.around.has(keyOf(cellOf(x, grid.size), cellOf(z, grid.size)))) return 0;
+  if (grid.count === 0) return 0;
+  const around = grid.around.get(keyOf(cellOf(x, grid.size), cellOf(z, grid.size)));
+  if (!around) return 0;
   const { radius, neighbours } = POPS_BALANCE.satisfaction.displacement;
   const span = expropriationTicks();
   const oldest = grid.list[0];
@@ -343,7 +341,7 @@ export function neighbourLoss(grid: ExpropriationGrid, x: number, z: number, tic
       }
     });
   } else {
-    if (home >= 0) homeSums(grid, home, x, z, scratchSums);
+    if (home >= 0) homeSums(grid, home, x, z, around.stamp, scratchSums);
     else sumsNear(grid, x, z, scratchSums);
     faded = ((span - tick) * scratchSums[0] + scratchSums[1]) / span;
   }
@@ -363,12 +361,36 @@ export function ownLoss(by: number, from: number, people: number, tick: number):
 export interface DisplacementView {
   grid: ExpropriationGrid;
   centres: { x: Float64Array; z: Float64Array } | null;
+  /** The tick, a game year in ticks, and whether the list holds a record a year old or from a later tick, which only a test sets up: then the records are read one by one. */
+  tick: number;
+  span: number;
+  stale: boolean;
+  /** `neighbours.perPerson` and `neighbours.most`. */
+  perPerson: number;
+  most: number;
 }
 
 /** The view of `state` for this tick's visits. */
 export function displacementView(state: SimState): DisplacementView {
   const grid = expropriationGridOf(state);
-  return { grid, centres: grid.count > 0 ? lotCentres(state) : null };
+  const span = expropriationTicks();
+  const tick = state.tick;
+  const list = grid.list;
+  const oldest = list[0];
+  const stale = oldest !== undefined && (tick - oldest.tick >= span || tick < (list[list.length - 1] as Expropriation).tick);
+  const { perPerson, most } = POPS_BALANCE.satisfaction.displacement.neighbours;
+  return { grid, centres: grid.count > 0 ? lotCentres(state) : null, tick, span, stale, perPerson, most };
+}
+
+/** `neighbourLoss` for home building `home` at (x, z), with what the tick's view worked out once. */
+function lossNear(view: DisplacementView, x: number, z: number, home: number): number {
+  const grid = view.grid;
+  const around = grid.around.get(keyOf(cellOf(x, grid.size), cellOf(z, grid.size)));
+  if (!around) return 0;
+  if (view.stale) return neighbourLoss(grid, x, z, view.tick, home);
+  homeSums(grid, home, x, z, around.stamp, scratchSums);
+  const faded = ((view.span - view.tick) * scratchSums[0] + scratchSums[1]) / view.span;
+  return Math.min(view.most, faded * view.perPerson);
 }
 
 /**
@@ -379,14 +401,12 @@ export function displacementView(state: SimState): DisplacementView {
  */
 export function displacementLoss(state: SimState, id: number, view: DisplacementView = displacementView(state)): number {
   const p = state.pops;
-  const tick = state.tick;
   let loss = 0;
   const by = p.displacedBy[id] ?? DISPLACED_BY_NONE;
-  if (by !== DISPLACED_BY_NONE) {
-    loss += ownLoss(by, p.displacedTick[id] ?? 0, p.displacedWith[id] ?? 0, tick);
-  }
+  if (by !== DISPLACED_BY_NONE) loss += ownLoss(by, p.displacedTick[id] ?? 0, p.displacedWith[id] ?? 0, state.tick);
   const centres = view.centres;
+  if (centres === null) return loss;
   const home = p.home[id] ?? NO_HOME;
-  if (centres && home !== NO_HOME) loss += neighbourLoss(view.grid, centres.x[home] ?? 0, centres.z[home] ?? 0, tick, home);
+  if (home !== NO_HOME) loss += lossNear(view, centres.x[home] ?? 0, centres.z[home] ?? 0, home);
   return loss;
 }
