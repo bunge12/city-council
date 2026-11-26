@@ -128,15 +128,15 @@ export function businessTaxOf(type: Pick<BuildingType, "zone">, filled: JobsFill
   const sales = filled.commercial * b.salesPerJob * terms.salesScale;
   const officeOutput = filled.office * b.outputPerJob.office;
   const factoryOutput = terms.reachesOutside ? filled.industrial * b.outputPerJob.industrial : 0;
-  const rate = (i: number): number => terms.rates[i] ?? 0;
+  const rates = terms.rates;
   if (type.zone === "mixed") {
-    out[COMMERCIAL] = Math.floor((sales + officeOutput + factoryOutput) * rate(COMMERCIAL));
+    out[COMMERCIAL] = Math.floor((sales + officeOutput + factoryOutput) * (rates[COMMERCIAL] ?? 0));
     out[OFFICE] = 0;
     out[INDUSTRIAL] = 0;
   } else {
-    out[COMMERCIAL] = Math.floor(sales * rate(COMMERCIAL));
-    out[OFFICE] = Math.floor(officeOutput * rate(OFFICE));
-    out[INDUSTRIAL] = Math.floor(factoryOutput * rate(INDUSTRIAL));
+    out[COMMERCIAL] = Math.floor(sales * (rates[COMMERCIAL] ?? 0));
+    out[OFFICE] = Math.floor(officeOutput * (rates[OFFICE] ?? 0));
+    out[INDUSTRIAL] = Math.floor(factoryOutput * (rates[INDUSTRIAL] ?? 0));
   }
   return out;
 }
@@ -187,6 +187,7 @@ const homes: number[] = [];
 let landValues = new Float64Array(0);
 const yearly: TaxByLine = [0, 0, 0, 0];
 const due: TaxByLine = [0, 0, 0, 0];
+const sweepTerms: BusinessTaxTerms = { rates: [], salesScale: 1, reachesOutside: false };
 
 /**
  * The tax system's work for one tick: each building of the day's slice
@@ -215,7 +216,9 @@ export function collectTax(state: SimState): void {
   const rate = rates[RESIDENTIAL] ?? 0;
   const day = Math.floor(state.tick / perDay) % yearDays();
   const reach = outsideReachByNode(state);
-  const terms: BusinessTaxTerms = { rates, salesScale: shopSalesScale(state.stats.totals), reachesOutside: false };
+  sweepTerms.rates = rates;
+  sweepTerms.salesScale = shopSalesScale(state.stats.totals);
+  const terms = sweepTerms;
   due.fill(0);
   let h = 0;
   for (let i = 0; i < slice.length; i++) {
