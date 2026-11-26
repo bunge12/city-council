@@ -15,6 +15,7 @@ import { RoadReadout } from "./RoadReadout";
 import type { AppServices } from "./services";
 import { shortcutFor, toggledSpeed } from "./shortcuts";
 import { LandValueLegend, LandValueReadout } from "./LandValue";
+import { BudgetLegend, BudgetReadout } from "./Budget";
 import { StatsPanel } from "./StatsPanel";
 import { OverlayBar } from "./OverlayBar";
 import { closeOverlay, setPanel, toggleDebug, toggleLog, toggleOverlay, toggleStats, useUi } from "./store";
@@ -149,6 +150,7 @@ function Shell() {
         <OverlayBar />
         <ZoneLegend />
         <LandValueLegend />
+        <BudgetLegend />
         <Notes />
       </div>
       {/* Top right: settings and statistics, and the panels they open, under their buttons. */}
@@ -168,6 +170,7 @@ function Shell() {
       <ZoneReadout />
       <BuildingReadout />
       <LandValueReadout />
+      <BudgetReadout />
     </>
   );
 }

@@ -205,6 +205,7 @@ export {
 export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
 export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
 export { TAX_SYSTEM, buildingTaxByLine, buildingTaxPerYear, businessTaxOf, collectTax, residentialTaxOf, shopSalesScale, type BusinessTaxTerms, type JobsFilled, type TaxByLine } from "./economy/tax";
+export { areaBudget, blockBudget, blockBudgets, blockBudgetsWith, budgetAreasOfSlots, chunkBudget, type AreaBudget, type BlockBudgets } from "./economy/block-budget";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";
@@ -380,5 +381,5 @@ export {
 export type { ConnectionBalance, ConnectionSite } from "./roads/connections";
 export { SCALE_BUILDINGS, SCALE_CITY_RESIDENTS, SCALE_PLAYER, SCALE_SEED, SCALE_SEGMENTS, SCALE_TREASURY, buildScaleCity, createScaleState, generateScaleCity, growScaleCity } from "./scale";
 export type { GeneratedScaleCity, ScaleCity, ScaleCityResidents, ScaleCityTotals, ScaleCounts, ScaleTown } from "./scale";
-export { BLOCK_MIN_AREA, blockById, blockIndexOf, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
+export { BLOCK_MIN_AREA, blockById, blockIndexOf, blockOnSide, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
 export type { Block, BlockIndex } from "./roads/blocks";

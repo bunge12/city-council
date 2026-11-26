@@ -36,6 +36,11 @@
 // no geometry and no lot marks. In the city band every run of a chunk takes
 // the colour of the chunk's mean value.
 //
+// The budget overlay (issue M4-18) colours them too, by the net income of
+// the block or open ground each cell is in. It draws the cells under
+// buildings as well, so a chunk built for it, or built for another colouring
+// while it shows, is built again on the switch rather than coloured in place.
+//
 // The material is unlit: it takes no light, casts no shadow and takes none,
 // so the colours are the same at every graphics preset and match the legend.
 // The renderer reads the mirror; it never writes it.
@@ -59,6 +64,8 @@ export interface CellSource {
   marks?(chunk: number, shapes: ChunkCellShapes): ArrayLike<number> | null;
   /** By the order of `shapes`, each cell's land value, for the land value overlay (issue M3-18). Null for none. */
   values?(shapes: ChunkCellShapes): ArrayLike<number> | null;
+  /** By the order of `shapes`, chunk `chunk`'s, each cell's budget byte (`budgetByte`), for the budget overlay (issue M4-18). Null for none. */
+  budget?(chunk: number, shapes: ChunkCellShapes): ArrayLike<number> | null;
 }
 
 /** What the overlay reports, for the debug panel and tests. */
@@ -116,9 +123,10 @@ export interface CellLayer {
    */
   setColouring(colouring: CellColouring): void;
   /**
-   * The land values of these chunks may have changed, or of every chunk
-   * with no list, though their cells did not. While the overlay colours by
-   * land value, they are coloured again in place; otherwise nothing.
+   * The land values or budget figures of these chunks may have changed, or
+   * of every chunk with no list, though their cells did not. While the
+   * overlay colours by land value or budget, they are coloured again in
+   * place; otherwise nothing.
    */
   revalue(chunks?: readonly number[]): void;
   /**
@@ -288,6 +296,8 @@ interface ChunkMesh {
   cells: Int32Array;
   /** Whether its lot marks were looked up. Not while it was built for land value, which shows none. */
   hasMarks: boolean;
+  /** Whether it draws the cells under buildings too, as the budget colouring does (issue M4-18). */
+  underBuildings: boolean;
   zoned: number;
   unzoned: number;
   marked: number;
@@ -369,7 +379,9 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     const shapes = source.shapes(c);
     const cells = source.cells();
     if (!shapes || !cells || shapes.slots.length === 0) return;
-    const built = source.built?.(shapes) ?? null;
+    // The budget overlay colours a block's ground under its buildings too, so a built-up block shows (issue M4-18).
+    const underBuildings = colouring === "budget";
+    const built = underBuildings ? null : (source.built?.(shapes) ?? null);
     const runs = buildCityCells(shapes, cells.zone, cells.density, height, built);
     if (runs.runs > 0) {
       cityParts[c] = runs;
@@ -397,7 +409,7 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     detail.add(mesh);
-    chunks[c] = { mesh, shapes, cells: arrays.cells, hasMarks, zoned: arrays.zoned, unzoned: arrays.unzoned, marked: arrays.marked };
+    chunks[c] = { mesh, shapes, cells: arrays.cells, hasMarks, underBuildings, zoned: arrays.zoned, unzoned: arrays.unzoned, marked: arrays.marked };
     if (colouring !== "zoning") paint(c);
   }
 
@@ -419,13 +431,13 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
       return;
     }
     m.shapes = now;
-    const values = colouring === "landValue" ? (source.values?.(m.shapes) ?? null) : null;
+    const values = colouring === "landValue" ? (source.values?.(m.shapes) ?? null) : colouring === "budget" ? (source.budget?.(c, m.shapes) ?? null) : null;
     const fill = m.mesh.geometry.getAttribute("cellFill") as BufferAttribute;
     const mean = paintCells(fill.array as Uint8Array, m.cells, m.shapes, cells.zone, cells.density, colouring, values);
     fill.needsUpdate = true;
     const run = cityParts[c];
     if (run) {
-      paintCity(run, m.shapes, cells.zone, cells.density, colouring, mean);
+      paintCity(run, m.shapes, cells.zone, cells.density, colouring, mean, values);
       cityDirty.add(cityGroupOf(c));
     }
   }
@@ -528,7 +540,8 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
   function restale(c: number): void {
     const m = chunks[c];
     if (!m || dirty.has(c)) return;
-    if (colouring === "zoning" && !m.hasMarks) {
+    // A chunk built with or without the ground under buildings is built again for a colouring that wants the other.
+    if ((colouring === "zoning" && !m.hasMarks) || m.underBuildings !== (colouring === "budget")) {
       dirty.add(c);
       stale.delete(c);
     } else stale.add(c);
@@ -554,13 +567,16 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     },
     setColouring(next) {
       if (next === colouring) return;
+      // A chunk whose every cell is under a building drew nothing for zoning or land value, so has no mesh to colour: build it for budget, which draws them, and the other way.
+      const crossing = (next === "budget") !== (colouring === "budget");
       colouring = next;
+      if (crossing) for (let c = 0; c < chunks.length; c++) if (!chunks[c]) dirty.add(c);
       hatching.value = next === "zoning" ? 1 : 0;
       for (let c = 0; c < chunks.length; c++) restale(c);
       stats = { ...stats, colouring, pending: dirty.size + stale.size };
     },
     revalue(list) {
-      if (colouring !== "landValue") return;
+      if (colouring !== "landValue" && colouring !== "budget") return;
       if (list) for (const c of list) restale(c);
       else for (let c = 0; c < chunks.length; c++) restale(c);
       stats = { ...stats, pending: dirty.size + stale.size };
