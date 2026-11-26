@@ -117,14 +117,20 @@ function workplaces(state: SimState, zone: string): number[] {
   return out;
 }
 
-/** Runs the tax sweep over one whole day from the next day's first tick, without stepping anything else. Returns what each tax line gained. */
+/**
+ * Runs the tax sweep over one whole day from the next day's first tick,
+ * without stepping anything else, then puts the tick back so the city
+ * steps on from where it was. Returns what each tax line gained.
+ */
 function sweepDay(state: SimState): number[] {
   const before = [...state.budget.month.slice(LINE.taxResidential, LINE.taxIndustrial + 1)];
-  state.tick = Math.ceil(state.tick / DAY) * DAY;
+  const tick = state.tick;
+  state.tick = Math.ceil(tick / DAY) * DAY;
   for (let k = 0; k < DAY; k++) {
     collectTax(state);
     state.tick += 1;
   }
+  state.tick = tick;
   return before.map((was, i) => (state.budget.month[LINE.taxResidential + i] as number) - was);
 }
 
@@ -157,12 +163,15 @@ describe("business tax in the jobs town", () => {
     }
     const gained = sweepDay(copy);
     for (let line = 1; line < 4; line++) expect(gained[line], `line ${line}`).toBe(expected[line]);
-    expect(gained[C]! + gained[O]! + gained[I]!).toBeGreaterThan(0);
+    expect((gained[C] ?? 0) + (gained[O] ?? 0) + (gained[I] ?? 0)).toBeGreaterThan(0);
   });
 
   it("scales each shop's sales down when the city has more shop jobs filled than spending power keeps busy", () => {
     const shops = workplaces(state, "commercial");
     const full = shops.map((id) => buildingTaxByLine(state, id)[C]);
+    const others = [...workplaces(state, "office"), ...workplaces(state, "industrial")];
+    expect(others.length).toBeGreaterThan(0);
+    const othersFull = others.map((id) => buildingTaxByLine(state, id));
     expect(shopSalesScale(state.stats.totals)).toBe(1);
     // A tenth of the shop jobs filled are kept busy.
     const supported = (state.stats.totals["filledCommercial"] ?? 0) / 10;
@@ -177,9 +186,7 @@ describe("business tax in the jobs town", () => {
         expect(scaled).toBeLessThan(full[i] as number);
       });
       // Offices and factories do not sell to residents, so they pay the same.
-      for (const id of [...workplaces(state, "office"), ...workplaces(state, "industrial")]) {
-        expect(buildingTaxByLine(state, id)).toEqual(withValue(DEMAND_BALANCE, "shopJobsPerSpending", DEMAND_BALANCE.shopJobsPerSpending, () => buildingTaxByLine(state, id)));
-      }
+      others.forEach((id, i) => expect(buildingTaxByLine(state, id)).toEqual(othersFull[i]));
     });
   });
 

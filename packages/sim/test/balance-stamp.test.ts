@@ -49,7 +49,7 @@ describe("the balance stamp", () => {
     // #376 moved it: economy.json joined the stamp, on top of #358's cell settle weights in zoning.json.
     // #379 moved it again: roads.json's upkeep became a yearly share of build cost.
     // #381 moved it again: economy.json gained the sales and output per job business tax is charged on.
-    expect(BALANCE_STAMP).toBe("4fd2a916d729c8ab");
+    expect(BALANCE_STAMP).toBe("822e51681489bea7");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

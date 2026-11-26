@@ -102,9 +102,9 @@
     "outputPerJob": {
       "office": {
         "amount": 105000,
-        "sourceYear": 2026,
+        "sourceYear": 2025,
         "index": "general",
-        "source": "Placeholder. A rate on output, which no real city levies, so the output is set to an office job's value: 56 square metres at $1,870, so an office pays at its rate about what a home of the same floor space pays at the residential rate.",
+        "source": "Placeholder. A rate on output, which no real city levies, so the output is set to an office job's value: 56 square metres at $1,870, so an office pays at its rate about what a home of the same floor space pays at the residential rate. The 2025 price per square metre makes it a 2025 figure. Worked out by hand, so it does not follow either number if they change.",
         "placeholder": true
       },
       "industrial": {
