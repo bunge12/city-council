@@ -4,16 +4,15 @@
 // migration and snapshot tests, which check that a version 33 save loads to
 // the same city with only those added. Every older `without...` helper
 // takes them out too, through `withoutCharges`, since a state from before
-// any earlier version is from before this one. It takes out version 35's
-// marks on the pops as well (before-displaced-marks.ts).
+// any earlier version is from before this one.
 
-import { withoutDisplacedMarks } from "./before-displaced-marks";
+import { withoutTax } from "./before-tax";
 
 type Loose = Record<string, unknown>;
 
-/** `state` with the fields version 34 added taken out. Leaves a state that has none as it is. */
+/** `state` with the fields version 34 added taken out, and what version 35 added. Leaves a state that has none as it is. */
 export function withoutExpropriations<T extends object>(state: T): T {
-  const out: Loose = { ...(withoutDisplacedMarks(state) as Loose) };
+  const out: Loose = { ...(withoutTax(state) as Loose) };
   delete out["expropriations"];
   if (out["buildings"] && typeof out["buildings"] === "object") {
     const buildings: Loose = { ...(out["buildings"] as Loose) };

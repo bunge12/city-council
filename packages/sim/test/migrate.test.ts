@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { withoutExpropriations } from "./before-expropriations";
+import { withoutTax } from "./before-tax";
 import { withoutDisplacedMarks } from "./before-displaced-marks";
 import { BUILDING_TYPES, LINE, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, popCount, step, submit, travelTimesReady, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
@@ -40,13 +41,16 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
-  // Before version 35 no pop was marked displaced (M4-10), and its
+  // Before version 35 no bar had its tax part (M4-07), and its migration
+  // gives each as 0. `state` gets the same in place.
+  // Before version 36 no pop was marked displaced (M4-10), and its
   // migration marks none. `state` gets the same in place.
-  if (version < 35) {
+  if (version < 36) {
     state.pops.displacedBy.fill(0);
     state.pops.displacedTick.fill(0);
     state.pops.displacedWith.fill(0);
   }
+  if (version < 35) withNoTax(state);
   // Before version 34 nothing kept the expropriations (M4-09), and its
   // migration gives an empty list, no building paid for and undo records that
   // took none. `state` gets the same in place.
@@ -90,8 +94,9 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   else if (version < 33) kept = withoutCharges(kept);
   // Before version 34 no building was marked paid for, and no undo record counted what it took (M4-09).
   else if (version < 34) kept = withoutExpropriations(kept);
-  // Before version 35 no pop carried a displacement mark (M4-10).
-  else if (version < 35) kept = withoutDisplacedMarks(kept);
+  else if (version < 35) kept = withoutTax(kept);
+  // Before version 36 no pop carried a displacement mark (M4-10).
+  else if (version < 36) kept = withoutDisplacedMarks(kept);
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
       const { spent, ...rest } = record;
@@ -175,10 +180,19 @@ function withOldMoney(state: SimState): SimState {
 }
 
 /**
- * Gives `state`, in place, the demand the version 32 migration gives a city
- * saved before it: each bar's waiting part at 0, the bar reading what it
- * pulled (#420). Returns it.
+ * Gives `state`, in place, the tax parts the version 35 migration gives a
+ * city saved before it: each at 0, the bar reading what it did. Takes the
+ * part's value off the bar so the bar is still the sum of its parts.
  */
+function withNoTax(state: SimState): SimState {
+  for (const bar of DEMAND_BARS) {
+    const b = state.demand[bar];
+    b.value -= b.parts["tax"] ?? 0;
+    b.parts["tax"] = 0;
+  }
+  return state;
+}
+
 /** Gives `state`, in place, the development charges the version 33 migration gives a city saved before it, and returns it. */
 function withNoCharges(state: SimState): SimState {
   if (state.budget.month[LINE.chargeMixed] !== 0 || state.budget.lastMonth[LINE.chargeMixed] !== 0) throw new Error("a city from before version 33 paid no mixed charge");
@@ -186,6 +200,11 @@ function withNoCharges(state: SimState): SimState {
   return state;
 }
 
+/**
+ * Gives `state`, in place, the demand the version 32 migration gives a city
+ * saved before it: each bar's waiting part at 0, the bar reading what it
+ * pulled (#420). Returns it.
+ */
 function withNoWaiting(state: SimState): SimState {
   for (const bar of DEMAND_BARS) {
     const b = state.demand[bar];
@@ -261,7 +280,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(35);
+    expect(SNAPSHOT_VERSION).toBe(36);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -905,7 +924,30 @@ describe("migrateState", () => {
     expect(migrated).toEqual({ ...state, expropriations: [] });
   });
 
-  it("upgrades a version 34 city by giving every pop no displacement mark, and changes nothing else", () => {
+  it("upgrades a version 34 city by giving each demand bar its tax part at 0, in its place, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    // A few days in, so the bars have parts other than 0.
+    while (state.tick < 6 * TIME_BALANCE.ticksPerDay) step(state);
+    expect(state.demand.residential.parts["outsidePull"]).toBeGreaterThan(0);
+    const v34 = older(structuredClone(state), 34);
+    const demand = v34["demand"] as Record<string, { parts: Record<string, number> }>;
+    for (const bar of DEMAND_BARS) expect("tax" in (demand[bar]?.parts ?? {})).toBe(false);
+    const migrated = migrateState(v34);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    for (const bar of DEMAND_BARS) {
+      expect(migrated.demand[bar].parts["tax"]).toBe(0);
+      expect(Object.keys(migrated.demand[bar].parts)).toEqual([...DEMAND_PARTS[bar]]);
+    }
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(migrated).toEqual(state);
+    expect(hashState(migrated)).toBe(hashState(state));
+  });
+
+  it("upgrades a version 35 city by giving every pop no displacement mark, and changes nothing else", () => {
     const state = createState(SEED_WITH_FLAT_GROUND);
     expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
     step(state);
@@ -920,9 +962,9 @@ describe("migrateState", () => {
     state.pops.displacedTick[pop] = 1;
     state.pops.displacedWith[pop] = 3;
     state.expropriations = [{ tick: 1, x: 4300, z: 4620, people: 3, jobs: 0, playerId: "p1" }];
-    const v34 = older(structuredClone(state), 34);
-    expect("displacedBy" in (v34["pops"] as object)).toBe(false);
-    const migrated = migrateState(v34);
+    const v35 = older(structuredClone(state), 35);
+    expect("displacedBy" in (v35["pops"] as object)).toBe(false);
+    const migrated = migrateState(v35);
     expect(migrated.version).toBe(SNAPSHOT_VERSION);
     expect(pops.length).toBeGreaterThan(0);
     expect(migrated.pops.displacedBy.every((by) => by === 0)).toBe(true);

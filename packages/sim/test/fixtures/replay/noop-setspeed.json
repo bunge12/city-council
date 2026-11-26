@@ -11,6 +11,6 @@
     { "tick": 12, "seq": 4, "playerId": "p1", "type": "NoOp", "payload": {} },
     { "tick": 12, "seq": 3, "playerId": "p2", "type": "SetSpeed", "payload": { "speed": 1 } }
   ],
-  "balance": "2e27cb3d6ba7110b",
-  "hash": "1bdf0f9aea7359c2"
+  "balance": "171c0e4853668cbf",
+  "hash": "de7f225dc20fe2c7"
 }

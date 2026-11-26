@@ -36,6 +36,17 @@
 // industrial bar's other parts add up to above 0 while nothing the city has
 // built reaches an outside connection: factories need a route out.
 //
+// Each bar has a part for its zone's tax rate (M4-07, economy/tax-rates.ts):
+// the rate's pressure, 0 at the default rate and 1 at the top of its range,
+// times the bar's `tax` weight, which is 0 or less. A rate above the default
+// pulls the bar down and one below it pushes the bar up. It goes on after
+// the other parts are scaled into range, so a booming town whose inputs ask
+// for more than 100 still reads its tax: at the top rate a full bar reads
+// 100 plus the weight. A bar then over 100, from a rate below the default,
+// is scaled again with the tax part in it. It counts among what
+// `outsideRoute` takes away, and is part of what the systems that act on
+// demand read (`demandPull`).
+//
 // Each bar's last part is what is already waiting (#420): homes still
 // filling on residential, open jobs in the zone's workplaces on the others
 // (pull.ts, `WAITING_PART`). The grower holds a zone back while too many of
@@ -70,6 +81,7 @@ import { zoneJobs } from "../pops/openings";
 import { workplacesHeldBy } from "../pops/open-jobs";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { cellsSettled } from "../zoning/cell-index";
+import { taxPressures } from "../economy/tax-rates";
 
 /** The four bars, in the order state, deltas and the debug panel hold them. */
 export const DEMAND_BARS = ["residential", "commercial", "office", "industrial"] as const;
@@ -77,14 +89,15 @@ export type DemandBar = (typeof DEMAND_BARS)[number];
 
 /**
  * Each bar's parts, in the order state holds them. The weighted inputs come
- * first, named as their weights in `demand.json`; then the two parts that
- * are not weights; last, what is already waiting (`WAITING_PART`, #420).
+ * first, named as their weights in `demand.json`, the tax rate's last of
+ * them (M4-07); then the two parts that are not weights; last, what is
+ * already waiting (`WAITING_PART`, #420).
  */
 export const DEMAND_PARTS = {
-  residential: ["openJobs", "unemployment", "satisfaction", "outsidePull", "homesFilling"],
-  commercial: ["spendingPower", "availableWorkers", "shopSurplus", "jobsOpen"],
-  office: ["educatedWorkers", "serviceBuyers", "jobsOpen"],
-  industrial: ["unemployedWorkers", "goodsNeeded", "openOfficeJobs", "outsideRoute", "jobsOpen"],
+  residential: ["openJobs", "unemployment", "satisfaction", "tax", "outsidePull", "homesFilling"],
+  commercial: ["spendingPower", "availableWorkers", "shopSurplus", "tax", "jobsOpen"],
+  office: ["educatedWorkers", "serviceBuyers", "tax", "jobsOpen"],
+  industrial: ["unemployedWorkers", "goodsNeeded", "openOfficeJobs", "tax", "outsideRoute", "jobsOpen"],
 } as const satisfies Record<DemandBar, readonly string[]>;
 
 /** One bar: its value and the parts it is the sum of. */
@@ -133,6 +146,12 @@ export interface DemandInputs {
    * zero. Left out, nothing waits.
    */
   waiting?: Partial<Record<DemandBar, number>>;
+  /**
+   * The four tax rates, in `ECONOMY_SLIDERS` order (`BudgetState.taxRates`,
+   * M4-07). Each bar's tax part reads its zone's. Left out, every rate is at
+   * its default and every tax part is 0.
+   */
+  taxRates?: ArrayLike<number>;
 }
 
 /** Each bar's parts as the inputs put them today, before the day's share is taken. */
@@ -142,6 +161,8 @@ const at = (t: StatTotals, name: string): number => t[name] ?? 0;
 /** `n` over `d`, with `d` at least 1, so nothing divides by 0. */
 const per = (n: number, d: number): number => n / Math.max(1, d);
 const positive = (v: number): number => (v > 0 ? v : 0);
+/** A bar's tax part: its weight times the pressure, and 0, not -0, at the default rate. */
+const taxPart = (weight: number, pressure: number): number => (pressure === 0 || weight === 0 ? 0 : weight * pressure);
 
 /**
  * The residents' spending power: each resident counted at their wealth
@@ -171,6 +192,7 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
   const low = at(t, "residentsEducationLow");
   const medium = at(t, "residentsEducationMedium");
   const high = at(t, "residentsEducationHigh");
+  const pressure = taxPressures(inputs.taxRates);
 
   // Residential: open jobs bring people, unemployment sends them away, and
   // residents happier than `satisfactionNeutral` on average bring more
@@ -187,6 +209,7 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
     openJobs: jobsPart,
     unemployment: unemploymentPart,
     satisfaction: satisfactionPart,
+    tax: 0,
     outsidePull: residents === 0 || highest < pull.untilResidents ? pull.bar : 0,
   };
 
@@ -202,6 +225,7 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
     spendingPower: c.spendingPower * per(positive(servedJobs - shopJobs), servedJobs),
     availableWorkers: c.availableWorkers * per(unemployed, workers),
     shopSurplus: c.shopSurplus * per(positive(shopJobs - servedJobs), shopJobs),
+    tax: 0,
   };
 
   // Office: medium and high education workers who have no office job, and
@@ -214,6 +238,7 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
   const office: Record<string, number> = {
     educatedWorkers: o.educatedWorkers * per(positive(educatedWorkers - at(t, "filledOffice")), workers),
     serviceBuyers: o.serviceBuyers * per(positive(buyers - officeJobs), buyers),
+    tax: 0,
   };
 
   // Industrial: low and medium education workers with no job of any kind,
@@ -229,12 +254,32 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
     unemployedWorkers: unemployedPart,
     goodsNeeded: goodsPart,
     openOfficeJobs: officePart,
+    tax: 0,
     outsideRoute: inputs.segmentsOutside === 0 && industrySum > 0 ? -industrySum : 0,
   };
 
   const targets: DemandTargets = { residential, commercial, office, industrial };
+  const taxes: Record<DemandBar, number> = {
+    residential: taxPart(r.tax, pressure.residential),
+    commercial: taxPart(c.tax, pressure.commercial),
+    office: taxPart(o.tax, pressure.office),
+    industrial: taxPart(i.tax, pressure.industrial),
+  };
   for (const bar of DEMAND_BARS) {
     fitInRange(targets[bar], DEMAND_PARTS[bar]);
+    // The tax part goes on after the rest are in range, so a bar whose
+    // inputs ask for more than 100 still feels its rate (M4-07).
+    const tax = taxes[bar];
+    if (tax !== 0) {
+      const parts = targets[bar];
+      parts["tax"] = tax;
+      // Without a road out, the industrial bar's route part takes away the tax part too.
+      if (bar === "industrial" && inputs.segmentsOutside === 0) {
+        const others = (parts["unemployedWorkers"] ?? 0) + (parts["goodsNeeded"] ?? 0) + (parts["openOfficeJobs"] ?? 0) + tax;
+        parts["outsideRoute"] = others > 0 ? -others : 0;
+      }
+      fitInRange(parts, DEMAND_PARTS[bar]);
+    }
     // Then what is already waiting takes its share of what the rest add above zero.
     const share = inputs.waiting?.[bar] ?? 0;
     const above = othersSum(targets[bar], bar);
@@ -330,6 +375,7 @@ export function updateDemand(state: SimState): void {
     totals: state.stats.totals,
     segmentsOutside: segmentsReachingOutside(state),
     highestPopulation: state.stats.highestPopulation,
+    taxRates: state.budget.taxRates,
     ...(settled ? { waiting: waitingShares(state) } : {}),
   });
   if (!settled) for (const bar of DEMAND_BARS) targets[bar][WAITING_PART[bar]] = state.demand[bar].parts[WAITING_PART[bar]] ?? 0;
