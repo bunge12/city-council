@@ -213,7 +213,7 @@
       "source": "M4-04"
     },
     "tax.tick": {
-      "name": "the tax sweep's ticks on the scale city of 500,000 residents, each tick visiting a hundredth of its buildings and charging each occupied home its day of property tax; a twentieth of the tick",
+      "name": "the tax sweep's ticks on the scale city of 500,000 residents, each tick visiting a hundredth of its buildings and charging each occupied home its day of property tax and each workplace people work in its day of business tax (M4-06); a twentieth of the tick",
       "unit": "ms",
       "statistic": "mean",
       "budget": 1,

@@ -151,6 +151,7 @@ export {
   copyDemand,
   createDemand,
   demandTargets,
+  spendingPower,
   moveDemand,
   type BarState,
   type DemandBar,
@@ -167,7 +168,7 @@ export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
 export { GROWER_SYSTEM, dayOf, extraChances, dayQuotas, dayWants, dueOnTick, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
-export { CHARGE_ZONES, ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
+export { BUSINESS_OUTPUTS, CHARGE_ZONES, ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
 export type { ChargeZone, DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
 export {
   buildingFloorSpace,
@@ -201,7 +202,7 @@ export {
 } from "./economy/budget";
 export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
 export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
-export { TAX_SYSTEM, buildingTaxPerYear, collectTax, residentialTaxOf } from "./economy/tax";
+export { TAX_SYSTEM, buildingTaxByLine, buildingTaxPerYear, businessTaxOf, collectTax, residentialTaxOf, shopSalesScale, type BusinessTaxTerms, type JobsFilled, type TaxByLine } from "./economy/tax";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";

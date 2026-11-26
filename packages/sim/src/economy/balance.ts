@@ -19,6 +19,10 @@ export type EconomySlider = (typeof ECONOMY_SLIDERS)[number];
 export const CHARGE_ZONES = ["residential", "commercial", "office", "industrial", "mixed"] as const;
 export type ChargeZone = (typeof CHARGE_ZONES)[number];
 
+/** The job kinds whose output, not sales, is taxed (M4-06). */
+export const BUSINESS_OUTPUTS = ["office", "industrial"] as const;
+export type BusinessOutput = (typeof BUSINESS_OUTPUTS)[number];
+
 /** Which index raises a price to 2026. */
 export type PriceIndex = "construction" | "general";
 
@@ -74,6 +78,7 @@ export interface EconomyBalanceFile {
   taxRates: Record<EconomySlider, EconomyRate>;
   developmentCharges: Record<ChargeZone, EconomyPriceRange>;
   developmentChargeGrowth: { shareAtMax: number; source: string; sourceUrl?: string; placeholder?: boolean; note?: string };
+  business: { salesPerJob: EconomyPrice; outputPerJob: Record<BusinessOutput, EconomyPrice>; source: string; placeholder?: boolean };
   value: {
     perSquareMetre: Record<EconomySlider, EconomyPrice>;
     landValueReference: number;
@@ -108,6 +113,8 @@ export interface Economy {
   developmentCharges: Record<ChargeZone, DevelopmentCharge>;
   /** The share of a zone's daily quota left with its charge at the top of its range (M4-08). */
   developmentChargeGrowth: { shareAtMax: number };
+  /** Whole 2026 dollars a year for each job filled: a shop job's sales, and an office or factory job's output (M4-06). */
+  business: { salesPerJob: number; outputPerJob: Record<BusinessOutput, number> };
   value: { perSquareMetre: Record<EconomySlider, number>; landValueReference: number; landValueWeight: number };
   floorSpace: { perResident: number; perJob: Record<JobKind, number> };
   eminentDomain: {
@@ -246,6 +253,19 @@ export function checkEconomyBalance(data: unknown): string[] {
     }),
   );
   errors.push(
+    ...blockProblems(data, "business", (b) => {
+      const out = priceProblems(b["salesPerJob"], "business.salesPerJob", toYear);
+      const perJob = b["outputPerJob"];
+      if (!isRecord(perJob)) out.push("business.outputPerJob is missing");
+      else {
+        for (const kind of BUSINESS_OUTPUTS) out.push(...priceProblems(perJob[kind], `business.outputPerJob.${kind}`, toYear));
+        out.push(...unknownKeys(perJob, BUSINESS_OUTPUTS, "business.outputPerJob"));
+      }
+      out.push(...sourceProblems(b, "business"), ...unknownKeys(b, ["salesPerJob", "outputPerJob", ...WORDS], "business"));
+      return out;
+    }),
+  );
+  errors.push(
     ...blockProblems(data, "value", (v) => {
       const out = perSlider(v["perSquareMetre"], "value.perSquareMetre", (p, at) => priceProblems(p, at, toYear));
       const ref = v["landValueReference"];
@@ -308,7 +328,7 @@ export function checkEconomyBalance(data: unknown): string[] {
       return out;
     }),
   );
-  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "developmentChargeGrowth", "value", "floorSpace", "eminentDomain", "loans", "creditLimit"], "the file"));
+  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "developmentChargeGrowth", "business", "value", "floorSpace", "eminentDomain", "loans", "creditLimit"], "the file"));
   return errors;
 }
 
@@ -345,6 +365,10 @@ export function resolveEconomy(data: unknown): Economy {
       }),
     ) as Record<ChargeZone, DevelopmentCharge>,
     developmentChargeGrowth: { shareAtMax: file.developmentChargeGrowth.shareAtMax },
+    business: {
+      salesPerJob: at(file.business.salesPerJob),
+      outputPerJob: { office: at(file.business.outputPerJob.office), industrial: at(file.business.outputPerJob.industrial) },
+    },
     value: {
       perSquareMetre: sliders(file.value.perSquareMetre, (p) => at(p)),
       landValueReference: file.value.landValueReference,
