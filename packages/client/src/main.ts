@@ -748,7 +748,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
    * The game day the budget overlay's figures were last worked out on, or
    * -1 for not since it was turned on (issue M4-18). They move as people
    * come and go, so while the overlay shows they are worked out again once a
-   * game day, and when roads or buildings change, and every cell coloured
+   * game day, and when roads change, and every cell coloured
    * again.
    */
   let budgetDay = -1;
@@ -762,7 +762,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
     view.revalueCells();
   };
   const showCells = (update: MirrorUpdate) => {
-    refreshBudgets(update.kind === "snapshot" || update.roadChunks.length > 0 || update.buildingChunks.length > 0);
+    // A new block, or one gone, is worked out at once; buildings and people wait for the day's refresh, so a growing city does not work it all out on every delta.
+    refreshBudgets(update.kind === "snapshot" || update.roadChunks.length > 0);
     const c = mirror.state?.centre;
     const centre = c ? `${c.x},${c.z},${c.weight}` : "";
     const moved = centre !== centreKey;

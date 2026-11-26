@@ -128,10 +128,10 @@ describe("the budget overlay on the zoning overlay's meshes", () => {
     layer.update(camera, Infinity);
     expect(layer.stats()).toMatchObject({ zoned: 6, totalRebuilt: ALL });
 
-    // The budget colouring builds the chunk again, with the four cells under buildings.
+    // The budget colouring builds the chunk again, with the four cells under buildings, and every chunk that had no mesh.
     layer.setColouring("budget");
     layer.update(camera, Infinity);
-    expect(layer.stats()).toMatchObject({ colouring: "budget", zoned: 10, pending: 0, totalRebuilt: ALL + 1 });
+    expect(layer.stats()).toMatchObject({ colouring: "budget", zoned: 10, pending: 0, totalRebuilt: 2 * ALL });
     const [mesh] = meshes(scene, "cells ");
     if (!mesh) throw new Error("no chunk mesh");
     const fill = fillOf(mesh);
@@ -142,7 +142,30 @@ describe("the budget overlay on the zoning overlay's meshes", () => {
 
     layer.setColouring("zoning");
     layer.update(camera, Infinity);
-    expect(layer.stats()).toMatchObject({ colouring: "zoning", zoned: 6, totalRebuilt: ALL + 2 });
+    expect(layer.stats()).toMatchObject({ colouring: "zoning", zoned: 6, totalRebuilt: 3 * ALL });
+    layer.dispose();
+  });
+
+  it("colours a chunk whose every cell is under a building, which zoning drew nothing of", () => {
+    const shapes = row(0, 4, 100, 100);
+    const source: CellSource = {
+      shapes: (c) => (c === 0 ? shapes : { slots: new Int32Array(0), statuses: new Uint8Array(0), corners: new Float64Array(0) }),
+      cells: () => ({ zone: new Uint8Array(4).fill(1), density: new Uint8Array(4).fill(1) }),
+      built: () => new Int32Array(4).fill(3),
+      marks: (_c, s) => new Uint8Array(s.slots.length),
+      budget: () => new Uint8Array(4).fill(budgetByte(BUDGET_SCALE.full)),
+    };
+    const scene = new Scene();
+    const layer = createCellLayer(scene, source, () => 0);
+    layer.setVisible(true);
+    layer.update(camera, Infinity);
+    layer.update(camera, Infinity);
+    expect(meshes(scene, "cells ")).toHaveLength(0);
+    layer.setColouring("budget");
+    layer.update(camera, Infinity);
+    const [mesh] = meshes(scene, "cells ");
+    if (!mesh) throw new Error("the built-up chunk has no mesh for the budget overlay");
+    expect([...fillOf(mesh).subarray(0, 4)]).toEqual([...rgb(budgetColour(1)), 255]);
     layer.dispose();
   });
 

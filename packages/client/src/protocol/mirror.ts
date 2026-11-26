@@ -55,6 +55,7 @@ import {
   copyBudget,
   copyDemand,
   ZONING_BALANCE,
+  CHUNKS_PER_SIDE,
   countZoneJobsWith,
   holdsHomes,
   reachableRoomWith,
@@ -65,7 +66,7 @@ import {
 } from "@city-council/sim";
 import { countRoom, roomAfter, roomBefore } from "./room";
 import { budgetByte } from "../render/cell-geometry";
-import { blockContaining, cellChunkOf } from "./block-at";
+import { blockContaining, blockOutlines, cellChunkOf, type BlockOutline } from "./block-at";
 import type { ClientTransport } from "./transport";
 
 /** Deeply read-only view of sim state. The client never writes it. */
@@ -160,6 +161,9 @@ export class SimMirror {
   /** The budget overlay's figures as last worked out (`refreshBudgets`), and the time that took. Derived, never state. */
   private budgets: BlockBudgets | null = null;
   private budgetsMs = 0;
+  /** The blocks' outlines for `budgetAt`, read again on the first look after the roads change. */
+  private outlines: { roads: number; list: BlockOutline[] } | null = null;
+  private roadsSeen = 0;
 
   constructor(transport: ClientTransport, playerId: string) {
     this.transport = transport;
@@ -448,14 +452,34 @@ export class SimMirror {
     const cell = cellAt(state, x, z);
     let area: number;
     if (cell) {
-      const chunk = cellChunkOf(x, z);
+      const chunk = this.chunkListing(cell.index, x, z);
       area = budgetAreasOfSlots(state, [cell.index], chunk)[0] ?? -1 - chunk;
     } else {
-      const block = blockContaining(state.roads, x, z);
+      if (!this.outlines || this.outlines.roads !== this.roadsSeen) this.outlines = { roads: this.roadsSeen, list: blockOutlines(state.roads) };
+      const block = blockContaining(this.outlines.list, x, z);
       area = block >= 0 ? block : -1 - cellChunkOf(x, z);
     }
     const budget = areaBudget(budgets, area);
     return budget ? { area, budget } : null;
+  }
+
+  /**
+   * The chunk whose cells list slot `slot`, so the readout names the open
+   * ground the overlay coloured the cell by: the chunk under (x, z) or one
+   * next to it, for a cell near a chunk's edge.
+   */
+  private chunkListing(slot: number, x: number, z: number): number {
+    const home = cellChunkOf(x, z);
+    const ci = home % CHUNKS_PER_SIDE;
+    const cj = (home - ci) / CHUNKS_PER_SIDE;
+    for (const [di, dj] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      const i = ci + di;
+      const j = cj + dj;
+      if (i < 0 || j < 0 || i >= CHUNKS_PER_SIDE || j >= CHUNKS_PER_SIDE) continue;
+      const slots = this.cellShapesInChunk(j * CHUNKS_PER_SIDE + i)?.slots;
+      if (slots?.includes(slot)) return j * CHUNKS_PER_SIDE + i;
+    }
+    return home;
   }
 
   /** The land value of the zoning cell at (x, z), its parts, and the type of road it fronts, or null where there is no cell. */
@@ -538,6 +562,7 @@ export class SimMirror {
         this.settleFromSnapshot(message.state);
         this.skipSeqs(message.state);
         this.current = message.state;
+        this.roadsSeen++;
         this.roomTally = countRoom(message.state.buildings);
         this.occupancy = countOccupancy(message.state);
         this.logFrom = message.logFrom;
@@ -609,6 +634,7 @@ export class SimMirror {
     let roadNodes: readonly number[] = [];
     let roadSegs: readonly number[] = [];
     if (delta.roads) {
+      this.roadsSeen++;
       const applied = applyRoadDelta(state.roads, delta.roads);
       if (typeof applied === "string") {
         this.outOfStep();

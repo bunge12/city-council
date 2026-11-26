@@ -567,7 +567,10 @@ export function createCellLayer(parent: Object3D, source: CellSource, height: (x
     },
     setColouring(next) {
       if (next === colouring) return;
+      // A chunk whose every cell is under a building drew nothing for zoning or land value, so has no mesh to colour: build it for budget, which draws them, and the other way.
+      const crossing = (next === "budget") !== (colouring === "budget");
       colouring = next;
+      if (crossing) for (let c = 0; c < chunks.length; c++) if (!chunks[c]) dirty.add(c);
       hatching.value = next === "zoning" ? 1 : 0;
       for (let c = 0; c < chunks.length; c++) restale(c);
       stats = { ...stats, colouring, pending: dirty.size + stale.size };

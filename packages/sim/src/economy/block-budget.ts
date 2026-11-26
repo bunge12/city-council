@@ -19,6 +19,9 @@
 // its middle's. So a cul-de-sac on open ground still shows, as part of its
 // chunk's figure. A bridge or a tunnel bounds no block, so its upkeep goes
 // to its chunk too.
+// A road with no link to the roads round the block it stands in, a piece of
+// network of its own with no loop, bounds no block either, so it and the
+// buildings along it count toward their chunk like any open ground.
 //
 // Every figure is derived on request from the blocks, the tax function and
 // the upkeep function. Nothing of it is in state. The blocks' and chunks'

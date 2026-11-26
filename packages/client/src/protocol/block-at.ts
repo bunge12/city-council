@@ -9,33 +9,73 @@ import { CHUNKS_PER_SIDE, CHUNK_SIZE, blockIndexOf, listBlocks, quadPoint, segme
 /** Points along each curved segment of a boundary. A straight one is its two ends. */
 const CURVE_STEPS = 8;
 
-/** Whether (x, z) is inside `block`, by the even-odd rule along its boundary. A dead end inside it is walked out and back, so it crosses a ray twice and changes nothing. */
-export function inBlock(net: RoadNetwork, block: Block, x: number, z: number): boolean {
-  let inside = false;
+/** One block's boundary as a closed run of points, and its box. */
+export interface BlockOutline {
+  id: number;
+  area: number;
+  xs: Float64Array;
+  zs: Float64Array;
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+}
+
+/** `block`'s boundary as points, curves followed through `CURVE_STEPS` points. A dead end inside it is walked out and back. */
+function outlineOf(net: RoadNetwork, block: Block): BlockOutline {
+  const xs: number[] = [];
+  const zs: number[] = [];
   for (let i = 0; i < block.segments.length; i++) {
-    const seg = block.segments[i] ?? 0;
-    const q = segmentQuad(net, seg);
+    const q = segmentQuad(net, block.segments[i] ?? 0);
     const forward = block.forward[i] ?? true;
     const straight = q.cx === (q.ax + q.bx) / 2 && q.cz === (q.az + q.bz) / 2;
     const steps = straight ? 1 : CURVE_STEPS;
-    let p = quadPoint(q, forward ? 0 : 1);
-    for (let k = 1; k <= steps; k++) {
-      const n = quadPoint(q, forward ? k / steps : 1 - k / steps);
-      if (p.z > z !== n.z > z && x < p.x + ((z - p.z) * (n.x - p.x)) / (n.z - p.z)) inside = !inside;
-      p = n;
+    for (let k = 0; k < steps; k++) {
+      const p = quadPoint(q, forward ? k / steps : 1 - k / steps);
+      xs.push(p.x);
+      zs.push(p.z);
     }
+  }
+  return {
+    id: block.id,
+    area: block.area,
+    xs: Float64Array.from(xs),
+    zs: Float64Array.from(zs),
+    minX: Math.min(...xs),
+    minZ: Math.min(...zs),
+    maxX: Math.max(...xs),
+    maxZ: Math.max(...zs),
+  };
+}
+
+/** Every block of `net` as an outline with its box. Read it again when the roads change. */
+export function blockOutlines(net: RoadNetwork): BlockOutline[] {
+  return listBlocks(blockIndexOf(net)).map((b) => outlineOf(net, b));
+}
+
+/** Whether (x, z) is inside `o`, by the even-odd rule: a dead end crosses a ray twice and changes nothing. */
+export function inOutline(o: BlockOutline, x: number, z: number): boolean {
+  if (x < o.minX || x > o.maxX || z < o.minZ || z > o.maxZ) return false;
+  let inside = false;
+  const n = o.xs.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const px = o.xs[j] ?? 0;
+    const pz = o.zs[j] ?? 0;
+    const qx = o.xs[i] ?? 0;
+    const qz = o.zs[i] ?? 0;
+    if (pz > z !== qz > z && x < px + ((z - pz) * (qx - px)) / (qz - pz)) inside = !inside;
   }
   return inside;
 }
 
-/** The id of the smallest block of `net` round (x, z), or -1 for none. */
-export function blockContaining(net: RoadNetwork, x: number, z: number): number {
+/** The id of the smallest of `outlines` round (x, z), or -1 for none. */
+export function blockContaining(outlines: readonly BlockOutline[], x: number, z: number): number {
   let best = -1;
   let bestArea = Infinity;
-  for (const block of listBlocks(blockIndexOf(net))) {
-    if (block.area < bestArea && inBlock(net, block, x, z)) {
-      best = block.id;
-      bestArea = block.area;
+  for (const o of outlines) {
+    if (o.area < bestArea && inOutline(o, x, z)) {
+      best = o.id;
+      bestArea = o.area;
     }
   }
   return best;
