@@ -489,13 +489,13 @@ describe("over game decades", () => {
     const trough = Math.min(...mean);
     const troughYear = mean.indexOf(trough) + 1;
     const average = (ys: number[]) => ys.reduce((x, y) => x + y, 0) / ys.length;
-    // The dip: a twentieth or more of the street gone as the children leave, its lowest over the first two decades or so.
-    // Averaged over four streets (M4-08) the dip reads 0.90 to 0.93 of the fill, on this build and on the one
-    // before it. The tenth or more the test asked before held on one street that happened to fill to 150.
-    expect(trough).toBeLessThan(0.95 * filled);
+    // The dip: about a twelfth of the street gone as the children leave, its lowest over the first two decades or so.
+    // Averaged over four streets (M4-08) the dip reads 0.92 of the fill, and 0.905 on the build before; the
+    // tenth or more the test asked before held on one street that happened to fill to 150.
+    expect(trough).toBeLessThan(0.94 * filled);
     expect(troughYear).toBeGreaterThanOrEqual(5);
     expect(troughYear).toBeLessThanOrEqual(25);
-    expect(mean[19] ?? 0).toBeLessThan(filled);
+    expect(mean[19] ?? 0).toBeLessThan(0.95 * filled);
     // Then the climb back: the last ten years sit above the ten around the
     // trough. The climb is small, the replacement rate against the children
     // leaving: about 2% of the street since M3-21. A street that dips and
@@ -504,9 +504,10 @@ describe("over game decades", () => {
     const late = average(mean.slice(-10));
     expect(mean.length - 10).toBeGreaterThanOrEqual(troughYear + 4);
     expect(late).toBeGreaterThan(1.01 * around);
-    // And it settles about where it filled, not far past it: 0.985 and 1.01 of
-    // the fill over four streets. One street's 0.92 in the M3 review was its fill.
-    expect(late).toBeLessThan(1.05 * filled);
+    // And it settles below where it filled: 0.967 of the fill over four
+    // streets (M4-08), 0.985 on the build before. One street's 0.92 in the M3
+    // review was that street's high fill.
+    expect(late).toBeLessThan(filled);
   }, 180_000);
 
   it("finds a city held at steady demand keeps its population for fifty game years, and each year's counts add up to its change (scenario test)", () => {

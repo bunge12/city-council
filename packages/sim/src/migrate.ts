@@ -3,7 +3,7 @@ import { TIME_BALANCE } from "./calendar";
 import { NO_LEAVING, createPops } from "./pops/pops";
 import { STAT_TOTALS, emptyMoney, recountTotals, statsFor } from "./stats/stats";
 import { ECONOMY, ECONOMY_SLIDERS } from "./economy/balance";
-import { LINE, chargesAtDefaults } from "./economy/budget";
+import { chargesAtDefaults } from "./economy/budget";
 import { DEMAND_PARTS, createDemand } from "./demand/demand";
 import { placeConnections } from "./roads/connections";
 import { NO_TIER, createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
@@ -168,6 +168,8 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
 
 /** The ledger lines of version 30 and 31: 18, with no mixed charge line. */
 const VERSION_31_LINES = 18;
+/** Where version 32 puts the mixed charge line: after the four tax and four charge lines. Fixed, so a later change of lines cannot move it. */
+const VERSION_32_MIXED_LINE = 8;
 
 /** What version 30 gave a city saved before the treasury: `treasury` as its opening balance, an empty ledger of version 30's lines and the tax rates at their defaults. */
 function version30Budget(treasury: number): Record<string, unknown> {
@@ -182,7 +184,7 @@ function version30Budget(treasury: number): Record<string, unknown> {
 
 /** `ledger` of version 31's lines with the mixed charge line version 32 adds, at 0, in its place after the industrial charge. */
 function withMixedChargeLine(ledger: Float64Array): Float64Array {
-  const at = LINE.chargeMixed;
+  const at = VERSION_32_MIXED_LINE;
   const out = new Float64Array(ledger.length + 1);
   out.set(ledger.subarray(0, at), 0);
   out.set(ledger.subarray(at), at + 1);

@@ -5,14 +5,13 @@
 // through `withoutSpending`, since a state from before any earlier version
 // is from before this one.
 
-import { LINE } from "../src/economy/budget";
-
 type Loose = Record<string, unknown>;
 
 /** `ledger` without the mixed charge line, which must hold 0. */
 function withoutMixedLine(ledger: unknown): unknown {
   if (!(ledger instanceof Float64Array) || ledger.length !== 19) return ledger;
-  const at = LINE.chargeMixed;
+  // Version 32's place for the mixed charge line, as migrate.ts fixes it.
+  const at = 8;
   if (ledger[at] !== 0) throw new Error("a city from before version 32 paid no mixed development charge");
   return Float64Array.from([...ledger.subarray(0, at), ...ledger.subarray(at + 1)]);
 }

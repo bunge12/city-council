@@ -183,15 +183,21 @@ export function dayQuotas(demand: DemandState, shares?: Float64Array): number[] 
 /**
  * The chance, by zone number, with index 0 unused, that each zone builds
  * one more building than its quota on the day's last tick: the fraction
- * its want leaves over, or 0 where its quota was cut by `growthPerDayMax`.
+ * its want leaves over, or 0 where `growthPerDayMax` has no room left for
+ * it once the zones before it took their quotas and their extra ones.
  */
 export function extraChances(demand: DemandState, shares?: Float64Array): number[] {
   const wants = dayWants(demand, shares);
-  const quotas = dayQuotas(demand, shares);
-  return wants.map((want, zone) => {
+  const out = [0];
+  let left = BUILDINGS_BALANCE.growthPerDayMax;
+  for (let zone = 1; zone < wants.length; zone++) {
+    const want = wants[zone] ?? 0;
     const whole = Math.floor(want);
-    return zone > 0 && quotas[zone] === whole ? want - whole : 0;
-  });
+    const fits = whole + 1 <= left;
+    out.push(fits ? want - whole : 0);
+    left -= Math.min(whole, left) + (fits && want > whole ? 1 : 0);
+  }
+  return out;
 }
 
 /**

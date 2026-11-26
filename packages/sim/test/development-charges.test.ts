@@ -30,12 +30,17 @@ import {
   submit,
   validateCommand,
   createDemand,
+  deserialize,
+  hashState,
+  replay,
+  serialize,
   createState,
   type Command,
   type DemandState,
   type SimState,
 } from "../src/index";
 import { growOne } from "../src/buildings/grower";
+import { enqueue } from "../src/commands";
 import { redevelop } from "../src/buildings/redevelop";
 import { holdDemand, setBars } from "./demand-helper";
 import { watchTreasury } from "./treasury-helper";
@@ -361,5 +366,34 @@ describe("how a charge slows the grower", () => {
     expect(top.charges).toBeGreaterThan(0);
     expect(zero.buildings).toBeGreaterThan(15);
     expect(top.buildings).toBeLessThan(zero.buildings * 0.6);
+  });
+});
+
+describe("a city that sets its charges as it grows", () => {
+  /** A street zoned R1 from the stub, grown on the pull from outside, with the residential charge raised mid-day and lowered on a later one. */
+  function session(): SimState {
+    const { state } = zonedStreet("residential", 1);
+    while (state.tick < 5 * DAY + DAY / 2) step(state);
+    ok(state, "SetDevelopmentCharge", { zone: "residential", rate: ECONOMY.developmentCharges.residential.max });
+    while (state.tick < 9 * DAY + 37) step(state);
+    ok(state, "SetDevelopmentCharge", { zone: "residential", rate: 0 });
+    while (state.tick < 14 * DAY) step(state);
+    return state;
+  }
+
+  it("replays its log to the same city, and hashes the same saved and loaded mid-day", () => {
+    const live = session();
+    expect(live.log.filter((e) => e.type === "SetDevelopmentCharge")).toHaveLength(2);
+    expect(charged(live, RESIDENTIAL) + (live.budget.lastMonth[LINE.chargeResidential] ?? 0)).toBeGreaterThan(0);
+    expect(hashState(replay(SEED, live.log, live.tick))).toBe(hashState(live));
+    // Saved and loaded at a tick between the two commands, mid-day, it steps on to the same city.
+    let state = createState(SEED);
+    let next = 0;
+    while (state.tick < live.tick) {
+      if (state.tick === 7 * DAY + 41) state = deserialize(serialize(state)).state;
+      for (let e = live.log[next]; e && e.tick <= state.tick; e = live.log[++next]) enqueue(state, e);
+      step(state);
+    }
+    expect(hashState(state)).toBe(hashState(live));
   });
 });
