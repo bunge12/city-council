@@ -12,6 +12,10 @@ import { ROAD_BALANCE } from "../roads/balance";
 export const ECONOMY_SLIDERS = ["residential", "commercial", "office", "industrial"] as const;
 export type EconomySlider = (typeof ECONOMY_SLIDERS)[number];
 
+/** The job kinds whose output, not sales, is taxed (M4-06). */
+export const BUSINESS_OUTPUTS = ["office", "industrial"] as const;
+export type BusinessOutput = (typeof BUSINESS_OUTPUTS)[number];
+
 /** Which index raises a price to 2026. */
 export type PriceIndex = "construction" | "general";
 
@@ -66,6 +70,7 @@ export interface EconomyBalanceFile {
   overdraft: EconomyPrice;
   taxRates: Record<EconomySlider, EconomyRate>;
   developmentCharges: Record<EconomySlider, EconomyPriceRange>;
+  business: { salesPerJob: EconomyPrice; outputPerJob: Record<BusinessOutput, EconomyPrice>; source: string; placeholder?: boolean };
   value: {
     perSquareMetre: Record<EconomySlider, EconomyPrice>;
     landValueReference: number;
@@ -98,6 +103,8 @@ export interface Economy {
   overdraft: number;
   taxRates: Record<EconomySlider, { default: number; min: number; max: number }>;
   developmentCharges: Record<EconomySlider, DevelopmentCharge>;
+  /** Whole 2026 dollars a year for each job filled: a shop job's sales, and an office or factory job's output (M4-06). */
+  business: { salesPerJob: number; outputPerJob: Record<BusinessOutput, number> };
   value: { perSquareMetre: Record<EconomySlider, number>; landValueReference: number; landValueWeight: number };
   floorSpace: { perResident: number; perJob: Record<JobKind, number> };
   eminentDomain: {
@@ -228,6 +235,19 @@ export function checkEconomyBalance(data: unknown): string[] {
   errors.push(...perSlider(data["taxRates"], "taxRates", rateProblems));
   errors.push(...perSlider(data["developmentCharges"], "developmentCharges", (v, at) => rangeProblems(v, at, toYear)));
   errors.push(
+    ...blockProblems(data, "business", (b) => {
+      const out = priceProblems(b["salesPerJob"], "business.salesPerJob", toYear);
+      const perJob = b["outputPerJob"];
+      if (!isRecord(perJob)) out.push("business.outputPerJob is missing");
+      else {
+        for (const kind of BUSINESS_OUTPUTS) out.push(...priceProblems(perJob[kind], `business.outputPerJob.${kind}`, toYear));
+        out.push(...unknownKeys(perJob, BUSINESS_OUTPUTS, "business.outputPerJob"));
+      }
+      out.push(...sourceProblems(b, "business"), ...unknownKeys(b, ["salesPerJob", "outputPerJob", ...WORDS], "business"));
+      return out;
+    }),
+  );
+  errors.push(
     ...blockProblems(data, "value", (v) => {
       const out = perSlider(v["perSquareMetre"], "value.perSquareMetre", (p, at) => priceProblems(p, at, toYear));
       const ref = v["landValueReference"];
@@ -290,7 +310,7 @@ export function checkEconomyBalance(data: unknown): string[] {
       return out;
     }),
   );
-  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "value", "floorSpace", "eminentDomain", "loans", "creditLimit"], "the file"));
+  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "business", "value", "floorSpace", "eminentDomain", "loans", "creditLimit"], "the file"));
   return errors;
 }
 
@@ -321,6 +341,10 @@ export function resolveEconomy(data: unknown): Economy {
     overdraft: at(file.overdraft),
     taxRates: sliders(file.taxRates, (r) => ({ default: r.default, min: r.min, max: r.max })),
     developmentCharges: sliders(file.developmentCharges, (c) => ({ default: at(c), min: at(c, c.min), max: at(c, c.max) })),
+    business: {
+      salesPerJob: at(file.business.salesPerJob),
+      outputPerJob: { office: at(file.business.outputPerJob.office), industrial: at(file.business.outputPerJob.industrial) },
+    },
     value: {
       perSquareMetre: sliders(file.value.perSquareMetre, (p) => at(p)),
       landValueReference: file.value.landValueReference,
