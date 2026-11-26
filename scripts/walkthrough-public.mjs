@@ -3,10 +3,10 @@
 //
 //   node scripts/walkthrough-public.mjs xvfb-run -a pnpm e2e --project walkthrough ...
 //
-// It runs the command it is given and, every 20 seconds, asks GitHub for the
-// newest github-pages deployment. When that is a commit other than this
-// run's, the public address serves the newer build or soon will, so the
-// walkthrough would no longer test the commit it names. The script then
+// It runs the command it is given and, every 20 seconds, asks GitHub whether
+// a github-pages deployment newer than this run's is going out or is out.
+// When one is, the public address serves the newer build or will within
+// seconds, so the walkthrough would no longer test the commit it names. The script then
 // stops the command and exits 0 with a notice, and the job ends green.
 //
 // deploy.yml used to cancel the walkthrough through a concurrency group. A
@@ -39,26 +39,36 @@ const repo = process.env.GITHUB_REPOSITORY;
 const sha = process.env.GITHUB_SHA;
 const token = process.env.GITHUB_TOKEN;
 
-/** The commit of the newest github-pages deployment, or null when unknown. */
-async function deployed() {
-  if (!repo || !sha) return null;
-  try {
-    const response = await fetch(`${api}/repos/${repo}/deployments?environment=github-pages&per_page=1`, {
-      headers: { accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) return null;
-    const newest = (await response.json())[0];
-    return typeof newest?.sha === "string" ? newest.sha : null;
-  } catch {
-    return null;
-  }
+async function ask(path) {
+  const response = await fetch(`${api}/repos/${repo}/${path}`, {
+    headers: { accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`${path}: ${response.status}`);
+  return response.json();
 }
 
-/** The newer commit when one has replaced this run's on the site. */
+/**
+ * The newer commit when one has replaced this run's on the site, or null.
+ *
+ * GitHub records a deployment as soon as its deploy job is created, minutes
+ * before that job gets through the `pages` group and a runner, and the site
+ * serves this run's commit all that time. So a deployment counts only once
+ * its newest status says it is going out or is out. The list is newest first
+ * and stops at this run's own deployment.
+ */
 async function replacedBy() {
-  const newest = await deployed();
-  return newest !== null && newest !== sha ? newest : null;
+  if (!repo || !sha) return null;
+  try {
+    for (const deployment of await ask("deployments?environment=github-pages&per_page=10")) {
+      if (deployment.sha === sha) return null;
+      const [status] = await ask(`deployments/${deployment.id}/statuses?per_page=1`);
+      if (status?.state === "in_progress" || status?.state === "success") return deployment.sha;
+    }
+  } catch {
+    // Not answered: carry on as not replaced.
+  }
+  return null;
 }
 
 function replaced(by, how) {
