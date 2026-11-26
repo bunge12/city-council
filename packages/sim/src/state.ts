@@ -20,7 +20,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 32;
+export const SNAPSHOT_VERSION = 33;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -216,7 +216,7 @@ export function createBareState(seed: number): SimState {
     budget: createBudget(),
     // After it, where the version 31 migration puts it.
     logSpent: [],
-    // After it, where the version 32 migration puts it.
+    // After it, where the version 33 migration puts it.
     expropriations: [],
   };
 }

@@ -1,5 +1,5 @@
 {
-  "_about": "The economy (PRD, \"M4 Economy\", \"Eminent domain\" and \"Prices in 2026 dollars\"; M4-01). Every number M4 runs on, read by the issues after M4-01. Money is whole dollars. A price is an `amount` in whole dollars of its `sourceYear`, with a `source`, and `index` says how it is raised to 2026: `construction` by the highway construction index in roads.json, `general` by `generalEscalation` here, since property values, relocation payments, charges and grants are not construction. A figure with no usable source says `placeholder: true`, and its `source` says what it stands in for. Shares and rates are fractions, 0.01 for one percent, and each says where it came from the same way. `taxRates` are the four sliders' defaults and ranges: residential is a yearly rate on property value, commercial a rate on sales, office and industrial a rate on output, and mixed pays the residential and commercial rates (M4.md). `developmentCharges` are dollars per square metre of floor space a new building adds, a default and a range per slider; mixed pays the residential charge on its homes and the commercial one on its shops. A building's value (`value`, economy/value.ts) is its floor space by use times that use's dollars per square metre, times a land value factor: `1 - landValueWeight + landValueWeight × landValue / landValueReference`, so at the reference land value a square metre is worth its price, and the weight is the share of the price that follows the land. Floor space follows room and jobs, not lot area: `perResident` square metres for each resident a building holds room for, and `perJob` for each job by kind, so a mixed building adds its homes and its shops. `eminentDomain` prices clearing an occupied building: its value, plus `relocationPerResident` for each resident and `relocationPerJob` for each job it holds room for, plus `premium.share` times the value. A vacant or abandoned building costs `demolitionPerSquareMetre` of its floor space only. A building is occupied while somebody lives or works in it, and the relocation payments count the residents and the jobs filled that clearing it displaces. Clearing something the city owns costs its demolition less `refundShare.share` of its build cost. `expropriationRecords.max` is the most expropriation records state keeps (M4-09): one for each occupied building cleared by the city, each kept a game year. `loans` are what the city may borrow: at most `maxOpen` at once, each on one of `offers`. The credit limit is `perResident` dollars for each resident plus `lastYearTaxMultiple` times last year's tax income. `generalEscalation` is one year of the consumer price index, the 12 months to September 2026, applied to every year before 2026 as roads.json's index is; that is a stand-in for the years before, which only matters for prices more than a year old. Every number here is a starting value to tune in M4-19.",
+  "_about": "The economy (PRD, \"M4 Economy\", \"Eminent domain\" and \"Prices in 2026 dollars\"; M4-01). Every number M4 runs on, read by the issues after M4-01. Money is whole dollars. A price is an `amount` in whole dollars of its `sourceYear`, with a `source`, and `index` says how it is raised to 2026: `construction` by the highway construction index in roads.json, `general` by `generalEscalation` here, since property values, relocation payments, charges and grants are not construction. A figure with no usable source says `placeholder: true`, and its `source` says what it stands in for. Shares and rates are fractions, 0.01 for one percent, and each says where it came from the same way. `taxRates` are the four sliders' defaults and ranges: residential is a yearly rate on property value, commercial a rate on sales, office and industrial a rate on output, and mixed pays the residential and commercial rates (M4.md). `developmentCharges` are dollars per square metre of floor space a new building adds, a default and a range per slider; mixed pays the residential charge on its homes and the commercial one on its shops. `business` is what a shop sells and an office or factory makes a year for each job filled, the base the commercial, office and industrial rates are charged on (M4-06); mixed pays the commercial rate on all its jobs, its offices' output included. A building's value (`value`, economy/value.ts) is its floor space by use times that use's dollars per square metre, times a land value factor: `1 - landValueWeight + landValueWeight × landValue / landValueReference`, so at the reference land value a square metre is worth its price, and the weight is the share of the price that follows the land. Floor space follows room and jobs, not lot area: `perResident` square metres for each resident a building holds room for, and `perJob` for each job by kind, so a mixed building adds its homes and its shops. `eminentDomain` prices clearing an occupied building: its value, plus `relocationPerResident` for each resident and `relocationPerJob` for each job it holds room for, plus `premium.share` times the value. A vacant or abandoned building costs `demolitionPerSquareMetre` of its floor space only. A building is occupied while somebody lives or works in it, and the relocation payments count the residents and the jobs filled that clearing it displaces. Clearing something the city owns costs its demolition less `refundShare.share` of its build cost. `expropriationRecords.max` is the most expropriation records state keeps (M4-09): one for each occupied building cleared by the city, each kept a game year. `loans` are what the city may borrow: at most `maxOpen` at once, each on one of `offers`. The credit limit is `perResident` dollars for each resident plus `lastYearTaxMultiple` times last year's tax income. `generalEscalation` is one year of the consumer price index, the 12 months to September 2026, applied to every year before 2026 as roads.json's index is; that is a stand-in for the years before, which only matters for prices more than a year old. Every number here is a starting value to tune in M4-19.",
   "generalEscalation": {
     "toYear": 2026,
     "annualFactor": 1.037,
@@ -88,6 +88,34 @@
       "source": "Placeholder. Dollars per square metre of floor space added, lower than shops and offices since factories cover more ground for each job.",
       "placeholder": true
     }
+  },
+  "business": {
+    "salesPerJob": {
+      "amount": 451000,
+      "sourceYear": 2022,
+      "index": "general",
+      "source": "US Census Bureau, Annual Retail Trade Survey: US retail sales (NAICS 44-45) of $7,041.0 billion in 2022, over about 15.6 million retail jobs, $451,000 a job.",
+      "sourceUrl": "https://www.census.gov/programs-surveys/arts.html",
+      "placeholder": true,
+      "note": "The sales total has a source; the job count is the BLS retail trade figure for 2022 from memory, not a source read."
+    },
+    "outputPerJob": {
+      "office": {
+        "amount": 105000,
+        "sourceYear": 2025,
+        "index": "general",
+        "source": "Placeholder. A rate on output, which no real city levies, so the output is set to an office job's value: 56 square metres at $1,870, so an office pays at its rate about what a home of the same floor space pays at the residential rate. The 2025 price per square metre makes it a 2025 figure. Worked out by hand, so it does not follow either number if they change.",
+        "placeholder": true
+      },
+      "industrial": {
+        "amount": 225000,
+        "sourceYear": 2024,
+        "index": "general",
+        "source": "Placeholder. US manufacturing value added of about $2.9 trillion in 2024 over about 12.9 million manufacturing jobs, from memory of the BEA and BLS figures; no table was read.",
+        "placeholder": true
+      }
+    },
+    "source": "Business tax follows activity (PRD, \"M4 Economy\"). M4 has no trips or freight, so a shop's sales and an office's or factory's output follow its jobs filled (M4-06): `salesPerJob` dollars a year for each shop job filled, scaled down while the city's shop jobs filled are more than its residents' spending power keeps busy (demand.json), and `outputPerJob` for each office or factory job filled, a factory's only while its road reaches an outside connection. M5 swaps in trips and freight and keeps the rates."
   },
   "value": {
     "perSquareMetre": {

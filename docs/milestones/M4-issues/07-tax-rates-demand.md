@@ -13,6 +13,7 @@ The player sets four tax rates, and each one pushes back on the zone it taxes. S
 - The residential rate is an input to each pop's satisfaction, on its daily visit, with the weight in `pops.json`. A higher rate lowers the score, more for a wealthy pop, as the PRD's satisfaction section says
 - The rates go in the delta, and the protocol version goes up
 - The demand parts are state (`BarState.parts`), so a tax part on each bar bumps `SNAPSHOT_VERSION`, with a migration that adds it at zero and a test, as M3-10 did for satisfaction
+- Each bar's last part is what is already waiting (`homesFilling` or `jobsOpen`, #420), which takes away a share of what the other parts add above zero. The tax part goes before it in `DEMAND_PARTS`, so it is one of the parts the waiting part reads, and the systems that act on demand read it through `demandPull`
 
 ## Out of scope
 

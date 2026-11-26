@@ -16,6 +16,7 @@ import { collect, hold } from "./budget";
 import {
   POPS_BALANCE,
   TIME_BALANCE,
+  WAITING_PART,
   cellsSettled,
   cutPeople,
   popCount,
@@ -102,6 +103,8 @@ function reset(pops: PopState, k: number, bar: number): void {
   state.stats = structuredClone(stats);
   state.demand = structuredClone(demand);
   state.demand.residential.value = bar;
+  // With no waiting part, so departures read the bar as set (#420, `demandPull`).
+  state.demand.residential.parts[WAITING_PART.residential] = 0;
   state.tick = firstTick + k;
   popIndexOf(state);
 }

@@ -108,7 +108,7 @@ export interface UndoRecord {
    * How many buildings the command took (M4-09): a bulldoze's, and a new
    * road's or upgrade's, as its plan found them. Undo refuses a record that
    * took any, since buildings never come back. 0 for a ZoneCells, and for
-   * a record from before version 32, which kept no count.
+   * a record from before version 33, which kept no count.
    */
   took: number;
   /**

@@ -4,7 +4,9 @@ import { checkConnections, chooseConnectionSites } from "../src/roads/connection
 import { LEVEL_BRIDGE, NO_TIER, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 import { checkUndoHistory } from "../src/undo";
-import { createDemand } from "../src/demand/demand";
+import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "../src/demand/demand";
+import { WAITING_PART, demandPull } from "../src/demand/pull";
+import { withoutWaiting } from "./before-waiting";
 import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
 import { ECONOMY } from "../src/economy/balance";
 import { dailyShare, emptyBudget } from "../src/economy/budget";
@@ -35,13 +37,18 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
-  // Before version 32 nothing kept the expropriations (M4-09), and its
-  // migration gives an empty list. `state` gets the same in place.
-  if (version < 32) {
+  // Before version 33 nothing kept the expropriations (M4-09), and its
+  // migration gives an empty list, no building paid for and undo records that
+  // took none. `state` gets the same in place.
+  if (version < 33) {
     gone.push("expropriations");
     state.expropriations = [];
     state.buildings.paid.fill(0);
+    for (const record of state.undo) record.took = 0;
   }
+  // Before version 32 no bar had its waiting part (#420), and its migration
+  // gives each as 0. `state` gets the same in place.
+  if (version < 32) withNoWaiting(state);
   // Before version 31 nothing kept the money a command moved (M4-03), and
   // its migration gives every amount as 0. `state` gets the same in place.
   if (version < 31) {
@@ -63,12 +70,20 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 20) gone.push("demand");
   if (version < 26) gone.push("redevelopedToday");
   if (version < 27) gone.push("travelLast");
-  const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
-  // Before version 32 no building was marked paid for (M4-09).
-  if (version < 32 && kept["buildings"]) {
+  let kept: Record<string, unknown> = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  if (version < 32) kept = withoutWaiting(kept);
+  // Before version 33 no building was marked paid for, and no undo record counted what it took (M4-09).
+  if (version < 33 && kept["buildings"]) {
     const { paid, ...buildings } = kept["buildings"] as SimState["buildings"];
     void paid;
     kept["buildings"] = buildings;
+  }
+  if (version < 33 && Array.isArray(kept["undo"])) {
+    kept["undo"] = (kept["undo"] as Record<string, unknown>[]).map((record) => {
+      const { took, ...rest } = record;
+      void took;
+      return rest;
+    });
   }
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
@@ -152,6 +167,21 @@ function withOldMoney(state: SimState): SimState {
   return withNoSpending(state);
 }
 
+/**
+ * Gives `state`, in place, the demand the version 32 migration gives a city
+ * saved before it: each bar's waiting part at 0, the bar reading what it
+ * pulled (#420). Returns it.
+ */
+function withNoWaiting(state: SimState): SimState {
+  for (const bar of DEMAND_BARS) {
+    const b = state.demand[bar];
+    const name = WAITING_PART[bar];
+    b.value -= b.parts[name] ?? 0;
+    b.parts[name] = 0;
+  }
+  return state;
+}
+
 /** Gives `state`, in place, the amounts the version 31 migration gives a city saved before it, all 0, and returns it. */
 function withNoSpending(state: SimState): SimState {
   state.logSpent = state.log.map(() => 0);
@@ -217,7 +247,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(32);
+    expect(SNAPSHOT_VERSION).toBe(33);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -795,14 +825,39 @@ describe("migrateState", () => {
     expect(money(migrated)).toBe(treasury);
   });
 
-  it("upgrades a version 31 city by giving it an empty list of expropriations, and changes nothing else", () => {
+  it("upgrades a version 31 state by giving each demand bar its waiting part at 0, the bar reading what it pulled (#420)", () => {
+    const state = createState(5);
+    for (const bar of DEMAND_BARS) {
+      const names = DEMAND_PARTS[bar];
+      // A bar the waiting part was holding down: the first part pulls 30 and the waiting part takes 20 of it.
+      state.demand[bar] = { value: 10, parts: Object.fromEntries(names.map((name, i) => [name, i === 0 ? 30 : name === WAITING_PART[bar] ? -20 : 0])) };
+    }
+    const v31 = older(structuredClone(state), 31);
+    const saved = v31["demand"] as Record<string, { value: number; parts: Record<string, number> }>;
+    for (const bar of DEMAND_BARS) {
+      expect(WAITING_PART[bar] in (saved[bar]?.parts ?? {})).toBe(false);
+      expect(saved[bar]?.value).toBe(30);
+    }
+    const migrated = migrateState(v31);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    for (const bar of DEMAND_BARS) {
+      expect(Object.keys(migrated.demand[bar].parts)).toEqual([...DEMAND_PARTS[bar]]);
+      expect(migrated.demand[bar].parts[WAITING_PART[bar]]).toBe(0);
+      expect(migrated.demand[bar].value).toBe(30);
+      expect(demandPull(migrated.demand, bar)).toBe(30);
+    }
+    expect(migrated).toEqual(withNoWaiting(state));
+    expect(hashState(migrated)).toBe(hashState(state));
+  });
+
+  it("upgrades a version 32 city by giving it an empty list of expropriations, no building paid for and undo records that took none, and changes nothing else", () => {
     const state = createState(SEED_WITH_FLAT_GROUND);
     expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
     step(state);
     state.expropriations = [{ tick: 0, x: 4300, z: 4620, people: 4, jobs: 0, playerId: "p1" }];
-    const v31 = older(structuredClone(state), 31);
-    expect("expropriations" in v31).toBe(false);
-    const migrated = migrateState(v31);
+    const v32 = older(structuredClone(state), 32);
+    expect("expropriations" in v32).toBe(false);
+    const migrated = migrateState(v32);
     expect(migrated.version).toBe(SNAPSHOT_VERSION);
     expect(migrated.expropriations).toEqual([]);
     expect(Object.keys(migrated)).toEqual(Object.keys(state));

@@ -17,6 +17,7 @@ import {
   ZONING_BALANCE,
   buildingCount,
   connectionEnd,
+  countZoneJobs,
   createState,
   createStats,
   homeRoom,
@@ -26,6 +27,8 @@ import {
   segmentTypeId,
   step,
   submit,
+  workplacesHeldBy,
+  type DemandBar,
   type SimState,
 } from "@city-council/sim";
 import { countRoom, roomBefore } from "../src/protocol/room";
@@ -34,7 +37,7 @@ import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror } from "../src/protocol/mirror";
 import { memoryTransportPair } from "../src/protocol/transport";
 import { MIXED_NOTE } from "../src/ui/ZoneReadout";
-import { PART_WORDS, formatDemandTitle, formatHomesWaiting, formatParts, formatPopulationTitle, populationTrend, trendArrow } from "../src/ui/top-figures";
+import { PART_WORDS, formatDemandTitle, formatHomesWaiting, formatWaiting, formatParts, formatPopulationTitle, populationTrend, trendArrow } from "../src/ui/top-figures";
 
 const SEED = 2026;
 const RESIDENTIAL = ZONING_BALANCE.zones.findIndex((z) => z.id === "residential") + 1;
@@ -177,7 +180,7 @@ describe("the room the homes hold", () => {
  * zoned R3 six cells deep on both sides, so towers grow and fill side by
  * side and hold new homes back while they do.
  */
-function towerCity(): SimState {
+function towerCity(north = "residential", south = "residential"): SimState {
   const state = createState(SEED);
   const seq = { n: 0 };
   const r = state.roads;
@@ -192,11 +195,12 @@ function towerCity(): SimState {
   run(state, "BuildRoad", { from: { x, z }, to: { x: x + dx * cell * places, z: z + dz * cell * places }, type: "street" }, seq);
   // Each side in two halves: a ZoneCells rect is at most 256 m a side.
   for (const side of [1, -1]) {
+    const zone = side === 1 ? north : south;
     for (const p0 of [0, places / 2]) {
       const off = side * (5 + (cell * 6) / 2);
       const [a, b] = [cell * p0 + 2, cell * (p0 + places / 2) - 2];
       const rect = { from: { x: x + dx * a - dz * off, z: z + dz * a + dx * off }, to: { x: x + dx * b - dz * off, z: z + dz * b + dx * off }, width: cell * 6 - 4 };
-      run(state, "ZoneCells", { zone: "residential", density: 3, rects: [rect] }, seq);
+      run(state, "ZoneCells", { zone, density: zone === "residential" ? 3 : 1, rects: [rect] }, seq);
     }
   }
   return state;
@@ -236,6 +240,48 @@ describe("the homes waiting to fill", () => {
     }
     expect(held).toBeGreaterThan(0);
     expect(free).toBeGreaterThan(0);
+  });
+});
+
+describe("the jobs waiting to fill (#420)", () => {
+  it("is null before a snapshot, for every bar", () => {
+    const { client } = memoryTransportPair();
+    const mirror = new SimMirror(client, "p1");
+    for (const bar of ["residential", "commercial", "office", "industrial"] as const) expect(mirror.waitingFor(bar)).toBeNull();
+  });
+
+  it("agrees with the sim's count of a zone's open jobs while the grower holds it, and is null while it does not", async () => {
+    // Shops with nobody to staff them: every job open. With no floor on open jobs, that holds commercial back.
+    const was = DEMAND_BALANCE.openJobsMin;
+    DEMAND_BALANCE.openJobsMin = 0;
+    try {
+      // Shops on both sides of a street from the outside connection, and nobody living near to staff them.
+      const state = towerCity("commercial", "commercial");
+      const { mirror, ticks, send } = setup(state);
+      ticks(1);
+      expect(await send("SetSpeed", { speed: 4 })).toEqual({ ok: true });
+      const release = holdDemandBars(100);
+      try {
+        for (let i = 0; i < 30 && !workplacesHeldBy(countZoneJobs(state), ZONING_BALANCE.zones.findIndex((z) => z.id === "commercial") + 1); i++) ticks(100);
+      } finally {
+        release();
+      }
+      await new Promise((r) => setTimeout(r, 0));
+      const counts = countZoneJobs(state);
+      let held = 0;
+      for (const bar of ["commercial", "office", "industrial"] as const satisfies readonly DemandBar[]) {
+        const zone = ZONING_BALANCE.zones.findIndex((z) => z.id === bar) + 1;
+        if (workplacesHeldBy(counts, zone)) {
+          expect(mirror.waitingFor(bar), bar).toBe(counts.open[zone]);
+          held++;
+        } else {
+          expect(mirror.waitingFor(bar), bar).toBeNull();
+        }
+      }
+      expect(held).toBeGreaterThan(0);
+    } finally {
+      DEMAND_BALANCE.openJobsMin = was;
+    }
   });
 });
 
@@ -317,6 +363,22 @@ describe("the top bar's tooltips", () => {
     expect(formatDemandTitle("residential", -20, { unemployment: -20 }, 3100)).toBe("Residential demand -20. Unemployment -20");
   });
 
+  it("names what each workplace zone waits for, and says so while the bar pulls above zero even when it reads 0 (#420)", () => {
+    expect(formatWaiting("residential", 3100)).toBe(formatHomesWaiting(3100));
+    expect(formatWaiting("commercial", 1)).toBe("New shops waiting: 1 open job to fill first.");
+    expect(formatWaiting("office", 3644)).toBe("New offices waiting: 3,644 open jobs to fill first.");
+    expect(formatWaiting("industrial", 12)).toBe("New factories waiting: 12 open jobs to fill first.");
+    // Held: what pulls the bar is all taken away by the jobs still open, so it reads 0 and says why.
+    expect(formatDemandTitle("office", 0, { educatedWorkers: 23, serviceBuyers: 0, jobsOpen: -23 }, 3644)).toBe(
+      "Office demand 0. Educated workers +23, Office jobs still open -23\nNew offices waiting: 3,644 open jobs to fill first.",
+    );
+    expect(formatDemandTitle("residential", 6, { openJobs: 30, homesFilling: -24 }, 1410)).toBe(
+      "Residential demand +6. Open jobs +30, Homes still filling -24\nNew homes waiting: 1,410 empty places to fill first.",
+    );
+    // Nothing pulls the bar: nothing to wait for.
+    expect(formatDemandTitle("office", 0, { educatedWorkers: 0, serviceBuyers: 0, jobsOpen: 0 }, 3644)).toBe("Office demand 0. Nothing pushes it either way.");
+  });
+
   it("has plain words for every part the sim sends", () => {
     for (const [bar, names] of Object.entries(DEMAND_PARTS)) {
       for (const name of names) expect(PART_WORDS[bar as keyof typeof PART_WORDS][name], `${bar}.${name}`).toBeTruthy();
@@ -324,6 +386,6 @@ describe("the top bar's tooltips", () => {
   });
 
   it("explains mixed ground, which has no bar", () => {
-    expect(MIXED_NOTE).toBe("Builds when residential and commercial demand are both above zero");
+    expect(MIXED_NOTE).toBe("Builds when residential and commercial demand are both above zero, not counting homes and jobs still filling");
   });
 });

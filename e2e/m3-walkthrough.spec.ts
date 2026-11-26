@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { devices, expect, test, type Page, type TestInfo } from "@playwright/test";
 import { PLAYER_STATE } from "./browser-state";
-import { TIME_BALANCE, YEAR_COUNTS, ZONING_BALANCE, deserialize, hashState, heightAt, generateTerrain, replayFrom } from "../packages/sim/src/index";
+import { TIME_BALANCE, WAITING_PART, YEAR_COUNTS, ZONING_BALANCE, deserialize, hashState, heightAt, generateTerrain, replayFrom } from "../packages/sim/src/index";
 import { MENU_SHIFT } from "./dock";
 import { cityReady, frames, hideNotes, openCity, openSettings, settingsButton, settle } from "./helpers";
 import { HALF, HOMES, MAIN, REZONED, SEED, SHOPS, SHORE, UPPER, X0, X1, XM, abandonmentCity, fillPoint, redevelopmentCity, stripCell, townCity, townStart, type Strip } from "./m3-walkthrough-city";
@@ -60,7 +60,7 @@ interface MirrorState {
   log: LogEntry[];
   buildings: Arrays;
   cells: Arrays;
-  demand: Record<Bar, { value: number }>;
+  demand: Record<Bar, { value: number; parts: Record<string, number> }>;
   stats: { totals: Record<string, number>; year: Record<string, number>; lastYear: Record<string, number> };
 }
 interface Cue {
@@ -322,6 +322,17 @@ async function bar(page: Page, name: Bar): Promise<number> {
   return Number(await page.locator(`#demand-${name}`).getAttribute("data-value"));
 }
 
+/**
+ * A demand bar without its part for what is already waiting (#420), from
+ * the page's copy: what the grower and newcomers act on. The bar as shown
+ * reads 0 while homes or jobs still fill, and the grower carries on.
+ */
+async function pull(page: Page, name: Bar): Promise<number> {
+  const b = await page.evaluate((n) => window.cityCouncil.mirror.state?.demand[n], name);
+  if (!b) throw new Error(`no ${name} bar`);
+  return b.value - (b.parts[WAITING_PART[name]] ?? 0);
+}
+
 /** The four bars and the population as the top bar shows them, checked against the copy. */
 async function topBar(page: Page): Promise<{ population: number; trend: string } & Record<Bar, number>> {
   const s = await page.evaluate(() => {
@@ -534,7 +545,7 @@ for (const variant of [
       for (let i = 1; i < counts.length; i++) expect(counts[i] ?? 0, `population read ${i}`).toBeGreaterThanOrEqual(counts[i - 1] ?? 0);
       const now = await topBar(page);
       expect(now.trend).toBe("up");
-      expect(now.residential).toBeGreaterThan(0);
+      expect(await pull(page, "residential")).toBeGreaterThan(0);
       await settleBuilt(page);
       await shot(page, info, dir, "1-houses-and-population");
       info.annotations.push({ type: "step 1", description: `population ${now.population}, residential bar ${now.residential.toFixed(1)}` });
@@ -586,7 +597,7 @@ for (const variant of [
         "shops, factories and workers",
         async () => {
           const bs = await buildings(page);
-          return { shops: ofZone(bs, COMMERCIAL).length, factories: ofZone(bs, INDUSTRIAL).length, employed: (await stats(page)).totals["workersEmployed"] ?? 0, bar: await bar(page, "residential") };
+          return { shops: ofZone(bs, COMMERCIAL).length, factories: ofZone(bs, INDUSTRIAL).length, employed: (await stats(page)).totals["workersEmployed"] ?? 0, bar: await pull(page, "residential") };
         },
         (v) => v.shops > 0 && v.factories > 0 && v.employed > 50 && v.bar > 0,
         6_000,
@@ -597,7 +608,7 @@ for (const variant of [
     });
 
     await test.step("4. zone office ground: small offices grow from the start", async () => {
-      expect(await bar(page, "office")).toBeGreaterThan(0);
+      expect(await pull(page, "office")).toBeGreaterThan(0);
       await zoneStrips(page, [OFFICE_STRIP], "office", 1, 5);
       const key = await stripKey(page, OFFICE_STRIP);
       await growUntil(page, "an office", async () => (await buildings(page)).filter((b) => b.strip === key && b.zone === OFFICE), (v) => v.length > 0, 3_000);
@@ -616,7 +627,7 @@ for (const variant of [
       await growUntil(
         page,
         "a mixed building",
-        async () => ({ r: await bar(page, "residential"), c: await bar(page, "commercial"), ids: (await buildings(page)).filter((b) => b.strip === key && b.zone === MIXED).map((b) => b.id) }),
+        async () => ({ r: await pull(page, "residential"), c: await pull(page, "commercial"), ids: (await buildings(page)).filter((b) => b.strip === key && b.zone === MIXED).map((b) => b.id) }),
         (v) => v.ids.length >= 1,
         6_000,
         25,
@@ -635,7 +646,7 @@ for (const variant of [
     });
 
     await test.step("6. zone an empty R3 lot of 4 x 4 or more: a tower grows there as soon as residential demand is above zero, with no density 1 or 2 building first", async () => {
-      expect(await bar(page, "residential")).toBeGreaterThan(0);
+      expect(await pull(page, "residential")).toBeGreaterThan(0);
       await zoneStrips(page, [TOWER_STRIP], "residential", 3, 5);
       const key = await stripKey(page, TOWER_STRIP);
       const seen = new Set<number>();
@@ -767,7 +778,8 @@ for (const variant of [
       const other = await context.newPage();
       const city = redevelopment();
       await openOn(other, info, city.bytes, variant, "M3 walkthrough, redevelopment");
-      const r = await bar(other, "residential");
+      // Redevelopment reads the bar without its part for homes still filling (#420), which the bar as shown takes away.
+      const r = await pull(other, "residential");
       expect(r).toBeGreaterThan(15);
       // The ground is zoned R3 under standing houses.
       expect(await stripZone(other, REZONED)).toEqual({ zone: RESIDENTIAL, density: 3 });

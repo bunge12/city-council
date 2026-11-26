@@ -18,7 +18,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 26;
+export const PROTOCOL_VERSION = 27;
 
 // ---- Client to sim ----
 
@@ -179,7 +179,7 @@ export interface DeltaMessage {
   /**
    * How the expropriation list changed since the last delta, when it did:
    * the records dropped from its head and the ones added (M4-09, protocol
-   * version 26). Left out otherwise.
+   * version 27). Left out otherwise.
    */
   expropriations?: ExpropriationDelta;
   /**
