@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILDING_TYPES, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, popCount, step, submit, travelTimesReady, type SimState } from "../src/index";
+import { BUILDING_TYPES, LINE, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, popCount, step, submit, travelTimesReady, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, NO_TIER, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
@@ -7,7 +7,8 @@ import { checkUndoHistory } from "../src/undo";
 import { createDemand } from "../src/demand/demand";
 import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
 import { ECONOMY } from "../src/economy/balance";
-import { emptyBudget } from "../src/economy/budget";
+import { dailyShare, emptyBudget } from "../src/economy/budget";
+import { roadUpkeepPerYear } from "../src/economy/upkeep";
 import { addBuilding } from "../src/buildings/buildings";
 import { addPop, setPopWork } from "../src/pops/pops";
 import { withEnds } from "./seen-ends";
@@ -736,10 +737,17 @@ describe("migrateState", () => {
     void wasBudget;
     expect(rest).toEqual(wasRest);
     expect({ ...stats, money: null }).toEqual({ ...wasStats, money: null });
-    // And it steps on, closing its months from the grant.
+    // And it steps on, closing its months from the grant, its street's upkeep paid a day at a time (M4-04).
+    const yearly = roadUpkeepPerYear(migrated.roads);
+    expect(yearly).toBeGreaterThan(0);
+    const upkeep = (from: number, to: number) => {
+      let sum = 0;
+      for (let d = from; d < to; d++) sum += dailyShare(yearly, d);
+      return sum;
+    };
     while (migrated.tick < 63 * day) step(migrated);
-    expect(migrated.budget.treasury).toBe(ECONOMY.startingGrant);
-    expect(Array.from(migrated.stats.money.treasury)).toEqual([0, 0, ECONOMY.startingGrant]);
+    expect(migrated.budget.treasury).toBe(ECONOMY.startingGrant - upkeep(33, 63));
+    expect(Array.from(migrated.stats.money.treasury)).toEqual([0, 0, ECONOMY.startingGrant - upkeep(33, 59)]);
   });
 
   it("upgrades a version 30 city by giving every log entry and undo record the money it moved as 0, and changes nothing else", () => {
@@ -763,11 +771,13 @@ describe("migrateState", () => {
     expect(migrated).toEqual(state);
     expect(hashState(migrated)).toBe(hashState(state));
     // An undo of a command from before moves no money: the treasury stays where it is.
-    const treasury = migrated.budget.treasury;
+    // Road upkeep (M4-04) is put back, since a step can be a day's first tick.
+    const money = (s: SimState) => s.budget.treasury + (s.budget.month[LINE.roadUpkeep] ?? 0);
+    const treasury = money(migrated);
     expect(submit(migrated, { seq: 3, playerId: "p1", type: "Undo", payload: {} })).toEqual({ ok: true });
     step(migrated);
     expect(migrated.undo).toHaveLength(1);
-    expect(migrated.budget.treasury).toBe(treasury);
+    expect(money(migrated)).toBe(treasury);
   });
 
   it("leaves a current state as it is", () => {

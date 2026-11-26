@@ -7,6 +7,7 @@ import { SATISFACTION } from "./pops/satisfaction";
 import { TURNOVER } from "./pops/turnover";
 import { STATS } from "./stats/stats";
 import { BUDGET_SYSTEM, closeMonthOn } from "./economy/budget";
+import { UPKEEP } from "./economy/upkeep";
 import { DEMAND } from "./demand/demand";
 import { keepBuildings } from "./buildings/upkeep";
 import { VACANCY } from "./buildings/vacancy";
@@ -27,8 +28,10 @@ export interface System {
 /**
  * The systems `step` runs each tick, in this fixed order. The statistics
  * come first, so the yearly counts roll over before anything adds to the
- * new year, and a month's sample is the city as the month opens. Demand
- * comes next, so every system that acts on the bars reads the day's. The pops'
+ * new year, and a month's sample is the city as the month opens. Upkeep
+ * comes next, so the day's first tick charges the day's share of the
+ * yearly upkeep for the roads the commands left (M4-04), after the sample
+ * and before anything else spends. Demand comes next, so every system that acts on the bars reads the day's. The pops'
  * sweep comes after it, so every system after it reads the day's slice.
  * Displaced pops find homes next, in the tick that removed theirs and
  * before newcomers take the room (M3-12). Arrivals come after them, so a pop that arrives waits for the next
@@ -50,7 +53,7 @@ export interface System {
  * it reads the month's centre, and the grower builds on the ground it
  * clears. The pops of a home it replaces find homes on the next tick.
  */
-export const SYSTEMS: readonly System[] = [STATS, DEMAND, POPS, DISPLACED, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, REDEVELOP, GROWER];
+export const SYSTEMS: readonly System[] = [STATS, UPKEEP, DEMAND, POPS, DISPLACED, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, REDEVELOP, GROWER];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";

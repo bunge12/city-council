@@ -77,6 +77,14 @@ function segmentBetween(state: SimState, a: [number, number], b: [number, number
 /** The month's amount on `line`. */
 const onLine = (state: SimState, line: LedgerLine) => state.budget.month[LINE[line]] ?? 0;
 
+/**
+ * The treasury with the month's road upkeep put back (M4-04): upkeep is
+ * charged on each day's first tick, after that tick's commands, so it moves
+ * the treasury in steps these tests take for other reasons.
+ */
+const money = (state: SimState) => state.budget.treasury + onLine(state, "roadUpkeep");
+// Where a test sets the treasury with `fundCity`, `paid` is the upkeep already on the line then.
+
 const street = ROAD_TYPES.find((t) => t.id === "street");
 if (!street) throw new Error("no street type");
 
@@ -99,12 +107,12 @@ describe("construction costs", () => {
     const plan = planRoad(state.roads, terrainOf(SEED), c.payload);
     if (!plan.ok) throw new Error(plan.reason);
     expect(plan.plan.cost).toBeGreaterThan(0);
-    const before = state.budget.treasury;
+    const before = money(state);
     expect(submit(state, c)).toEqual({ ok: true });
     // Accepted but not applied: nothing moves until the step.
-    expect(state.budget.treasury).toBe(before);
+    expect(money(state)).toBe(before);
     step(state);
-    expect(state.budget.treasury).toBe(before - plan.plan.cost);
+    expect(money(state)).toBe(before - plan.plan.cost);
     expect(onLine(state, "construction")).toBe(plan.plan.cost);
     expect(state.logSpent).toEqual([plan.plan.cost]);
     expect(state.undo.at(-1)?.spent).toBe(plan.plan.cost);
@@ -116,10 +124,10 @@ describe("construction costs", () => {
     const c = grid([4200, 4500], 3, 3);
     const plan = planRoadGrid(state.roads, terrainOf(SEED), c.payload);
     if (!plan.ok) throw new Error(plan.reason);
-    const before = state.budget.treasury;
+    const before = money(state);
     run(state, c);
     expect(state.log).toHaveLength(1);
-    expect(state.budget.treasury).toBe(before - plan.plan.cost);
+    expect(money(state)).toBe(before - plan.plan.cost);
     expect(onLine(state, "construction")).toBe(plan.plan.cost);
     expect(readLogSpent(state, 0)).toEqual([plan.plan.cost]);
   });
@@ -133,15 +141,15 @@ describe("construction costs", () => {
     if (!plan.ok) throw new Error(plan.reason);
     expect(plan.plan.cost).toBeGreaterThan(0);
     const built = onLine(state, "construction");
-    const before = state.budget.treasury;
+    const before = money(state);
     run(state, c);
-    expect(state.budget.treasury).toBe(before - plan.plan.cost);
+    expect(money(state)).toBe(before - plan.plan.cost);
     expect(onLine(state, "construction")).toBe(built + plan.plan.cost);
     // A one-way reversed costs nothing.
     run(state, command("UpgradeRoad", withEnds(state.roads, { segments: [seg], type: "oneWay" })));
-    const oneWay = state.budget.treasury;
+    const oneWay = money(state);
     run(state, command("UpgradeRoad", withEnds(state.roads, { segments: [seg], type: "oneWay" })));
-    expect(state.budget.treasury).toBe(oneWay);
+    expect(money(state)).toBe(oneWay);
     expect(state.logSpent.at(-1)).toBe(0);
   });
 
@@ -156,9 +164,9 @@ describe("construction costs", () => {
     expect(plan.plan.demolition).toBe(Math.round(300 * street.demolitionCostPerMetre));
     expect(plan.plan.refund).toBe(Math.round(300 * street.buildCostPerMetre * ECONOMY.eminentDomain.refundShare));
     expect(plan.plan.cost).toBe(plan.plan.demolition - plan.plan.refund);
-    const before = state.budget.treasury;
+    const before = money(state);
     run(state, c);
-    expect(state.budget.treasury).toBe(before - plan.plan.cost);
+    expect(money(state)).toBe(before - plan.plan.cost);
     expect(onLine(state, "demolition")).toBe(plan.plan.cost);
     expect(state.logSpent.at(-1)).toBe(plan.plan.cost);
   });
@@ -174,10 +182,10 @@ describe("construction costs", () => {
     expect(plan.plan.cost).toBeLessThan(0);
     // Broke, and the bulldoze still goes through: it costs nothing.
     fundCity(state, -ECONOMY.overdraft - 5);
-    const before = state.budget.treasury;
+    const before = money(state);
     run(state, c);
-    expect(state.budget.treasury).toBe(before - plan.plan.cost);
-    expect(state.budget.treasury).toBeGreaterThan(before);
+    expect(money(state)).toBe(before - plan.plan.cost);
+    expect(money(state)).toBeGreaterThan(before);
     expect(onLine(state, "demolition")).toBe(plan.plan.cost);
     expect(state.logSpent.at(-1)).toBe(plan.plan.cost);
   }));
@@ -214,10 +222,10 @@ describe("the overdraft", () => {
     }
     expect(costsReason(4_200_000, 1_100_000)).toBe("Costs $4.2M, $1.1M available");
     // Zoning is free, and stays open: a broke city recovers by growing.
-    const treasury = state.budget.treasury;
+    const treasury = money(state);
     run(state, zone());
     expect(state.log.at(-1)?.type).toBe("ZoneCells");
-    expect(state.budget.treasury).toBe(treasury);
+    expect(money(state)).toBe(treasury);
   });
 
   it("lets a command through that leaves the treasury exactly at the overdraft, and refuses one dollar more", () => {
@@ -230,8 +238,9 @@ describe("the overdraft", () => {
     // Rounded alike, the two would read the same, so both are given to the dollar.
     expect(costsReason(plan.plan.cost, plan.plan.cost - 1)).toMatch(/^Costs \$[\d,]+, \$[\d,]+ available$/);
     fundCity(state, plan.plan.cost - ECONOMY.overdraft);
+    const paid = onLine(state, "roadUpkeep");
     run(state, c);
-    expect(state.budget.treasury).toBe(-ECONOMY.overdraft);
+    expect(money(state) - paid).toBe(-ECONOMY.overdraft);
   });
 
   it("says what is left as nothing once upkeep or anything else has run the treasury past the overdraft", () => {
@@ -247,13 +256,14 @@ describe("the overdraft", () => {
     if (!one.ok || !two.ok) throw new Error("the roads do not plan");
     // Enough for either, not both.
     fundCity(state, one.plan.cost + two.plan.cost - ECONOMY.overdraft - 1);
+    const paid = onLine(state, "roadUpkeep");
     expect(submit(state, first)).toEqual({ ok: true });
     expect(submit(state, second)).toEqual({ ok: true });
     const dropped = step(state);
     expect(state.log.at(-1)?.seq).toBe(first.seq);
     const left = two.plan.cost - 1;
     expect(dropped).toEqual([{ seq: second.seq, playerId: "p1", type: "BuildRoad", reason: costsReason(two.plan.cost, left) }]);
-    expect(state.budget.treasury).toBe(left - ECONOMY.overdraft);
+    expect(money(state) - paid).toBe(left - ECONOMY.overdraft);
   });
 
   it("gives the tools' previews the price and the refusal, and changes nothing", () => {
@@ -277,11 +287,11 @@ describe("the overdraft", () => {
 describe("undo and money", () => {
   it("refunds a road undone in full, and leaves the treasury where it was", () => {
     const state = createBareState(SEED);
-    const before = state.budget.treasury;
+    const before = money(state);
     run(state, road([4200, 4500], [4500, 4500]));
-    expect(state.budget.treasury).toBeLessThan(before);
+    expect(money(state)).toBeLessThan(before);
     run(state, undo());
-    expect(state.budget.treasury).toBe(before);
+    expect(money(state)).toBe(before);
     // Built and taken back in one month: the construction line nets to nothing.
     expect(onLine(state, "construction")).toBe(0);
     expect(state.logSpent.at(-1)).toBe(-(state.logSpent[0] ?? 0));
@@ -289,24 +299,24 @@ describe("undo and money", () => {
 
   it("refunds a grid undone in full", () => {
     const state = createBareState(SEED);
-    const before = state.budget.treasury;
+    const before = money(state);
     run(state, grid([4200, 4500], 2, 2));
     run(state, undo());
-    expect(state.budget.treasury).toBe(before);
+    expect(money(state)).toBe(before);
   });
 
   it("takes back a bulldoze's refund when it is undone, and so charges its demolition back", () => {
     const state = createBareState(SEED);
     run(state, road([4200, 4500], [4500, 4500]));
     const seg = segmentBetween(state, [4200, 4500], [4500, 4500]);
-    const built = state.budget.treasury;
+    const built = money(state);
     const c = command("BulldozeRoad", withEnds(state.roads, { segments: [seg] }));
     const plan = planBulldoze(state.roads, c.payload);
     if (!plan.ok) throw new Error(plan.reason);
     run(state, c);
-    expect(state.budget.treasury).toBe(built - plan.plan.cost);
+    expect(money(state)).toBe(built - plan.plan.cost);
     run(state, undo());
-    expect(state.budget.treasury).toBe(built);
+    expect(money(state)).toBe(built);
     expect(onLine(state, "demolition")).toBe(0);
   });
 
@@ -325,8 +335,9 @@ describe("undo and money", () => {
     expect(submit(state, undo())).toEqual({ ok: false, reason: costsReason(price, 0) });
     expect(state.undo).toHaveLength(records);
     fundCity(state, price - ECONOMY.overdraft);
+    const paid = onLine(state, "roadUpkeep");
     run(state, undo());
-    expect(state.budget.treasury).toBe(-ECONOMY.overdraft);
+    expect(money(state) - paid).toBe(-ECONOMY.overdraft);
     expect(state.undo).toHaveLength(records - 1);
   }));
 
@@ -334,16 +345,16 @@ describe("undo and money", () => {
     const state = createBareState(SEED);
     run(state, road([4200, 4500], [4500, 4500]));
     run(state, zone());
-    const treasury = state.budget.treasury;
+    const treasury = money(state);
     expect(state.undo.at(-1)?.spent).toBe(0);
     run(state, undo());
-    expect(state.budget.treasury).toBe(treasury);
+    expect(money(state)).toBe(treasury);
     expect(state.logSpent.at(-1)).toBe(0);
   });
 
   it("keeps the amount on the undo record, so an undo after its log entry paged out refunds the same", () => {
     const state = createBareState(SEED);
-    const before = state.budget.treasury;
+    const before = money(state);
     run(state, road([4200, 4500], [4500, 4500]));
     // Enough free commands to page the road's entry out of live state.
     for (let i = 0; i < LOG_LIVE_LIMIT; i += LOG_PAGE_SIZE) {
@@ -354,7 +365,7 @@ describe("undo and money", () => {
     expect(state.log).toHaveLength(state.logSpent.length);
     expect(() => readLogSpent(state, 0)).toThrow(RangeError);
     run(state, undo());
-    expect(state.budget.treasury).toBe(before);
+    expect(money(state)).toBe(before);
   });
 });
 

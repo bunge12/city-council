@@ -1346,12 +1346,13 @@ describe("snapshots with a road network", () => {
     expect(digest(serialize(v29))).toBe("20216:79e42e6b91dbf347");
     expect(digest(serializeDetached(v29))).toBe("20192:1f85133032e1067d");
     // M4-02's treasury and ledger, version 30, moved them again: taken out, with the version set back, the bytes are main's, which the two lines above check.
-    const v30 = { ...withoutSpending(old), version: 30 } as SimState;
+    // M4-04's upkeep share in roads.json moved the stamp: with #376's stamp put back, the bytes are main's.
+    const v30 = { ...withoutSpending(old), version: 30, balance: "7a23208d1f2e0407" } as SimState;
     expect(digest(serialize(v30))).toBe("21640:1ee3431e5995d193");
     expect(digest(serializeDetached(v30))).toBe("21616:4f7a50d129b3e3f6");
     // M4-03's money beside the log and on the undo records, version 31, moved them again.
-    expect(digest(serialize(old))).toBe("21672:93bd6d6e873d7524");
-    expect(digest(serializeDetached(old))).toBe("21648:965a1f76b1916523");
+    expect(digest(serialize(old))).toBe("21672:30ee59b0a0f8c5d3");
+    expect(digest(serializeDetached(old))).toBe("21648:9781ef771ac22259");
     expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 

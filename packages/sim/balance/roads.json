@@ -1,5 +1,5 @@
 {
-  "_about": "Road types. Lengths and widths are metres, speeds km/h, capacity vehicles per hour per lane, slopes rise over run. Prices are whole dollars in their source year; `escalation` brings them to 2026. A type's place in `types` is its id in saves, so append new types and never reorder. `demolitionCostPerMetre` is what bulldozing a metre costs, times the bridge multiplier on a bridge. A type's `bridge` sets the longest bridge it can make, in metres, and how many times its price per metre a bridge costs. Speeds, capacities, widths and limits are starting values to tune. Issue 47 relaxed the grades and curve radii of the buildable types and raised every bridge limit to the longest bridge over water.",
+  "_about": "Road types. Lengths and widths are metres, speeds km/h, capacity vehicles per hour per lane, slopes rise over run. Prices are whole dollars in their source year; `escalation` brings them to 2026. A type's place in `types` is its id in saves, so append new types and never reorder. `upkeepShare` is the share of a road's build cost, the bridge multiplier included on a bridge, that it costs to keep each year (PRD, \"Upkeep is a share of build cost\"). `demolitionCostPerMetre` is what bulldozing a metre costs, times the bridge multiplier on a bridge. A type's `bridge` sets the longest bridge it can make, in metres, and how many times its price per metre a bridge costs. Speeds, capacities, widths and limits are starting values to tune. Issue 47 relaxed the grades and curve radii of the buildable types and raised every bridge limit to the longest bridge over water.",
   "escalation": {
     "toYear": 2026,
     "annualFactor": 1.1085,
@@ -55,12 +55,12 @@
         "placeholder": true,
         "note": "FDOT's Cost Per Mile Models list a new 2-lane undivided urban arterial (U01) at about $9.1M per mile, but that is an arterial with bike lanes and drainage, its price year could not be confirmed, and it would make a street cost more than an avenue."
       },
-      "upkeepPerMetrePerYear": {
-        "amount": 14,
+      "upkeepShare": {
+        "share": 0.01,
         "sourceYear": 2026,
-        "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
+        "source": "Placeholder. One percent of the build cost a year, the figure the per-metre placeholders used before M4-04, until issue M4-19 tunes it.",
         "placeholder": true,
-        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear. M4-04 makes upkeep a yearly share of build cost."
+        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear."
       },
       "demolitionCostPerMetre": {
         "amount": 300,
@@ -97,12 +97,12 @@
         "source": "City of Phoenix, Major Arterial Infrastructure Improvements Plan: $2.8M to $4.2M per km for 4 to 6 lanes. The low end, for 4 lanes.",
         "sourceUrl": "https://web-prod.phoenix.gov/content/dam/phoenix/pddsite/documents/impact-fees/2025-if-update/Major%20Arterial%20IIP%20Final.pdf"
       },
-      "upkeepPerMetrePerYear": {
-        "amount": 28,
+      "upkeepShare": {
+        "share": 0.01,
         "sourceYear": 2026,
-        "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
+        "source": "Placeholder. One percent of the build cost a year, the figure the per-metre placeholders used before M4-04, until issue M4-19 tunes it.",
         "placeholder": true,
-        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear. M4-04 makes upkeep a yearly share of build cost."
+        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear."
       },
       "demolitionCostPerMetre": {
         "amount": 540,
@@ -139,12 +139,12 @@
         "source": "Placeholder. The same pavement as a street: two lanes, so the street figure.",
         "placeholder": true
       },
-      "upkeepPerMetrePerYear": {
-        "amount": 14,
+      "upkeepShare": {
+        "share": 0.01,
         "sourceYear": 2026,
-        "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
+        "source": "Placeholder. One percent of the build cost a year, the figure the per-metre placeholders used before M4-04, until issue M4-19 tunes it.",
         "placeholder": true,
-        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear. M4-04 makes upkeep a yearly share of build cost."
+        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear."
       },
       "demolitionCostPerMetre": {
         "amount": 240,
@@ -181,12 +181,12 @@
         "source": "The Pricer: $3M to $12M per lane-km. The low end, for 6 lanes. Undated and not a primary source, low confidence; taken as current, so not escalated.",
         "sourceUrl": "https://www.thepricer.org/how-much-does-a-lane-of-highway-cost/"
       },
-      "upkeepPerMetrePerYear": {
-        "amount": 180,
+      "upkeepShare": {
+        "share": 0.01,
         "sourceYear": 2026,
-        "source": "Placeholder. One percent of the build cost a year, until M4 prices upkeep.",
+        "source": "Placeholder. One percent of the build cost a year, the figure the per-metre placeholders used before M4-04, until issue M4-19 tunes it.",
         "placeholder": true,
-        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear. M4-04 makes upkeep a yearly share of build cost."
+        "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear."
       },
       "demolitionCostPerMetre": {
         "amount": 900,
