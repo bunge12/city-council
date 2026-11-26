@@ -391,6 +391,6 @@ describe("the top bar's tooltips", () => {
   });
 
   it("explains mixed ground, which has no bar", () => {
-    expect(MIXED_NOTE).toBe("Builds when residential and commercial demand are both above zero");
+    expect(MIXED_NOTE).toBe("Builds when residential and commercial demand are both above zero, not counting homes and jobs still filling");
   });
 });
