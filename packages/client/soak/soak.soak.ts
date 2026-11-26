@@ -821,11 +821,15 @@ describe("soak: one hour of game time at 4x", () => {
     // buildings over the hour. On the city of 200,000 (M3-20) the homes
     // stand part empty from the start, at 1.1 times the room, and empty
     // as people come and go, so the grower holds new homes back while
-    // homes are still filling (`unfilledHomesMax`, #331) and adds few: one
+    // homes are still filling (`unfilledHomesAllowed`, #331) and adds few: one
     // run grew 147 past the start while the clearing took about 1,500 (15
-    // while it took about 15,000, before #326). The grower is
-    // timed at full size in scale-cities.bench.ts instead. #324
-    // tracks a soak that keeps the grower busy on a full city.
+    // while it took about 15,000, before #326). Since the count scales
+    // with the city (#426) it lets 20 homes fill at once from the start,
+    // and the hour ends on about 470,000 people in about 34,000 buildings,
+    // 4,900 past the start, so the grower is busy all hour. Its retries of
+    // cells where no lot fits were the slow part (#426). The grower is
+    // also timed at full size in scale-cities.bench.ts. #324 tracks a soak
+    // that keeps the grower busy on a full city.
     expect(b.grown, "buildings standing past the start at some sample").toBeGreaterThan(0);
     // The tick budget is an exit number. A part of an autosave runs in the
     // worker between two steps, so it holds up the next one and gets the

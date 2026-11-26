@@ -50,6 +50,7 @@ import {
   copyBudget,
   copyDemand,
   ZONING_BALANCE,
+  cityPopulation,
   countZoneJobsWith,
   holdsHomes,
   reachableRoomWith,
@@ -207,7 +208,7 @@ export class SimMirror {
 
   /**
    * The homes newcomers can reach, as the sim's `reachableRoom` counts them,
-   * when they hold new homes back (#330): `unfilledHomesMax` or more of
+   * when they hold new homes back (#330): `unfilledHomesAllowed` or more of
    * them still filling, so the grower adds no home and redevelopment waits.
    * Null while they do not, and before the first snapshot. Worked out from
    * the copy's buildings and roads and each building's people, with one
@@ -217,7 +218,7 @@ export class SimMirror {
   homesWaiting(): ReachableRoom | null {
     if (!this.current) return null;
     const room = reachableRoomWith(this.current, this.occupancy.people);
-    return holdsHomes(room) ? room : null;
+    return holdsHomes(room, cityPopulation(this.current)) ? room : null;
   }
 
   /**

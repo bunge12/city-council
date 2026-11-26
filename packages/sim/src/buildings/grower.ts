@@ -23,9 +23,10 @@
 //
 // Homes standing fill before more are built (M3-08, PRD "Turnover"; a
 // count since M3-21): the grower adds no building to a zone people live in,
-// residential or mixed, while `unfilledHomesMax` or more of the homes
+// residential or mixed, while `unfilledHomesAllowed` or more of the homes
 // newcomers can reach are still filling (demand.json, pops/room.ts,
-// `homeUnfilled`). A count and not a share of the room, so a few towers
+// `homeUnfilled`): `unfilledHomesMax`, or one for every
+// `residentsPerUnfilledHome` residents in a bigger city (#420). A count and not a share of the room, so a few towers
 // fill side by side as a street of houses does, and arrivals, which follow
 // the empty room (pops/arrivals.ts), tell the densities apart. It counts
 // once on a tick it adds such a building, after the tick's arrivals, and
@@ -99,9 +100,9 @@ import { cellSlotIn, cellsSettled, nextColumn, syncCells, type Column } from "..
 import { BUILDINGS_BALANCE, BUILDING_TYPES, typesFor, type BuildingType } from "./balance";
 import { addBuilding } from "./buildings";
 import { bestCandidate, candidateCount, setAside } from "./candidates";
-import { freeFrontage, lotOptions, type Lot, type LotOptions } from "./lots";
+import { clearReads, freeFrontage, lotOptions, type Lot, type LotOptions, type LotReads } from "./lots";
 import { pollutionGrid, segmentBuildings } from "./where";
-import { buildingReachesOutside, homeUnfilled, newcomerRoomLeft, reachableRoom, type ReachableRoom } from "../pops/room";
+import { buildingReachesOutside, homeUnfilled, newcomerRoomLeft, reachableRoom, unfilledHomesAllowed, type ReachableRoom } from "../pops/room";
 import { workplacesHeldBy, type ZoneJobs } from "../pops/open-jobs";
 import { zoneJobs } from "../pops/openings";
 import { buildingJobs } from "./jobs";
@@ -229,28 +230,39 @@ function hasThroughLots(state: SimState, ref: CellRef): boolean {
   return typesFor(state.cells.zone[slot] ?? 0, state.cells.density[slot] ?? 0).some((t) => t.throughLot);
 }
 
+/** What the last `optionsFromEnd` read beyond its strips: scratch, one try at a time, so a try makes no garbage (issue 166). */
+const tryReads: LotReads = { across: false, blocks: false, sides: [], x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity };
+
 /**
  * What fits at the nearer end of the free frontage `ref` lies on, else at
  * the farther end, else at `ref` itself, as the header says; and how each
  * lot would stand to leave room on the frontage. Away from an end every
- * lot stands as it is.
+ * lot stands as it is. `tryReads` says afterwards what the lot searches
+ * read beyond their strips, which decides what brings the cell back if it
+ * is set aside (lot-order.ts, #426).
  */
 function optionsFromEnd(state: SimState, ref: CellRef): { options: LotOptions; leaving: (lot: Lot) => Lot | null } {
+  clearReads(tryReads);
   const { ends, width } = freeFrontage(state, ref);
   const asIs = (lot: Lot) => lot;
   let last: LotOptions | null = null;
   const isEnd = ends.some((e) => e.segment === ref.segment && e.side === ref.side && e.place === ref.place);
   for (const at of ends) {
-    last = lotOptions(state, at, false);
+    last = lotOptions(state, at, false, undefined, tryReads);
     if (!last.ok) continue;
     // A through-lot at the cell drawn still comes first, as before issue 194.
     if (!isEnd && !last.lots.some((lot) => lot.backDepth > 0) && hasThroughLots(state, ref)) {
-      const drawn = lotOptions(state, ref, false);
+      const drawn = lotOptions(state, ref, false, undefined, tryReads);
       if (drawn.ok && drawn.lots.some((lot) => lot.backDepth > 0)) return { options: drawn, leaving: asIs };
     }
     return { options: last, leaving: (lot) => leavingRoom(state, lot, at, width) };
   }
-  return { options: isEnd && last ? last : lotOptions(state, ref, false), leaving: asIs };
+  return { options: isEnd && last ? last : lotOptions(state, ref, false, undefined, tryReads), leaving: asIs };
+}
+
+/** Sets `ref` aside after a try found no lot there, with what the try read (`tryReads`). */
+function setAsideTried(state: SimState, ref: CellRef): void {
+  setAside(state, ref, tryReads);
 }
 
 /**
@@ -266,7 +278,7 @@ export function growOne(state: SimState, zone = 0): number {
     if (!ref) return -1;
     const { options, leaving } = optionsFromEnd(state, ref);
     if (!options.ok) {
-      setAside(state, ref, hasThroughLots(state, ref));
+      setAsideTried(state, ref);
       continue;
     }
     const lot = chooseLot(state.rng, options.lots, options.free, leaving);
@@ -297,7 +309,7 @@ export function setAsideCellsWithNoLot(state: SimState): void {
       const index = syncCells(state);
       const ref = bestCandidate(state, index, () => segmentBuildings(state), grid, zone);
       if (!ref || optionsFromEnd(state, ref).options.ok) break;
-      setAside(state, ref, hasThroughLots(state, ref));
+      setAsideTried(state, ref);
     }
   }
 }
@@ -318,14 +330,19 @@ const HOME_ZONES: ReadonlySet<number> = new Set(BUILDING_TYPES.filter((t) => t.r
 /** Zone numbers with a type that offers jobs: commercial, office, industrial and mixed. */
 const WORK_ZONES: ReadonlySet<number> = new Set(BUILDING_TYPES.filter((t) => t.jobsPerCell > 0).map((t) => t.zoneNumber));
 
-/** Whether `room` holds new homes back: `unfilledHomesMax` or more of its homes are still filling. */
-export function holdsHomes(room: ReachableRoom): boolean {
-  return room.unfilled >= DEMAND_BALANCE.unfilledHomesMax;
+/** Whether `room` holds new homes back in a city of `population`: `unfilledHomesAllowed` or more of its homes are still filling. */
+export function holdsHomes(room: ReachableRoom, population: number): boolean {
+  return room.unfilled >= unfilledHomesAllowed(population);
 }
 
-/** Whether the grower holds new homes back: `unfilledHomesMax` or more of the homes newcomers can reach are still filling. */
+/** Whether the grower holds new homes back: `unfilledHomesAllowed` or more of the homes newcomers can reach are still filling. */
 export function homesHeld(state: SimState): boolean {
-  return holdsHomes(reachableRoom(state));
+  return holdsHomes(reachableRoom(state), cityPopulation(state));
+}
+
+/** The residents the city has, the running total, as the homes hold reads it. */
+export function cityPopulation(state: SimState): number {
+  return state.stats.totals["population"] ?? 0;
 }
 
 /** Adds new home `id` to `room`, as `reachableRoom` would count it, if newcomers can reach it: all its room is empty. */
@@ -357,7 +374,7 @@ export function grow(state: SimState): void {
     for (let i = 0; i < due; i++) {
       if (homes) {
         room ??= reachableRoom(state);
-        if (holdsHomes(room)) break;
+        if (holdsHomes(room, cityPopulation(state))) break;
       }
       if (work) {
         jobs ??= zoneJobs(state);
