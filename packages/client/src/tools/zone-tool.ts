@@ -473,7 +473,8 @@ export function previewZoneAround(
   if (!on.includes(true)) return { ...all, whole };
   const underBuildings = new Set(cells.filter((_, i) => on[i]).map((c) => c.slot));
   const built = all.cells.filter((c) => underBuildings.has(c.slot)).length;
-  if (whole) return { ...all, whole, built };
+  // With no cell under a building to change, leaving them out changes nothing, and the plan's reason stands.
+  if (whole || built === 0) return { ...all, whole, built };
   const open = cells.filter((_, i) => !on[i]);
   const empty = previewZone(city, zone, density, open, sent);
   // Only when no empty cell was asked for: otherwise the plan's own reason, such as a stroke already sent, holds.

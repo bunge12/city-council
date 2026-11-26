@@ -571,3 +571,20 @@ describe("ground under buildings (#417)", () => {
     expect(whole?.cells.length).toBe((empty?.cells.length ?? 0) + (empty?.built ?? 0));
   });
 });
+
+describe("ground under buildings that would not change (#417)", () => {
+  it("keeps the plan's reason when every cell is built and none would change", () => {
+    const state = city();
+    run(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4571 }, to: { x: 4390, z: 4571 }, width: 44 }] });
+    for (let t = 0; t < 6000 && buildingCount(state.buildings) < 2; t++) step(state);
+    const seg = segmentAt(state, 4300, 4600);
+    const strip = stripCells(state, seg, nearerSide(state, seg, 4300, 4590) ?? 0, DEPTH);
+    const ids = buildingsOnSlots(state, strip.map((c) => c.slot));
+    const built = strip.filter((_, i) => (ids[i] ?? NO_BUILDING) !== NO_BUILDING);
+    expect(built.length).toBeGreaterThan(0);
+    const preview = previewZoneAround(state, "residential", 1, built, false);
+    expect(preview.ok).toBe(false);
+    expect(preview.built).toBe(0);
+    expect(preview.reason).toMatch(/no cell would change/);
+  });
+});
