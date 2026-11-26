@@ -51,6 +51,7 @@ function houseRows(place: number, alive: boolean): BuildingDelta["rows"] {
     variant: Uint8Array.of(alive ? 1 : 0),
     builtAt: Float64Array.of(0),
     statusSince: Float64Array.of(0),
+    paid: Uint8Array.of(0),
   };
 }
 

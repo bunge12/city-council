@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PER_SIDE, CHUNK_SIZE, ROAD_TYPES, ZONING_BALANCE, cellAt, cellCorners, cellStatuses, createState, deserialize, generateTerrain, hashState, heightAt, replay, step, submit, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PER_SIDE, CHUNK_SIZE, ROAD_TYPES, SCALE_TREASURY, ZONING_BALANCE, cellAt, cellCorners, cellStatuses, createState, deserialize, fundCity, generateTerrain, hashState, heightAt, replayFrom, step, submit, syncCells, type SimState } from "../packages/sim/src/index";
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
@@ -183,8 +183,20 @@ const DEEP_R2 = PAINT[1]?.strip ?? { row: 4570, col: 2, north: false };
 /** Step 9: the piece of the middle street between its two eastern junctions, with M1 on its north side and R3 on its south. */
 const BULLDOZED = { x: 4602.5, z: 4570 };
 
-function walkthroughCity(): SimState {
+/**
+ * A new city on the seed, funded at `SCALE_TREASURY`: step 9 bulldozes a
+ * street with towers on it, which at the eminent domain price (M4-09) costs
+ * more than the starting grant. What the walkthrough's city and its replay
+ * start from; funding is not a command, so not in the log.
+ */
+function walkthroughStart(): SimState {
   const state = createState(SEED);
+  fundCity(state, SCALE_TREASURY);
+  return state;
+}
+
+function walkthroughCity(): SimState {
+  const state = walkthroughStart();
   buildRoads(state, [
     ...ROWS.map((z) => [[COLS[0], z], [COLS[4], z], "street"] as [[number, number], [number, number], string]),
     ...COLS.map((x) => [[x, ROWS[0]], [x, ROWS[2]], "street"] as [[number, number], [number, number], string]),
@@ -1229,7 +1241,8 @@ for (const variant of [
       for (const type of ["ZoneCells", "BuildRoad", "BulldozeBuilding", "BulldozeRoad", "Undo", "SetSpeed"]) expect(fullLog.map((e) => e.type)).toContain(type);
       // The page held every bar, so the replay does too.
       const v = WALKTHROUGH_DEMAND;
-      const rebuilt = holdDemand({ residential: v, commercial: v, office: v, industrial: v }, () => replay(header.seed, fullLog, header.tick));
+      expect(header.seed).toBe(SEED);
+      const rebuilt = holdDemand({ residential: v, commercial: v, office: v, industrial: v }, () => replayFrom(walkthroughStart(), fullLog, header.tick));
       const hash = hashState(rebuilt);
       expect(hash).toBe(hashState(state));
       info.annotations.push({ type: "replay", description: `seed ${header.seed}, ${fullLog.length} commands, tick ${header.tick}, ${state.buildings.flags.filter((f) => f !== 0).length} buildings, hash ${hash}` });

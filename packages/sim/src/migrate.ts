@@ -160,6 +160,11 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
     undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, spent: 0 })),
     logSpent: (old["log"] as unknown[]).map(() => 0),
   }),
+  // Version 32 keeps the expropriations of the last game year, and marks
+  // each building the city has paid to clear (M4-09). Clearing a building
+  // cost nothing before it and left no record, so an older city has no
+  // records and no building paid for.
+  31: (old) => ({ ...old, version: 32, buildings: buildingsWithPaid(old["buildings"]), expropriations: [] }),
 };
 
 /** Version 29 statistics with money series of zeros as long as the history, after `next`. */
@@ -216,6 +221,18 @@ function stripTiers(old: Record<string, unknown>): Record<string, unknown> {
     ops: record.ops.map((op) => (op.row ? { ...op, row: { ...op.row, tierL: NO_TIER, tierR: NO_TIER } } : op)),
   }));
   return { ...old, roads, undo };
+}
+
+/** A version 31 set of buildings with `paid`, none paid for, after `statusSince` as a new state has it. Left as it is when it has one. */
+function buildingsWithPaid(value: unknown): Record<string, unknown> {
+  const b = value as Record<string, unknown> & { flags: Uint8Array };
+  if (b["paid"] !== undefined) return b;
+  const out: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(b)) {
+    out[key] = field;
+    if (key === "statusSince") out["paid"] = new Uint8Array(b.flags.length);
+  }
+  return out;
 }
 
 /** A version 23 set of buildings with `statusSince`, each building's `builtAt`, after `builtAt` as a new state has it. */

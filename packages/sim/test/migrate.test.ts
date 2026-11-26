@@ -35,6 +35,13 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
+  // Before version 32 nothing kept the expropriations (M4-09), and its
+  // migration gives an empty list. `state` gets the same in place.
+  if (version < 32) {
+    gone.push("expropriations");
+    state.expropriations = [];
+    state.buildings.paid.fill(0);
+  }
   // Before version 31 nothing kept the money a command moved (M4-03), and
   // its migration gives every amount as 0. `state` gets the same in place.
   if (version < 31) {
@@ -57,6 +64,12 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 26) gone.push("redevelopedToday");
   if (version < 27) gone.push("travelLast");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  // Before version 32 no building was marked paid for (M4-09).
+  if (version < 32 && kept["buildings"]) {
+    const { paid, ...buildings } = kept["buildings"] as SimState["buildings"];
+    void paid;
+    kept["buildings"] = buildings;
+  }
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
       const { spent, ...rest } = record;
@@ -204,7 +217,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(31);
+    expect(SNAPSHOT_VERSION).toBe(32);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -228,6 +241,7 @@ describe("migrateState", () => {
       travelLast: null,
       budget: emptyBudget(ECONOMY.startingGrant),
       logSpent: [],
+      expropriations: [],
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -256,6 +270,7 @@ describe("migrateState", () => {
       travelLast: null,
       budget: emptyBudget(ECONOMY.startingGrant),
       logSpent: [],
+      expropriations: [],
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -645,7 +660,7 @@ describe("migrateState", () => {
     const migrated = migrateState(v16);
     const { growth, ...kept } = v16;
     void growth;
-    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null, budget: emptyBudget(ECONOMY.startingGrant), logSpent: [] });
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null, budget: emptyBudget(ECONOMY.startingGrant), logSpent: [], expropriations: [] });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 
@@ -778,6 +793,20 @@ describe("migrateState", () => {
     step(migrated);
     expect(migrated.undo).toHaveLength(1);
     expect(money(migrated)).toBe(treasury);
+  });
+
+  it("upgrades a version 31 city by giving it an empty list of expropriations, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    state.expropriations = [{ tick: 0, x: 4300, z: 4620, people: 4, jobs: 0, playerId: "p1" }];
+    const v31 = older(structuredClone(state), 31);
+    expect("expropriations" in v31).toBe(false);
+    const migrated = migrateState(v31);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(migrated.expropriations).toEqual([]);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(migrated).toEqual({ ...state, expropriations: [] });
   });
 
   it("leaves a current state as it is", () => {

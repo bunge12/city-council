@@ -22,7 +22,9 @@ import {
   cellAt,
   cellShapesInChunk,
   cellsInChunk,
+  applyExpropriationDelta,
   gridEffects,
+  NO_COMPENSATION,
   landValueAt,
   landValuesOfShapes,
   lotMarkAt,
@@ -188,6 +190,10 @@ export class SimMirror {
   jobsFilled(id: number): number {
     return this.occupancy.filled[id] ?? 0;
   }
+
+  /** `buildingPeople` and `jobsFilled` as the sim's planners take them, so a preview prices clearing a building as the command will (M4-09). */
+  readonly peopleIn = (id: number): number => this.buildingPeople(id);
+  readonly filledIn = (id: number): number => this.jobsFilled(id);
 
   /**
    * Why no newcomer would move into home `id` today, as the sim's
@@ -399,12 +405,12 @@ export class SimMirror {
    * was. Empty until the first snapshot.
    */
   roadClears(plan: RoadPlan): BuildingsInTheWay {
-    return this.effectsOf(plan, (state) => roadEffects(state, plan, (id) => this.buildingPeople(id))).clears;
+    return this.effectsOf(plan, (state) => roadEffects(state, plan, this.peopleIn, this.filledIn)).clears;
   }
 
   /** As `roadClears`, for a grid the sim has planned. */
   gridClears(plan: GridPlan): BuildingsInTheWay {
-    return this.effectsOf(plan, (state) => gridEffects(state, plan, (id) => this.buildingPeople(id))).clears;
+    return this.effectsOf(plan, (state) => gridEffects(state, plan, this.peopleIn, this.filledIn)).clears;
   }
 
   /**
@@ -417,7 +423,7 @@ export class SimMirror {
   private effectsOf(plan: RoadPlan | GridPlan, find: (state: SimState) => RoadEffects): RoadEffects {
     let effects = this.effects.get(plan);
     if (!effects) {
-      effects = this.current ? find(this.current) : { clears: { ids: [], residents: 0 }, cells: new Float64Array(0) };
+      effects = this.current ? find(this.current) : { clears: { ids: [], residents: 0, compensation: { ...NO_COMPENSATION } }, cells: new Float64Array(0) };
       this.effects.set(plan, effects);
     }
     return effects;
@@ -427,12 +433,12 @@ export class SimMirror {
 
   /** The cells a road the sim has planned would open, as corners, eight numbers a cell. Empty until the first snapshot. */
   roadCells(plan: RoadPlan): Float64Array {
-    return this.effectsOf(plan, (state) => roadEffects(state, plan, (id) => this.buildingPeople(id))).cells;
+    return this.effectsOf(plan, (state) => roadEffects(state, plan, this.peopleIn, this.filledIn)).cells;
   }
 
   /** As `roadCells`, for a grid the sim has planned. */
   gridCells(plan: GridPlan): Float64Array {
-    return this.effectsOf(plan, (state) => gridEffects(state, plan, (id) => this.buildingPeople(id))).cells;
+    return this.effectsOf(plan, (state) => gridEffects(state, plan, this.peopleIn, this.filledIn)).cells;
   }
 
   requestSnapshot(): void {
@@ -513,6 +519,12 @@ export class SimMirror {
       this.outOfStep();
       return;
     }
+    // And the expropriations, which must apply to the list the copy has.
+    const expropriations = delta.expropriations ? applyExpropriationDelta(state.expropriations, delta.expropriations, delta.tick) : null;
+    if (typeof expropriations === "string") {
+      this.outOfStep();
+      return;
+    }
     // Roads first: a delta whose rows do not fit the copy changes nothing.
     let roadChunks: readonly number[] = [];
     let roadNodes: readonly number[] = [];
@@ -574,6 +586,7 @@ export class SimMirror {
     state.demand = copyDemand(delta.demand);
     state.redevelopedToday = delta.redevelopedToday;
     if (delta.budget) state.budget = copyBudget(delta.budget);
+    if (expropriations) state.expropriations = expropriations;
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
     state.centre = { ...delta.centre };

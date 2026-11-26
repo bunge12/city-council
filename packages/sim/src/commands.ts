@@ -1,11 +1,18 @@
-import { bulldozeBuildings, planBulldozeBuildings } from "./buildings/bulldoze";
+import {
+  bulldozeBuildings,
+  chargeClears,
+  planBulldozeBuildings,
+  previewBuildRoad,
+  previewBuildRoadGrid,
+  previewBulldozeRoad,
+  previewUpgradeRoad,
+} from "./buildings/bulldoze";
 import { moveMoney } from "./economy/budget";
-import { spendingRefusal } from "./economy/spend";
 import { keepBuildings } from "./buildings/upkeep";
 import { LOG_PAGE_SIZE, logLength, recordEntry } from "./log";
-import { buildRoad, planRoad } from "./roads/build";
-import { buildRoadGrid, checkRoadGrid, gridProblemReason, planRoadGrid, type GridProblem } from "./roads/grid";
-import { bulldozeRoad, planBulldoze, planUpgrade, upgradeRoad } from "./roads/edit";
+import { buildRoad } from "./roads/build";
+import { buildRoadGrid, gridProblemReason, type GridProblem } from "./roads/grid";
+import { bulldozeRoad, upgradeRoad } from "./roads/edit";
 import { endJournal, reverseOps, startJournal, type NetworkOp } from "./roads/network";
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
@@ -99,6 +106,13 @@ function recordRoadUndo(state: SimState, command: Command, ops: NetworkOp[], spe
  * it charged (`recordRoadUndo`). The price is the one its plan worked out,
  * the number the tools show, so the readout and the charge cannot
  * disagree (M4-03).
+ *
+ * A road command that clears buildings charges their compensation too,
+ * from the same preview (M4-09), on the tick it applies and before the
+ * road changes, while the buildings and their pops are as the preview saw
+ * them, though a new road's buildings go only once the cells settle
+ * (buildings/upkeep.ts). That is not on the undo record: undo never brings
+ * a building back, so the compensation stays paid.
  */
 function undoable(state: SimState, command: Command, price: number, run: () => void): void {
   startJournal(state.roads);
@@ -118,18 +132,21 @@ function undoable(state: SimState, command: Command, price: number, run: () => v
  * straight or, with `payload.control`, one quadratic curve through it. See
  * roads/build.ts for the checks. The terrain comes from the seed, so a
  * worker, a server and a replay check against the same ground. Its plan's
- * cost goes on the construction line, and it is refused when the treasury
- * cannot pay it (economy/spend.ts).
+ * cost goes on the construction line and the compensation for the
+ * buildings it clears on the compensation line, and it is refused when the
+ * treasury cannot pay both (`previewBuildRoad`, economy/spend.ts).
  */
 const BuildRoad: CommandDef = {
   validate: (state, command) => {
-    const result = planRoad(state.roads, terrainOf(state.seed), command.payload);
-    return result.ok ? spendingRefusal(state, result.plan.cost) : result.reason;
+    const preview = previewBuildRoad(state, command.payload);
+    return preview.ok ? preview.refusal : preview.reason;
   },
   apply: (state, command) => {
     const terrain = terrainOf(state.seed);
-    const result = planRoad(state.roads, terrain, command.payload);
-    if (result.ok) undoable(state, command, result.plan.cost, () => buildRoad(state.roads, terrain, result.plan));
+    const preview = previewBuildRoad(state, command.payload);
+    if (!preview.ok) return;
+    chargeClears(state, command.playerId, preview.clears);
+    undoable(state, command, preview.plan.cost, () => buildRoad(state.roads, terrain, preview.plan));
   },
 };
 
@@ -138,43 +155,48 @@ const BuildRoad: CommandDef = {
  * `payload.along` and across to `payload.across`, blocks `payload.depth` by
  * `payload.width` metres between road edges, of road type `payload.type`.
  * See roads/grid.ts. Validation rehearses the whole grid on the network and
- * takes it back, so a grid is built whole or refused whole, with the street
- * the refusal came from. Its price is checked first, before any street.
+ * takes it back (`previewBuildRoadGrid`), so a grid is built whole or
+ * refused whole, with the street the refusal came from, and the same
+ * rehearsal finds the buildings it clears. Its price, the grid's cost and
+ * their compensation, is checked first, before any street.
  */
 const BuildRoadGrid: CommandDef = {
   validate: (state, command) => {
-    const terrain = terrainOf(state.seed);
-    const result = planRoadGrid(state.roads, terrain, command.payload);
-    if (!result.ok) return result.reason;
-    const refusal = spendingRefusal(state, result.plan.cost);
-    if (refusal !== null) return refusal;
-    const problem = checkRoadGrid(state.roads, terrain, result.plan);
-    return problem === null ? null : gridProblemReason(result.plan, problem);
+    const preview = previewBuildRoadGrid(state, command.payload);
+    if (!preview.ok) return preview.reason;
+    if (preview.refusal !== null) return preview.refusal;
+    return preview.problem === null ? null : gridProblemReason(preview.plan, preview.problem);
   },
   apply: (state, command) => {
     const terrain = terrainOf(state.seed);
-    const result = planRoadGrid(state.roads, terrain, command.payload);
-    if (result.ok) undoable(state, command, result.plan.cost, () => buildRoadGrid(state.roads, terrain, result.plan));
+    const preview = previewBuildRoadGrid(state, command.payload);
+    if (!preview.ok || preview.problem !== null) return;
+    chargeClears(state, command.playerId, preview.clears);
+    undoable(state, command, preview.plan.cost, () => buildRoadGrid(state.roads, terrain, preview.plan));
   },
-  // The step builds the grid once with the journal open, and takes it back
-  // if a street is refused, rather than rehearsing it and building it again.
+  // The step rehearses the grid once, for its price and its refusal, then
+  // builds it with the journal open, rather than running `validate`'s
+  // rehearsal and `apply`'s again.
   applyIfValid: (state, command) => {
     const terrain = terrainOf(state.seed);
-    const result = planRoadGrid(state.roads, terrain, command.payload);
-    if (!result.ok) return result.reason;
-    const price = result.plan.cost;
-    const refusal = spendingRefusal(state, price);
-    if (refusal !== null) return refusal;
+    const preview = previewBuildRoadGrid(state, command.payload);
+    if (!preview.ok) return preview.reason;
+    if (preview.refusal !== null) return preview.refusal;
+    if (preview.problem !== null) return gridProblemReason(preview.plan, preview.problem);
+    const price = preview.plan.cost;
+    // Charged before the grid goes down, as the other road commands charge: the rehearsal read the buildings and pops as they are now.
+    chargeClears(state, command.playerId, preview.clears);
     startJournal(state.roads);
     let problem: GridProblem | null = null;
     let ops: NetworkOp[];
     try {
-      problem = buildRoadGrid(state.roads, terrain, result.plan);
+      problem = buildRoadGrid(state.roads, terrain, preview.plan);
     } finally {
       ops = endJournal(state.roads);
       if (problem !== null) reverseOps(state.roads, ops);
     }
-    if (problem !== null) return gridProblemReason(result.plan, problem);
+    // The rehearsal built the same grid on the same network, so this is never reached.
+    if (problem !== null) throw new Error(`a grid its rehearsal built was refused: ${gridProblemReason(preview.plan, problem)}`);
     if (price !== 0) moveMoney(state, undoLine(command.type), price);
     recordRoadUndo(state, command, ops, price);
     return null;
@@ -185,33 +207,39 @@ const BuildRoadGrid: CommandDef = {
  * Removes the segments in `payload.segments`, or the stretch of each that
  * `payload.sections` names, and every node they leave with no segments.
  * See roads/edit.ts. Its plan's demolition less its refund goes on the
- * demolition line; a bulldoze whose refund is the larger pays in.
+ * demolition line; a bulldoze whose refund is the larger pays in. The
+ * buildings on the road's cells go with it, at their compensation.
  */
 const BulldozeRoad: CommandDef = {
   validate: (state, command) => {
-    const result = planBulldoze(state.roads, command.payload);
-    return result.ok ? spendingRefusal(state, result.plan.cost) : result.reason;
+    const preview = previewBulldozeRoad(state, command.payload);
+    return preview.ok ? preview.refusal : preview.reason;
   },
   apply: (state, command) => {
-    const result = planBulldoze(state.roads, command.payload);
-    if (result.ok) undoable(state, command, result.plan.cost, () => bulldozeRoad(state.roads, terrainOf(state.seed), result.plan));
+    const preview = previewBulldozeRoad(state, command.payload);
+    if (!preview.ok) return;
+    chargeClears(state, command.playerId, preview.clears);
+    undoable(state, command, preview.plan.cost, () => bulldozeRoad(state.roads, terrainOf(state.seed), preview.plan));
   },
 };
 
 /**
  * Changes the segments in `payload.segments` to road type `payload.type` in
  * place, or reverses one-ways given their own type. See roads/edit.ts. Its
- * plan's cost goes on the construction line.
+ * plan's cost goes on the construction line, and the compensation for the
+ * buildings a wider road takes on the compensation line.
  */
 const UpgradeRoad: CommandDef = {
   validate: (state, command) => {
-    const result = planUpgrade(state.roads, terrainOf(state.seed), command.payload);
-    return result.ok ? spendingRefusal(state, result.plan.cost) : result.reason;
+    const preview = previewUpgradeRoad(state, command.payload);
+    return preview.ok ? preview.refusal : preview.reason;
   },
   apply: (state, command) => {
     const terrain = terrainOf(state.seed);
-    const result = planUpgrade(state.roads, terrain, command.payload);
-    if (result.ok) undoable(state, command, result.plan.cost, () => upgradeRoad(state.roads, terrain, result.plan));
+    const preview = previewUpgradeRoad(state, command.payload);
+    if (!preview.ok) return;
+    chargeClears(state, command.playerId, preview.clears);
+    undoable(state, command, preview.plan.cost, () => upgradeRoad(state.roads, terrain, preview.plan));
   },
 };
 
@@ -282,26 +310,30 @@ function zoneCells(state: SimState, command: Command): string | null {
 /**
  * Clears the buildings in `payload.buildings`, each named by its id and its
  * lot's first cell as the player saw them, and refuses the whole command if
- * any changed since. See buildings/bulldoze.ts. Free until M4-09 prices it. No undo
- * record: the grower owns buildings, and undo never brings one back.
+ * any changed since. See buildings/bulldoze.ts. Charged at the eminent
+ * domain price on the compensation line, and refused when the treasury
+ * cannot pay it (M4-09). No undo record: the grower owns buildings, and
+ * undo never brings one back.
  */
 const BulldozeBuilding: CommandDef = {
   validate: (state, command) => {
     const result = planBulldozeBuildings(state, command.payload);
-    return result.ok ? null : result.reason;
+    return result.ok ? result.refusal : result.reason;
   },
-  apply: (state, command) => {
-    const result = planBulldozeBuildings(state, command.payload);
-    if (result.ok) bulldozeBuildings(state, result.ids);
-  },
-  // Checking 5,000 buildings costs as much as clearing them, so the step does it once (issue #162).
-  applyIfValid: (state, command) => {
-    const result = planBulldozeBuildings(state, command.payload);
-    if (!result.ok) return result.reason;
-    bulldozeBuildings(state, result.ids);
-    return null;
-  },
+  apply: (state, command) => void clearBuildings(state, command),
+  // Checking 1,000 buildings costs as much as clearing them, so the step does it once (issue #162).
+  applyIfValid: (state, command) => clearBuildings(state, command),
 };
+
+/** Checks, charges and clears a `BulldozeBuilding` in one pass: null once applied, or the reason, with state as it was. */
+function clearBuildings(state: SimState, command: Command): string | null {
+  const result = planBulldozeBuildings(state, command.payload);
+  if (!result.ok) return result.reason;
+  if (result.refusal !== null) return result.refusal;
+  chargeClears(state, command.playerId, result);
+  bulldozeBuildings(state, result.ids);
+  return null;
+}
 
 /** Every command type the sim accepts, by name. */
 export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
@@ -501,7 +533,7 @@ export function applyPending(state: SimState): DroppedCommand[] {
       if (counted) state.cellReads++;
       stepCells(state);
       keepBuildings(state);
-      // Everything the command moved, the buildings it took included once M4-09 prices them, so the log can name who spent it.
+      // Everything the command moved, the compensation for the buildings it took included (M4-09), so the log can name who spent it.
       recordEntry(
         state,
         { tick: state.tick, seq: command.seq, playerId: command.playerId, type: command.type, payload: command.payload },

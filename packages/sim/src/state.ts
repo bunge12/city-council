@@ -1,3 +1,4 @@
+import type { Expropriation } from "./economy/compensation";
 import { BALANCE_STAMP } from "./balance-stamp";
 import { createBuildings, type BuildingState } from "./buildings/buildings";
 import type { Command } from "./commands";
@@ -19,7 +20,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 31;
+export const SNAPSHOT_VERSION = 32;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -149,6 +150,13 @@ export interface SimState {
    * entries, since the log is the replay input and this is a result.
    */
   logSpent: number[];
+  /**
+   * Every occupied building the city cleared in the last game year, oldest
+   * first: the tick, its lot's centre, the people and jobs displaced and
+   * the player (economy/compensation.ts, M4-09). Held to
+   * `expropriationsMax`. Replaced, never changed in place.
+   */
+  expropriations: Expropriation[];
 }
 
 /**
@@ -208,6 +216,8 @@ export function createBareState(seed: number): SimState {
     budget: createBudget(),
     // After it, where the version 31 migration puts it.
     logSpent: [],
+    // After it, where the version 32 migration puts it.
+    expropriations: [],
   };
 }
 
@@ -221,15 +231,15 @@ export function cloneState(state: SimState): SimState {
 
 /**
  * A copy of `state` to write a save from while the sim steps on, for the
- * cost of copying the typed arrays. Log entries and undo records are shared
- * with `state`, not copied: each is made once and never changed (log.ts,
- * undo.ts). Everything else is copied as `cloneState` copies it.
+ * cost of copying the typed arrays. Log entries, undo records and the
+ * expropriation list are shared with `state`, not copied: each is made once
+ * and never changed (log.ts, undo.ts, economy/compensation.ts). Everything else is copied as `cloneState` copies it.
  */
 export function captureState(state: SimState, keep?: CaptureBuffers): SimState {
   // The spread keeps the keys in the order `state` has them, which is the
   // order a snapshot writes them in.
-  const rest = cloneValue({ ...state, log: [], undo: [], logSpent: [] }, "", keep) as SimState;
-  return { ...rest, log: state.log.slice(), undo: state.undo, logSpent: state.logSpent.slice() };
+  const rest = cloneValue({ ...state, log: [], undo: [], logSpent: [], expropriations: [] }, "", keep) as SimState;
+  return { ...rest, log: state.log.slice(), undo: state.undo, logSpent: state.logSpent.slice(), expropriations: state.expropriations };
 }
 
 /**

@@ -3,13 +3,15 @@
 // tests, which check that a version 30 save loads to the same city with
 // only those added. Every older `without...` helper takes them out too,
 // through `withoutMoney`, since a state from before any earlier version is
-// from before this one.
+// from before this one. It takes out what later versions added too.
+
+import { withoutExpropriations } from "./before-expropriations";
 
 type Loose = Record<string, unknown>;
 
 /** `state` with the fields version 31 added taken out. Leaves a state that has none as it is. */
 export function withoutSpending<T extends object>(state: T): T {
-  const out: Loose = { ...(state as Loose) };
+  const out: Loose = { ...(withoutExpropriations(state) as Loose) };
   delete out["logSpent"];
   if (Array.isArray(out["undo"])) {
     out["undo"] = (out["undo"] as Loose[]).map((record) => {

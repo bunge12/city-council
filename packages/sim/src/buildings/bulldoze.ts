@@ -8,18 +8,21 @@
 // command when any no longer match. The tick matters when the grower builds
 // again on the lot it was cleared from: the new building can take the freed
 // id and the same first cell (M2 review, #147). A cleared lot is free at once, and the grower may build on it
-// under the cells' current zoning. Clearing costs nothing until the
-// eminent domain price arrives in M4-09.
+// under the cells' current zoning. Clearing is charged at the eminent
+// domain price (economy/compensation.ts, M4-09).
 //
-// The previews give a road command's plan, whose `cost` is what the
-// command charges, and `refusal`: why the treasury cannot pay it, or null
-// (M4-03). A refused plan is still a plan, so the tools can show its price
-// and the reason together.
+// The previews give a road command's plan, the buildings it would clear
+// with their compensation (M4-09), `price`, what the command charges: the
+// plan's `cost` plus the compensation, and `refusal`: why the treasury
+// cannot pay it, or null (M4-03). A refused plan is still a plan, so the
+// tools can show its price and the reason together. The commands call the
+// same functions, so the price shown is the price charged.
 
+import { chargeCompensation, compensationFor, type Compensation } from "../economy/compensation";
 import { spendingRefusal } from "../economy/spend";
-import { planBulldoze, planUpgrade, type BulldozePlan, type UpgradePlan } from "../roads/edit";
+import { planBulldoze, planUpgrade, upgradeRoad, type BulldozePlan, type UpgradePlan } from "../roads/edit";
 import { buildRoad, planRoad, type RoadPlan } from "../roads/build";
-import { buildRoadGrid, planRoadGrid, type GridPlan } from "../roads/grid";
+import { buildRoadGrid, planRoadGrid, type GridPlan, type GridProblem } from "../roads/grid";
 import { endJournal, reverseOps, startJournal, type NetworkOp, type RoadNetwork } from "../roads/network";
 import type { SimState } from "../state";
 import { terrainOf } from "../terrain/cache";
@@ -71,15 +74,29 @@ function peopleOf(state: SimState): PeopleIn {
 }
 
 /**
- * The building ids a `BulldozeBuilding` payload names, ascending, and the
- * people living in them, who would be displaced (M3-12), or the reason it
- * cannot apply to `state`. Changes nothing.
+ * The jobs filled in building `id`, as `PeopleIn` gives its residents: the
+ * sim's from its pops (`jobsFilled`), a client's copy from its mirror.
+ */
+export type FilledIn = PeopleIn;
+
+/** The sim's own `FilledIn`. */
+function filledOf(state: SimState): FilledIn {
+  const filled = popIndexOf(state).filled;
+  return (id) => filled[id] ?? 0;
+}
+
+/**
+ * The building ids a `BulldozeBuilding` payload names, ascending, the
+ * people living in them, who would be displaced (M3-12), what clearing
+ * them costs (M4-09), and why the treasury cannot pay it, or null; or the
+ * reason it cannot apply to `state` at all. Changes nothing.
  */
 export function planBulldozeBuildings(
   state: SimState,
   payload: unknown,
   people: PeopleIn = peopleOf(state),
-): { ok: true; ids: number[]; residents: number } | { ok: false; reason: string } {
+  filled: FilledIn = filledOf(state),
+): { ok: true; ids: number[]; residents: number; compensation: Compensation; refusal: Refusal } | { ok: false; reason: string } {
   const need = "BulldozeBuilding needs a list of buildings, each { id, segment, side, place, builtAt }";
   if (!isRecord(payload) || !Array.isArray(payload["buildings"]) || payload["buildings"].length === 0) return { ok: false, reason: need };
   const list = payload["buildings"] as unknown[];
@@ -102,7 +119,18 @@ export function planBulldozeBuildings(
   const sorted = [...ids].sort((p, q) => p - q);
   let residents = 0;
   for (const id of sorted) residents += people(id);
-  return { ok: true, ids: sorted, residents };
+  const compensation = compensationFor(state, sorted, people, filled);
+  return { ok: true, ids: sorted, residents, compensation, refusal: spendingRefusal(state, compensation.total) };
+}
+
+/**
+ * Charges what clearing `ids` costs, `compensation` as a plan priced it, on
+ * the compensation line, and records each occupied one for `playerId`
+ * (economy/compensation.ts). The commands call it before the buildings or
+ * the road under them go, while their pops and lots are as the plan saw them.
+ */
+export function chargeClears(state: SimState, playerId: string, clears: Pick<BuildingsInTheWay, "ids" | "compensation">): void {
+  chargeCompensation(state, playerId, clears.ids, clears.compensation, peopleOf(state), filledOf(state));
 }
 
 /** Removes the buildings a plan named, in ascending id order. */
@@ -116,26 +144,26 @@ export interface BuildingsInTheWay {
   ids: number[];
   /** The people living in them, added up: the residents who would be displaced (M3-12), not the room the buildings hold. */
   residents: number;
+  /** What clearing them costs, which the command charges on the compensation line (M4-09). */
+  compensation: Compensation;
 }
 
-function inTheWay(ids: number[], people: PeopleIn): BuildingsInTheWay {
+function inTheWay(state: SimState, ids: number[], people: PeopleIn, filled: FilledIn): BuildingsInTheWay {
   let residents = 0;
   for (const id of ids) residents += people(id);
-  return { ids, residents };
+  return { ids, residents, compensation: compensationFor(state, ids, people, filled) };
 }
-
-
 
 /**
  * The buildings that stand on the cells of the segments a bulldoze removes,
  * or of the stretch of each it cuts out. Their cells go with the road, so
  * the command removes them at once.
  */
-export function bulldozeClears(state: SimState, plan: BulldozePlan, people: PeopleIn = peopleOf(state)): BuildingsInTheWay {
+export function bulldozeClears(state: SimState, plan: BulldozePlan, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): BuildingsInTheWay {
   const cut = new Set(plan.sections.map((s) => s.seg));
   const ids = new Set(buildingsOnSegments(state, plan.segments.filter((seg) => !cut.has(seg))));
   for (const s of plan.sections) for (const id of buildingsOnStretch(state, s.seg, s.from, s.to)) ids.add(id);
-  return inTheWay([...ids].sort((p, q) => p - q), people);
+  return inTheWay(state, [...ids].sort((p, q) => p - q), people, filled);
 }
 
 /**
@@ -153,8 +181,9 @@ function rehearse<T>(state: SimState, build: (net: RoadNetwork) => boolean, read
     if (!build(net)) return none;
     ops = endJournal(net);
     const added = new Set<number>();
+    // A restyled segment counts as new: an upgrade's wider surface covers ground its old one did not.
     for (const op of ops) {
-      if (op.op === "addSeg") added.add(op.id);
+      if (op.op === "addSeg" || op.op === "restyle") added.add(op.id);
       else if (op.op === "removeSeg") added.delete(op.id);
     }
     return read(index, [...added].sort((p, q) => p - q));
@@ -180,7 +209,7 @@ export interface RoadEffects {
  * rehearsal. The pieces of a road it splits keep their cells, so only
  * segments with a new build order bring cells.
  */
-function effectsOf(state: SimState, build: (net: RoadNetwork) => boolean, people: PeopleIn): RoadEffects {
+function effectsOf(state: SimState, build: (net: RoadNetwork) => boolean, people: PeopleIn, filled: FilledIn): RoadEffects {
   const firstNew = state.roads.segOrderNext;
   const { lost, cells } = rehearse(
     state,
@@ -193,7 +222,7 @@ function effectsOf(state: SimState, build: (net: RoadNetwork) => boolean, people
     { lost: [] as number[], cells: new Float64Array(0) },
   );
   // Asked once the build is taken back: the building index follows the cell index, which must not see the rehearsal.
-  return { clears: inTheWay(buildingsOnCells(state, lost, CELL_KEY_STRIDE), people), cells };
+  return { clears: inTheWay(state, buildingsOnCells(state, lost, CELL_KEY_STRIDE), people, filled), cells };
 }
 
 /**
@@ -202,7 +231,7 @@ function effectsOf(state: SimState, build: (net: RoadNetwork) => boolean, people
  * segments. For the road tool's preview, so the player sees the lots a
  * road makes before building it.
  */
-export function roadEffects(state: SimState, plan: RoadPlan, people: PeopleIn = peopleOf(state)): RoadEffects {
+export function roadEffects(state: SimState, plan: RoadPlan, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): RoadEffects {
   const terrain = terrainOf(state.seed);
   return effectsOf(
     state,
@@ -211,13 +240,14 @@ export function roadEffects(state: SimState, plan: RoadPlan, people: PeopleIn = 
       return true;
     },
     people,
+    filled,
   );
 }
 
 /** As `roadEffects`, for every street of a grid. Nothing for a grid a street of which is refused. */
-export function gridEffects(state: SimState, plan: GridPlan, people: PeopleIn = peopleOf(state)): RoadEffects {
+export function gridEffects(state: SimState, plan: GridPlan, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): RoadEffects {
   const terrain = terrainOf(state.seed);
-  return effectsOf(state, (net) => buildRoadGrid(net, terrain, plan) === null, people);
+  return effectsOf(state, (net) => buildRoadGrid(net, terrain, plan) === null, people, filled);
 }
 
 /**
@@ -226,60 +256,102 @@ export function gridEffects(state: SimState, plan: GridPlan, people: PeopleIn = 
  * The pieces of a road it splits keep their cells, and the buildings on
  * them stand.
  */
-export function roadClears(state: SimState, plan: RoadPlan, people: PeopleIn = peopleOf(state)): BuildingsInTheWay {
+export function roadClears(state: SimState, plan: RoadPlan, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): BuildingsInTheWay {
   const terrain = terrainOf(state.seed);
   const keys = cellsCoveredBy(state, (net) => {
     buildRoad(net, terrain, plan);
     return true;
   });
-  return inTheWay(buildingsOnCells(state, keys, CELL_KEY_STRIDE), people);
+  return inTheWay(state, buildingsOnCells(state, keys, CELL_KEY_STRIDE), people, filled);
 }
 
 /** The buildings a grid would clear, as `roadClears` says for each street. None for a grid a street of which is refused. */
-export function gridClears(state: SimState, plan: GridPlan, people: PeopleIn = peopleOf(state)): BuildingsInTheWay {
+export function gridClears(state: SimState, plan: GridPlan, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): BuildingsInTheWay {
+  return gridRehearsal(state, plan, people, filled).clears;
+}
+
+/**
+ * One rehearsal of a grid: the street it is refused at, or null, and the
+ * buildings it would clear, none when refused. `BuildRoadGrid` checks the
+ * grid and prices what it clears with it, in one build taken back.
+ */
+export function gridRehearsal(state: SimState, plan: GridPlan, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): { problem: GridProblem | null; clears: BuildingsInTheWay } {
   const terrain = terrainOf(state.seed);
-  const keys = cellsCoveredBy(state, (net) => buildRoadGrid(net, terrain, plan) === null);
-  return inTheWay(buildingsOnCells(state, keys, CELL_KEY_STRIDE), people);
+  let problem: GridProblem | null = null;
+  const keys = cellsCoveredBy(state, (net) => {
+    problem = buildRoadGrid(net, terrain, plan);
+    return problem === null;
+  });
+  return { problem, clears: inTheWay(state, buildingsOnCells(state, keys, CELL_KEY_STRIDE), people, filled) };
+}
+
+/**
+ * The buildings an upgrade would clear: the ones with a cell under the
+ * wider surface of a segment it restyles, or of a piece it cuts, as a new
+ * road's (PRD, "Eminent domain": widening a road into a lot counts).
+ */
+export function upgradeClears(state: SimState, plan: UpgradePlan, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): BuildingsInTheWay {
+  const terrain = terrainOf(state.seed);
+  const keys = cellsCoveredBy(state, (net) => {
+    upgradeRoad(net, terrain, plan);
+    return true;
+  });
+  return inTheWay(state, buildingsOnCells(state, keys, CELL_KEY_STRIDE), people, filled);
 }
 
 /** Why the treasury of `state` cannot pay a plan's cost, or null: what the command would be refused with. */
 export type Refusal = string | null;
 
-/**
- * `planRoad` on `state`, with the buildings the road would clear and why
- * the treasury cannot pay its cost, or null. For the road tool's preview.
- */
-export function previewBuildRoad(
-  state: SimState,
-  payload: unknown,
-  people: PeopleIn = peopleOf(state),
-): { ok: true; plan: RoadPlan; clears: BuildingsInTheWay; refusal: Refusal } | { ok: false; reason: string } {
-  const result = planRoad(state.roads, terrainOf(state.seed), payload);
-  return result.ok ? { ...result, clears: roadClears(state, result.plan, people), refusal: spendingRefusal(state, result.plan.cost) } : result;
+/** What a road command's preview gives besides its plan: the buildings it clears, its price and why it is refused for money. */
+export interface RoadPreview<P> {
+  ok: true;
+  plan: P;
+  clears: BuildingsInTheWay;
+  /** Whole dollars the command charges: the plan's `cost` plus the compensation for the buildings it clears. */
+  price: number;
+  refusal: Refusal;
 }
 
-/** `planRoadGrid` on `state`, with the buildings the grid would clear and why the treasury cannot pay it. For the grid tool's preview. */
+function priced<P extends { cost: number }>(state: SimState, plan: P, clears: BuildingsInTheWay): RoadPreview<P> {
+  const price = plan.cost + clears.compensation.total;
+  return { ok: true, plan, clears, price, refusal: spendingRefusal(state, price) };
+}
+
+/**
+ * `planRoad` on `state`, with the buildings the road would clear and their
+ * compensation, the price, and why the treasury cannot pay it, or null.
+ * For the road tool's preview, and what `BuildRoad` checks and charges.
+ */
+export function previewBuildRoad(state: SimState, payload: unknown, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): RoadPreview<RoadPlan> | { ok: false; reason: string } {
+  const result = planRoad(state.roads, terrainOf(state.seed), payload);
+  return result.ok ? priced(state, result.plan, roadClears(state, result.plan, people, filled)) : result;
+}
+
+/**
+ * `planRoadGrid` on `state`, priced as `previewBuildRoad` prices a road.
+ * For the grid tool's preview. A grid a street of which is refused clears
+ * nothing, and `problem` says where it is refused, or is null.
+ */
 export function previewBuildRoadGrid(
   state: SimState,
   payload: unknown,
   people: PeopleIn = peopleOf(state),
-): { ok: true; plan: GridPlan; clears: BuildingsInTheWay; refusal: Refusal } | { ok: false; reason: string } {
+  filled: FilledIn = filledOf(state),
+): (RoadPreview<GridPlan> & { problem: GridProblem | null }) | { ok: false; reason: string } {
   const result = planRoadGrid(state.roads, terrainOf(state.seed), payload);
-  return result.ok ? { ...result, clears: gridClears(state, result.plan, people), refusal: spendingRefusal(state, result.plan.cost) } : result;
+  if (!result.ok) return result;
+  const { problem, clears } = gridRehearsal(state, result.plan, people, filled);
+  return { ...priced(state, result.plan, clears), problem };
 }
 
-/** `planBulldoze` on `state`, with the buildings the bulldoze would clear and why the treasury cannot pay it. For the bulldoze tool's preview. */
-export function previewBulldozeRoad(
-  state: SimState,
-  payload: unknown,
-  people: PeopleIn = peopleOf(state),
-): { ok: true; plan: BulldozePlan; clears: BuildingsInTheWay; refusal: Refusal } | { ok: false; reason: string } {
+/** `planBulldoze` on `state`, priced: the road's demolition less its refund, plus the compensation for the buildings on it. For the bulldoze tool's preview. */
+export function previewBulldozeRoad(state: SimState, payload: unknown, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): RoadPreview<BulldozePlan> | { ok: false; reason: string } {
   const result = planBulldoze(state.roads, payload);
-  return result.ok ? { ...result, clears: bulldozeClears(state, result.plan, people), refusal: spendingRefusal(state, result.plan.cost) } : result;
+  return result.ok ? priced(state, result.plan, bulldozeClears(state, result.plan, people, filled)) : result;
 }
 
-/** `planUpgrade` on `state`, with why the treasury cannot pay it. For the upgrade tool's preview. */
-export function previewUpgradeRoad(state: SimState, payload: unknown): { ok: true; plan: UpgradePlan; refusal: Refusal } | { ok: false; reason: string } {
+/** `planUpgrade` on `state`, priced with the buildings a wider road clears. For the upgrade tool's preview. */
+export function previewUpgradeRoad(state: SimState, payload: unknown, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): RoadPreview<UpgradePlan> | { ok: false; reason: string } {
   const result = planUpgrade(state.roads, terrainOf(state.seed), payload);
-  return result.ok ? { ...result, refusal: spendingRefusal(state, result.plan.cost) } : result;
+  return result.ok ? priced(state, result.plan, upgradeClears(state, result.plan, people, filled)) : result;
 }

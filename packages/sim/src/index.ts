@@ -224,6 +224,7 @@ export {
   bulldozeClears,
   gridEffects,
   gridClears,
+  gridRehearsal,
   planBulldozeBuildings,
   previewBuildRoad,
   previewBuildRoadGrid,
@@ -232,8 +233,11 @@ export {
   roadEffects,
   roadClears,
   seeBuilding,
+  upgradeClears,
 } from "./buildings/bulldoze";
-export type { BuildingSeen, BuildingsInTheWay, RoadEffects, BulldozeBuildingPayload, PeopleIn, Refusal } from "./buildings/bulldoze";
+export type { BuildingSeen, BuildingsInTheWay, RoadEffects, RoadPreview, BulldozeBuildingPayload, FilledIn, PeopleIn, Refusal } from "./buildings/bulldoze";
+export { NO_COMPENSATION, applyExpropriationDelta, checkExpropriations, compensationFor, expropriationDelta, expropriationTicks } from "./economy/compensation";
+export type { Compensation, CountIn, Expropriation, ExpropriationDelta } from "./economy/compensation";
 export { applyBuildingDelta, drainBuildingDelta, recordBuildingChanges } from "./buildings/delta";
 export type { BuildingDelta } from "./buildings/delta";
 export type { ZoneCellsPayload, ZonePlan, ZonePlanResult, ZonePoint, ZoneRect } from "./zoning/zone";

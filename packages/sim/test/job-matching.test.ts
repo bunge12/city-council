@@ -42,6 +42,7 @@ import {
 import { GROWER } from "../src/buildings/grower";
 import { openingsOf, openingsProblem } from "../src/pops/openings";
 import { enqueue } from "../src/commands";
+import { funded } from "./funds";
 import { submit } from "./seen-ends";
 import { holdDemand, type HeldBars } from "./demand-helper";
 import { expectReplay, replayFixture, type ReplayFixture } from "./replay-helper";
@@ -174,7 +175,7 @@ const NEAR_FAR_BARS: HeldBars = { residential: 100, commercial: 100 };
  * zone and half the weight at thirty (`scaledTimes`).
  */
 function nearAndFar(): { state: SimState; near: number; far: number } {
-  const state = createState(SEED);
+  const state = funded(createState(SEED));
   const s = street(state, 99);
   zone(state, s, "commercial", 3, 0, 3, 4, 1);
   zone(state, s, "residential", 1, 6, 14, 6, 1);
@@ -541,7 +542,7 @@ describe("job matching", () => {
 
 describe("a long session", () => {
   it("never has a building with more jobs filled than it offers, after any step, its openings equal ones built afresh, and its totals equal the recount", () => {
-    const state = createState(SEED);
+    const state = funded(createState(SEED));
     const s = street(state, 60);
     zone(state, s, "residential", 1, 0, 20, 6, 1);
     zone(state, s, "residential", 2, 20, 10, 6, 1);

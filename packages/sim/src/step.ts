@@ -7,6 +7,7 @@ import { SATISFACTION } from "./pops/satisfaction";
 import { TURNOVER } from "./pops/turnover";
 import { STATS } from "./stats/stats";
 import { BUDGET_SYSTEM, closeMonthOn } from "./economy/budget";
+import { dropOldExpropriations } from "./economy/compensation";
 import { UPKEEP } from "./economy/upkeep";
 import { TAX } from "./economy/tax";
 import { DEMAND } from "./demand/demand";
@@ -132,6 +133,10 @@ export function step(state: SimState, timer?: SystemTimer): DroppedCommand[] {
   // On the new tick, before anything else happens on it: money a command
   // moves on a month's first tick, paused or not, is the new month's, and
   // the statistics' sample on it holds the month just filed (M4-02).
-  timed(timer, BUDGET_SYSTEM, () => closeMonthOn(state));
+  timed(timer, BUDGET_SYSTEM, () => {
+    closeMonthOn(state);
+    // A record a game year old goes on the tick it turns one (M4-09).
+    dropOldExpropriations(state);
+  });
   return dropped;
 }
