@@ -173,12 +173,15 @@ test("fill paints a strip two cells deep, a repeat sends nothing, and erase clea
   expect(await zoneLog(page)).toHaveLength(1);
   await expect(page.locator("#road-note")).toContainText("no cell would change");
 
-  // Erase clears them.
+  // Erase with Shift held clears them all, the ground of any house grown there since included (#417).
   await page.locator("#zone-erase").click();
+  await page.keyboard.down("Shift");
   await hover(page, MID_X, SOUTH_Z - HALF / 2);
   await expect(readout).toHaveAttribute("data-zone", "none");
+  await expect(readout).toHaveAttribute("data-whole", "true");
   await expect(readout).toContainText(`Clear ${count} cells`);
   await click(page, MID_X, SOUTH_Z - HALF / 2);
+  await page.keyboard.up("Shift");
   await expect.poll(() => zoneLog(page).then((l) => l.length)).toBe(2);
   await expect.poll(() => zonedCount(page)).toBe(0);
 
