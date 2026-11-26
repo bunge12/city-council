@@ -25,24 +25,69 @@
 // nobody in it and pays nothing; an abandoned one offers no room and pays
 // nothing either, and neither does a workplace.
 //
-// The sweep is shared: business tax (M4-06) is charged on the same visit,
-// so the cost of finding each building is paid once. Only add, multiply,
-// divide and floor, in one fixed order, so every host agrees (rule 6).
+// Business tax (M4-06) is charged on the same visit, so the cost of
+// finding each building is paid once. Business tax follows activity, and M4
+// has no trips or freight, so jobs filled stand in for it: a shop pays the
+// commercial rate on its sales, its shop jobs filled times `salesPerJob`;
+// an office pays the office rate on its output, its office jobs filled
+// times `outputPerJob.office`; a factory pays the industrial rate on its
+// output in the same way, and only while its road reaches an outside
+// connection, read on the visit. A workplace nobody works in pays nothing.
+// Sales are scaled down, the same share for every shop, while the city's
+// shop jobs filled are more than its residents' spending power keeps busy
+// (`spendingPower` and `shopJobsPerSpending`, M3-06), both read from the
+// running totals, so the scale is never recounted. A mixed building pays
+// the residential and commercial rates (M4.md): the commercial rate on all
+// its jobs, its office jobs' output included at density 3. M5 swaps in
+// trips and freight for jobs filled and keeps the rates.
+//
+// Each line's yearly figure is charged with its own exact daily share, so a
+// year of visits adds up to the yearly figure on every line. Only add,
+// multiply, divide and floor, in one fixed order, so every host agrees
+// (rule 6).
 
 import { TIME_BALANCE, yearDays } from "../calendar";
 import { BUILDING_TYPES, type BuildingType } from "../buildings/balance";
 import { BUILDING_ABANDONED, BUILDING_ALIVE } from "../buildings/buildings";
 import { lotJobs } from "../buildings/jobs";
+import { DEMAND_BALANCE } from "../demand/balance";
+import { spendingPower } from "../demand/demand";
 import { buildingValues } from "../landvalue/land-value";
+import { roadReaches } from "../pops/room";
 import { popIndexOf } from "../pops/where";
+import { outsideReachByNode } from "../roads/outside";
 import type { SimState } from "../state";
+import { kindsOf, type StatTotals } from "../stats/stats";
 import type { System } from "../step";
-import { ECONOMY_SLIDERS } from "./balance";
-import { dailyShare, moveMoney } from "./budget";
+import { ECONOMY, ECONOMY_SLIDERS } from "./balance";
+import { TAX_LINES, dailyShare, moveMoney } from "./budget";
 import { floorSpaceOf, valueOfSpace } from "./value";
 
-/** The residential rate's place in `BudgetState.taxRates`. */
+/** Each rate's place in `BudgetState.taxRates`. */
 const RESIDENTIAL = ECONOMY_SLIDERS.indexOf("residential");
+const COMMERCIAL = ECONOMY_SLIDERS.indexOf("commercial");
+const OFFICE = ECONOMY_SLIDERS.indexOf("office");
+const INDUSTRIAL = ECONOMY_SLIDERS.indexOf("industrial");
+
+/** A building's yearly tax by line, whole dollars, in `ECONOMY_SLIDERS` order: residential, commercial, office, industrial. */
+export type TaxByLine = [number, number, number, number];
+
+/** A building's jobs filled by kind, the base its business tax follows. */
+export interface JobsFilled {
+  commercial: number;
+  office: number;
+  industrial: number;
+}
+
+/** What the business tax reads beside a building's jobs filled: the rates and the city's shop sales scale. */
+export interface BusinessTaxTerms {
+  /** The four tax rates, in `ECONOMY_SLIDERS` order (`BudgetState.taxRates`). */
+  rates: ArrayLike<number>;
+  /** The share of a shop's sales it makes, from 0 to 1 (`shopSalesScale`). */
+  salesScale: number;
+  /** Whether the building's road reaches an outside connection, which a factory needs to pay. */
+  reachesOutside: boolean;
+}
 
 /**
  * The yearly residential tax, in whole dollars, of a building of `type`
@@ -57,60 +102,140 @@ export function residentialTaxOf(type: Pick<BuildingType, "zone" | "density">, r
   return Math.max(0, Math.floor(((value * space.homes) / space.total) * rate));
 }
 
-/** Whether building `flags` may pay: standing and not abandoned. Who lives in it is the sweep's question. */
+/**
+ * The share of its sales a shop makes, from 0 to 1, from the running
+ * totals: 1 while the residents' spending power keeps every shop job filled
+ * busy, and spending power's shop jobs over the shop jobs filled once
+ * there are more. The same for every shop in the city.
+ */
+export function shopSalesScale(totals: StatTotals): number {
+  const filled = totals["filledCommercial"] ?? 0;
+  const supported = spendingPower(totals) * DEMAND_BALANCE.shopJobsPerSpending;
+  if (filled <= supported) return 1;
+  return supported > 0 ? supported / filled : 0;
+}
+
+/**
+ * The yearly business tax, in whole dollars, of a building of `type` with
+ * `filled` jobs filled, into `out` at the commercial, office and industrial
+ * places; the residential place is left alone. A shop pays the commercial
+ * rate on its sales, an office the office rate on its output, and a factory
+ * the industrial rate on its output while its road reaches outside. A mixed
+ * building pays the commercial rate on all its jobs, onto the commercial line.
+ */
+export function businessTaxOf(type: Pick<BuildingType, "zone">, filled: JobsFilled, terms: BusinessTaxTerms, out: TaxByLine = [0, 0, 0, 0]): TaxByLine {
+  const b = ECONOMY.business;
+  const sales = filled.commercial * b.salesPerJob * terms.salesScale;
+  const officeOutput = filled.office * b.outputPerJob.office;
+  const factoryOutput = terms.reachesOutside ? filled.industrial * b.outputPerJob.industrial : 0;
+  const rate = (i: number): number => terms.rates[i] ?? 0;
+  if (type.zone === "mixed") {
+    out[COMMERCIAL] = Math.floor((sales + officeOutput + factoryOutput) * rate(COMMERCIAL));
+    out[OFFICE] = 0;
+    out[INDUSTRIAL] = 0;
+  } else {
+    out[COMMERCIAL] = Math.floor(sales * rate(COMMERCIAL));
+    out[OFFICE] = Math.floor(officeOutput * rate(OFFICE));
+    out[INDUSTRIAL] = Math.floor(factoryOutput * rate(INDUSTRIAL));
+  }
+  return out;
+}
+
+/** Whether building `flags` may pay: standing and not abandoned. Who lives or works in it is the sweep's question. */
 function mayPay(flags: number): boolean {
   return (flags & BUILDING_ALIVE) !== 0 && (flags & BUILDING_ABANDONED) === 0;
 }
 
+const NO_JOBS: JobsFilled = { commercial: 0, office: 0, industrial: 0 };
+
 /**
- * What building `id` pays a year in residential tax while people live in
- * it, in whole dollars, at the city's rate and the land value at its lot
- * today. 0 for a free id, an abandoned building, or one with no homes. For
- * the hover readout and the budget overlay (M4-18). It does not ask
- * whether anyone lives there today, so a vacant home shows what it would
- * pay: the sweep asks.
+ * What building `id` pays a year, by line, in whole dollars, at the city's
+ * rates and the land value at its lot today: residential tax while people
+ * live in it, and business tax on the jobs filled there today. All zero for
+ * a free id or an abandoned building. For the hover readout and the budget
+ * overlay (M4-18). The residential place does not ask whether anyone lives
+ * there today, so a vacant home shows what it would pay: the sweep asks.
  */
-export function buildingTaxPerYear(state: SimState, id: number): number {
+export function buildingTaxByLine(state: SimState, id: number, out: TaxByLine = [0, 0, 0, 0]): TaxByLine {
+  out.fill(0);
   const b = state.buildings;
-  if (!mayPay(b.flags[id] ?? 0)) return 0;
+  if (!mayPay(b.flags[id] ?? 0)) return out;
   const type = BUILDING_TYPES[b.type[id] ?? 0];
-  if (!type || (b.residents[id] ?? 0) <= 0) return 0;
-  const land = buildingValues(state, [id])[0] ?? 0;
-  return residentialTaxOf(type, b.residents[id] ?? 0, lotJobs(b, id), land, state.budget.taxRates[RESIDENTIAL] ?? 0);
+  if (!type) return out;
+  const rates = state.budget.taxRates;
+  const filled = popIndexOf(state).filled[id] ?? 0;
+  if (filled > 0) {
+    const terms = { rates, salesScale: shopSalesScale(state.stats.totals), reachesOutside: roadReaches(state, outsideReachByNode(state), id) };
+    businessTaxOf(type, kindsOf(b.type[id] ?? 0, filled) ?? NO_JOBS, terms, out);
+  }
+  if ((b.residents[id] ?? 0) > 0) {
+    const land = buildingValues(state, [id])[0] ?? 0;
+    out[RESIDENTIAL] = residentialTaxOf(type, b.residents[id] ?? 0, lotJobs(b, id), land, rates[RESIDENTIAL] ?? 0);
+  }
+  return out;
+}
+
+/** What building `id` pays a year in tax on every line together, in whole dollars (`buildingTaxByLine`). */
+export function buildingTaxPerYear(state: SimState, id: number): number {
+  const by = buildingTaxByLine(state, id);
+  return by[0] + by[1] + by[2] + by[3];
 }
 
 /** The ids of the slice a tick pays, and their land values: reused across ticks. Derived scratch, never state. */
 const slice: number[] = [];
+const homes: number[] = [];
 let landValues = new Float64Array(0);
+const yearly: TaxByLine = [0, 0, 0, 0];
+const due: TaxByLine = [0, 0, 0, 0];
 
 /**
- * The tax system's work for one tick: each building of the day's slice that
- * people live in pays the day's share of its yearly residential tax, onto
- * the residential tax line.
+ * The tax system's work for one tick: each building of the day's slice
+ * pays the day's share of its yearly tax, line by line: residential tax if
+ * people live in it, business tax if people work in it.
  */
 export function collectTax(state: SimState): void {
   const perDay = TIME_BALANCE.ticksPerDay;
   const b = state.buildings;
   const { flags, residents } = b;
-  const people = popIndexOf(state).people;
+  const index = popIndexOf(state);
+  const { people, filled } = index;
   slice.length = 0;
+  homes.length = 0;
   for (let id = state.tick % perDay; id < flags.length; id += perDay) {
-    if (!mayPay(flags[id] ?? 0) || (residents[id] ?? 0) <= 0 || (people[id] ?? 0) <= 0) continue;
+    if (!mayPay(flags[id] ?? 0)) continue;
+    const home = (residents[id] ?? 0) > 0 && (people[id] ?? 0) > 0;
+    if (!home && (filled[id] ?? 0) <= 0) continue;
     slice.push(id);
+    if (home) homes.push(id);
   }
   if (slice.length === 0) return;
-  if (landValues.length < slice.length) landValues = new Float64Array(Math.max(slice.length, landValues.length * 2));
-  const land = buildingValues(state, slice, landValues);
-  const rate = state.budget.taxRates[RESIDENTIAL] ?? 0;
+  if (landValues.length < homes.length) landValues = new Float64Array(Math.max(homes.length, landValues.length * 2));
+  const land = homes.length > 0 ? buildingValues(state, homes, landValues) : landValues;
+  const rates = state.budget.taxRates;
+  const rate = rates[RESIDENTIAL] ?? 0;
   const day = Math.floor(state.tick / perDay) % yearDays();
-  let due = 0;
+  const reach = outsideReachByNode(state);
+  const terms: BusinessTaxTerms = { rates, salesScale: shopSalesScale(state.stats.totals), reachesOutside: false };
+  due.fill(0);
+  let h = 0;
   for (let i = 0; i < slice.length; i++) {
     const id = slice[i] as number;
     const type = BUILDING_TYPES[b.type[id] ?? 0];
-    if (!type) continue;
-    due += dailyShare(residentialTaxOf(type, residents[id] ?? 0, lotJobs(b, id), land[i] ?? 0, rate), day);
+    const isHome = homes[h] === id;
+    if (!type) {
+      if (isHome) h++;
+      continue;
+    }
+    yearly.fill(0);
+    const workers = filled[id] ?? 0;
+    if (workers > 0) {
+      terms.reachesOutside = roadReaches(state, reach, id);
+      businessTaxOf(type, kindsOf(b.type[id] ?? 0, workers) ?? NO_JOBS, terms, yearly);
+    }
+    if (isHome) yearly[RESIDENTIAL] = residentialTaxOf(type, residents[id] ?? 0, lotJobs(b, id), land[h++] ?? 0, rate);
+    for (let line = 0; line < 4; line++) if (yearly[line] !== 0) due[line] = (due[line] as number) + dailyShare(yearly[line] as number, day);
   }
-  if (due !== 0) moveMoney(state, "taxResidential", due);
+  for (let line = 0; line < 4; line++) if (due[line] !== 0) moveMoney(state, TAX_LINES[line] as (typeof TAX_LINES)[number], due[line] as number);
 }
 
 /** The name the timer hook reports for the tax sweep, as the debug panel shows it. */

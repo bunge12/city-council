@@ -209,7 +209,7 @@ let kindCache: (JobsByKind | undefined)[][] = BUILDING_TYPES.map(() => []);
 let kindCacheMix: unknown = BUILDINGS_BALANCE.jobMix;
 
 /** `jobs` of a building of type index `type` split by kind, or null for no such type. */
-function kindsOf(type: number, jobs: number): JobsByKind | null {
+export function kindsOf(type: number, jobs: number): JobsByKind | null {
   if (kindCacheMix !== BUILDINGS_BALANCE.jobMix) {
     kindCache = BUILDING_TYPES.map(() => []);
     kindCacheMix = BUILDINGS_BALANCE.jobMix;
