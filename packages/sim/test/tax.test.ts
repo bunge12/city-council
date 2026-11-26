@@ -53,13 +53,14 @@ const type = (id: string): BuildingType => {
   return t;
 };
 
-/** The live buildings of `state` with homes and people in them, neither vacant nor abandoned. */
+/** The live buildings of `state` with homes and people in them, not abandoned. */
 function occupiedHomes(state: SimState): number[] {
   const b = state.buildings;
   const people = popIndexOf(state).people;
   const out: number[] = [];
   for (let id = 0; id < buildingIdLimit(b); id++) {
-    if ((b.flags[id] ?? 0) !== BUILDING_ALIVE) continue;
+    const flags = b.flags[id] ?? 0;
+    if ((flags & BUILDING_ALIVE) === 0 || (flags & BUILDING_ABANDONED) !== 0) continue;
     if ((b.residents[id] ?? 0) > 0 && (people[id] ?? 0) > 0) out.push(id);
   }
   return out;
@@ -106,7 +107,7 @@ describe("a building's yearly tax", () => {
     expect(residentialTaxOf(store, 0, jobsForLot(store, 1, 1), LV, RATE)).toBe(0);
   });
 
-  it("is read for a building in state at the city's rate, and is nothing for one vacant, abandoned or gone", () => {
+  it("is read for a building in state at the city's rate, and is nothing for one abandoned or gone", () => {
     const state = town();
     const homes = occupiedHomes(state);
     expect(homes.length).toBeGreaterThan(0);
@@ -117,8 +118,9 @@ describe("a building's yearly tax", () => {
     expect(buildingTaxPerYear(state, id)).toBe(Math.floor(propertyValue(state, id) * 2 * RATE));
     state.budget.taxRates[RESIDENTIAL] = RATE;
     const b = state.buildings;
+    // A vacant home shows what it would pay; the sweep asks who lives there.
     b.flags[id] = BUILDING_ALIVE | BUILDING_VACANT;
-    expect(buildingTaxPerYear(state, id)).toBe(0);
+    expect(buildingTaxPerYear(state, id)).toBe(yearly);
     b.flags[id] = BUILDING_ALIVE | BUILDING_ABANDONED;
     expect(buildingTaxPerYear(state, id)).toBe(0);
     b.flags[id] = 0;
@@ -150,39 +152,43 @@ describe("the tax sweep", () => {
     expect(total).toBeGreaterThan(0);
   });
 
-  it("charges nothing for a vacant or abandoned home, or one nobody lives in", () => {
+  it("charges nothing for an abandoned home or one nobody lives in, vacant or not", () => {
     const state = town();
     const homes = occupiedHomes(state);
     const b = state.buildings;
-    for (const [i, id] of homes.entries()) b.flags[id] = BUILDING_ALIVE | (i % 2 === 0 ? BUILDING_VACANT : BUILDING_ABANDONED);
     const before = state.budget.month[LINE.taxResidential] as number;
-    for (let k = 0; k < DAY; k++) {
-      state.tick += 1;
-      collectTax(state);
-    }
+    const day = () => {
+      for (let k = 0; k < DAY; k++) {
+        state.tick += 1;
+        collectTax(state);
+      }
+    };
+    for (const id of homes) b.flags[id] = BUILDING_ALIVE | BUILDING_ABANDONED;
+    day();
     expect(state.budget.month[LINE.taxResidential]).toBe(before);
-    // Back in use but emptied of people, they still pay nothing.
-    for (const id of homes) b.flags[id] = BUILDING_ALIVE;
-    popIndexOf(state).people.fill(0);
-    for (let k = 0; k < DAY; k++) {
-      state.tick += 1;
-      collectTax(state);
-    }
+    // Emptied of people, in use or marked vacant, they pay nothing.
+    const people = popIndexOf(state).people;
+    const kept = people.slice();
+    people.fill(0);
+    for (const [i, id] of homes.entries()) b.flags[id] = BUILDING_ALIVE | (i % 2 === 0 ? BUILDING_VACANT : 0);
+    day();
     expect(state.budget.month[LINE.taxResidential]).toBe(before);
+    // People moved back into a home still marked vacant: it pays on the visit, before the vacancy check clears the mark.
+    people.set(kept);
+    day();
+    expect(state.budget.month[LINE.taxResidential]).toBeGreaterThan(before);
   });
 });
 
 describe("a game year of the town", () => {
   it("files on the residential tax line the sum of each home's yearly tax over the days it was lived in", () => {
     const state = town();
-    held(() => {
-      while (state.tick % (DAY * yearDays()) !== 0) step(state);
-    });
     const watch = watchTreasury(state);
     /** By building: what it owed on each day it was visited lived in, and the yearly tax it was charged on. */
     const owed = new Map<number, { paid: number; days: number; yearly: Set<number> }>();
     let expected = 0;
-    let filed = 0;
+    // What the line held as the year began, less what it holds at the end, plus every month the year closed.
+    let filed = -(state.budget.month[LINE.taxResidential] as number);
     const end = state.tick + DAY * yearDays();
     held(() => {
       while (state.tick < end) {
@@ -205,16 +211,15 @@ describe("a game year of the town", () => {
         if (isMonthStart(state.tick)) filed += state.budget.lastMonth[LINE.taxResidential] as number;
       }
     });
+    filed += state.budget.month[LINE.taxResidential] as number;
     expect(watch.closes).toBe(12);
-    // The year's last close filed December, and nothing of the new year is in the month yet.
-    expect(state.budget.month[LINE.taxResidential]).toBe(0);
     expect(filed).toBe(expected);
     expect(filed).toBeGreaterThan(0);
-    // A home lived in every day of the year at one value pays its yearly tax to the dollar.
+    // A home lived in on every day of a year at one value pays its yearly tax to the dollar.
     const wholeYear = [...owed.values()].filter((row) => row.days === yearDays() && row.yearly.size === 1);
     expect(wholeYear.length).toBeGreaterThan(0);
     for (const row of wholeYear) expect(row.paid).toBe([...row.yearly][0]);
-  }, 120_000);
+  });
 });
 
 describe("saving and replaying", () => {

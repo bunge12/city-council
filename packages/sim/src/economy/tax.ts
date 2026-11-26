@@ -17,8 +17,13 @@
 // Residential tax is the residential rate, from state (M4-02; the command
 // that sets it is M4-07), times the building's value (economy/value.ts), on
 // the share of its floor space that is homes: all of a house or a tower,
-// part of a mixed building. A building pays only while people live in it.
-// A vacant or abandoned building pays nothing, and neither does a workplace.
+// part of a mixed building. A building pays only while people live in it,
+// read from who lives there on the visit, not from the vacancy check's
+// flag: the tax sweep visits each id on the same tick as the vacancy check
+// and runs before it, so a home people moved back into still carries
+// yesterday's BUILDING_VACANT and would miss a day. A vacant building has
+// nobody in it and pays nothing; an abandoned one offers no room and pays
+// nothing either, and neither does a workplace.
 //
 // The sweep is shared: business tax (M4-06) is charged on the same visit,
 // so the cost of finding each building is paid once. Only add, multiply,
@@ -26,7 +31,7 @@
 
 import { TIME_BALANCE, yearDays } from "../calendar";
 import { BUILDING_TYPES, type BuildingType } from "../buildings/balance";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_VACANT } from "../buildings/buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE } from "../buildings/buildings";
 import { lotJobs } from "../buildings/jobs";
 import { buildingValues } from "../landvalue/land-value";
 import { popIndexOf } from "../pops/where";
@@ -52,21 +57,22 @@ export function residentialTaxOf(type: Pick<BuildingType, "zone" | "density">, r
   return Math.max(0, Math.floor(((value * space.homes) / space.total) * rate));
 }
 
-/** Whether live building `flags` is in a state to pay: neither vacant nor abandoned. */
-function standsInUse(flags: number): boolean {
-  return (flags & BUILDING_ALIVE) !== 0 && (flags & (BUILDING_VACANT | BUILDING_ABANDONED)) === 0;
+/** Whether building `flags` may pay: standing and not abandoned. Who lives in it is the sweep's question. */
+function mayPay(flags: number): boolean {
+  return (flags & BUILDING_ALIVE) !== 0 && (flags & BUILDING_ABANDONED) === 0;
 }
 
 /**
  * What building `id` pays a year in residential tax while people live in
  * it, in whole dollars, at the city's rate and the land value at its lot
- * today. 0 for a free id, a vacant or abandoned building, or one with no
- * homes. For the hover readout and the budget overlay (M4-18). It does not
- * ask whether anyone lives there today: the sweep does.
+ * today. 0 for a free id, an abandoned building, or one with no homes. For
+ * the hover readout and the budget overlay (M4-18). It does not ask
+ * whether anyone lives there today, so a vacant home shows what it would
+ * pay: the sweep asks.
  */
 export function buildingTaxPerYear(state: SimState, id: number): number {
   const b = state.buildings;
-  if (!standsInUse(b.flags[id] ?? 0)) return 0;
+  if (!mayPay(b.flags[id] ?? 0)) return 0;
   const type = BUILDING_TYPES[b.type[id] ?? 0];
   if (!type || (b.residents[id] ?? 0) <= 0) return 0;
   const land = buildingValues(state, [id])[0] ?? 0;
@@ -89,7 +95,7 @@ export function collectTax(state: SimState): void {
   const people = popIndexOf(state).people;
   slice.length = 0;
   for (let id = state.tick % perDay; id < flags.length; id += perDay) {
-    if (!standsInUse(flags[id] ?? 0) || (residents[id] ?? 0) <= 0 || (people[id] ?? 0) <= 0) continue;
+    if (!mayPay(flags[id] ?? 0) || (residents[id] ?? 0) <= 0 || (people[id] ?? 0) <= 0) continue;
     slice.push(id);
   }
   if (slice.length === 0) return;
