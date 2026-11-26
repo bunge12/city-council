@@ -28,7 +28,7 @@ export function formatSpeed(speed: number): string {
  * out when the buildings hold none, as shops and offices do. The bulldozer's
  * tag says "Takes" for the buildings a road takes with it.
  */
-export function formatClears(clears: BuildingsInTheWay | null | undefined, verb = "Clears"): string | null {
+export function formatClears(clears: Pick<BuildingsInTheWay, "ids" | "residents"> | null | undefined, verb = "Clears"): string | null {
   const n = clears?.ids.length ?? 0;
   if (!clears || n === 0) return null;
   const buildings = n === 1 ? "1 building" : `${n} buildings`;

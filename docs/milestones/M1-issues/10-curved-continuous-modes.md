@@ -26,6 +26,6 @@ The road tool has the three drawing modes the PRD lists: straight, curved and co
 
 - [ ] A Playwright walkthrough draws a curved avenue that ends on an existing node, and a three-segment road in continuous mode
 - [ ] A curve drawn from a road end has no visible kink at the join
-- [ ] Switching mode or tool part way through a road cancels it and leaves nothing behind
+- [ ] Switching tool part way through a road cancels it and leaves nothing behind. Switching mode keeps its start (changed later: the start had to be found again)
 - [ ] A rejection part way through a continuous road keeps the segments already built and stops there
 - [ ] Screenshots attached to the pull request

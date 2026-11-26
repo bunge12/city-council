@@ -37,6 +37,8 @@ import {
   type StatTotals,
   type BudgetState,
   sameBudget,
+  expropriationDelta,
+  type Expropriation,
   type SystemTimer,
   type SystemTiming,
   type ToSimMessage,
@@ -129,6 +131,8 @@ export class SimHost {
   private sentStatTotals: StatTotals;
   /** The treasury, ledger and tax rates as the last delta or snapshot left them, so the next delta sends them only when they changed. */
   private sentBudget: BudgetState;
+  /** The expropriation list as the last delta or snapshot left it, the state's own, never copied. */
+  private sentExpropriations: readonly Expropriation[];
   private stepsSinceDelta = 0;
   /**
    * What an autosave copies the city into and writes it out to, kept from
@@ -186,6 +190,7 @@ export class SimHost {
     this.sentStatsNext = state.stats.next;
     this.sentStatTotals = { ...state.stats.totals };
     this.sentBudget = copyBudget(state.budget);
+    this.sentExpropriations = state.expropriations;
     this.sentLogFrom = this.logCursor;
     this.lastPump = now();
     transport.onMessage((raw) => this.receive(raw));
@@ -411,8 +416,11 @@ export class SimHost {
     const people = drainPopDelta(this.state);
     const stats = encodeStatsDelta(this.state.stats, this.sentStatsNext, this.sentStatTotals);
     const budget = sameBudget(this.state.budget, this.sentBudget) ? undefined : copyBudget(this.state.budget);
+    // The list is replaced whenever it changes, never changed in place.
+    const expropriations = this.state.expropriations !== this.sentExpropriations ? expropriationDelta(this.sentExpropriations, this.state.expropriations) : undefined;
     const changed =
       budget !== undefined ||
+      expropriations !== undefined ||
       this.unsent.length > 0 ||
       this.unsentDropped.length > 0 ||
       this.unsentRoads !== null ||
@@ -461,6 +469,7 @@ export class SimHost {
       demand: copyDemand(this.state.demand),
       redevelopedToday: this.state.redevelopedToday,
       ...(budget ? { budget } : {}),
+      ...(expropriations ? { expropriations } : {}),
       ...(queue !== this.sentQueue ? { pending: this.state.pending.map((c) => ({ ...c })) } : {}),
       steps: this.stepsSinceDelta,
       timings: this.lastTimings,
@@ -477,6 +486,7 @@ export class SimHost {
     this.sentStatsNext = this.state.stats.next;
     this.sentStatTotals = { ...this.state.stats.totals };
     if (budget) this.sentBudget = copyBudget(budget);
+    this.sentExpropriations = this.state.expropriations;
     this.sentLogFrom += log.length;
     this.stepsSinceDelta = 0;
     // Sent last, once the host has noted what it sent: over a transport

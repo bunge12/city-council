@@ -8,7 +8,7 @@
 import type { CellColouring } from "../render/cell-geometry";
 
 /** Every overlay: zoning, which comes with the zone, road and grid tools, and those in `OVERLAYS`. */
-export type OverlayId = "zoning" | "landValue";
+export type OverlayId = "zoning" | "landValue" | "budget";
 
 export interface OverlayEntry {
   id: Exclude<OverlayId, "zoning">;
@@ -29,6 +29,14 @@ export const OVERLAYS: readonly OverlayEntry[] = [
     key: "O",
     title: "Land value (O): colour the cells along every road by what their land is worth, and point at one to see why",
     colouring: "landValue",
+  },
+  {
+    id: "budget",
+    label: "Budget",
+    code: "KeyN",
+    key: "N",
+    title: "Budget (N): colour each block by its net income a year, its buildings' tax less its share of the roads' upkeep, and point at one to see its figures",
+    colouring: "budget",
   },
 ];
 

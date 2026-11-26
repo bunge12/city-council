@@ -9,8 +9,9 @@
 //               and starts the next, until Escape, a right-click or a
 //               double click
 //
-// Escape or a right-click drops the road being drawn; switching mode or
-// leaving the tool does too. Each segment is its own `BuildRoad` command.
+// Escape or a right-click drops the road being drawn; leaving the tool does
+// too. Switching mode keeps its start, so the road carries on in the new
+// mode without finding the start again; a curve's control point goes. Each segment is its own `BuildRoad` command.
 // A continuous road also ends at a click back on the end just built, which
 // is what the second click of a double click is, and at a segment the
 // preview or the sim refuses, keeping the segments built before it.
@@ -229,7 +230,12 @@ export interface RoadToolState {
   roadStart: BuildPoint | null;
   /** Curved mode: the control point, once the second click has set it. */
   roadControl: BuildPoint | null;
-  /** Continuous mode: the road being drawn, or 0. */
+  /**
+   * The continuous road being drawn, or 0. A road whose mode was switched
+   * away from continuous keeps it, so its one segment waits for the chain's
+   * last segment, which it starts from, and goes with the chain if that one
+   * is refused.
+   */
   roadChain: number;
   roadPending: readonly PendingRoad[];
   /** The last refusal, from the preview check at the click or from the sim. Null when there is none. */
@@ -311,9 +317,22 @@ export class RoadToolController {
     this.host.set({ tool, roadType: type, roadNote: null });
   }
 
-  /** Picks a drawing mode and turns the tool on. A road being drawn is dropped. */
+  /**
+   * Picks a drawing mode and turns the tool on. A road being drawn keeps its
+   * start and carries on in the new mode; a curve's control point is dropped,
+   * so a curve picked part way asks for its direction again.
+   */
   pickMode(mode: DrawMode): void {
-    this.host.set({ tool: "road", roadMode: mode, roadNote: null, ...IDLE });
+    const s = this.host.get();
+    const roadStart = s.tool === "road" ? s.roadStart : null;
+    if (!roadStart) {
+      this.host.set({ tool: "road", roadMode: mode, roadNote: null, ...IDLE });
+      return;
+    }
+    // A continuous road keeps its chain through a switch, and a road switched
+    // to continuous starts one.
+    const roadChain = mode === "continuous" && s.roadChain === 0 ? this.nextChain++ : s.roadChain;
+    this.host.set({ tool: "road", roadMode: mode, roadNote: null, roadStart, roadControl: null, roadChain });
   }
 
   leave(): void {
@@ -452,12 +471,13 @@ export class RoadToolController {
       return;
     }
     const payload = roadPayload(s.roadStart, point, s.roadType, s.roadControl, s.roadLevel);
-    const chain = continuous ? s.roadChain : 0;
-    // A continuous road's segment waits for the one before it.
+    // A continuous road's segment, or a road switched out of continuous
+    // mode part way, waits for the one before it.
+    const chain = s.roadChain;
     const waits = chain !== 0 && s.roadPending.some((p) => p.chain === chain);
     const pending: PendingRoad = { id: this.nextId++, preview, payload, chain, status: waits ? "queued" : "sending" };
     // A continuous road carries on from where this segment ends, at the node it joins if it joins one.
-    const next = chain !== 0 ? { roadStart: preview.to, roadControl: null } : IDLE;
+    const next = continuous ? { roadStart: preview.to, roadControl: null } : IDLE;
     this.host.set({ ...next, roadNote: null, roadPending: [...s.roadPending, pending] });
     if (!waits) this.sendPending(pending);
   }

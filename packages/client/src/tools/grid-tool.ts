@@ -35,6 +35,7 @@ import {
   ROAD_BUILD,
   ROAD_TYPES,
   planRoad,
+  gridClearsReason,
   planRoadGrid,
   roadIndexOf,
   segmentsInBox,
@@ -317,6 +318,9 @@ export function previewGrid(
       }
     }
   });
+  // A grid never demolishes (M4-09): one whose streets would take a building is refused, as the sim refuses it.
+  const clears = reason === null && clearsOf ? clearsOf(result.plan) : null;
+  if (clears && clears.ids.length > 0) reason = gridClearsReason(clears.ids.length);
   const ok = reason === null;
   return {
     payload,
@@ -328,7 +332,7 @@ export function previewGrid(
     cuts,
     length,
     cost: ok ? cost : 0,
-    clears: ok && clearsOf ? clearsOf(result.plan) : null,
+    clears,
     newCells: ok && cellsOf ? cellsOf(result.plan) : null,
   };
 }

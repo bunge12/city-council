@@ -6,7 +6,7 @@ import { submit } from "./seen-ends";
 // Issue #155: a delta carries how the undo history changed, not the whole of it.
 
 function record(playerId: string, entry: number): UndoRecord {
-  return { playerId, entry, type: "BuildRoad", ops: [], zones: NO_JOURNALS, spent: 0 };
+  return { playerId, entry, type: "BuildRoad", ops: [], zones: NO_JOURNALS, spent: 0, took: 0 };
 }
 
 /** `delta` as it arrives on the other side of a worker or a socket: no object shared. */

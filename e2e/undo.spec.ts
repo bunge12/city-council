@@ -30,9 +30,10 @@ declare const window: {
   cityCouncil: {
     mirror: {
       state: { log: { type: string; playerId: string }[]; roads: Net & Record<string, ArrayLike<number>>; cells: { zone: ArrayLike<number> };
-        buildings: { flags: ArrayLike<number> };
+        buildings: Record<"flags" | "firstSeg" | "firstSide" | "firstPlace" | "builtAt", ArrayLike<number>>;
       } | null;
     };
+    sendCommand(type: string, payload: unknown): Promise<{ ok: boolean; reason?: string }>;
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
       project(x: number, y: number, z: number): { x: number; y: number };
@@ -208,7 +209,22 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   // Pause, so nothing grows while the undos are checked. Commands still apply.
   await page.getByRole("button", { name: "Pause" }).click();
 
-  // Bulldoze the east piece, which takes its house.
+  // Clear the house first. A bulldoze that took it could not be undone (M4-09),
+  // and clearing a building has no undo record, so the steps below still undo one by one.
+  const houses = await page.evaluate(() => {
+    const b = window.cityCouncil.mirror.state?.buildings;
+    const out: { id: number; segment: number; side: number; place: number; builtAt: number }[] = [];
+    if (!b) return out;
+    for (let id = 0; id < b.flags.length; id++) {
+      if (b.flags[id]) out.push({ id, segment: b.firstSeg[id] ?? 0, side: b.firstSide[id] ?? 0, place: b.firstPlace[id] ?? 0, builtAt: b.builtAt[id] ?? 0 });
+    }
+    return out;
+  });
+  expect(houses.length).toBeGreaterThan(0);
+  expect(await page.evaluate((buildings) => window.cityCouncil.sendCommand("BulldozeBuilding", { buildings }), houses)).toEqual({ ok: true });
+  await expect.poll(() => buildingCount(page)).toBe(0);
+
+  // Bulldoze the east piece, with nothing on it now.
   await page.keyboard.press("KeyB");
   await page.keyboard.down("Shift");
   await click(page, 4415, 4600);
@@ -217,15 +233,15 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   await page.keyboard.press("KeyB");
   await expect.poll(() => zonedCount(page)).toBe(0);
   expect(await buildingCount(page)).toBe(0);
-  await attachZoning(page, testInfo, "5 bulldozed the east piece, its zoning and its house");
-  expect((await logTypes(page)).slice(startLog)).toEqual(["BuildRoad", "ZoneCells", "UpgradeRoad", "SetSpeed", "BulldozeRoad"]);
+  await attachZoning(page, testInfo, "5 cleared the house, then bulldozed the east piece and its zoning");
+  expect((await logTypes(page)).slice(startLog)).toEqual(["BuildRoad", "ZoneCells", "UpgradeRoad", "SetSpeed", "BulldozeBuilding", "BulldozeRoad"]);
 
   // Ctrl+Z brings the east piece back, under the same id, with its zoning.
   await page.keyboard.press("Control+KeyZ");
   await expect.poll(async () => (await segmentNear(page, 4415, 4600)).id).toBe(east.id);
   expect(await roads(page)).toEqual(upgraded);
   await expect.poll(() => zonedCount(page)).toBe(zoned);
-  // The house does not come back: the grower builds again once the game runs.
+  // The house does not come back: clearing it has no undo, and the grower builds again once the game runs.
   expect(await buildingCount(page)).toBe(0);
   await attachZoning(page, testInfo, "6 Ctrl+Z put the bulldozed piece back with its zoning, and no house");
 
@@ -245,7 +261,7 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   // Cmd+Z takes back the build and rejoins the street it split.
   await page.keyboard.press("Meta+KeyZ");
   await expect.poll(async () => roads(page)).toEqual(start);
-  expect((await logTypes(page)).slice(startLog)).toEqual(["BuildRoad", "ZoneCells", "UpgradeRoad", "SetSpeed", "BulldozeRoad", "Undo", "Undo", "Undo", "Undo"]);
+  expect((await logTypes(page)).slice(startLog)).toEqual(["BuildRoad", "ZoneCells", "UpgradeRoad", "SetSpeed", "BulldozeBuilding", "BulldozeRoad", "Undo", "Undo", "Undo", "Undo"]);
   await expect(page.locator("#activity-log")).toContainText("Undo");
   await away(page);
   await attach(page, testInfo, "9 Cmd+Z took back the build, the network is as the file had it");
@@ -253,6 +269,6 @@ test("builds, zones, upgrades and bulldozes, then undoes all four one step at a 
   // One more press, with nothing left: the sim refuses and says why.
   await page.keyboard.press("Control+KeyZ");
   await expect(note).toHaveText("Nothing to undo");
-  expect((await logTypes(page)).slice(startLog)).toHaveLength(9);
+  expect((await logTypes(page)).slice(startLog)).toHaveLength(10);
   await attach(page, testInfo, "10 nothing left to undo, and the reason shown");
 });

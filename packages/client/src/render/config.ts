@@ -605,6 +605,36 @@ export const LAND_VALUE_SCALE = {
   ] as readonly LandValueStop[],
 } as const;
 
+/** One stop on the budget overlay's scale: the colour, as sRGB hex, at place `at` from -1, the largest loss, to 1, the largest gain. */
+export interface BudgetStop {
+  at: number;
+  colour: number;
+}
+
+/**
+ * The budget overlay's colour scale (issue M4-18): diverging, red for an
+ * area that costs the city more than it pays and blue for one that pays
+ * more, with a neutral grey in the middle so an area near break-even does
+ * not read as a loss. Net income a year is placed on it by its size on a
+ * log scale: `neutral` dollars either way or less is the grey, and
+ * `full` or more is the end of its arm. Each arm has the same steps, and
+ * lightness rises at every step toward the grey, as the dataviz skill asks
+ * of a diverging scale. Presentation only, so not balance data.
+ */
+export const BUDGET_SCALE = {
+  neutral: 1_000,
+  full: 1_000_000,
+  stops: [
+    { at: -1, colour: 0x9b1c1c },
+    { at: -0.5, colour: 0xe0524f },
+    { at: -0.15, colour: 0xf2b8b5 },
+    { at: 0, colour: 0xe6e6e6 },
+    { at: 0.15, colour: 0xb6cff2 },
+    { at: 0.5, colour: 0x4b8ee6 },
+    { at: 1, colour: 0x1a4f9c },
+  ] as readonly BudgetStop[],
+} as const;
+
 /**
  * Buildings on screen (issues M2-12 and M2-13). `buildBudgetMs` is how long
  * a frame may spend reading chunks of buildings from the mirror, writing

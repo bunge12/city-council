@@ -5,8 +5,11 @@ import {
   CELL_OPEN,
   DENSITY_NONE,
   NONE,
+  NO_BUILDING,
   ZONE_NONE,
   ZONING_BALANCE,
+  buildingCount,
+  buildingsOnSlots,
   cellStatuses,
   cellsInBox,
   createState,
@@ -20,10 +23,12 @@ import {
 } from "@city-council/sim";
 import {
   INITIAL_ZONE_TOOL,
+  ONLY_BUILT,
   ZoneToolController,
   cellUnder,
   nearerSide,
   previewZone,
+  previewZoneAround,
   rectsFor,
   stripCells,
   stripParts,
@@ -471,5 +476,115 @@ describe("the controller", () => {
       paint(state, sent);
       expect(zonedSlots(state)).toEqual(shown.map((c) => c.slot).sort((a, b) => a - b));
     });
+  });
+});
+
+describe("ground under buildings (#417)", () => {
+  /** The street of `city()`, its north side zoned R1 and grown until a few houses stand, with ground still empty beside them. */
+  function builtCity(): SimState {
+    const state = city();
+    run(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4571 }, to: { x: 4390, z: 4571 }, width: 44 }] });
+    for (let t = 0; t < 6000 && buildingCount(state.buildings) < 2; t++) step(state);
+    if (buildingCount(state.buildings) < 2) throw new Error("the houses did not grow");
+    return state;
+  }
+
+  /** The north strip of the street along z = 4600, full depth. */
+  function northStrip(state: SimState): ZoneTarget[] {
+    const seg = segmentAt(state, 4300, 4600);
+    return stripCells(state, seg, nearerSide(state, seg, 4300, 4590) ?? 0, DEPTH);
+  }
+
+  function builtSlots(state: SimState, cells: readonly ZoneTarget[]): Set<number> {
+    const ids = buildingsOnSlots(state, cells.map((c) => c.slot));
+    return new Set(cells.filter((_, i) => (ids[i] ?? NO_BUILDING) !== NO_BUILDING).map((c) => c.slot));
+  }
+
+  it("leaves out cells a building stands on, and counts them", () => {
+    const state = builtCity();
+    const strip = northStrip(state);
+    const built = builtSlots(state, strip);
+    expect(built.size).toBeGreaterThan(0);
+    expect(built.size).toBeLessThan(strip.length);
+    const preview = previewZoneAround(state, "commercial", 2, strip, false);
+    expect(preview.ok).toBe(true);
+    expect(preview.whole).toBe(false);
+    expect(preview.built).toBe(built.size);
+    expect(preview.cells.some((c) => built.has(c.slot))).toBe(false);
+    expect(preview.cells).toHaveLength(strip.length - built.size);
+    // Painted, the ground under the houses keeps its R1, and every house still stands.
+    const houses = buildingCount(state.buildings);
+    const before = [...built].map((slot) => [state.cells.zone[slot], state.cells.density[slot]]);
+    paint(state, preview.payloads);
+    expect([...built].map((slot) => [state.cells.zone[slot], state.cells.density[slot]])).toEqual(before);
+    expect(buildingCount(state.buildings)).toBe(houses);
+  });
+
+  it("takes them too when whole, as Shift asks", () => {
+    const state = builtCity();
+    const strip = northStrip(state);
+    const built = builtSlots(state, strip);
+    const preview = previewZoneAround(state, "commercial", 2, strip, true);
+    expect(preview.ok).toBe(true);
+    expect(preview.whole).toBe(true);
+    expect(preview.built).toBe(built.size);
+    expect(preview.cells).toHaveLength(strip.length);
+    paint(state, preview.payloads);
+    const C = ZONING_BALANCE.zones.findIndex((z) => z.id === "commercial") + 1;
+    for (const slot of built) expect(state.cells.zone[slot]).toBe(C);
+  });
+
+  it("says Shift is needed when only cells under buildings would change", () => {
+    const state = builtCity();
+    const strip = northStrip(state);
+    const built = strip.filter((c) => builtSlots(state, strip).has(c.slot));
+    const preview = previewZoneAround(state, "residential", 3, built, false);
+    expect(preview.ok).toBe(false);
+    expect(preview.reason).toBe(ONLY_BUILT);
+    expect(preview.built).toBe(built.length);
+    expect(previewZoneAround(state, "residential", 3, built, true).ok).toBe(true);
+  });
+
+  it("the controller asks the host whether Shift is held", () => {
+    const state = builtCity();
+    let shift = false;
+    let store = { ...INITIAL_ROAD_TOOL, ...INITIAL_ZONE_TOOL };
+    const tool = new ZoneToolController({
+      get: () => store,
+      set: (patch) => {
+        store = { ...store, ...patch };
+      },
+      city: () => state,
+      version: () => state.tick,
+      whole: () => shift,
+      send: () => Promise.resolve({ ok: true }),
+      strokeId: () => 1,
+    });
+    tool.toggle();
+    tool.pickZone("commercial");
+    const hover = { ground: { x: 4300, z: 4592 }, segment: segmentAt(state, 4300, 4600) };
+    const empty = tool.preview(hover);
+    shift = true;
+    const whole = tool.preview(hover);
+    expect(empty?.whole).toBe(false);
+    expect(whole?.whole).toBe(true);
+    expect(whole?.cells.length).toBe((empty?.cells.length ?? 0) + (empty?.built ?? 0));
+  });
+});
+
+describe("ground under buildings that would not change (#417)", () => {
+  it("keeps the plan's reason when every cell is built and none would change", () => {
+    const state = city();
+    run(state, "ZoneCells", { zone: "residential", density: 1, rects: [{ from: { x: 4202, z: 4571 }, to: { x: 4390, z: 4571 }, width: 44 }] });
+    for (let t = 0; t < 6000 && buildingCount(state.buildings) < 2; t++) step(state);
+    const seg = segmentAt(state, 4300, 4600);
+    const strip = stripCells(state, seg, nearerSide(state, seg, 4300, 4590) ?? 0, DEPTH);
+    const ids = buildingsOnSlots(state, strip.map((c) => c.slot));
+    const built = strip.filter((_, i) => (ids[i] ?? NO_BUILDING) !== NO_BUILDING);
+    expect(built.length).toBeGreaterThan(0);
+    const preview = previewZoneAround(state, "residential", 1, built, false);
+    expect(preview.ok).toBe(false);
+    expect(preview.built).toBe(0);
+    expect(preview.reason).toMatch(/no cell would change/);
   });
 });

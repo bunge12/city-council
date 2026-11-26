@@ -168,15 +168,28 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // mixed, after industrial's, at 0 in both months; the five rates at their
   // defaults. Nothing was charged before it.
   32: (old) => ({ ...old, version: 33, budget: budgetWithCharges(old["budget"]) }),
-  // Version 34 gives each demand bar a part for its zone's tax rate (M4-07),
+  // Version 34 keeps the expropriations of the last game year, marks each
+  // building the city has paid to clear, and counts on each undo record the
+  // buildings its command took (M4-09). Clearing a building cost nothing
+  // before it and left no record, so an older city has no records, no
+  // building paid for, and undo records that took none: they undo as they
+  // did.
+  33: (old) => ({
+    ...old,
+    version: 34,
+    undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, took: 0 })),
+    buildings: buildingsWithPaid(old["buildings"]),
+    expropriations: [],
+  }),
+  // Version 35 gives each demand bar a part for its zone's tax rate (M4-07),
   // at 0, after its other weighted parts. The bar reads what it did, and the
   // part takes its first step on the next day, from the rates the city has.
-  33: (old) => ({ ...old, version: 34, demand: demandWithTax(old["demand"]) }),
+  34: (old) => ({ ...old, version: 35, demand: demandWithTax(old["demand"]) }),
 };
 
 /**
- * Each bar's parts in version 34, the tax part's place fixed here so a later
- * change of parts cannot move it in old saves: the version 33 parts with
+ * Each bar's parts in version 35, the tax part's place fixed here so a later
+ * change of parts cannot move it in old saves: the version 34 parts with
  * `tax` before the first name in `TAX_PART_BEFORE`.
  */
 const TAX_PART_BEFORE: Readonly<Record<string, string>> = {
@@ -186,7 +199,7 @@ const TAX_PART_BEFORE: Readonly<Record<string, string>> = {
   industrial: "outsideRoute",
 };
 
-/** Version 33 demand bars with each bar's tax part, at 0, in its place before `TAX_PART_BEFORE`. */
+/** Version 34 demand bars with each bar's tax part, at 0, in its place before `TAX_PART_BEFORE`. */
 function demandWithTax(value: unknown): Record<string, unknown> {
   const demand = value as Record<string, { value: number; parts: Record<string, number> }>;
   const out: Record<string, unknown> = {};
@@ -208,7 +221,7 @@ function demandWithWaiting(value: unknown): Record<string, unknown> {
   for (const bar of DEMAND_BARS) {
     const state = demand[bar] as { value: number; parts: Record<string, number> };
     const parts: Record<string, number> = {};
-    // Version 32's parts: today's but the tax part version 34 adds.
+    // Version 32's parts: today's but the tax part version 35 adds.
     for (const name of DEMAND_PARTS[bar]) if (name !== "tax") parts[name] = state.parts[name] ?? 0;
     out[bar] = { value: state.value, parts };
   }
@@ -301,6 +314,18 @@ function stripTiers(old: Record<string, unknown>): Record<string, unknown> {
     ops: record.ops.map((op) => (op.row ? { ...op, row: { ...op.row, tierL: NO_TIER, tierR: NO_TIER } } : op)),
   }));
   return { ...old, roads, undo };
+}
+
+/** A version 33 set of buildings with `paid`, none paid for, after `statusSince` as a new state has it. Left as it is when it has one. */
+function buildingsWithPaid(value: unknown): Record<string, unknown> {
+  const b = value as Record<string, unknown> & { flags: Uint8Array };
+  if (b["paid"] !== undefined) return b;
+  const out: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(b)) {
+    out[key] = field;
+    if (key === "statusSince") out["paid"] = new Uint8Array(b.flags.length);
+  }
+  return out;
 }
 
 /** A version 23 set of buildings with `statusSince`, each building's `builtAt`, after `builtAt` as a new state has it. */

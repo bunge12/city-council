@@ -108,7 +108,7 @@ function bulldozeSetup(state: SimState) {
     set: (patch) => {
       ui = { ...ui, ...patch };
     },
-    world: () => (mirror.state ? { state: mirror.state, terrain, people: (id: number) => mirror.buildingPeople(id) } : null),
+    world: () => (mirror.state ? { state: mirror.state, terrain, people: (id: number) => mirror.buildingPeople(id), filled: (id: number) => mirror.jobsFilled(id) } : null),
     send: (type, payload) => {
       sent.push({ type, payload });
       return mirror.sendCommandSettled(type, payload);

@@ -1,3 +1,4 @@
+import { funded } from "./funds";
 import { describe, expect, it } from "vitest";
 import { deserialize, hashState, prepareDerived, serialize, step, submit, type SimState } from "../src/index";
 import { NODE_ARRAYS, SEG_ARRAYS, capacityOf, type AnyTypedArray } from "../src/roads/network";
@@ -21,6 +22,8 @@ function arrays(state: SimState): AnyTypedArray[] {
 }
 
 function buildCrossing(state: SimState): void {
+  // The crossing clears buildings, whose compensation is past the starting grant (M4-09).
+  funded(state);
   const result = submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: CROSSING });
   expect(result.ok, result.ok ? "" : result.reason).toBe(true);
   step(state);
