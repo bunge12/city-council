@@ -119,7 +119,10 @@ export {
   readPop,
   workersFor,
 } from "./pops/pops";
-export type { PopProfile, PopRow, PopState } from "./pops/pops";
+export type { DisplacedMark, PopProfile, PopRow, PopState } from "./pops/pops";
+export { DISPLACED_BY_CITY, DISPLACED_BY_NONE, DISPLACED_BY_OWNER, popDisplacedMark } from "./pops/pops";
+export { displacementLoss, displacementView, expropriationGridCells, expropriationGridOf, neighbourLoss, ownLoss } from "./pops/displacement";
+export type { DisplacementView, ExpropriationGrid } from "./pops/displacement";
 export { buildingPeople, jobsFilled, popsAtHome, popsAtWork } from "./pops/where";
 export { applyPopDelta, countOccupancy, drainPopDelta, popDeltaProblem, recordPopChanges } from "./pops/delta";
 export type { Occupancy, PopDelta } from "./pops/delta";
@@ -133,7 +136,7 @@ export { ARRIVALS, ARRIVALS_SYSTEM, dayArrivals, drawProfile, drawSize } from ".
 export { DISPLACED, DISPLACED_SYSTEM, placeDisplaced } from "./pops/displaced";
 export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homeUnfilled, homesAndEmptyRoom, homesWithRoom, leastNewcomers, newcomerRoomLeft, reachableRoom, reachableRoomWith, whyNoNewcomers } from "./pops/room";
 export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/matching";
-export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
+export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, jobTarget, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
 export { TURNOVER, TURNOVER_SYSTEM, dayChances, turnOver, turnoverEvent } from "./pops/turnover";
 export type { DayChances, TurnoverEvent } from "./pops/turnover";
 export { countZoneJobs, countZoneJobsWith, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";

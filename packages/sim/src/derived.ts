@@ -2,8 +2,8 @@
 // hashed: the terrain, the road spatial index, the routing graph, the
 // blocks, where the zoning cells are, which building stands on each, the
 // grower's candidates and the cells it has set aside, who lives and works in each building, the
-// travel times between zones, which pieces of road reach outside, and the
-// yearly road upkeep. See "Derived data" in the PRD.
+// travel times between zones, which pieces of road reach outside, the
+// yearly road upkeep, and the grid of expropriation records. See "Derived data" in the PRD.
 //
 // The terrain is cached by seed (terrain/cache.ts). Each other one is cached
 // by the state object it comes from and built from its
@@ -18,6 +18,7 @@ import { blockIndexOf, existingBlockIndex, listBlocks, settleBlocks } from "./ro
 import { popIndexOf } from "./pops/where";
 import { prepareArrivals } from "./pops/arrivals";
 import { reservePopRoom } from "./pops/pops";
+import { expropriationGridOf } from "./pops/displacement";
 import { openingsOf } from "./pops/openings";
 import { catchUpOutside, prepareOutside } from "./roads/outside";
 import { routingGraphOf } from "./roads/routing";
@@ -69,6 +70,7 @@ export function prepareDerived(state: SimState, onStage: (stage: DerivedStage) =
   pollutionGrid(state);
   prepareCandidates(state, index, () => segmentBuildings(state));
   popIndexOf(state);
+  expropriationGridOf(state);
   prepareArrivals(state);
   onStage("travel");
   prepareTravelTimes(state);

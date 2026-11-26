@@ -774,7 +774,7 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   if (!Number.isSafeInteger(cellReads) || (cellReads as number) < 0) throw corrupt("its count of cell commands this tick is not a whole number");
   const buildingProblem = checkBuildings(buildings, roads as RoadNetwork, tick as number);
   if (buildingProblem !== null) throw corrupt(`its buildings are malformed: ${buildingProblem}`);
-  const popProblem = checkPops(pops, buildings as BuildingState);
+  const popProblem = checkPops(pops, buildings as BuildingState, tick as number);
   if (popProblem !== null) throw corrupt(`its pops are malformed: ${popProblem}`);
   if (!isCentre(centre)) throw corrupt("its city centre is malformed");
   // Before the statistics are checked: totals that drifted below zero under a build's other numbers are counted again, not refused.

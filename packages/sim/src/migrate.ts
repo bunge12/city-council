@@ -181,6 +181,11 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
     buildings: buildingsWithPaid(old["buildings"]),
     expropriations: [],
   }),
+  // Version 35 marks each pop displaced by the city or by its home's owner
+  // (M4-10): who, the tick and the people displaced with it. Nothing was
+  // marked before it, so an older city's pops carry no mark, and only
+  // its expropriation records lower its neighbours' satisfaction.
+  34: (old) => ({ ...old, version: 35, pops: popsWithDisplacedMarks(old["pops"]) }),
 };
 
 /** Version 31 demand bars with each bar's waiting part, at 0, in `DEMAND_PARTS` order. */
@@ -243,6 +248,19 @@ function popsWithGrace(value: unknown): Record<string, unknown> {
   // Only the keys the save has and the one this version adds, so a later version's fields are its own migration's to add.
   for (const key of Object.keys(createPops())) {
     if (key === "graceDays") out[key] = new Uint8Array(pops.flags.length);
+    else if (key in pops) out[key] = pops[key];
+  }
+  return out;
+}
+
+/** A version 34 set of pops with the marks version 35 adds, none, in the order a new state has them. */
+function popsWithDisplacedMarks(value: unknown): Record<string, unknown> {
+  const pops = value as Record<string, unknown> & { flags: Uint8Array };
+  const n = pops.flags.length;
+  const marks: Record<string, unknown> = { displacedBy: new Uint8Array(n), displacedTick: new Int32Array(n), displacedWith: new Uint16Array(n) };
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(createPops())) {
+    if (key in marks) out[key] = marks[key];
     else if (key in pops) out[key] = pops[key];
   }
   return out;

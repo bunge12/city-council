@@ -394,7 +394,8 @@ describe("a tower pop whose child leaves", () => {
     let size = 2;
     while (workersFor(size + 1, 1) <= openJobsFor(state, shop, 0)) size++;
     expect(workersFor(size - 1, 0)).toBeGreaterThan(workersFor(size, 1));
-    const id = addPop(state, { home: tower, size, education: 0, wealth: 1, children: 1, satisfaction: 66, daysLow: 0, graceDays: 7 });
+    const mark = { by: 1, tick: state.tick, with: 40 };
+    const id = addPop(state, { home: tower, size, education: 0, wealth: 1, children: 1, satisfaction: 66, daysLow: 0, graceDays: 7, displaced: mark });
     setPopWork(state, id, shop);
     const open = openJobsFor(state, shop, 0);
     expect(workersFor(size - 1, 0) - workersFor(size, 1)).toBeGreaterThan(open);
@@ -405,7 +406,9 @@ describe("a tower pop whose child leaves", () => {
     expect(state.pops.work[id]).toBe(shop);
     const rest = household.find((p) => p !== id) ?? -1;
     // The rest keeps the household's grace too (#361), so it is among the unemployed newcomers.
-    expect(readPop(state.pops, rest)).toMatchObject({ work: NO_WORK, children: 0, satisfaction: 66, education: 0, wealth: 1, graceDays: 7 });
+    // And the mark of the household's displacement (M4-10), so both parts carry its hit.
+    expect(readPop(state.pops, rest)).toMatchObject({ work: NO_WORK, children: 0, satisfaction: 66, education: 0, wealth: 1, graceDays: 7, displaced: mark });
+    expect(readPop(state.pops, id).displaced).toEqual(mark);
     expect(state.stats.totals["workersUnemployedNew"]).toBe(workersFor(state.pops.size[rest] ?? 0, 0));
     expect(state.pops.children[id]).toBe(0);
     expectRecount(state);

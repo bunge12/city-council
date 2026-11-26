@@ -40,6 +40,15 @@ export interface PopsBalance {
     leaveBelow: number;
     /** Game days in a row below `leaveBelow` before a pop moves out, from 1 to `DAYS_LOW_LIMIT`. */
     leaveAfterDays: number;
+    /** What displacement takes off a target, fading over a game year (M4-10, pops/displacement.ts). */
+    displacement: {
+      /** Metres from a pop's home within which an expropriation counts. Above 0. */
+      radius: number;
+      /** Points per person an expropriation near the home displaced, and the most all of them take together. */
+      neighbours: { perPerson: number; most: number };
+      /** Points a pop the city displaced takes: `base` plus `perPerson` for each person its old home held, at most `most`; `byOwnerShare` of that when its owner redeveloped it. */
+      own: { base: number; perPerson: number; most: number; byOwnerShare: number };
+    };
   };
   /** Yearly rates, applied a 365th a game day. */
   turnover: {
@@ -132,7 +141,9 @@ export function checkPopsBalance(data: unknown): string[] {
       }
       if (!("target" in sat)) errors.push("satisfaction.target is missing");
       else errors.push(...numberProblems(sat["target"], { noWorkers: score, fittingJob: score, otherJob: score, noJob: score }, "satisfaction.target"));
-      errors.push(...unknownKeys(sat, [...Object.keys(rules), "target"], "satisfaction"));
+      if (!("displacement" in sat)) errors.push("satisfaction.displacement is missing");
+      else errors.push(...displacementProblems(sat["displacement"]));
+      errors.push(...unknownKeys(sat, [...Object.keys(rules), "target", "displacement"], "satisfaction"));
     }
   }
 
@@ -146,6 +157,22 @@ export function checkPopsBalance(data: unknown): string[] {
       ),
     );
   }
+  return errors;
+}
+
+/** Problems with `satisfaction.displacement` (M4-10): a radius above 0, and points from 0 to 100, with a share from 0 to 1. */
+function displacementProblems(d: unknown): string[] {
+  const where = "satisfaction.displacement";
+  if (!isRecord(d)) return [`${where} must be an object`];
+  const errors: string[] = [];
+  const radius = numberProblem(d, "radius", { min: 0, aboveMin: true }, where);
+  if (radius) errors.push(radius);
+  const points = { min: 0, max: 100 };
+  if (!("neighbours" in d)) errors.push(`${where}.neighbours is missing`);
+  else errors.push(...numberProblems(d["neighbours"], { perPerson: points, most: points }, `${where}.neighbours`));
+  if (!("own" in d)) errors.push(`${where}.own is missing`);
+  else errors.push(...numberProblems(d["own"], { base: points, perPerson: points, most: points, byOwnerShare: { min: 0, max: 1 } }, `${where}.own`));
+  errors.push(...unknownKeys(d, ["radius", "neighbours", "own"], where));
   return errors;
 }
 

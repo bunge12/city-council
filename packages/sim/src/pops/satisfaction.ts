@@ -19,6 +19,12 @@
 // still climbing back, so a job found late in the wait is kept. That is the only way unemployment
 // makes a pop leave, as the PRD asks.
 //
+// Since M4-10 displacement is a second input (displacement.ts): the
+// expropriations near the pop's home in the last game year, and its own
+// displacement if it carries a mark, take points off the target from the
+// job, faded over the year. The target is rounded to a whole point and
+// held at 0 and above.
+//
 // The one other rule is the residential bar below zero. A bar of b below
 // zero sends ceil(-b / 100 × `departuresPerYearAtFullDemand` / days a year)
 // people away a day (demand.json), the least satisfied first. On the day's
@@ -50,6 +56,7 @@ import type { SimState } from "../state";
 import type { System } from "../step";
 import { noteYear } from "../stats/stats";
 import { POPS_BALANCE } from "./balance";
+import { clearOldMark, displacementLoss, displacementView, type DisplacementView } from "./displacement";
 import { jobsUpToLevel } from "./open-jobs";
 import { NO_LEAVING, NO_WORK, POP_ALIVE, SATISFACTION_MAX, popWorkers, removePop, setPopDaysLow, setPopGraceDays, setPopSatisfaction } from "./pops";
 import { popSlice } from "./sweep";
@@ -66,14 +73,28 @@ export function jobFits(state: SimState, work: number, education: number): boole
   return (upTo[education] ?? 0) - below > 0;
 }
 
-/** Where pop `id`'s score heads today, from its job alone, as the header says. */
-export function satisfactionTarget(state: SimState, id: number): number {
+/** Where pop `id`'s score heads from its job alone, as the header says. */
+export function jobTarget(state: SimState, id: number): number {
   const target = POPS_BALANCE.satisfaction.target;
   const p = state.pops;
   if (popWorkers(p, id) === 0) return target.noWorkers;
   const work = p.work[id] ?? NO_WORK;
   if (work === NO_WORK) return target.noJob;
   return jobFits(state, work, p.education[id] ?? 0) ? target.fittingJob : target.otherJob;
+}
+
+/**
+ * Where pop `id`'s score heads today: its job's target less what
+ * displacement takes off (M4-10), rounded to a whole point and held at 0
+ * and above. `view` is the tick's `displacementView`, worked out once a
+ * tick; left out, it is. Reads state only.
+ */
+export function satisfactionTarget(state: SimState, id: number, view: DisplacementView = displacementView(state)): number {
+  const job = jobTarget(state, id);
+  const loss = displacementLoss(state, id, view);
+  if (loss === 0) return job;
+  const target = Math.floor(job - loss + 0.5);
+  return target < 0 ? 0 : target;
 }
 
 /** A score one day on from `score` toward `target`: `dailyShare` of the way, rounded to the nearest point, at least one and never past the target. */
@@ -136,6 +157,7 @@ export function updateSatisfaction(state: SimState): void {
   const { leaveBelow, leaveAfterDays } = POPS_BALANCE.satisfaction;
   const { from, to, step } = popSlice(state);
   const p = state.pops;
+  const view = displacementView(state);
   for (let id = from; id < to; id += step) {
     if (((p.flags[id] ?? 0) & POP_ALIVE) === 0) continue;
     const score = p.satisfaction[id] ?? 0;
@@ -145,7 +167,8 @@ export function updateSatisfaction(state: SimState): void {
     }
     const grace = p.graceDays[id] ?? 0;
     if (grace > 0) setPopGraceDays(state, id, grace - 1);
-    const target = satisfactionTarget(state, id);
+    clearOldMark(state, id);
+    const target = satisfactionTarget(state, id, view);
     const next = stepScore(score, target);
     setPopSatisfaction(state, id, next);
     const days = next < leaveBelow && target < leaveBelow ? Math.min(leaveAfterDays, (p.daysLow[id] ?? 0) + 1) : 0;

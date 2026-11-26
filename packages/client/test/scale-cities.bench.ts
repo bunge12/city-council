@@ -255,6 +255,8 @@ interface Checkpoints {
   /** The worst tick, and the displaced pass's worst, over the game day after it. */
   afterBulldozeWorstMs: number;
   displacedWorstMs: number;
+  /** The satisfaction system's worst tick over that day, with the clearing's 1,000 records fresh (M4-10). */
+  satisfactionAfterWorstMs: number;
   /** The travel table's rebuild after one BuildRoad. */
   travelSteps: number;
   travelTotalMs: number;
@@ -399,10 +401,12 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
   const bulldozeCharged = (state.budget.month[LINE.compensation] ?? 0) - compensationBefore;
   let afterBulldozeWorstMs = 0;
   let displacedWorstMs = systemMs(bulldoze.timings, DISPLACED_SYSTEM);
+  let satisfactionAfterWorstMs = systemMs(bulldoze.timings, SATISFACTION_SYSTEM);
   for (let k = 0; k < TIME_BALANCE.ticksPerDay; k++) {
     const t = tick();
     afterBulldozeWorstMs = Math.max(afterBulldozeWorstMs, t.ms);
     displacedWorstMs = Math.max(displacedWorstMs, systemMs(t.timings, DISPLACED_SYSTEM));
+    satisfactionAfterWorstMs = Math.max(satisfactionAfterWorstMs, systemMs(t.timings, SATISFACTION_SYSTEM));
   }
 
   // One BuildRoad, and the steps until its travel table is whole.
@@ -442,6 +446,7 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
     downtownTowerPrice,
     afterBulldozeWorstMs,
     displacedWorstMs,
+    satisfactionAfterWorstMs,
     travelSteps,
     travelTotalMs,
     travelWorstMs,
@@ -477,6 +482,7 @@ function checkpointTable(rows: readonly Checkpoints[]): string {
     row("Clearing the occupied tower nearest the centre", rows.map((r) => formatMoneyFull(r.downtownTowerPrice))),
     row("The game day after: worst tick, ms", rows.map((r) => ms(r.afterBulldozeWorstMs))),
     row("The game day after: worst displaced pass, ms", rows.map((r) => ms(r.displacedWorstMs))),
+    row(`The game day after: worst satisfaction tick, ms (share ${budgetFigure(SHARES[SATISFACTION_SYSTEM] as string).budget})`, rows.map((r) => ms(r.satisfactionAfterWorstMs))),
     row("Travel rebuild after one BuildRoad: steps", rows.map((r) => `${r.travelSteps}`)),
     row("Travel rebuild: all steps, ms", rows.map((r) => ms(r.travelTotalMs))),
     row("Travel rebuild: worst step's travel, ms", rows.map((r) => ms(r.travelWorstMs))),

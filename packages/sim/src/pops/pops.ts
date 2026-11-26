@@ -3,10 +3,12 @@
 // A pop is a block of people who share a home building, a workplace and a
 // profile. One row per pop id in flat typed arrays, like the buildings: a
 // removed id's row is zeros and its id goes on the free list, the next one
-// to reuse last. A row is 15 bytes: the alive flag, the home and workplace
-// as 32-bit building ids, and a byte each for size, education, wealth,
-// children, satisfaction and the game days its satisfaction has been below
-// the threshold for leaving (M3-10).
+// to reuse last. A row is 23 bytes: the alive flag, the home and workplace
+// as 32-bit building ids, a byte each for size, education, wealth,
+// children, satisfaction, the game days its satisfaction has been below
+// the threshold for leaving (M3-10) and the game days of grace it has
+// left (#361), and the mark of its last displacement (M4-10): who cleared
+// its home, a byte, the tick, 32 bits, and the people cleared with it, 16.
 //
 // Only the functions here change a pop, and each keeps the derived index
 // (where.ts) current: which pops live in and work at each building, and
@@ -26,6 +28,12 @@
 // becomes NO_HOME and its id joins `displaced`, the queue of pops waiting
 // for a new home. A pop in the queue still counts in the population and
 // keeps its job. Only a pop in the queue has no home.
+//
+// A pop displaced by the city clearing its home, or by its owner
+// redeveloping it, is marked (M4-10): who cleared it, the tick, and how
+// many people the building held. Satisfaction reads the mark on the pop's
+// visits for a game year and clears it after (satisfaction.ts). The mark
+// goes with the pop to its new home and to both parts of a split.
 
 import { BUILDING_TYPES } from "../buildings/balance";
 import { homeRoom, isAbandoned, isBuilding, type BuildingState } from "../buildings/buildings";
@@ -52,6 +60,18 @@ export const POP_LEVELS = 3;
 
 /** The highest satisfaction. */
 export const SATISFACTION_MAX = 100;
+
+/** `displacedBy` for a pop with no mark: never displaced, or not for a game year. */
+export const DISPLACED_BY_NONE = 0;
+
+/** `displacedBy` for a pop whose home the city cleared: a bulldoze or a road, at the eminent domain price (M4-09). */
+export const DISPLACED_BY_CITY = 1;
+
+/** `displacedBy` for a pop whose home its owner redeveloped (M3-14). */
+export const DISPLACED_BY_OWNER = 2;
+
+/** The most `displacedWith` holds: it is 16 bits. A building of more people marks this many. */
+export const DISPLACED_WITH_LIMIT = 65_535;
 
 /** Every pop. Plain typed arrays and one number (CLAUDE.md rule 7). */
 export interface PopState {
@@ -80,6 +100,16 @@ export interface PopState {
    * the day's sweep has yet to reach loses its first day the day it arrives. 0 for a pop that has settled in.
    */
   graceDays: Uint8Array;
+  /**
+   * The mark of its last displacement (M4-10): DISPLACED_BY_CITY,
+   * DISPLACED_BY_OWNER or DISPLACED_BY_NONE; the tick it was displaced on;
+   * and the people living in the building it was displaced from, itself
+   * among them, up to DISPLACED_WITH_LIMIT. The tick and the people are 0
+   * while there is no mark.
+   */
+  displacedBy: Uint8Array;
+  displacedTick: Int32Array;
+  displacedWith: Uint16Array;
   /** Removed ids, the next one to reuse last. */
   free: Int32Array;
   /**
@@ -120,11 +150,11 @@ export interface PopState {
 export const NO_LEAVING = -1;
 
 /** The per-pop arrays, in the order a new state has them. */
-export const POP_ARRAYS = ["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow", "graceDays"] as const;
+export const POP_ARRAYS = ["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow", "graceDays", "displacedBy", "displacedTick", "displacedWith"] as const;
 
 type PopKey = (typeof POP_ARRAYS)[number];
 
-const ARRAY_TYPES: Readonly<Record<PopKey | "free", new (n: number) => AnyTypedArray>> = {
+const ARRAY_TYPES: Readonly<Record<PopKey | "free", new (n: number) => AnyTypedArray | Uint16Array>> = {
   flags: Uint8Array,
   home: Int32Array,
   work: Int32Array,
@@ -135,6 +165,9 @@ const ARRAY_TYPES: Readonly<Record<PopKey | "free", new (n: number) => AnyTypedA
   satisfaction: Uint8Array,
   daysLow: Uint8Array,
   graceDays: Uint8Array,
+  displacedBy: Uint8Array,
+  displacedTick: Int32Array,
+  displacedWith: Uint16Array,
   free: Int32Array,
 };
 
@@ -154,6 +187,9 @@ export function createPops(): PopState {
     satisfaction: new Uint8Array(0),
     daysLow: new Uint8Array(0),
     graceDays: new Uint8Array(0),
+    displacedBy: new Uint8Array(0),
+    displacedTick: new Int32Array(0),
+    displacedWith: new Uint16Array(0),
     free: new Int32Array(0),
     sweep: 0,
     owed: 0,
@@ -215,6 +251,17 @@ export interface NewPop extends PopProfile {
   daysLow?: number;
   /** Game days left before its workers count as unemployed in the residential bar (#361): `newcomer.graceDays` for a newcomer, what is left of it for the part of a split pop. 0 if left out. */
   graceDays?: number;
+  /** The mark of its last displacement, for the part of a split pop (M4-10). None if left out. */
+  displaced?: DisplacedMark;
+}
+
+/** The mark of a pop's last displacement (M4-10), as `PopState` keeps it. */
+export interface DisplacedMark {
+  /** DISPLACED_BY_CITY, DISPLACED_BY_OWNER or DISPLACED_BY_NONE. */
+  by: number;
+  tick: number;
+  /** The people living in the building it was displaced from, itself among them. */
+  with: number;
 }
 
 /** One pop's row. */
@@ -224,6 +271,12 @@ export interface PopRow extends NewPop {
   work: number;
   daysLow: number;
   graceDays: number;
+  displaced: DisplacedMark;
+}
+
+/** The mark pop `id` carries. All zeros for none. */
+export function popDisplacedMark(p: PopState, id: number): DisplacedMark {
+  return { by: p.displacedBy[id] ?? 0, tick: p.displacedTick[id] ?? 0, with: p.displacedWith[id] ?? 0 };
 }
 
 /** The row of pop `id`. Throws if there is no such pop. */
@@ -240,6 +293,7 @@ export function readPop(p: PopState, id: number): PopRow {
     satisfaction: p.satisfaction[id] ?? 0,
     daysLow: p.daysLow[id] ?? 0,
     graceDays: p.graceDays[id] ?? 0,
+    displaced: popDisplacedMark(p, id),
   };
 }
 
@@ -313,6 +367,20 @@ function checkGraceDays(days: number): void {
   if (!Number.isInteger(days) || days < 0 || days > GRACE_DAYS_LIMIT) throw new RangeError(`grace days must be a whole number from 0 to ${GRACE_DAYS_LIMIT}`);
 }
 
+/** Why `mark` is not a mark a pop can carry, or null. */
+function displacedMarkProblem(by: number, tick: number, people: number): string | null {
+  if (by === DISPLACED_BY_NONE) return tick === 0 && people === 0 ? null : "an unmarked pop must have no displacement tick or people";
+  if (by !== DISPLACED_BY_CITY && by !== DISPLACED_BY_OWNER) return "a displacement mark must be by the city or by an owner";
+  if (!Number.isSafeInteger(tick) || tick < 0 || tick > 0x7fff_ffff) return "a displacement tick must be a whole number from 0";
+  if (!Number.isSafeInteger(people) || people < 1 || people > DISPLACED_WITH_LIMIT) return `a displacement must have from 1 to ${DISPLACED_WITH_LIMIT} people`;
+  return null;
+}
+
+function checkDisplacedMark(mark: DisplacedMark): void {
+  const problem = displacedMarkProblem(mark.by, mark.tick, mark.with);
+  if (problem !== null) throw new RangeError(problem);
+}
+
 /**
  * Throws unless `size` people fit one pop in building `home`, beside the
  * `others` people already there. `from` is the size of the pop these
@@ -367,6 +435,7 @@ function insertPop(state: SimState, spec: NewPop, splitFrom: number): number {
   checkSatisfaction(spec.satisfaction);
   checkDaysLow(spec.daysLow ?? 0);
   checkGraceDays(spec.graceDays ?? 0);
+  if (spec.displaced) checkDisplacedMark(spec.displaced);
   const index = popIndexOf(state);
   checkHomeRoom(state, spec.home, spec.size, index.people[spec.home] ?? 0, splitFrom);
   const p = state.pops;
@@ -389,6 +458,9 @@ function insertPop(state: SimState, spec: NewPop, splitFrom: number): number {
   p.satisfaction[id] = spec.satisfaction;
   p.daysLow[id] = spec.daysLow ?? 0;
   p.graceDays[id] = spec.graceDays ?? 0;
+  p.displacedBy[id] = spec.displaced?.by ?? DISPLACED_BY_NONE;
+  p.displacedTick[id] = spec.displaced?.tick ?? 0;
+  p.displacedWith[id] = spec.displaced?.with ?? 0;
   linkHome(index, p, id);
   countPop(state, id, 1);
   return id;
@@ -469,6 +541,9 @@ function clearRow(p: PopState, id: number): void {
   p.satisfaction[id] = 0;
   p.daysLow[id] = 0;
   p.graceDays[id] = 0;
+  p.displacedBy[id] = 0;
+  p.displacedTick[id] = 0;
+  p.displacedWith[id] = 0;
 }
 
 /**
@@ -653,6 +728,15 @@ export function setPopDaysLow(state: SimState, id: number, days: number): void {
   state.pops.daysLow[id] = days;
 }
 
+/** Takes the mark of its last displacement off pop `id`, once it is a game year old (satisfaction.ts). */
+export function clearPopDisplaced(state: SimState, id: number): void {
+  livePop(state, id);
+  const p = state.pops;
+  p.displacedBy[id] = DISPLACED_BY_NONE;
+  p.displacedTick[id] = 0;
+  p.displacedWith[id] = 0;
+}
+
 /**
  * Displaces the pops who live in buildings `ids` and takes the jobs of
  * those who work in them, so state never names a building that is gone
@@ -662,9 +746,16 @@ export function setPopDaysLow(state: SimState, id: number, days: number): void {
  * in one of `ids` too, and its people stay in the population. The
  * building module calls it before it clears the rows. Free when the city
  * has no pops.
+ *
+ * Each resident is marked (M4-10) with this tick and the people its
+ * building held: by its owner when `byOwner` says the buildings are being
+ * redeveloped, else by the city for a building the city paid to clear
+ * (`BuildingState.paid`, M4-09). A pop moved out any other way, as when
+ * a road change leaves a lot with no ground, is not marked.
  */
-export function displaceBuildingPops(state: SimState, ids: readonly number[]): void {
+export function displaceBuildingPops(state: SimState, ids: readonly number[], byOwner = false): void {
   if (popCount(state.pops) === 0) return;
+  const paid = state.buildings.paid;
   const index = popIndexOf(state);
   const p = state.pops;
   const queued: number[] = [];
@@ -679,7 +770,18 @@ export function displaceBuildingPops(state: SimState, ids: readonly number[]): v
     // Only the residents of the home's density move in the totals: its pops are still the city's people.
     const people = index.people[building] ?? 0;
     if (people > 0) countHomeDensity(state, building, -people);
+    const from = queued.length;
     emptyHome(index, p, building, queued);
+    // An owner's redevelopment is the owner's, even of a building the city once paid to clear and left standing, as a road undone before its buildings went does.
+    const by = byOwner ? DISPLACED_BY_OWNER : (paid[building] ?? 0) !== 0 ? DISPLACED_BY_CITY : DISPLACED_BY_NONE;
+    if (by === DISPLACED_BY_NONE) continue;
+    const together = Math.min(people, DISPLACED_WITH_LIMIT);
+    for (let i = from; i < queued.length; i++) {
+      const id = queued[i] as number;
+      p.displacedBy[id] = by;
+      p.displacedTick[id] = state.tick;
+      p.displacedWith[id] = together;
+    }
   }
   if (queued.length === 0) return;
   const queue = resized(p.displaced, p.displaced.length + queued.length);
@@ -724,7 +826,7 @@ export function rehomePop(state: SimState, id: number, home: number): void {
  * job matching settle such a pop (M3-12, M3-09), it keeps its size and its
  * job.
  */
-export function checkPops(value: unknown, buildings: BuildingState): string | null {
+export function checkPops(value: unknown, buildings: BuildingState, tick = Number.MAX_SAFE_INTEGER): string | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return "it is not an object";
   const raw = value as Record<string, unknown>;
   for (const [key, Type] of Object.entries(ARRAY_TYPES)) {
@@ -769,6 +871,9 @@ export function checkPops(value: unknown, buildings: BuildingState): string | nu
     if ((p.education[id] ?? 0) >= POP_LEVELS || (p.wealth[id] ?? 0) >= POP_LEVELS) return `pop ${id} has a bad education or wealth`;
     if ((p.children[id] ?? 0) > 1) return `pop ${id} has a bad children flag`;
     if ((p.satisfaction[id] ?? 0) > SATISFACTION_MAX) return `pop ${id} is past the highest satisfaction`;
+    const markProblem = displacedMarkProblem(p.displacedBy[id] ?? 0, p.displacedTick[id] ?? 0, p.displacedWith[id] ?? 0);
+    if (markProblem !== null) return `pop ${id}'s mark: ${markProblem}`;
+    if ((p.displacedTick[id] ?? 0) > tick) return `pop ${id} was displaced after the city's tick`;
     if (home !== NO_HOME) people[home] = (people[home] ?? 0) + size;
     const work = p.work[id] ?? NO_WORK;
     if (work === NO_WORK) continue;
