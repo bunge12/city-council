@@ -840,14 +840,14 @@ for (const variant of [
       await hover(page, ...fillPoint(R1_STRIP));
       const readout = page.locator("#zone-readout");
       await expect(readout).toHaveAttribute("data-whole", "false");
-      const under = Number(await readout.getAttribute("data-built"));
-      expect(under).toBeGreaterThan(0);
-      await expect(page.locator("#zone-built-note")).toHaveText(`Hold Shift to include ${under === 1 ? "1 cell" : `${under} cells`} under buildings`);
+      // The sim runs on, and a house can grow on the strip meanwhile, so the count is not pinned.
+      await expect.poll(async () => Number(await readout.getAttribute("data-built"))).toBeGreaterThan(0);
+      await expect(page.locator("#zone-built-note")).toHaveText(/^Hold Shift to include \d+ cells? under buildings$/);
       await shot(page, info, dir, "6-fill-leaves-the-houses-ground");
       await page.keyboard.down("Shift");
       await frames(page, 3);
       await expect(readout).toHaveAttribute("data-whole", "true");
-      await expect(page.locator("#zone-built-note")).toContainText("under buildings, which stand until redeveloped");
+      await expect(page.locator("#zone-built-note")).toContainText("under buildings; the buildings stay");
       await shot(page, info, dir, "6-shift-fill-takes-the-houses-ground");
       await page.keyboard.up("Shift");
       await fill(page, R1_STRIP, true);

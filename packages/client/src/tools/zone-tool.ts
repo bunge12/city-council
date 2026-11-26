@@ -446,7 +446,7 @@ export function previewZone(
 }
 
 /** Why a click sends nothing when every cell it would change has a building on it. */
-export const ONLY_BUILT = "every cell here has a building on it; hold Shift to zone under buildings";
+export const ONLY_BUILT = "every cell here has a building on it; hold Shift to include them";
 
 /** Whether each of `cells` has a building standing on it, in the same order. */
 function builtOn(city: City, cells: readonly ZoneTarget[]): boolean[] {
@@ -474,14 +474,10 @@ export function previewZoneAround(
   const underBuildings = new Set(cells.filter((_, i) => on[i]).map((c) => c.slot));
   const built = all.cells.filter((c) => underBuildings.has(c.slot)).length;
   if (whole) return { ...all, whole, built };
-  const empty = previewZone(
-    city,
-    zone,
-    density,
-    cells.filter((_, i) => !on[i]),
-    sent,
-  );
-  if (!empty.ok && built > 0) return { ...empty, reason: ONLY_BUILT, whole, built };
+  const open = cells.filter((_, i) => !on[i]);
+  const empty = previewZone(city, zone, density, open, sent);
+  // Only when no empty cell was asked for: otherwise the plan's own reason, such as a stroke already sent, holds.
+  if (!empty.ok && built > 0 && open.length === 0) return { ...empty, reason: ONLY_BUILT, whole, built };
   return { ...empty, whole, built };
 }
 

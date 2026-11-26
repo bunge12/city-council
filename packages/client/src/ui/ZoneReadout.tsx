@@ -30,7 +30,7 @@ export function zoneTitle(preview: ZonePreview): string {
 export function builtNote(preview: ZonePreview): string | null {
   if (preview.built === 0) return null;
   const n = cells(preview.built);
-  return preview.whole ? `Including ${n} under buildings, which stand until redeveloped` : `Hold Shift to include ${n} under buildings`;
+  return preview.whole ? `Including ${n} under buildings; the buildings stay` : `Hold Shift to include ${n} under buildings`;
 }
 
 /** The readout's line over mixed ground, which has no demand bar of its own (issue M3-15). */
