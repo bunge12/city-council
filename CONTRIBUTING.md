@@ -121,6 +121,18 @@ Every e2e job uploads `playwright-report-<runner>`, whatever its result. In it, 
 
 Each runner's Playwright run stops at three times its planned minutes, with a ten minute floor (`globalTimeout` in `e2e/projects.json`), and never before its plan plus every attempt of its longest test, so a retry still fits. It then fails with its report, before GitHub's job limit would stop it with none. The walkthrough runners have nothing to deal and set their limit in minutes as `limit:` in `ci.yml`. `pnpm lint` runs `scripts/check-e2e-timeouts.mjs`, which fails when a test's limit is over a third of its CI job's: a test that times out runs again, and the runner's other files need the rest. It also fails when a `limit:` cannot hold every attempt of its runner's longest test with two minutes to spare, or leaves less than three minutes of the job. The perf project does not retry, so a perf test may take half of its job; its one limit is described under [Time limits are not speed checks](#time-limits-are-not-speed-checks).
 
+### Deploy runs
+
+`.github/workflows/deploy.yml` runs on every push to `main`. It builds, deploys to GitHub Pages, then runs the M0, M1, M2 and M3 walkthroughs against the public address, a job each. Read a Deploy run like this:
+
+- **Green with a "Walkthrough replaced" notice.** A newer push deployed while the walkthrough ran, or before it started. `scripts/walkthrough-public.mjs` asks GitHub every 20 seconds which commit is deployed, and stops Playwright when it is no longer this run's. The job has no result and needs nothing: the newer run's walkthrough covers this commit's changes.
+- **Red.** A build, a deploy or a walkthrough failed, and the `report` job has opened or commented on the issue titled "Deploy failed on main", labelled `Deploy Failure`. It blocks no merge. Fix it before starting other work, and close the issue with what happened.
+- **Cancelled.** Rare. GitHub keeps one waiting job in the `pages` group, so with three pushes inside about a minute an older build or deploy is dropped while it waits. The newest push still deploys. Nothing to fix.
+
+No job in a workflow that runs on `main` should be cancelled part way, by a concurrency group with `cancel-in-progress: true` or otherwise. One cancelled job leaves the whole run cancelled, and GitHub shows that as a failed check on the commit. Until #414 the walkthroughs were cancelled that way, and three merges in twenty minutes left three red marks with nothing wrong. A job that a newer push makes pointless should notice and end green, as the walkthrough does.
+
+A walkthrough that fails here after passing on the pull request usually depends on the runner's speed. The sim keeps running while a spec works, so a step that reads a figure, does something for a few seconds and reads it again sees more game time on a slow runner. #407 added road upkeep, charged on each game day's first tick, and the M1 walkthrough's "the preview charges nothing" step failed whenever a day ended inside it. Pause the sim for such a step, or work out what the sim did in between, as that step does now.
+
 ### Runners are not the same speed
 
 CI runners have 4 virtual CPUs and no GPU, and they are not all the same speed. The e2e jobs print their CPU as `machine:` near the top of the test step. Over 300 e2e jobs in the 25 CI runs before 19 November 2026, with each runner's time as a multiple of its files' planned seconds (the median per CPU):
