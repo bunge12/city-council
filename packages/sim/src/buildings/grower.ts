@@ -6,10 +6,19 @@
 // while the residential and commercial bars both are. The grower reads each
 // bar without its waiting part (demand/pull.ts, #420), which shows what the
 // holds below are waiting for; the holds themselves stop it. Its pace follows the
-// bar: a zone whose bar reads b builds ceil(b / 100 x its
-// `buildingsPerDayAtFullDemand`) buildings a game day (demand.json), so a
-// bar barely above zero still builds one a day. Mixed reads the lower of
-// its two bars. The zones take their quotas in zone order, and together
+// bar and its development charge (M4-08): a zone whose bar reads b wants
+// b / 100 x its `buildingsPerDayAtFullDemand` (demand.json), at least one,
+// x its charge's share (economy/charges.ts, 1 at a charge of 0) buildings a
+// game day. So with no charge a bar barely above zero still builds one a
+// day, as M3-07 had it, and the charge slows even that zone: at the top of
+// the range a want of one becomes 0.4. The whole part is built over the
+// day, and the fraction left over is one more building with that chance:
+// a want of 0.4 builds on about four days in ten. Until M4-08 the want was
+// rounded up instead, which left a charge nothing to slow at one a day. The chance is drawn from the generator on the day's last
+// tick, and that tick builds the one more if the draw falls below the
+// fraction, so every tick's work still follows from state. A zone with no
+// free zoned cell by a road draws nothing, so a city with nothing to build
+// never moves the generator. Mixed reads the lower of its two bars. The zones take their quotas in zone order, and together
 // they are held to `growthPerDayMax` (buildings.json), which keeps a tick
 // inside its share of the budget. The bars move only on a day's first tick
 // (demand.ts), and the grower runs after them, so the day's quotas follow
@@ -90,7 +99,8 @@ import { TIME_BALANCE } from "../calendar";
 import { DEMAND_BALANCE } from "../demand/balance";
 import type { DemandState } from "../demand/demand";
 import { demandPull } from "../demand/pull";
-import { nextInt } from "../rng";
+import { nextFloat, nextInt } from "../rng";
+import { chargeShares, payDevelopmentCharge } from "../economy/charges";
 import type { SimState } from "../state";
 import type { CellRef } from "../zoning/cells";
 import type { System } from "../step";
@@ -143,24 +153,76 @@ export function zoneBar(demand: DemandState, id: string): number {
 }
 
 /**
- * The buildings each zone adds today, by zone number, with index 0 unused,
- * as the header says: none while its bar is at or below zero, else its
- * full-demand rate times the bar over 100, rounded up, the zones together
- * held to `growthPerDayMax` in zone order.
+ * The buildings each zone wants today, by zone number, with index 0 unused,
+ * before rounding: none while its bar is at or below zero, else its
+ * full-demand rate times the bar over 100, at least 1, times its share in
+ * `shares`, by zone number, all 1 when left out.
  */
-export function dayQuotas(demand: DemandState): number[] {
-  const quotas = [0];
-  let left = BUILDINGS_BALANCE.growthPerDayMax;
-  for (const zone of ZONING_BALANCE.zones) {
+export function dayWants(demand: DemandState, shares?: Float64Array): number[] {
+  const wants = [0];
+  for (const [i, zone] of ZONING_BALANCE.zones.entries()) {
     const bar = zoneBar(demand, zone.id);
     const rate = DEMAND_BALANCE.buildingsPerDayAtFullDemand[zone.id] ?? 0;
-    // ceil(rate x bar / 100) as -floor(-x), so it uses only floor (CLAUDE.md rule 6).
-    const want = bar > 0 ? -Math.floor(-(rate * bar) / 100) : 0;
-    const quota = Math.min(want, left);
+    // At least one a day while the bar is above zero (M3-07), before the charge's share, so a charge still slows a small zone.
+    wants.push(bar > 0 ? Math.max(1, (rate * bar) / 100) * (shares?.[i + 1] ?? 1) : 0);
+  }
+  return wants;
+}
+
+/**
+ * The buildings each zone adds over the day for certain, by zone number,
+ * with index 0 unused, as the header says: the whole part of its want
+ * (`dayWants`), the zones together held to `growthPerDayMax` in zone order.
+ */
+export function dayQuotas(demand: DemandState, shares?: Float64Array): number[] {
+  const quotas = [0];
+  const wants = dayWants(demand, shares);
+  let left = BUILDINGS_BALANCE.growthPerDayMax;
+  for (let zone = 1; zone < wants.length; zone++) {
+    const quota = Math.min(Math.floor(wants[zone] ?? 0), left);
     quotas.push(quota);
     left -= quota;
   }
   return quotas;
+}
+
+/**
+ * The chance, by zone number, with index 0 unused, that each zone builds
+ * one more building than its quota on the day's last tick: the fraction
+ * its want leaves over, or 0 where `growthPerDayMax` has no room left for
+ * it once the zones before it took their quotas and their extra ones.
+ */
+export function extraChances(demand: DemandState, shares?: Float64Array): number[] {
+  const wants = dayWants(demand, shares);
+  const out = [0];
+  let left = BUILDINGS_BALANCE.growthPerDayMax;
+  for (let zone = 1; zone < wants.length; zone++) {
+    const want = wants[zone] ?? 0;
+    const whole = Math.floor(want);
+    const fits = whole + 1 <= left;
+    out.push(fits ? want - whole : 0);
+    left -= Math.min(whole, left) + (fits && want > whole ? 1 : 0);
+  }
+  return out;
+}
+
+/**
+ * The buildings each zone of `state` adds on its tick, by zone number, as
+ * the header says: its quota's share of the tick, and on the day's last
+ * tick one more where the zone's draw falls below its chance. A zone draws
+ * only on that tick, with a chance above 0 and a free zoned cell by a road.
+ */
+export function dueOnTick(state: SimState): number[] {
+  const shares = chargeShares(state.budget.chargeRates);
+  const due = dayQuotas(state.demand, shares).map((quota) => growthOnTick(state.tick, quota));
+  if (state.tick % TIME_BALANCE.ticksPerDay !== TIME_BALANCE.ticksPerDay - 1) return due;
+  const chances = extraChances(state.demand, shares);
+  for (let zone = 1; zone < due.length; zone++) {
+    const chance = chances[zone] ?? 0;
+    if (!(chance > 0) || freeFrontCells(state, zone) === 0) continue;
+    if (nextFloat(state.rng) < chance) due[zone] = (due[zone] ?? 0) + 1;
+  }
+  return due;
 }
 
 /** Residents for a `type` building on a `width` x `depth` lot. */
@@ -273,7 +335,9 @@ export function growOne(state: SimState, zone = 0): number {
     const type = BUILDING_TYPES[lot.type] as BuildingType;
     const residents = residentsFor(type, lot.width, lot.depth);
     const variant = nextInt(state.rng, VARIANTS);
-    return addBuilding(state, { ...lot, residents, variant });
+    const id = addBuilding(state, { ...lot, residents, variant });
+    payDevelopmentCharge(state, id);
+    return id;
   }
 }
 
@@ -341,13 +405,13 @@ export function countNewHome(state: SimState, room: ReachableRoom, id: number): 
 /** The grower's work for one tick. */
 export function grow(state: SimState): void {
   if (!cellsSettled(state)) return;
-  const quotas = dayQuotas(state.demand);
+  const dues = dueOnTick(state);
   // Each worked out on the first building of its kind the tick may add, then kept as it adds them.
   let room: ReachableRoom | null = null;
   let jobs: ZoneJobs | null = null;
   let waiting: Int32Array | null = null;
-  for (let zone = 1; zone < quotas.length; zone++) {
-    const due = growthOnTick(state.tick, quotas[zone] ?? 0);
+  for (let zone = 1; zone < dues.length; zone++) {
+    const due = dues[zone] ?? 0;
     const homes = HOME_ZONES.has(zone);
     const work = WORK_ZONES.has(zone);
     if (due > 0) {

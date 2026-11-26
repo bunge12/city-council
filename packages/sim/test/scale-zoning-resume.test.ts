@@ -121,7 +121,8 @@ describe("save and resume with zoning and growth on the scale city (issue M2-17)
     const seqB = { n: 100_000 };
     while (resumed.tick < start + TICKS / 2) zoningTick(resumed, grids, seqB);
     // Half way the grower has buildings up and lots half built: the save must carry all of it.
-    expect(buildingCount(resumed.buildings)).toBeGreaterThan(100);
+    // About 90 since M4-08's charges slow the grower and M4-09 stopped undos giving back houses a road had not yet taken; well past nothing.
+    expect(buildingCount(resumed.buildings)).toBeGreaterThan(50);
     resumed = deserialize(serialize(resumed)).state;
     while (resumed.tick < start + TICKS) zoningTick(resumed, grids, seqB);
 

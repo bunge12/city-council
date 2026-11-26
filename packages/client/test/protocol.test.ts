@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   CHUNKS_PER_SIDE,
   CHUNK_SIZE,
+  CHARGE_ZONES,
+  ECONOMY,
   LINE,
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
@@ -279,6 +281,29 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     runUntil(33 * day);
     expect(deltas().length).toBeGreaterThan(seen);
     expect(deltas().slice(seen).every((d) => d.budget === undefined)).toBe(true);
+  });
+
+  it("sends a development charge the player sets in the next delta, with the budget (M4-08)", async () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    const state = createBareState(7);
+    const host = new SimHost(state, hostEnd, () => now);
+    const mirror = new SimMirror(client, "p1");
+    const pump = () => {
+      now += PUMP_INTERVAL_MS;
+      host.pump();
+    };
+    pump();
+    const before = received.length;
+    await mirror.sendCommand("SetDevelopmentCharge", { zone: "office", rate: ECONOMY.developmentCharges.office.max });
+    const office = CHARGE_ZONES.indexOf("office");
+    for (let i = 0; i < 50 && mirror.state?.budget.chargeRates[office] !== ECONOMY.developmentCharges.office.max; i++) pump();
+    const deltas = received.slice(before).filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    expect(deltas.filter((d) => d.budget !== undefined)).toHaveLength(1);
+    expect(mirror.state?.budget.chargeRates[office]).toBe(ECONOMY.developmentCharges.office.max);
+    expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
   });
 
   it("keeps the host's full log after live state pages entries out", () => {
@@ -937,8 +962,8 @@ describe("snapshot transfer", () => {
     const statBuffers = Object.values(state.stats.history).map((value) => value.buffer);
     // One money series each, the treasury and the month's income, expenses and tax income (M4-02).
     const moneyBuffers = Object.values(state.stats.money).map((value) => value.buffer);
-    // The ledger's two months and the tax rates.
-    const budgetBuffers = [state.budget.month.buffer, state.budget.lastMonth.buffer, state.budget.taxRates.buffer];
+    // The ledger's two months, the tax rates and the development charges (M4-08).
+    const budgetBuffers = [state.budget.month.buffer, state.budget.lastMonth.buffer, state.budget.taxRates.buffer, state.budget.chargeRates.buffer];
     expect(typedArrayBuffers(state)).toEqual([
       state.rng.buffer,
       ...roadBuffers,

@@ -50,8 +50,9 @@ describe("the balance stamp", () => {
     // #379 moved it again: roads.json's upkeep became a yearly share of build cost.
     // #381 moved it again: economy.json gained the sales and output per job business tax is charged on.
     // #420 moved it again: demand.json's notes on the bars' waiting parts.
+    // #383 moved it again: economy.json gained the mixed development charge and how a charge slows the grower.
     // #384 moved it again: economy.json gained the cap on expropriation records.
-    expect(BALANCE_STAMP).toBe("95a4e579ce4c6c69");
+    expect(BALANCE_STAMP).toBe("81bba359afc9473f");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

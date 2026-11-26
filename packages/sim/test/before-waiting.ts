@@ -6,14 +6,14 @@
 // takes out what version 33 added too.
 
 import { DEMAND_BARS, WAITING_PART } from "../src/index";
-import { withoutExpropriations } from "./before-expropriations";
+import { withoutCharges } from "./before-charges";
 
 type Loose = Record<string, unknown>;
 type Bar = { value: number; parts: Record<string, number> };
 
-/** `state` with the parts version 32 added taken out of its demand bars. Leaves a state that has none, or no bars, as it is. */
+/** `state` with the parts version 32 added taken out of its demand bars, and what version 33 added. Leaves a state that has none, or no bars, as it is. */
 export function withoutWaiting<T extends object>(state: T): T {
-  const out: Loose = { ...(withoutExpropriations(state) as Loose) };
+  const out: Loose = { ...(withoutCharges(state) as Loose) };
   const demand = out["demand"] as Record<string, Bar> | undefined;
   if (!demand || typeof demand !== "object") return out as T;
   const bars: Record<string, Bar> = {};

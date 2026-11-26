@@ -2,8 +2,8 @@ import { createBuildings } from "./buildings/buildings";
 import { TIME_BALANCE } from "./calendar";
 import { NO_LEAVING, createPops } from "./pops/pops";
 import { STAT_TOTALS, emptyMoney, recountTotals, statsFor } from "./stats/stats";
-import { ECONOMY } from "./economy/balance";
-import { emptyBudget } from "./economy/budget";
+import { ECONOMY, ECONOMY_SLIDERS } from "./economy/balance";
+import { chargesAtDefaults } from "./economy/budget";
 import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "./demand/demand";
 import { placeConnections } from "./roads/connections";
 import { NO_TIER, createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
@@ -150,7 +150,7 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // it is given the starting grant, as its opening balance and on no line,
   // an empty ledger, the tax rates at their defaults, and money series of
   // zeros as long as the rest of its history.
-  29: (old) => ({ ...old, version: 30, stats: statsWithMoney(old["stats"]), budget: emptyBudget(ECONOMY.startingGrant) }),
+  29: (old) => ({ ...old, version: 30, stats: statsWithMoney(old["stats"]), budget: version30Budget(ECONOMY.startingGrant) }),
   // Version 31 keeps the money each command moved (M4-03): beside each live
   // log entry, and on each undo record. Nothing cost money before it, so
   // every amount is 0, and an undo of an older command moves none.
@@ -164,15 +164,19 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // waiting, homes still filling or open jobs (#420), at 0. The bar reads
   // what it did, and the part takes its first step on the next day.
   31: (old) => ({ ...old, version: 32, demand: demandWithWaiting(old["demand"]) }),
-  // Version 33 keeps the expropriations of the last game year, marks each
+  // Version 33 adds the development charges (M4-08): a ledger line for
+  // mixed, after industrial's, at 0 in both months; the five rates at their
+  // defaults. Nothing was charged before it.
+  32: (old) => ({ ...old, version: 33, budget: budgetWithCharges(old["budget"]) }),
+  // Version 34 keeps the expropriations of the last game year, marks each
   // building the city has paid to clear, and counts on each undo record the
   // buildings its command took (M4-09). Clearing a building cost nothing
   // before it and left no record, so an older city has no records, no
   // building paid for, and undo records that took none: they undo as they
   // did.
-  32: (old) => ({
+  33: (old) => ({
     ...old,
-    version: 33,
+    version: 34,
     undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, took: 0 })),
     buildings: buildingsWithPaid(old["buildings"]),
     expropriations: [],
@@ -190,6 +194,38 @@ function demandWithWaiting(value: unknown): Record<string, unknown> {
     out[bar] = { value: state.value, parts };
   }
   return out;
+}
+
+
+/** The ledger lines of versions 30 to 32: 18, with no mixed charge line. */
+const VERSION_31_LINES = 18;
+/** Where version 33 puts the mixed charge line: after the four tax and four charge lines. Fixed, so a later change of lines cannot move it. */
+const VERSION_33_MIXED_LINE = 8;
+
+/** What version 30 gave a city saved before the treasury: `treasury` as its opening balance, an empty ledger of version 30's lines and the tax rates at their defaults. */
+function version30Budget(treasury: number): Record<string, unknown> {
+  return {
+    treasury,
+    opening: treasury,
+    month: new Float64Array(VERSION_31_LINES),
+    lastMonth: new Float64Array(VERSION_31_LINES),
+    taxRates: Float64Array.from(ECONOMY_SLIDERS, (slider) => ECONOMY.taxRates[slider].default),
+  };
+}
+
+/** `ledger` of version 32's lines with the mixed charge line version 33 adds, at 0, in its place after the industrial charge. */
+function withMixedChargeLine(ledger: Float64Array): Float64Array {
+  const at = VERSION_33_MIXED_LINE;
+  const out = new Float64Array(ledger.length + 1);
+  out.set(ledger.subarray(0, at), 0);
+  out.set(ledger.subarray(at), at + 1);
+  return out;
+}
+
+/** A version 32 budget with the version 33 fields, in the order a new state has them. */
+function budgetWithCharges(value: unknown): Record<string, unknown> {
+  const budget = value as Record<string, unknown> & { month: Float64Array; lastMonth: Float64Array };
+  return { ...budget, month: withMixedChargeLine(budget.month), lastMonth: withMixedChargeLine(budget.lastMonth), ...chargesAtDefaults() };
 }
 
 /** Version 29 statistics with money series of zeros as long as the history, after `next`. */
@@ -248,7 +284,7 @@ function stripTiers(old: Record<string, unknown>): Record<string, unknown> {
   return { ...old, roads, undo };
 }
 
-/** A version 32 set of buildings with `paid`, none paid for, after `statusSince` as a new state has it. Left as it is when it has one. */
+/** A version 33 set of buildings with `paid`, none paid for, after `statusSince` as a new state has it. Left as it is when it has one. */
 function buildingsWithPaid(value: unknown): Record<string, unknown> {
   const b = value as Record<string, unknown> & { flags: Uint8Array };
   if (b["paid"] !== undefined) return b;

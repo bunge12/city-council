@@ -19,12 +19,12 @@
 
 import { isMonthStart, yearDays } from "../calendar";
 import type { SimState } from "../state";
-import { ECONOMY, ECONOMY_SLIDERS } from "./balance";
+import { CHARGE_ZONES, ECONOMY, ECONOMY_SLIDERS } from "./balance";
 
 /**
  * The ledger's lines, in the order state holds them: income first, then
- * expenses. Development charges have one line per slider, as taxes do;
- * mixed pays the residential and commercial ones (M4.md). `otherSpending`
+ * expenses. Development charges have one line per zone, mixed included,
+ * since a mixed building is one project (M4-08). `otherSpending`
  * is the city's spending on what has no building yet, per resident, which
  * M8 and M9 replace a service at a time (M4.md, "Spending that has no
  * building yet"). A line no M4 issue fills yet stays at zero. The order is
@@ -39,6 +39,7 @@ export const LEDGER_LINES = [
   "chargeCommercial",
   "chargeOffice",
   "chargeIndustrial",
+  "chargeMixed",
   "grants",
   "loansTaken",
   "construction",
@@ -53,13 +54,16 @@ export const LEDGER_LINES = [
 export type LedgerLine = (typeof LEDGER_LINES)[number];
 
 /** How many of `LEDGER_LINES`, from the first, are income. The rest are expenses. */
-export const INCOME_LINES = 10;
+export const INCOME_LINES = 11;
 
 /** Each line's place in the ledger arrays. */
 export const LINE: Readonly<Record<LedgerLine, number>> = Object.freeze(Object.fromEntries(LEDGER_LINES.map((name, i) => [name, i])) as Record<LedgerLine, number>);
 
 /** The four tax lines, in `ECONOMY_SLIDERS` order. */
 export const TAX_LINES: readonly LedgerLine[] = ["taxResidential", "taxCommercial", "taxOffice", "taxIndustrial"];
+
+/** The five development charge lines, in `CHARGE_ZONES` order (M4-08). */
+export const CHARGE_LINES: readonly LedgerLine[] = ["chargeResidential", "chargeCommercial", "chargeOffice", "chargeIndustrial", "chargeMixed"];
 
 /** Whether line `line` is income: money in. Otherwise it is an expense, money out. */
 export function isIncome(line: LedgerLine): boolean {
@@ -78,6 +82,12 @@ export interface BudgetState {
   lastMonth: Float64Array;
   /** The four tax rates, in `ECONOMY_SLIDERS` order, as fractions. Issue M4-07 adds the command that sets them. */
   taxRates: Float64Array;
+  /**
+   * The five development charges, in `CHARGE_ZONES` order: whole dollars
+   * per square metre of floor space a new building adds (M4-08). Set by
+   * `SetDevelopmentCharge`.
+   */
+  chargeRates: Float64Array;
 }
 
 /**
@@ -93,9 +103,10 @@ export function createBudget(): BudgetState {
 }
 
 /**
- * A budget holding `treasury` with nothing on any line, and the tax rates
- * at their defaults: what the version 30 migration gives a city saved
- * before the treasury, with the starting grant as its opening balance.
+ * A budget holding `treasury` with nothing on any line, the tax rates and
+ * development charges at their defaults: what the
+ * version 30 migration gives a city saved before the treasury, with the
+ * starting grant as its opening balance, by way of version 33's.
  */
 export function emptyBudget(treasury: number): BudgetState {
   return {
@@ -104,7 +115,13 @@ export function emptyBudget(treasury: number): BudgetState {
     month: new Float64Array(LEDGER_LINES.length),
     lastMonth: new Float64Array(LEDGER_LINES.length),
     taxRates: Float64Array.from(ECONOMY_SLIDERS, (slider) => ECONOMY.taxRates[slider].default),
+    ...chargesAtDefaults(),
   };
+}
+
+/** The version 33 field (M4-08): the development charges at their defaults. */
+export function chargesAtDefaults(): Pick<BudgetState, "chargeRates"> {
+  return { chargeRates: Float64Array.from(CHARGE_ZONES, (zone) => ECONOMY.developmentCharges[zone].default) };
 }
 
 /**
@@ -207,12 +224,26 @@ export const BUDGET_SYSTEM = "budget";
 
 /** A copy of `budget` that shares nothing with it. */
 export function copyBudget(budget: BudgetState): BudgetState {
-  return { treasury: budget.treasury, opening: budget.opening, month: budget.month.slice(), lastMonth: budget.lastMonth.slice(), taxRates: budget.taxRates.slice() };
+  return {
+    treasury: budget.treasury,
+    opening: budget.opening,
+    month: budget.month.slice(),
+    lastMonth: budget.lastMonth.slice(),
+    taxRates: budget.taxRates.slice(),
+    chargeRates: budget.chargeRates.slice(),
+  };
 }
 
 /** Whether `a` and `b` hold the same numbers. For a host deciding whether the budget goes in a delta. */
 export function sameBudget(a: BudgetState, b: BudgetState): boolean {
-  return a.treasury === b.treasury && a.opening === b.opening && sameArray(a.month, b.month) && sameArray(a.lastMonth, b.lastMonth) && sameArray(a.taxRates, b.taxRates);
+  return (
+    a.treasury === b.treasury &&
+    a.opening === b.opening &&
+    sameArray(a.month, b.month) &&
+    sameArray(a.lastMonth, b.lastMonth) &&
+    sameArray(a.taxRates, b.taxRates) &&
+    sameArray(a.chargeRates, b.chargeRates)
+  );
 }
 
 function sameArray(a: Float64Array, b: Float64Array): boolean {
@@ -225,7 +256,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const BUDGET_KEYS = ["treasury", "opening", "month", "lastMonth", "taxRates"];
+const BUDGET_KEYS = ["treasury", "opening", "month", "lastMonth", "taxRates", "chargeRates"];
 
 /** Whether `ledger` is one whole dollar amount per line. A line may be below zero, where refunds took more off it than it held. */
 function isLedger(ledger: unknown): boolean {
@@ -238,19 +269,21 @@ function isLedger(ledger: unknown): boolean {
  * Why `value` is not a well-formed `BudgetState`, or null if it is. For
  * loading a save and checking a delta: whole dollars everywhere, the
  * treasury equal to the opening balance plus the month's income less its
- * expenses, one amount per ledger line, and a tax rate of at least 0 per
- * slider.
+ * expenses, one amount per ledger line, a tax rate of at least 0 per
+ * slider, and a development charge of whole dollars per zone.
  */
 export function checkBudget(value: unknown): string | null {
   if (!isRecord(value)) return "it is not an object";
   const keys = Object.keys(value);
   if (keys.length !== BUDGET_KEYS.length || BUDGET_KEYS.some((key, i) => keys[i] !== key)) return "it has missing or unknown fields";
-  const { treasury, opening, month, lastMonth, taxRates } = value;
+  const { treasury, opening, month, lastMonth, taxRates, chargeRates } = value;
   if (!Number.isSafeInteger(treasury) || !Number.isSafeInteger(opening)) return "its treasury is not whole dollars";
   if (!isLedger(month) || !isLedger(lastMonth)) return `its ledger is not ${LEDGER_LINES.length} whole dollar amounts a month in a Float64Array`;
   if ((opening as number) + incomeOf(month as Float64Array) - expensesOf(month as Float64Array) !== treasury) return "its treasury is not its opening balance plus the month's income less its expenses";
   if (!(taxRates instanceof Float64Array) || taxRates.length !== ECONOMY_SLIDERS.length) return `its tax rates are not ${ECONOMY_SLIDERS.length} numbers in a Float64Array`;
   // Not held to this build's ranges: a city saved under other balance numbers still loads.
   for (const rate of taxRates) if (!(Number.isFinite(rate) && rate >= 0)) return "its tax rates are not fractions of at least 0";
+  if (!(chargeRates instanceof Float64Array) || chargeRates.length !== CHARGE_ZONES.length) return `its development charges are not ${CHARGE_ZONES.length} numbers in a Float64Array`;
+  for (const rate of chargeRates) if (!(Number.isSafeInteger(rate) && rate >= 0)) return "its development charges are not whole dollars of at least 0";
   return null;
 }

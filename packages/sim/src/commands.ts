@@ -9,6 +9,7 @@ import {
   previewUpgradeRoad,
 } from "./buildings/bulldoze";
 import { moveMoney } from "./economy/budget";
+import { chargePayload, setDevelopmentCharge } from "./economy/charges";
 import { keepBuildings } from "./buildings/upkeep";
 import { LOG_PAGE_SIZE, logLength, recordEntry } from "./log";
 import { buildRoad } from "./roads/build";
@@ -323,6 +324,24 @@ function clearBuildings(state: SimState, command: Command): string | null {
   return null;
 }
 
+/**
+ * Sets one zone's development charge, `payload.zone` one of the five zones
+ * and `payload.rate` whole dollars per square metre of floor space a new
+ * building adds (M4-08, economy/charges.ts). Refused outside the zone's
+ * range in economy.json. Costs nothing and has no undo record, like
+ * `SetSpeed`: the player sets it back with another.
+ */
+const SetDevelopmentCharge: CommandDef = {
+  validate: (_state, command) => {
+    const result = chargePayload(command.payload);
+    return typeof result === "string" ? result : null;
+  },
+  apply: (state, command) => {
+    const result = chargePayload(command.payload);
+    if (typeof result !== "string") setDevelopmentCharge(state, result);
+  },
+};
+
 /** Every command type the sim accepts, by name. */
 export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   NoOp,
@@ -334,6 +353,7 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   Undo,
   ZoneCells,
   BulldozeBuilding,
+  SetDevelopmentCharge,
 });
 
 /** Checks a command against the current state without changing anything. */
