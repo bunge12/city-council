@@ -48,6 +48,7 @@ export function BulldozeTag() {
       data-fixed={String(p.fixed)}
       data-ids={p.ids.join(",")}
       data-cost={String(p.cost)}
+      data-split={String(p.split)}
       data-buildings={String(p.buildings.length)}
       data-residents={String(p.residents)}
       data-undoable={String(p.undoable)}
@@ -74,6 +75,12 @@ export function BulldozeTag() {
       {clears && (
         <div className="clears" id="bulldoze-clears">
           {clears}
+        </div>
+      )}
+      {/* Each part is charged its own plan, and pops the first part moves can land in the next (M4-09). */}
+      {p.ok && p.split && (
+        <div className="split" id="bulldoze-split">
+          Sent in {p.commands.length} parts · the total can change as people move
         </div>
       )}
       {p.ok && !p.undoable && (

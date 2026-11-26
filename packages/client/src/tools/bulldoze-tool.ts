@@ -37,6 +37,7 @@
 
 import {
   BUILDINGS_BALANCE,
+  NO_COMPENSATION,
   NONE,
   buildingInfo,
   isBuilding,
@@ -46,6 +47,8 @@ import {
   type BuildingInfo,
   type BuildingSeen,
   type CommandResult,
+  type Compensation,
+  type FilledIn,
   type PeopleIn,
   type Section,
   type SimState,
@@ -66,6 +69,8 @@ export interface BulldozeWorld {
   terrain: Terrain;
   /** The people living in a building, from the mirror (`buildingPeople`): the copy holds no pop rows (M3-05). */
   people: PeopleIn;
+  /** The jobs filled in a building, from the mirror (`jobsFilled`), which the eminent domain price counts (M4-09). */
+  filled: FilledIn;
 }
 
 /**
@@ -87,8 +92,21 @@ export interface BulldozePreview {
   reason: string | null;
   /** A target in it can never be removed, such as an outside connection's road. */
   fixed: boolean;
-  /** Whole dollars, from the target's plan. Zero when refused. Buildings are free until M4's eminent domain price. */
+  /**
+   * Whole dollars a click is charged, from the target's plan: for roads
+   * their demolition less the refund plus the compensation for the
+   * buildings on them, for buildings their compensation (M4-09). Zero when
+   * refused.
+   */
   cost: number;
+  /** The compensation for the buildings that go, and its parts, as the plan priced it. Issue M4-16 shows the parts. */
+  compensation: Compensation;
+  /**
+   * A drag over more than `bulldozeMaxBuildings` buildings, sent as several
+   * commands: pops the first moves can land in a building of the next, so
+   * the charge can come out different from `cost`.
+   */
+  split: boolean;
   /** Metres of road removed; 0 for buildings. */
   length: number;
   /** The road segments it removes, for the marks. Empty for buildings. */
@@ -133,14 +151,14 @@ export interface BulldozeTargetKind {
   plan(world: BulldozeWorld, ids: readonly number[], seen: readonly unknown[]): BulldozePreview;
 }
 
-const NOTHING = { ids: [] as number[], residents: 0 };
+const NOTHING = { ids: [] as number[], residents: 0, compensation: NO_COMPENSATION };
 
 function roadPlan(world: BulldozeWorld, ids: readonly number[], seen: readonly unknown[]): BulldozePreview {
   const net = world.state.roads;
   const state = asState(world);
   const edit = previewEdit(net, world.terrain, "bulldoze", ids, "street", seen as readonly SeenSegment[]);
   // The buildings on the roads' cells go with them (M2-11), counted by the sim's own planner.
-  const planned = edit.ok ? previewBulldozeRoad(state, edit.command.payload, world.people) : null;
+  const planned = edit.ok ? previewBulldozeRoad(state, edit.command.payload, world.people, world.filled) : null;
   const clears = planned?.ok ? planned.clears : NOTHING;
   return {
     kind: "road",
@@ -148,7 +166,9 @@ function roadPlan(world: BulldozeWorld, ids: readonly number[], seen: readonly u
     ok: edit.ok,
     reason: edit.reason,
     fixed: edit.fixed,
-    cost: edit.cost,
+    cost: planned?.ok ? planned.price : edit.cost,
+    compensation: clears.compensation,
+    split: false,
     length: edit.length,
     segments: [...ids],
     buildings: clears.ids,
@@ -168,17 +188,21 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
   const commands: BulldozeCommand[] = [];
   const cleared: number[] = [];
   let residents = 0;
+  let cost = 0;
+  const compensation: Compensation = { ...NO_COMPENSATION };
   let reason: string | null = null;
   for (let from = 0; from < buildings.length; from += most) {
     const payload = { buildings: buildings.slice(from, from + most) };
     commands.push({ type: "BulldozeBuilding", payload });
-    const result = planBulldozeBuildings(state, payload, world.people);
+    const result = planBulldozeBuildings(state, payload, world.people, world.filled);
     if (!result.ok) {
       reason ??= result.reason;
       continue;
     }
     for (const id of result.ids) cleared.push(id);
     residents += result.residents;
+    cost += result.compensation.total;
+    for (const key of Object.keys(compensation) as (keyof Compensation)[]) compensation[key] += result.compensation[key];
   }
   const ok = reason === null;
   return {
@@ -187,8 +211,10 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
     ok,
     reason,
     fixed: false,
-    // The plan has no price: M2 has no money. M4 puts the eminent domain price here, from the plan.
-    cost: 0,
+    // Each command's plan, added up. Each part is charged what its own plan says when it applies.
+    cost: ok ? cost : 0,
+    compensation: ok ? compensation : { ...NO_COMPENSATION },
+    split: commands.length > 1,
     length: 0,
     segments: [],
     buildings: ok ? cleared.sort((p, q) => p - q) : [],

@@ -3,6 +3,7 @@
 // standing in for the UI store.
 import { describe, expect, it } from "vitest";
 import {
+  NO_COMPENSATION,
   ROAD_BUILD,
   createBareState,
   generateTerrain,
@@ -160,7 +161,7 @@ describe("the grid tool", () => {
               terrain,
               clears: () => {
                 counts++;
-                return { ids: [7], residents: 3 };
+                return { ids: [7], residents: 3, compensation: { ...NO_COMPENSATION } };
               },
             }
           : null,
@@ -176,7 +177,7 @@ describe("the grid tool", () => {
     expect(tool.preview()?.clears).toBeNull();
     expect(counts).toBe(0);
     tool.click();
-    expect(tool.preview()?.clears).toEqual({ ids: [7], residents: 3 });
+    expect(tool.preview()?.clears).toEqual({ ids: [7], residents: 3, compensation: NO_COMPENSATION });
     expect(counts).toBe(1);
 
     const delta = (ids: number[]) => ({ kind: "delta" as const, steps: 1, roadNodes: [], roadSegs: [], buildingIds: ids });

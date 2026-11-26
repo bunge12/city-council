@@ -171,7 +171,7 @@ test("a road through a row of houses marks and counts them before the click, and
   await attach(page, testInfo, "after the click the houses are gone");
 });
 
-test("the grid tool counts the buildings its rectangle would clear", async ({ page }, testInfo) => {
+test("the grid tool refuses a rectangle whose streets would clear buildings, and builds nothing", async ({ page }, testInfo) => {
   const { state } = houseCity();
   await openCity(page, state, { name: "Houses" });
   await look(page, 4300, 4590, 300);
@@ -197,17 +197,23 @@ test("the grid tool counts the buildings its rectangle would clear", async ({ pa
   await expect(page.locator("#grid-summary")).toHaveAttribute("data-clears", "");
   await page.mouse.click(c.x, c.y);
   await frames(page);
+  // A grid never demolishes (M4-09): the summary says how many it would take, and Confirm is off.
   const summary = page.locator("#grid-summary");
-  await expect(summary).toHaveAttribute("data-ok", "true");
+  await expect(summary).toHaveAttribute("data-ok", "false");
   const count = Number(await summary.getAttribute("data-clears"));
   expect(count).toBeGreaterThan(0);
-  await expect(page.locator("#grid-clears")).toContainText(`Clears ${count} building`);
+  await expect(page.locator("#grid-reason")).toHaveText(`A grid can't demolish buildings, and this one would take ${count} buildings. Move it, or bulldoze them first`);
+  await expect(page.locator("#grid-confirm")).toBeDisabled();
   await page.mouse.move(640, 20);
   await frames(page, 4);
-  await attach(page, testInfo, "the grid preview counts the buildings it would clear");
+  await attach(page, testInfo, "the grid preview refuses a rectangle over houses");
 
-  await page.locator("#grid-confirm").click();
-  await expect.poll(async () => (await standingSince(page, beforeTick)).length, { timeout: 30_000 }).toBe(before.length - count);
+  // Enter sends nothing, and every house stands.
+  const log = await page.evaluate(() => window.cityCouncil.mirror.state?.log.length ?? 0);
+  await page.keyboard.press("Enter");
+  await frames(page, 6);
+  expect(await page.evaluate(() => window.cityCouncil.mirror.state?.log.length ?? 0)).toBe(log);
+  expect((await standingSince(page, beforeTick)).length).toBe(before.length);
 });
 
 test("hovering a building with no tool on reads it out", async ({ page }, testInfo) => {

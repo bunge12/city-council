@@ -15,6 +15,7 @@ import {
   buildingInfo,
   buildingsInChunk,
   createState,
+  buildingPeople,
   generateTerrain,
   heightAt,
   isBuilding,
@@ -75,7 +76,7 @@ function setup(state: SimState) {
     set: (patch) => {
       ui = { ...ui, ...patch };
     },
-    world: () => (mirror.state ? { state: mirror.state, terrain, people: (id: number) => mirror.buildingPeople(id) } : null),
+    world: () => (mirror.state ? { state: mirror.state, terrain, people: (id: number) => mirror.buildingPeople(id), filled: (id: number) => mirror.jobsFilled(id) } : null),
     send: (type, payload) => {
       sent.push({ type, payload });
       return mirror.sendCommandSettled(type, payload);
@@ -101,7 +102,13 @@ function setup(state: SimState) {
   };
   const join = (playerId: string) =>
     new SimMirror({ send: (m, t) => client.send(m, t), onMessage: (h) => client.onMessage((m) => h(structuredClone(m))) }, playerId);
-  return { mirror, tool, apply, tick, settle, sent, copy, join, ui: () => ui, setUi: (p: Partial<BulldozeToolState>) => (ui = { ...ui, ...p }) };
+  const sim = (host as unknown as { state: SimState }).state;
+  return { mirror, tool, apply, tick, settle, sent, copy, join, sim, ui: () => ui, setUi: (p: Partial<BulldozeToolState>) => (ui = { ...ui, ...p }) };
+}
+
+/** The people living in building `id`, from the sim's own pops. */
+function popsIn(state: SimState, id: number): number {
+  return buildingPeople(state, id);
 }
 
 function liveBuildings(state: SimState): number[] {
@@ -187,8 +194,11 @@ describe("BulldozeToolController", () => {
     const house = housesWestToEast(copy())[2] ?? NONE;
     const before = liveBuildings(copy());
     const preview = tool.preview({ kind: "building", id: house });
-    expect(preview).toMatchObject({ kind: "building", ok: true, undoable: false, cost: 0, buildings: [house], segments: [] });
+    expect(preview).toMatchObject({ kind: "building", ok: true, undoable: false, split: false, buildings: [house], segments: [] });
     expect(preview?.building?.id).toBe(house);
+    // The eminent domain price (M4-09), which the click is charged to the dollar.
+    expect(preview?.cost).toBeGreaterThan(0);
+    expect(preview?.cost).toBe(preview?.compensation.total);
     const log = copy().log.length;
     const undo = structuredClone(copy().undo);
     const want = seen(copy(), house);
@@ -198,8 +208,35 @@ describe("BulldozeToolController", () => {
     expect(sent).toEqual([{ type: "BulldozeBuilding", payload: { buildings: [want] } }]);
     expect(liveBuildings(copy())).toEqual(before.filter((id) => id !== house));
     expect(copy().log.length).toBe(log + 1);
+    // What the command took from the treasury, as the log keeps it.
+    expect(copy().logSpent.at(-1)).toBe(preview?.cost);
     expect(copy().undo).toEqual(undo);
     expect(ui().bulldozePending).toEqual([]);
+  });
+
+  it("prices an occupied house as the sim charges it, and the copy keeps the sim's expropriation records (M4-09)", async () => {
+    const { tool, apply, copy, sim } = setup(houseCity());
+    tool.toggle();
+    const houses = housesWestToEast(copy());
+    const lived = houses.find((id) => popsIn(sim, id) > 0) ?? NONE;
+    const empty = houses.find((id) => popsIn(sim, id) === 0) ?? NONE;
+    expect(lived).not.toBe(NONE);
+    expect(empty).not.toBe(NONE);
+    const occupied = tool.preview({ kind: "building", id: lived });
+    const vacant = tool.preview({ kind: "building", id: empty });
+    // Nobody lives in it: demolition only, far below a home with people in it.
+    expect(vacant?.compensation).toMatchObject({ occupied: 0, empty: 1, value: 0 });
+    expect(occupied?.compensation).toMatchObject({ occupied: 1, empty: 0, residents: 2 });
+    expect(occupied?.cost).toBeGreaterThan(10 * (vacant?.cost ?? 0));
+    tool.click({ kind: "building", id: lived });
+    await apply();
+    expect(copy().logSpent.at(-1)).toBe(occupied?.cost);
+    expect(sim.expropriations).toHaveLength(1);
+    expect(copy().expropriations).toEqual(sim.expropriations);
+    tool.click({ kind: "building", id: empty });
+    await apply();
+    expect(copy().logSpent.at(-1)).toBe(vacant?.cost);
+    expect(copy().expropriations).toEqual(sim.expropriations);
   });
 
   it("collects the buildings a drag passes over and leaves the road, in one command", async () => {

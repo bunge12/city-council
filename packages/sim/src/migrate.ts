@@ -168,6 +168,19 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // mixed, after industrial's, at 0 in both months; the five rates at their
   // defaults. Nothing was charged before it.
   32: (old) => ({ ...old, version: 33, budget: budgetWithCharges(old["budget"]) }),
+  // Version 34 keeps the expropriations of the last game year, marks each
+  // building the city has paid to clear, and counts on each undo record the
+  // buildings its command took (M4-09). Clearing a building cost nothing
+  // before it and left no record, so an older city has no records, no
+  // building paid for, and undo records that took none: they undo as they
+  // did.
+  33: (old) => ({
+    ...old,
+    version: 34,
+    undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, took: 0 })),
+    buildings: buildingsWithPaid(old["buildings"]),
+    expropriations: [],
+  }),
 };
 
 /** Version 31 demand bars with each bar's waiting part, at 0, in `DEMAND_PARTS` order. */
@@ -269,6 +282,18 @@ function stripTiers(old: Record<string, unknown>): Record<string, unknown> {
     ops: record.ops.map((op) => (op.row ? { ...op, row: { ...op.row, tierL: NO_TIER, tierR: NO_TIER } } : op)),
   }));
   return { ...old, roads, undo };
+}
+
+/** A version 33 set of buildings with `paid`, none paid for, after `statusSince` as a new state has it. Left as it is when it has one. */
+function buildingsWithPaid(value: unknown): Record<string, unknown> {
+  const b = value as Record<string, unknown> & { flags: Uint8Array };
+  if (b["paid"] !== undefined) return b;
+  const out: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(b)) {
+    out[key] = field;
+    if (key === "statusSince") out["paid"] = new Uint8Array(b.flags.length);
+  }
+  return out;
 }
 
 /** A version 23 set of buildings with `statusSince`, each building's `builtAt`, after `builtAt` as a new state has it. */

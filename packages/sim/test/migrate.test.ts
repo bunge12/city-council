@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withoutExpropriations } from "./before-expropriations";
 import { BUILDING_TYPES, LINE, SNAPSHOT_VERSION, buildingJobs, cellAt, findLot, jobsFilled, popsAtHome, TIME_BALANCE, connectionEnd, createBareState, createState, hashState, migrateState, popCount, step, submit, travelTimesReady, type SimState } from "../src/index";
 import { checkConnections, chooseConnectionSites } from "../src/roads/connections";
 import { LEVEL_BRIDGE, NO_TIER, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
@@ -38,6 +39,15 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
+  // Before version 34 nothing kept the expropriations (M4-09), and its
+  // migration gives an empty list, no building paid for and undo records that
+  // took none. `state` gets the same in place.
+  if (version < 34) {
+    gone.push("expropriations");
+    state.expropriations = [];
+    state.buildings.paid.fill(0);
+    for (const record of state.undo) record.took = 0;
+  }
   // Before version 33 no city had development charges (M4-08), and its
   // migration gives the defaults and an empty mixed charge line. `state`
   // gets the same in place.
@@ -70,6 +80,8 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   // withoutWaiting takes out version 33's fields as well.
   if (version < 32) kept = withoutWaiting(kept);
   else if (version < 33) kept = withoutCharges(kept);
+  // Before version 34 no building was marked paid for, and no undo record counted what it took (M4-09).
+  else if (version < 34) kept = withoutExpropriations(kept);
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
       const { spent, ...rest } = record;
@@ -239,7 +251,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(33);
+    expect(SNAPSHOT_VERSION).toBe(34);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -263,6 +275,7 @@ describe("migrateState", () => {
       travelLast: null,
       budget: emptyBudget(ECONOMY.startingGrant),
       logSpent: [],
+      expropriations: [],
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -291,6 +304,7 @@ describe("migrateState", () => {
       travelLast: null,
       budget: emptyBudget(ECONOMY.startingGrant),
       logSpent: [],
+      expropriations: [],
     });
     expect(() => hashState(state)).not.toThrow();
   });
@@ -680,7 +694,7 @@ describe("migrateState", () => {
     const migrated = migrateState(v16);
     const { growth, ...kept } = v16;
     void growth;
-    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null, budget: emptyBudget(ECONOMY.startingGrant), logSpent: [] });
+    expect(migrated).toEqual({ ...kept, version: SNAPSHOT_VERSION, roads: state.roads, buildings: state.buildings, pops: state.pops, centre: { x: 0, z: 0, weight: 0, due: 1234 }, stats: createStats(), travelReadyAt: 0, demand: createDemand(), redevelopedToday: 0, travelLast: null, budget: emptyBudget(ECONOMY.startingGrant), logSpent: [], expropriations: [] });
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
   });
 
@@ -865,6 +879,20 @@ describe("migrateState", () => {
     expect(Object.keys(migrated.budget)).toEqual(Object.keys(state.budget));
     expect(migrated).toEqual(state);
     expect(hashState(migrated)).toBe(hashState(state));
+  });
+
+  it("upgrades a version 33 city by giving it an empty list of expropriations, no building paid for and undo records that took none, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    state.expropriations = [{ tick: 0, x: 4300, z: 4620, people: 4, jobs: 0, playerId: "p1" }];
+    const v33 = older(structuredClone(state), 33);
+    expect("expropriations" in v33).toBe(false);
+    const migrated = migrateState(v33);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(migrated.expropriations).toEqual([]);
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(migrated).toEqual({ ...state, expropriations: [] });
   });
 
   it("leaves a current state as it is", () => {

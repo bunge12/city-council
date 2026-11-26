@@ -3,7 +3,9 @@
 // snapshot tests, which check that a version 32 save loads to the same city
 // with only those added. Every older `without...` helper takes them out too,
 // through `withoutWaiting`, since a state from before any earlier version
-// is from before this one.
+// is from before this one. It takes out what version 34 added too.
+
+import { withoutExpropriations } from "./before-expropriations";
 
 type Loose = Record<string, unknown>;
 
@@ -18,7 +20,7 @@ function withoutMixedLine(ledger: unknown): unknown {
 
 /** `state` with the fields version 33 added taken out. Leaves a state that has none as it is. */
 export function withoutCharges<T extends object>(state: T): T {
-  const out: Loose = { ...(state as Loose) };
+  const out: Loose = { ...(withoutExpropriations(state) as Loose) };
   const budget = out["budget"];
   if (budget && typeof budget === "object" && "chargeRates" in budget) {
     const rest: Loose = { ...(budget as Loose) };

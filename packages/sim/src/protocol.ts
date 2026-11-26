@@ -8,6 +8,7 @@ import type { Command, CommandResult, DroppedCommand } from "./commands";
 import type { CentreState } from "./landvalue/centre";
 import type { DemandState } from "./demand/demand";
 import type { BudgetState } from "./economy/budget";
+import type { ExpropriationDelta } from "./economy/compensation";
 import type { LogEntry } from "./log";
 import type { PopDelta } from "./pops/delta";
 import type { StatsDelta } from "./stats/stats";
@@ -17,7 +18,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 27;
+export const PROTOCOL_VERSION = 28;
 
 // ---- Client to sim ----
 
@@ -177,6 +178,12 @@ export interface DeltaMessage {
    * Left out otherwise.
    */
   budget?: BudgetState;
+  /**
+   * How the expropriation list changed since the last delta, when it did:
+   * the records dropped from its head and the ones added (M4-09, protocol
+   * version 28). Left out otherwise.
+   */
+  expropriations?: ExpropriationDelta;
   /**
    * The commands still queued, the ones waiting for the cells to settle,
    * when the queue changed since the last delta. Left out otherwise: a
