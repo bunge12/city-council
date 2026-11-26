@@ -21,8 +21,13 @@ permissions:
 # after a newer one. The walkthrough is not in the group (issue #233): it
 # took 17 to 30 minutes, and held the next push's deploy for all of them.
 #
-# A failure in any job opens an issue (the `report` job below). A newer push
-# cancelling a walkthrough is not a failure.
+# A failure in any job opens an issue (the `report` job below). A walkthrough
+# that a newer push's deploy replaces stops itself and ends green with a
+# "Walkthrough replaced" notice. Nothing in this workflow cancels a job that
+# has started: a cancelled job leaves the run "cancelled", which GitHub shows
+# as a failed check on the commit. The one run that can still end cancelled is
+# an older build or deploy that GitHub drops while it waits in the `pages`
+# group, which takes three pushes within about a minute of each other.
 
 jobs:
   build:
@@ -78,16 +83,19 @@ jobs:
   # minutes. The M0 walkthrough holds the cold load to its 5 s budget here
   # (issue #154).
   #
-  # A newer push cancels the walkthrough in flight. The public address then
-  # serves the newer build or soon will, so the older run would not test the
-  # commit it names. Each walkthrough has its own group, so the three of one
-  # run do not cancel each other.
+  # A newer push's deploy stops the walkthrough in flight. The public address
+  # then serves the newer build or soon will, so the older run would not test
+  # the commit it names. scripts/walkthrough-public.mjs watches for the newer
+  # deployment, stops Playwright and ends the job green with a notice; the
+  # newer run's walkthrough covers this commit's changes too. There is no
+  # concurrency group here, because a cancelled job marks the commit as failed.
   walkthrough:
     needs: [build, deploy]
     runs-on: ubuntu-latest
-    concurrency:
-      group: deploy-walkthrough-${{ matrix.id }}
-      cancel-in-progress: true
+    # deployments: read lets the script ask which commit is deployed.
+    permissions:
+      contents: read
+      deployments: read
     # The Playwright image, as in ci.yml's e2e job: no packages from apt.
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.build.outputs.playwright }}-noble
@@ -119,9 +127,10 @@ jobs:
           PAGE_URL: ${{ needs.deploy.outputs.page_url }}
           GREP: ${{ matrix.grep }}
           LIMIT: ${{ matrix.limit }}
+          GITHUB_TOKEN: ${{ github.token }}
         # One worker: the WebGPU and WebGL 2 runs of one walkthrough side by
         # side take the CPU from each other, and fail on steps that pass alone.
-        run: BASE_URL="${PAGE_URL%/}/" xvfb-run -a pnpm e2e --project walkthrough --workers=1 -g "$GREP" --global-timeout=$((LIMIT * 60000))
+        run: BASE_URL="${PAGE_URL%/}/" node scripts/walkthrough-public.mjs xvfb-run -a pnpm e2e --project walkthrough --workers=1 -g "$GREP" --global-timeout=$((LIMIT * 60000))
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -151,9 +160,10 @@ jobs:
           DEPLOY: ${{ needs.deploy.result }}
           WALKTHROUGH: ${{ needs.walkthrough.result }}
         # A newer push deploys while this run's walkthrough is still going,
-        # and cancels it only once its own deploy is done. A walkthrough that
-        # failed in that gap may have been testing the newer build, so the
-        # issue says when main had moved on.
+        # and the walkthrough stops itself within 20 seconds of that deploy
+        # starting. One that failed in a gap the script did not see may have
+        # been testing the newer build, so the issue says when main had moved
+        # on.
         run: |
           note="build: $BUILD, deploy: $DEPLOY, walkthrough: $WALKTHROUGH. The walkthrough holds the M0 cold load to its 5 s budget, which pull request CI only prints (issue #154). This blocks no merge."
           head=$(git ls-remote origin refs/heads/main | cut -f1)
