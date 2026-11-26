@@ -65,6 +65,8 @@ const ZONES = ZONING_BALANCE.zones.length;
 
 const { state, counts, grids } = loadScaleCity();
 prepareDerived(state);
+// No development charges (M4-08), so the quotas the cases time are the bars' whole wants, as dayQuotas reads them.
+state.budget.chargeRates.fill(0);
 const net = state.roads;
 const terrain = terrainOf(state.seed);
 const LINE = 96;
@@ -136,11 +138,13 @@ function zoneEverything(front: (zone: number, density: number) => [number, numbe
   forgetCandidates(state);
 }
 
-// The bars the grower reads: the residential bar barely above zero, so
-// the day's quotas are one house, for the cases that time one building;
-// every bar at 100 for the busiest tick demand can ask for.
-const ONE_HOUSE: HeldBars = { residential: 0.01, commercial: -1, office: -1, industrial: -1 };
-const ONE_SHOP: HeldBars = { residential: -1, commercial: 0.01, office: -1, industrial: -1 };
+// The bars the grower reads: the residential bar at the least that asks
+// for one house a day for certain, since M4-08 builds the whole part of a
+// zone's want and only a chance of the rest, for the cases that time one
+// building; every bar at 100 for the busiest tick demand can ask for.
+const oneADay = (zone: string): number => 100 / (DEMAND_BALANCE.buildingsPerDayAtFullDemand[zone] ?? 1);
+const ONE_HOUSE: HeldBars = { residential: oneADay("residential"), commercial: -1, office: -1, industrial: -1 };
+const ONE_SHOP: HeldBars = { residential: -1, commercial: oneADay("commercial"), office: -1, industrial: -1 };
 const EVERY_BAR_AT_100: HeldBars = { residential: 100, commercial: 100, office: 100, industrial: 100 };
 let bars = ONE_HOUSE;
 /** A tick of day 1 on which the grower adds the most buildings the bars give a tick, every zone together. */
