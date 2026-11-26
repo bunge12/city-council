@@ -489,6 +489,11 @@ for (const variant of [
 
     await test.step("5. the preview shows the length and the cost before the click; nothing is charged", async () => {
       const treasury = () => page.evaluate(() => window.cityCouncil.mirror.state?.budget.treasury);
+      // Paused, so no day starts during the step: road upkeep (M4-04) is charged on each
+      // day's first tick, and a day is 10 s at 1x, so a running city would move the
+      // treasury here or not depending on how fast the runner is (issue #410).
+      await setSpeed(page, "Pause");
+      const commands = (await log(page)).length;
       const before = await treasury();
       expect(before).toBeGreaterThan(0);
       await look(page, 4372, 4800, 330);
@@ -504,10 +509,11 @@ for (const variant of [
       await shot(page, info, dir, "5-length-and-cost");
       await page.keyboard.press("Escape");
       await expect(readout).toHaveCount(0);
-      expect((await log(page)).length).toBe(5);
+      expect((await log(page)).length).toBe(commands);
       // The preview moves no money: the treasury (M4-02) is what it was before the click.
       expect(await treasury()).toBe(before);
       await noTool(page);
+      await setSpeed(page, "1x");
     });
 
     await test.step("6. upgrade a street to an avenue in place, bulldoze a segment, and undo both one step at a time", async () => {
