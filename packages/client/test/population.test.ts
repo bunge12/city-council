@@ -382,6 +382,13 @@ describe("the top bar's tooltips", () => {
     expect(formatDemandTitle("office", 0, { educatedWorkers: 0, serviceBuyers: 0, jobsOpen: 0 }, 3644)).toBe("Office demand 0. Nothing pushes it either way.");
   });
 
+  it("names each bar's tax part after its rate, and shows a high rate pulling the bar down (M4-07)", () => {
+    expect(formatDemandTitle("residential", 12, { openJobs: 30, unemployment: -2, tax: -16 })).toBe("Residential demand +12. Open jobs +30, Unemployment -2, Residential tax rate -16");
+    expect(formatParts("commercial", { spendingPower: 20, tax: 7 })).toBe("Spending power +20, Commercial tax rate +7");
+    expect(PART_WORDS.office["tax"]).toBe("Office tax rate");
+    expect(PART_WORDS.industrial["tax"]).toBe("Industrial tax rate");
+  });
+
   it("has plain words for every part the sim sends", () => {
     for (const [bar, names] of Object.entries(DEMAND_PARTS)) {
       for (const name of names) expect(PART_WORDS[bar as keyof typeof PART_WORDS][name], `${bar}.${name}`).toBeTruthy();

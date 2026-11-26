@@ -1,6 +1,7 @@
 import { bulldozeBuildings, planBulldozeBuildings } from "./buildings/bulldoze";
 import { moveMoney } from "./economy/budget";
 import { chargePayload, setDevelopmentCharge } from "./economy/charges";
+import { setTaxRate, taxRatePayload } from "./economy/tax-rates";
 import { spendingRefusal } from "./economy/spend";
 import { keepBuildings } from "./buildings/upkeep";
 import { LOG_PAGE_SIZE, logLength, recordEntry } from "./log";
@@ -322,6 +323,24 @@ const SetDevelopmentCharge: CommandDef = {
   },
 };
 
+/**
+ * Sets one zone's tax rate, `payload.zone` one of the four sliders and
+ * `payload.rate` a fraction, 0.01 for one percent (M4-07,
+ * economy/tax-rates.ts). Refused outside the slider's range in
+ * economy.json. Costs nothing and has no undo record, like
+ * `SetDevelopmentCharge`: the player sets it back with another.
+ */
+const SetTaxRate: CommandDef = {
+  validate: (_state, command) => {
+    const result = taxRatePayload(command.payload);
+    return typeof result === "string" ? result : null;
+  },
+  apply: (state, command) => {
+    const result = taxRatePayload(command.payload);
+    if (typeof result !== "string") setTaxRate(state, result);
+  },
+};
+
 /** Every command type the sim accepts, by name. */
 export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   NoOp,
@@ -334,6 +353,7 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   ZoneCells,
   BulldozeBuilding,
   SetDevelopmentCharge,
+  SetTaxRate,
 });
 
 /** Checks a command against the current state without changing anything. */

@@ -8,6 +8,7 @@ import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "../src/demand/demand";
 import { WAITING_PART, demandPull } from "../src/demand/pull";
 import { withoutWaiting } from "./before-waiting";
 import { withoutCharges } from "./before-charges";
+import { withoutTax } from "./before-tax";
 import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
 import { CHARGE_ZONES, ECONOMY } from "../src/economy/balance";
 import { dailyShare, emptyBudget } from "../src/economy/budget";
@@ -38,6 +39,9 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
+  // Before version 34 no bar had its tax part (M4-07), and its migration
+  // gives each as 0. `state` gets the same in place.
+  if (version < 34) withNoTax(state);
   // Before version 33 no city had development charges (M4-08), and its
   // migration gives the defaults and an empty mixed charge line. `state`
   // gets the same in place.
@@ -70,6 +74,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   // withoutWaiting takes out version 33's fields as well.
   if (version < 32) kept = withoutWaiting(kept);
   else if (version < 33) kept = withoutCharges(kept);
+  else if (version < 34) kept = withoutTax(kept);
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
       const { spent, ...rest } = record;
@@ -157,6 +162,20 @@ function withOldMoney(state: SimState): SimState {
  * saved before it: each bar's waiting part at 0, the bar reading what it
  * pulled (#420). Returns it.
  */
+/**
+ * Gives `state`, in place, the tax parts the version 34 migration gives a
+ * city saved before it: each at 0, the bar reading what it did. Takes the
+ * part's value off the bar so the bar is still the sum of its parts.
+ */
+function withNoTax(state: SimState): SimState {
+  for (const bar of DEMAND_BARS) {
+    const b = state.demand[bar];
+    b.value -= b.parts["tax"] ?? 0;
+    b.parts["tax"] = 0;
+  }
+  return state;
+}
+
 /** Gives `state`, in place, the development charges the version 33 migration gives a city saved before it, and returns it. */
 function withNoCharges(state: SimState): SimState {
   if (state.budget.month[LINE.chargeMixed] !== 0 || state.budget.lastMonth[LINE.chargeMixed] !== 0) throw new Error("a city from before version 33 paid no mixed charge");
@@ -239,7 +258,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(33);
+    expect(SNAPSHOT_VERSION).toBe(34);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -863,6 +882,29 @@ describe("migrateState", () => {
     expect(Array.from(migrated.budget.chargeRates)).toEqual(CHARGE_ZONES.map((zone) => ECONOMY.developmentCharges[zone].default));
     expect(Object.keys(migrated)).toEqual(Object.keys(state));
     expect(Object.keys(migrated.budget)).toEqual(Object.keys(state.budget));
+    expect(migrated).toEqual(state);
+    expect(hashState(migrated)).toBe(hashState(state));
+  });
+
+  it("upgrades a version 33 city by giving each demand bar its tax part at 0, in its place, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    // A few days in, so the bars have parts other than 0.
+    while (state.tick < 6 * TIME_BALANCE.ticksPerDay) step(state);
+    expect(state.demand.residential.parts["outsidePull"]).toBeGreaterThan(0);
+    const v33 = older(structuredClone(state), 33);
+    const demand = v33["demand"] as Record<string, { parts: Record<string, number> }>;
+    for (const bar of DEMAND_BARS) expect("tax" in (demand[bar]?.parts ?? {})).toBe(false);
+    const migrated = migrateState(v33);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    for (const bar of DEMAND_BARS) {
+      expect(migrated.demand[bar].parts["tax"]).toBe(0);
+      expect(Object.keys(migrated.demand[bar].parts)).toEqual([...DEMAND_PARTS[bar]]);
+    }
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
     expect(migrated).toEqual(state);
     expect(hashState(migrated)).toBe(hashState(state));
   });

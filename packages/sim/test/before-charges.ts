@@ -5,6 +5,8 @@
 // through `withoutWaiting`, since a state from before any earlier version
 // is from before this one.
 
+import { withoutTax } from "./before-tax";
+
 type Loose = Record<string, unknown>;
 
 /** `ledger` without the mixed charge line, which must hold 0. */
@@ -16,9 +18,9 @@ function withoutMixedLine(ledger: unknown): unknown {
   return Float64Array.from([...ledger.subarray(0, at), ...ledger.subarray(at + 1)]);
 }
 
-/** `state` with the fields version 33 added taken out. Leaves a state that has none as it is. */
+/** `state` with the fields version 33 added taken out, and what version 34 added. Leaves a state that has none as it is. */
 export function withoutCharges<T extends object>(state: T): T {
-  const out: Loose = { ...(state as Loose) };
+  const out: Loose = { ...(withoutTax(state) as Loose) };
   const budget = out["budget"];
   if (budget && typeof budget === "object" && "chargeRates" in budget) {
     const rest: Loose = { ...(budget as Loose) };

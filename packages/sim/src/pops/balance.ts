@@ -5,7 +5,7 @@
 // in M3-11 and displacement reads `displacedPerTick` in M3-12.
 
 import balance from "../../balance/pops.json" with { type: "json" };
-import { EDUCATION_LEVELS, type EducationShares } from "../buildings/balance";
+import { EDUCATION_LEVELS, type EducationLevel, type EducationShares } from "../buildings/balance";
 import { isRecord, isShare, numberProblem, numberProblems, shareProblems, unknownKeys } from "../balance-fields";
 import { ZONING_BALANCE } from "../zoning/balance";
 
@@ -40,6 +40,8 @@ export interface PopsBalance {
     leaveBelow: number;
     /** Game days in a row below `leaveBelow` before a pop moves out, from 1 to `DAYS_LOW_LIMIT`. */
     leaveAfterDays: number;
+    /** By wealth: the points a pop's target loses with the residential tax rate at the top of its range, none at the default (M4-07). */
+    taxByWealth: Record<EducationLevel, number>;
   };
   /** Yearly rates, applied a 365th a game day. */
   turnover: {
@@ -132,7 +134,9 @@ export function checkPopsBalance(data: unknown): string[] {
       }
       if (!("target" in sat)) errors.push("satisfaction.target is missing");
       else errors.push(...numberProblems(sat["target"], { noWorkers: score, fittingJob: score, otherJob: score, noJob: score }, "satisfaction.target"));
-      errors.push(...unknownKeys(sat, [...Object.keys(rules), "target"], "satisfaction"));
+      if (!("taxByWealth" in sat)) errors.push("satisfaction.taxByWealth is missing");
+      else errors.push(...numberProblems(sat["taxByWealth"], Object.fromEntries(EDUCATION_LEVELS.map((level) => [level, { min: 0, max: 100 }])), "satisfaction.taxByWealth"));
+      errors.push(...unknownKeys(sat, [...Object.keys(rules), "target", "taxByWealth"], "satisfaction"));
     }
   }
 

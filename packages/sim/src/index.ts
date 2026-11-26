@@ -133,7 +133,7 @@ export { ARRIVALS, ARRIVALS_SYSTEM, dayArrivals, drawProfile, drawSize } from ".
 export { DISPLACED, DISPLACED_SYSTEM, placeDisplaced } from "./pops/displaced";
 export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homeUnfilled, homesAndEmptyRoom, homesWithRoom, leastNewcomers, newcomerRoomLeft, reachableRoom, reachableRoomWith, whyNoNewcomers } from "./pops/room";
 export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/matching";
-export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
+export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, jobTarget, satisfactionTarget, targetAfterTax, taxLosses, stepScore, updateSatisfaction } from "./pops/satisfaction";
 export { TURNOVER, TURNOVER_SYSTEM, dayChances, turnOver, turnoverEvent } from "./pops/turnover";
 export type { DayChances, TurnoverEvent } from "./pops/turnover";
 export { countZoneJobs, countZoneJobsWith, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";
@@ -182,6 +182,7 @@ export {
   payDevelopmentCharge,
   type SetDevelopmentChargePayload,
 } from "./economy/charges";
+export { setTaxRate, taxPressure, taxPressures, taxRateIndex, taxRatePayload, type SetTaxRatePayload } from "./economy/tax-rates";
 export { floorSpaceOf, propertyValue, propertyValueOf, propertyValues, type FloorSpace } from "./economy/value";
 export {
   BUDGET_SYSTEM,
