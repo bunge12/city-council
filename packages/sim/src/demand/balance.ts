@@ -20,10 +20,11 @@ import { isRecord, numberProblem, numberProblems, unknownKeys, type NumberRule }
 export interface DemandBalance {
   /** How far each bar moves toward its new value a game day, from 0 to 1. */
   dailyShare: number;
-  residential: { openJobs: number; unemployment: number; satisfaction: number };
-  commercial: { spendingPower: number; availableWorkers: number; shopSurplus: number };
-  office: { educatedWorkers: number; serviceBuyers: number };
-  industrial: { unemployedWorkers: number; goodsNeeded: number; openOfficeJobs: number };
+  /** Each bar's `tax` is the bar points its zone's tax rate is worth at the top of its range, 0 at the default rate (M4-07). */
+  residential: { openJobs: number; unemployment: number; satisfaction: number; tax: number };
+  commercial: { spendingPower: number; availableWorkers: number; shopSurplus: number; tax: number };
+  office: { educatedWorkers: number; serviceBuyers: number; tax: number };
+  industrial: { unemployedWorkers: number; goodsNeeded: number; openOfficeJobs: number; tax: number };
   /** What one resident at each wealth level counts for in spending power. Weights of 0 or more, not shares: they need not add to 1. */
   spendingByWealth: Record<EducationLevel, number>;
   /** Shop jobs one unit of spending power keeps busy. */
@@ -74,10 +75,10 @@ const LOWERS: NumberRule = { min: -1000, max: 0 };
 
 /** Each bar's inputs, and whether each raises the bar or lowers it (PRD, "Four demand bars"). */
 const BARS: Readonly<Record<string, Readonly<Record<string, NumberRule>>>> = {
-  residential: { openJobs: RAISES, unemployment: LOWERS, satisfaction: RAISES },
-  commercial: { spendingPower: RAISES, availableWorkers: RAISES, shopSurplus: LOWERS },
-  office: { educatedWorkers: RAISES, serviceBuyers: RAISES },
-  industrial: { unemployedWorkers: RAISES, goodsNeeded: RAISES, openOfficeJobs: LOWERS },
+  residential: { openJobs: RAISES, unemployment: LOWERS, satisfaction: RAISES, tax: LOWERS },
+  commercial: { spendingPower: RAISES, availableWorkers: RAISES, shopSurplus: LOWERS, tax: LOWERS },
+  office: { educatedWorkers: RAISES, serviceBuyers: RAISES, tax: LOWERS },
+  industrial: { unemployedWorkers: RAISES, goodsNeeded: RAISES, openOfficeJobs: LOWERS, tax: LOWERS },
 };
 
 const TOP: Readonly<Record<string, NumberRule>> = {

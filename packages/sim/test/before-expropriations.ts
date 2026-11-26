@@ -6,11 +6,13 @@
 // takes them out too, through `withoutCharges`, since a state from before
 // any earlier version is from before this one.
 
+import { withoutTax } from "./before-tax";
+
 type Loose = Record<string, unknown>;
 
-/** `state` with the fields version 34 added taken out. Leaves a state that has none as it is. */
+/** `state` with the fields version 34 added taken out, and what version 35 added. Leaves a state that has none as it is. */
 export function withoutExpropriations<T extends object>(state: T): T {
-  const out: Loose = { ...(state as Loose) };
+  const out: Loose = { ...(withoutTax(state) as Loose) };
   delete out["expropriations"];
   if (out["buildings"] && typeof out["buildings"] === "object") {
     const buildings: Loose = { ...(out["buildings"] as Loose) };
