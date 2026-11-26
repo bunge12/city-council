@@ -503,7 +503,9 @@ export function lotOptions(state: SimState, ref: CellRef, explain = true, free?:
   const gap2 = ZONING_BALANCE.throughLotMaxGap * ZONING_BALANCE.throughLotMaxGap;
   const blocks = blockIndexOf(state.roads);
   const blockOf = (col: Column) => {
-    reads?.sides.push(2 * col.seg + (col.side === CELL_RIGHT ? 0 : 1));
+    const h = 2 * col.seg + (col.side === CELL_RIGHT ? 0 : 1);
+    // Most reads repeat the last: the columns of one lot face one side of one road.
+    if (reads && reads.sides[reads.sides.length - 1] !== h) reads.sides.push(h);
     return blockOnSide(blocks, col.seg, col.side === CELL_RIGHT);
   };
   /** Notes in `reads` that a block test turned a back lot away, and returns `value`. */

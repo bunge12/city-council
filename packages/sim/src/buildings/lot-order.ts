@@ -333,6 +333,9 @@ export function setAside(order: LotOrder, seg: number, col: number, reads: Reado
   order.setAsideCount++;
   cols.stamp[col] = order.setAsideCount;
   const key = seg * CELL_KEY_STRIDE + col;
+  // A city that grows and builds no roads would keep the waits of cells that came back since: let go of them once they outnumber the rest.
+  if (order.asideThrough.length > 2 * order.asideCount + 64) order.asideThrough = order.asideThrough.filter((w) => waitStands(order, w));
+  if (order.asideBlocks.length > 2 * order.asideCount + 64) order.asideBlocks = order.asideBlocks.filter((w) => waitStands(order, w));
   if (reads.across && reads.x0 <= reads.x1) order.asideThrough.push({ key, stamp: order.setAsideCount, x0: reads.x0, z0: reads.z0, x1: reads.x1, z1: reads.z1 });
   if (!reads.blocks) return;
   // Waits read in another index, as after a load into new roads, can tell nothing: they come back.
@@ -341,8 +344,18 @@ export function setAside(order: LotOrder, seg: number, col: number, reads: Reado
     order.blockIndex = blocks;
     order.blockWalks = blockWalks(blocks);
   }
-  const sides = Int32Array.from(new Set(reads.sides));
-  order.asideBlocks.push({ key, stamp: order.setAsideCount, walks: blockWalks(blocks), sides });
+  const sides = Int32Array.from(reads.sides).sort();
+  let n = 0;
+  for (let i = 0; i < sides.length; i++) if (i === 0 || sides[i] !== sides[n - 1]) sides[n++] = sides[i] ?? 0;
+  order.asideBlocks.push({ key, stamp: order.setAsideCount, walks: blockWalks(blocks), sides: sides.subarray(0, n) });
+}
+
+/** Whether `wait`'s cell is still set aside under it, and not back since. */
+function waitStands(order: LotOrder, wait: { key: number; stamp: number }): boolean {
+  const seg = Math.floor(wait.key / CELL_KEY_STRIDE);
+  const col = wait.key - seg * CELL_KEY_STRIDE;
+  const cols = order.segs[seg];
+  return !!cols && cols.aside[col] === 1 && cols.stamp[col] === wait.stamp;
 }
 
 /** Brings back every cell in `asideBlocks`. */
