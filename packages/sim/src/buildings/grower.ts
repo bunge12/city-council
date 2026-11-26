@@ -5,12 +5,14 @@
 // Each zone builds only while its demand bar is above zero, and mixed only
 // while the residential and commercial bars both are. Its pace follows the
 // bar and its development charge (M4-08): a zone whose bar reads b wants
-// b / 100 x its `buildingsPerDayAtFullDemand` (demand.json) x its charge's
-// share (economy/charges.ts, 1 at a charge of 0) buildings a game day. The
-// whole part is built over the day, and the fraction left over is one more
-// building with that chance: a want of 0.3 builds on about three days in
-// ten. Until M4-08 the want was rounded up, so a zone never fell below one
-// building a day. The chance is drawn from the generator on the day's last
+// b / 100 x its `buildingsPerDayAtFullDemand` (demand.json), at least one,
+// x its charge's share (economy/charges.ts, 1 at a charge of 0) buildings a
+// game day. So with no charge a bar barely above zero still builds one a
+// day, as M3-07 had it, and the charge slows even that zone: at the top of
+// the range a want of one becomes 0.4. The whole part is built over the
+// day, and the fraction left over is one more building with that chance:
+// a want of 0.4 builds on about four days in ten. Until M4-08 the want was
+// rounded up instead, which left a charge nothing to slow at one a day. The chance is drawn from the generator on the day's last
 // tick, and that tick builds the one more if the draw falls below the
 // fraction, so every tick's work still follows from state. A zone with no
 // free zoned cell by a road draws nothing, so a city with nothing to build
@@ -150,15 +152,16 @@ export function zoneBar(demand: DemandState, id: string): number {
 /**
  * The buildings each zone wants today, by zone number, with index 0 unused,
  * before rounding: none while its bar is at or below zero, else its
- * full-demand rate times the bar over 100 times its share in `shares`, by
- * zone number, all 1 when left out.
+ * full-demand rate times the bar over 100, at least 1, times its share in
+ * `shares`, by zone number, all 1 when left out.
  */
 export function dayWants(demand: DemandState, shares?: Float64Array): number[] {
   const wants = [0];
   for (const [i, zone] of ZONING_BALANCE.zones.entries()) {
     const bar = zoneBar(demand, zone.id);
     const rate = DEMAND_BALANCE.buildingsPerDayAtFullDemand[zone.id] ?? 0;
-    wants.push(bar > 0 ? ((rate * bar) / 100) * (shares?.[i + 1] ?? 1) : 0);
+    // At least one a day while the bar is above zero (M3-07), before the charge's share, so a charge still slows a small zone.
+    wants.push(bar > 0 ? Math.max(1, (rate * bar) / 100) * (shares?.[i + 1] ?? 1) : 0);
   }
   return wants;
 }

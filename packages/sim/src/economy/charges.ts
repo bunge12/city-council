@@ -9,7 +9,8 @@
 // none is built by the grower or by redevelopment.
 //
 // The rate also slows the grower in its zone (buildings/grower.ts): the
-// zone's quota is multiplied by `chargeShare`, from 1 at a charge of 0 to
+// zone's want, at least one a day while its bar is above zero, is
+// multiplied by `chargeShareAt`, from 1 at a charge of 0 to
 // `developmentChargeGrowth.shareAtMax` at the top of the range, in a
 // straight line. It does not enter the demand bar, so a high charge slows
 // construction without telling newcomers the city is less attractive.

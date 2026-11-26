@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ECONOMY,
   BUILDINGS_BALANCE,
   BUILDING_TYPES,
   DEMAND_BALANCE,
@@ -89,7 +90,7 @@ describe("the day's quota for each zone", () => {
     expect(dayQuotas(bars({ residential: -30, commercial: -1, office: -100, industrial: 0 }))).toEqual([0, 0, 0, 0, 0, 0]);
   });
 
-  it("follows the bar: the full rate at 100, the whole part of the rate times the bar over 100 below it, and the fraction as the chance of one more (M4-08)", () => {
+  it("follows the bar: the full rate at 100, the whole part of the rate times the bar over 100 below it, the fraction as the chance of one more, and one a day barely above zero (M4-08)", () => {
     const all = (bar: number) => bars({ residential: bar, commercial: bar, office: bar, industrial: bar });
     for (const id of ["residential", "commercial", "office", "industrial", "mixed"]) {
       const rate = RATES[id] ?? 0;
@@ -97,9 +98,14 @@ describe("the day's quota for each zone", () => {
       expect(dayQuotas(all(100))[index(id)], id).toBe(rate);
       expect(dayQuotas(all(50))[index(id)], id).toBe(Math.floor(rate / 2));
       expect(extraChances(all(50))[index(id)], id).toBeCloseTo(rate / 2 - Math.floor(rate / 2), 12);
-      // Barely above zero: none for certain, and a small chance of one.
-      expect(dayQuotas(all(0.01))[index(id)], id).toBe(0);
-      expect(extraChances(all(0.01))[index(id)], id).toBeCloseTo((rate * 0.01) / 100, 12);
+      // Barely above zero: one a day for certain, as M3-07 had it, with no charge.
+      expect(dayQuotas(all(0.01))[index(id)], id).toBe(1);
+      expect(extraChances(all(0.01))[index(id)], id).toBe(0);
+      // At the top charge that one a day is a chance of shareAtMax.
+      const top = new Float64Array(6).fill(1);
+      top[index(id)] = ECONOMY.developmentChargeGrowth.shareAtMax;
+      expect(dayQuotas(all(0.01), top)[index(id)], id).toBe(0);
+      expect(extraChances(all(0.01), top)[index(id)], id).toBeCloseTo(ECONOMY.developmentChargeGrowth.shareAtMax, 12);
     }
   });
 
