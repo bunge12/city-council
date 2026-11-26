@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { ROAD_TYPES, createState, deserialize, generateTerrain, hashState, heightAt, reachesOutside, replay } from "../packages/sim/src/index";
+import { LINE, ROAD_TYPES, createState, deserialize, generateTerrain, hashState, heightAt, reachesOutside, replay } from "../packages/sim/src/index";
 import { formatMoneyShort } from "../packages/client/src/ui/format";
 import { SEED, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
@@ -57,7 +57,7 @@ interface SaveStatus {
 declare const window: {
   cityCouncil: {
     saves: { status: SaveStatus | null };
-    mirror: { state: ({ tick: number; log: LogEntry[]; roads: Net; connections: ArrayLike<number>; budget: { treasury: number } } & Record<string, unknown>) | null };
+    mirror: { state: ({ tick: number; log: LogEntry[]; roads: Net; connections: ArrayLike<number>; budget: { treasury: number; month: Float64Array; lastMonth: Float64Array } } & Record<string, unknown>) | null };
     renderStatus(): { backend: string } | null;
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
@@ -488,9 +488,17 @@ for (const variant of [
     });
 
     await test.step("5. the preview shows the length and the cost before the click; nothing is charged", async () => {
-      const treasury = () => page.evaluate(() => window.cityCouncil.mirror.state?.budget.treasury);
-      const before = await treasury();
-      expect(before).toBeGreaterThan(0);
+      // Road upkeep (M4-04) is charged on each game day's first tick, and a day is 10 s at 1x,
+      // so a day can end during this step however fast the runner is. The treasury is read
+      // with the upkeep the month has paid so far, and only that may have moved it.
+      const money = () =>
+        page.evaluate((line) => {
+          const budget = window.cityCouncil.mirror.state?.budget;
+          if (!budget) throw new Error("no state");
+          return { treasury: budget.treasury, upkeep: budget.month[line] as number, lastUpkeep: budget.lastMonth[line] as number };
+        }, LINE.roadUpkeep);
+      const before = await money();
+      expect(before.treasury).toBeGreaterThan(0);
       await look(page, 4372, 4800, 330);
       await click(page, 4200, 4900);
       await hover(page, 4440, 4900);
@@ -505,8 +513,12 @@ for (const variant of [
       await page.keyboard.press("Escape");
       await expect(readout).toHaveCount(0);
       expect((await log(page)).length).toBe(5);
-      // The preview moves no money: the treasury (M4-02) is what it was before the click.
-      expect(await treasury()).toBe(before);
+      // The preview moves no money: the treasury (M4-02) is what it was before the click, less
+      // any road upkeep charged meanwhile. A month that closed in between filed its upkeep
+      // under last month and started this one again from nothing.
+      const after = await money();
+      const upkeep = after.upkeep >= before.upkeep ? after.upkeep - before.upkeep : after.lastUpkeep - before.upkeep + after.upkeep;
+      expect(after.treasury).toBe(before.treasury - upkeep);
       await noTool(page);
     });
 
