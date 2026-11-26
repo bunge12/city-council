@@ -123,17 +123,18 @@ const BAR_COLOURS = Object.fromEntries(
 /**
  * One demand bar, lying on its side from -100 on the left to 100 on the
  * right of a centre line, with its name and value beside it and what pushes
- * it in the tooltip (issues M3-15, #332). The residential bar's tooltip also
- * says when homes still filling hold new homes back (#330). Counting those
- * walks every building, so it is counted only while the tooltip shows.
+ * it in the tooltip (issues M3-15, #332). Each bar's tooltip also says when
+ * the grower holds its zone back for homes still filling (#330) or open jobs
+ * (#420). Counting those walks every building, so it is counted only while
+ * the tooltip shows.
  */
 function DemandMeter({ bar }: { bar: DemandBar }) {
   const { mirror } = useServices();
   const tipState = useTipState();
-  const asksWaiting = tipState.shown && bar === "residential";
+  const asksWaiting = tipState.shown;
   const value = useSim((s) => s?.demand[bar].value ?? null);
   const title = useSim((s) =>
-    s ? formatDemandTitle(bar, s.demand[bar].value, s.demand[bar].parts, asksWaiting ? (mirror.homesWaiting()?.empty ?? null) : null) : formatDemandTitle(bar, null, null),
+    s ? formatDemandTitle(bar, s.demand[bar].value, s.demand[bar].parts, asksWaiting ? mirror.waitingFor(bar) : null) : formatDemandTitle(bar, null, null),
   );
   const { props, tip } = tipParts(tipState, title);
   const shown = value === null ? null : Math.round(value);

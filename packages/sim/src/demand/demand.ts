@@ -36,6 +36,25 @@
 // industrial bar's other parts add up to above 0 while nothing the city has
 // built reaches an outside connection: factories need a route out.
 //
+// Each bar's last part is what is already waiting (#420): homes still
+// filling on residential, open jobs in the zone's workplaces on the others
+// (pull.ts, `WAITING_PART`). The grower holds a zone back while too many of
+// them wait (grower.ts), and until #420 the bar read +30 the whole time, so
+// a player zoned more of what was not being built. The part's target takes
+// away a share of what the bar's other targets add above zero: the homes
+// still filling over the most the grower allows at once
+// (`unfilledHomesMax`), or the zone's open jobs over the most it allows
+// (`openJobsMin`, `openJobsShareMax`), at most all of it. So a bar reads 0
+// while its zone is held and something in between as it nears the hold. It
+// moves `dailyShare` a day like the rest, and then is held between 0 and the
+// sum of the other parts, so it never takes a bar below zero and never adds
+// to one. The systems that act on demand read the bar without it
+// (`demandPull`), so the city grows as it did; only what the bar says
+// changes. Counting the homes still filling is one pass over the buildings,
+// once a game day; the open jobs are kept by job matching's openings. While
+// a change of roads is settling nothing is counted and each waiting part
+// stays where it is, as the grower adds nothing then.
+//
 // Arithmetic is add, subtract, multiply and divide (CLAUDE.md rule 6), so a
 // replay on any machine reaches the same bars.
 
@@ -45,6 +64,12 @@ import { segmentsReachingOutside } from "../roads/outside";
 import { TIME_BALANCE } from "../calendar";
 import type { StatTotals } from "../stats/stats";
 import { DEMAND_BALANCE, type DemandBalance } from "./balance";
+import { WAITING_PART } from "./pull";
+import { reachableRoom } from "../pops/room";
+import { zoneJobs } from "../pops/openings";
+import { workplacesHeldBy } from "../pops/open-jobs";
+import { ZONING_BALANCE } from "../zoning/balance";
+import { cellsSettled } from "../zoning/cell-index";
 
 /** The four bars, in the order state, deltas and the debug panel hold them. */
 export const DEMAND_BARS = ["residential", "commercial", "office", "industrial"] as const;
@@ -53,13 +78,13 @@ export type DemandBar = (typeof DEMAND_BARS)[number];
 /**
  * Each bar's parts, in the order state holds them. The weighted inputs come
  * first, named as their weights in `demand.json`; then the two parts that
- * are not weights.
+ * are not weights; last, what is already waiting (`WAITING_PART`, #420).
  */
 export const DEMAND_PARTS = {
-  residential: ["openJobs", "unemployment", "satisfaction", "outsidePull"],
-  commercial: ["spendingPower", "availableWorkers", "shopSurplus"],
-  office: ["educatedWorkers", "serviceBuyers"],
-  industrial: ["unemployedWorkers", "goodsNeeded", "openOfficeJobs", "outsideRoute"],
+  residential: ["openJobs", "unemployment", "satisfaction", "outsidePull", "homesFilling"],
+  commercial: ["spendingPower", "availableWorkers", "shopSurplus", "jobsOpen"],
+  office: ["educatedWorkers", "serviceBuyers", "jobsOpen"],
+  industrial: ["unemployedWorkers", "goodsNeeded", "openOfficeJobs", "outsideRoute", "jobsOpen"],
 } as const satisfies Record<DemandBar, readonly string[]>;
 
 /** One bar: its value and the parts it is the sum of. */
@@ -101,6 +126,13 @@ export interface DemandInputs {
    * than it has now.
    */
   highestPopulation?: number;
+  /**
+   * By bar, from 0 to 1: how near the grower is to holding its zone back
+   * for what is already waiting, 1 when it does (`waitingShares`, #420). The
+   * bar's waiting part takes this share of what its other parts add above
+   * zero. Left out, nothing waits.
+   */
+  waiting?: Partial<Record<DemandBar, number>>;
 }
 
 /** Each bar's parts as the inputs put them today, before the day's share is taken. */
@@ -201,8 +233,48 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
   };
 
   const targets: DemandTargets = { residential, commercial, office, industrial };
-  for (const bar of DEMAND_BARS) fitInRange(targets[bar], DEMAND_PARTS[bar]);
+  for (const bar of DEMAND_BARS) {
+    fitInRange(targets[bar], DEMAND_PARTS[bar]);
+    // Then what is already waiting takes its share of what the rest add above zero.
+    const share = inputs.waiting?.[bar] ?? 0;
+    const above = othersSum(targets[bar], bar);
+    targets[bar][WAITING_PART[bar]] = share > 0 && above > 0 ? -(above * (share < 1 ? share : 1)) : 0;
+  }
   return targets;
+}
+
+/** The sum of every part of `bar` in `parts` but its waiting part. */
+function othersSum(parts: Readonly<Record<string, number>>, bar: DemandBar): number {
+  const waiting = WAITING_PART[bar];
+  let sum = 0;
+  for (const name of DEMAND_PARTS[bar]) if (name !== waiting) sum += parts[name] ?? 0;
+  return sum;
+}
+
+/** `n` over `most`, from 0 to 1: 1 once `n` reaches `most`. */
+const shareOf = (n: number, most: number): number => (n <= 0 ? 0 : n >= most ? 1 : n / most);
+
+/** Zone number of each workplace bar's zone. */
+const BAR_ZONES = Object.fromEntries(
+  (["commercial", "office", "industrial"] as const).map((bar) => [bar, ZONING_BALANCE.zones.findIndex((z) => z.id === bar) + 1]),
+) as Record<Exclude<DemandBar, "residential">, number>;
+
+/**
+ * How near the grower is to holding each zone back for what is already
+ * waiting, from 0 to 1, as the header says: the homes newcomers can reach
+ * still filling over `unfilledHomesMax`, and for each workplace zone its
+ * open jobs over the most it may have, 1 while the grower holds it
+ * (`workplacesHeldBy`). One pass over the buildings for the homes.
+ */
+export function waitingShares(state: SimState): Record<DemandBar, number> {
+  const room = reachableRoom(state);
+  const jobs = zoneJobs(state);
+  const shares = { residential: shareOf(room.unfilled, DEMAND_BALANCE.unfilledHomesMax) } as Record<DemandBar, number>;
+  for (const [bar, zone] of Object.entries(BAR_ZONES) as [Exclude<DemandBar, "residential">, number][]) {
+    const most = Math.max(DEMAND_BALANCE.openJobsMin, DEMAND_BALANCE.openJobsShareMax * (jobs.jobs[zone] ?? 0));
+    shares[bar] = workplacesHeldBy(jobs, zone) ? 1 : shareOf(jobs.open[zone] ?? 0, most);
+  }
+  return shares;
 }
 
 /** Scales `parts` together so they add up to no more than 100 either way. */
@@ -217,19 +289,29 @@ function fitInRange(parts: Record<string, number>, names: readonly string[]): vo
 
 /**
  * Moves every part `share` of the way to its target and sets each bar to
- * the sum of its parts, held within -100 to 100 against rounding.
+ * the sum of its parts, held within -100 to 100 against rounding. The
+ * waiting part is then held between minus what the others add above zero
+ * and 0, so it never takes the bar below zero or adds to it.
  */
 export function moveDemand(demand: DemandState, targets: DemandTargets, share: number): void {
   for (const bar of DEMAND_BARS) {
     const state = demand[bar];
+    const waiting = WAITING_PART[bar];
     let sum = 0;
     for (const name of DEMAND_PARTS[bar]) {
+      if (name === waiting) continue;
       const from = state.parts[name] ?? 0;
       const to = targets[bar][name] ?? 0;
       const part = from + (to - from) * share;
       state.parts[name] = part;
       sum += part;
     }
+    const from = state.parts[waiting] ?? 0;
+    const moved = from + ((targets[bar][waiting] ?? 0) - from) * share;
+    const least = sum > 0 ? -sum : 0;
+    const part = moved < least ? least : moved < 0 ? moved : 0;
+    state.parts[waiting] = part;
+    sum += part;
     // A sum that is not a number, from a save that loaded parts near the
     // largest double, reads as 0 rather than poisoning every later day.
     state.value = sum > 100 ? 100 : sum < -100 ? -100 : Number.isNaN(sum) ? 0 : sum;
@@ -239,11 +321,18 @@ export function moveDemand(demand: DemandState, targets: DemandTargets, share: n
 /** On a game day's first tick, the bars take the day's step toward where the totals put them. */
 export function updateDemand(state: SimState): void {
   if (state.tick % TIME_BALANCE.ticksPerDay !== 0) return;
+  // While a change of roads is still settling, what waits is not counted:
+  // the open jobs come from the building index, which would settle the
+  // cells at once, and the grower adds nothing then anyway. Each waiting
+  // part stays where it is for the day.
+  const settled = cellsSettled(state);
   const targets = demandTargets({
     totals: state.stats.totals,
     segmentsOutside: segmentsReachingOutside(state),
     highestPopulation: state.stats.highestPopulation,
+    ...(settled ? { waiting: waitingShares(state) } : {}),
   });
+  if (!settled) for (const bar of DEMAND_BARS) targets[bar][WAITING_PART[bar]] = state.demand[bar].parts[WAITING_PART[bar]] ?? 0;
   moveDemand(state.demand, targets, DEMAND_BALANCE.dailyShare);
 }
 

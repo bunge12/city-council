@@ -4,7 +4,9 @@ import { checkConnections, chooseConnectionSites } from "../src/roads/connection
 import { LEVEL_BRIDGE, NO_TIER, addNode, addSegment, createRoadNetwork, isNode, readSegment, removeNode, removeSegment, segmentCount } from "../src/roads/network";
 import { terrainOf } from "../src/terrain/cache";
 import { checkUndoHistory } from "../src/undo";
-import { createDemand } from "../src/demand/demand";
+import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "../src/demand/demand";
+import { WAITING_PART, demandPull } from "../src/demand/pull";
+import { withoutWaiting } from "./before-waiting";
 import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
 import { ECONOMY } from "../src/economy/balance";
 import { dailyShare, emptyBudget } from "../src/economy/budget";
@@ -35,6 +37,9 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
+  // Before version 32 no bar had its waiting part (#420), and its migration
+  // gives each as 0. `state` gets the same in place.
+  if (version < 32) withNoWaiting(state);
   // Before version 31 nothing kept the money a command moved (M4-03), and
   // its migration gives every amount as 0. `state` gets the same in place.
   if (version < 31) {
@@ -56,7 +61,8 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 20) gone.push("demand");
   if (version < 26) gone.push("redevelopedToday");
   if (version < 27) gone.push("travelLast");
-  const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  let kept: Record<string, unknown> = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  if (version < 32) kept = withoutWaiting(kept);
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
       const { spent, ...rest } = record;
@@ -139,6 +145,21 @@ function withOldMoney(state: SimState): SimState {
   return withNoSpending(state);
 }
 
+/**
+ * Gives `state`, in place, the demand the version 32 migration gives a city
+ * saved before it: each bar's waiting part at 0, the bar reading what it
+ * pulled (#420). Returns it.
+ */
+function withNoWaiting(state: SimState): SimState {
+  for (const bar of DEMAND_BARS) {
+    const b = state.demand[bar];
+    const name = WAITING_PART[bar];
+    b.value -= b.parts[name] ?? 0;
+    b.parts[name] = 0;
+  }
+  return state;
+}
+
 /** Gives `state`, in place, the amounts the version 31 migration gives a city saved before it, all 0, and returns it. */
 function withNoSpending(state: SimState): SimState {
   state.logSpent = state.log.map(() => 0);
@@ -204,7 +225,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(31);
+    expect(SNAPSHOT_VERSION).toBe(32);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -778,6 +799,31 @@ describe("migrateState", () => {
     step(migrated);
     expect(migrated.undo).toHaveLength(1);
     expect(money(migrated)).toBe(treasury);
+  });
+
+  it("upgrades a version 31 state by giving each demand bar its waiting part at 0, the bar reading what it pulled (#420)", () => {
+    const state = createState(5);
+    for (const bar of DEMAND_BARS) {
+      const names = DEMAND_PARTS[bar];
+      // A bar the waiting part was holding down: the first part pulls 30 and the waiting part takes 20 of it.
+      state.demand[bar] = { value: 10, parts: Object.fromEntries(names.map((name, i) => [name, i === 0 ? 30 : name === WAITING_PART[bar] ? -20 : 0])) };
+    }
+    const v31 = older(structuredClone(state), 31);
+    const saved = v31["demand"] as Record<string, { value: number; parts: Record<string, number> }>;
+    for (const bar of DEMAND_BARS) {
+      expect(WAITING_PART[bar] in (saved[bar]?.parts ?? {})).toBe(false);
+      expect(saved[bar]?.value).toBe(30);
+    }
+    const migrated = migrateState(v31);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    for (const bar of DEMAND_BARS) {
+      expect(Object.keys(migrated.demand[bar].parts)).toEqual([...DEMAND_PARTS[bar]]);
+      expect(migrated.demand[bar].parts[WAITING_PART[bar]]).toBe(0);
+      expect(migrated.demand[bar].value).toBe(30);
+      expect(demandPull(migrated.demand, bar)).toBe(30);
+    }
+    expect(migrated).toEqual(withNoWaiting(state));
+    expect(hashState(migrated)).toBe(hashState(state));
   });
 
   it("leaves a current state as it is", () => {

@@ -136,7 +136,7 @@ export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/ma
 export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
 export { TURNOVER, TURNOVER_SYSTEM, dayChances, turnOver, turnoverEvent } from "./pops/turnover";
 export type { DayChances, TurnoverEvent } from "./pops/turnover";
-export { countZoneJobs, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";
+export { countZoneJobs, countZoneJobsWith, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";
 export { zoneJobs } from "./pops/openings";
 export type { ZoneJobs } from "./pops/open-jobs";
 export type { ReachableRoom } from "./pops/room";
@@ -153,12 +153,14 @@ export {
   demandTargets,
   spendingPower,
   moveDemand,
+  waitingShares,
   type BarState,
   type DemandBar,
   type DemandInputs,
   type DemandState,
   type DemandTargets,
 } from "./demand/demand";
+export { WAITING_PART, demandPull } from "./demand/pull";
 export { nodeReachesOutside, prepareOutside, segmentReachesOutside, segmentsReachingOutside } from "./roads/outside";
 export { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_FLAG_VALUES, BUILDING_UNZONED, BUILDING_VACANT, buildingCount, buildingIdLimit, homeRoom, isAbandoned, isBuilding, isVacant, readBuilding } from "./buildings/buildings";
 export { VACANCY, VACANCY_SYSTEM, abandonedWaiting, buildingEmpty, checkVacancy, mayComeBack } from "./buildings/vacancy";

@@ -4,7 +4,7 @@ import { NO_LEAVING, createPops } from "./pops/pops";
 import { STAT_TOTALS, emptyMoney, recountTotals, statsFor } from "./stats/stats";
 import { ECONOMY } from "./economy/balance";
 import { emptyBudget } from "./economy/budget";
-import { DEMAND_PARTS, createDemand } from "./demand/demand";
+import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "./demand/demand";
 import { placeConnections } from "./roads/connections";
 import { NO_TIER, createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -160,7 +160,24 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
     undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, spent: 0 })),
     logSpent: (old["log"] as unknown[]).map(() => 0),
   }),
+  // Version 32 gives each demand bar a last part for what is already
+  // waiting, homes still filling or open jobs (#420), at 0. The bar reads
+  // what it did, and the part takes its first step on the next day.
+  31: (old) => ({ ...old, version: 32, demand: demandWithWaiting(old["demand"]) }),
 };
+
+/** Version 31 demand bars with each bar's waiting part, at 0, in `DEMAND_PARTS` order. */
+function demandWithWaiting(value: unknown): Record<string, unknown> {
+  const demand = value as Record<string, { value: number; parts: Record<string, number> }>;
+  const out: Record<string, unknown> = {};
+  for (const bar of DEMAND_BARS) {
+    const state = demand[bar] as { value: number; parts: Record<string, number> };
+    const parts: Record<string, number> = {};
+    for (const name of DEMAND_PARTS[bar]) parts[name] = state.parts[name] ?? 0;
+    out[bar] = { value: state.value, parts };
+  }
+  return out;
+}
 
 /** Version 29 statistics with money series of zeros as long as the history, after `next`. */
 function statsWithMoney(value: unknown): Record<string, unknown> {
