@@ -193,4 +193,12 @@ test("the land value overlay shows the waterfront strip worth more than the stri
   expect(await overlay(page)).toBe("landValue");
   await page.keyboard.press("KeyO");
   expect(await overlay(page)).toBe("");
+  // Escape puts it away like a window, and the legend with it.
+  await page.keyboard.press("KeyO");
+  await expect(page.locator("#land-value-legend")).toBeVisible();
+  await attach(page, testInfo, "land value overlay, before Escape");
+  await page.keyboard.press("Escape");
+  expect(await overlay(page)).toBe("");
+  await expect(page.locator("#land-value-legend")).toHaveCount(0);
+  await attach(page, testInfo, "land value overlay, after Escape");
 });
