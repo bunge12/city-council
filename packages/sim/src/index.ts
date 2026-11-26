@@ -131,12 +131,12 @@ export type { NewPop } from "./pops/pops";
 export { POPS_SYSTEM, popSlice } from "./pops/sweep";
 export { ARRIVALS, ARRIVALS_SYSTEM, dayArrivals, drawProfile, drawSize } from "./pops/arrivals";
 export { DISPLACED, DISPLACED_SYSTEM, placeDisplaced } from "./pops/displaced";
-export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homeUnfilled, homesAndEmptyRoom, homesWithRoom, leastNewcomers, newcomerRoomLeft, reachableRoom, reachableRoomWith, whyNoNewcomers } from "./pops/room";
+export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homeUnfilled, homesAndEmptyRoom, homesWithRoom, leastNewcomers, newcomerRoomLeft, reachableRoom, reachableRoomWith, unfilledHomesAllowed, whyNoNewcomers } from "./pops/room";
 export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/matching";
 export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
 export { TURNOVER, TURNOVER_SYSTEM, dayChances, turnOver, turnoverEvent } from "./pops/turnover";
 export type { DayChances, TurnoverEvent } from "./pops/turnover";
-export { countZoneJobs, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";
+export { countZoneJobs, countZoneJobsWith, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";
 export { zoneJobs } from "./pops/openings";
 export type { ZoneJobs } from "./pops/open-jobs";
 export type { ReachableRoom } from "./pops/room";
@@ -152,12 +152,14 @@ export {
   createDemand,
   demandTargets,
   moveDemand,
+  waitingShares,
   type BarState,
   type DemandBar,
   type DemandInputs,
   type DemandState,
   type DemandTargets,
 } from "./demand/demand";
+export { WAITING_PART, demandPull } from "./demand/pull";
 export { nodeReachesOutside, prepareOutside, segmentReachesOutside, segmentsReachingOutside } from "./roads/outside";
 export { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_FLAG_VALUES, BUILDING_UNZONED, BUILDING_VACANT, buildingCount, buildingIdLimit, homeRoom, isAbandoned, isBuilding, isVacant, readBuilding } from "./buildings/buildings";
 export { VACANCY, VACANCY_SYSTEM, abandonedWaiting, buildingEmpty, checkVacancy, mayComeBack } from "./buildings/vacancy";
@@ -166,7 +168,7 @@ export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
-export { GROWER_SYSTEM, dayOf, dayQuotas, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
+export { GROWER_SYSTEM, cityPopulation, dayOf, dayQuotas, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
 export { ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
 export type { DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
 export { floorSpaceOf, propertyValue, propertyValueOf, propertyValues, type FloorSpace } from "./economy/value";

@@ -22,6 +22,7 @@ import { NETWORK_ROAD } from "../roads/network";
 import { outsideReachByNode } from "../roads/outside";
 import type { SimState } from "../state";
 import { DEMAND_BALANCE } from "../demand/balance";
+import { demandPull } from "../demand/pull";
 import { POPS_BALANCE } from "./balance";
 import { popIndexOf } from "./where";
 
@@ -102,6 +103,18 @@ export interface ReachableRoom {
  */
 export function homeUnfilled(room: number, left: number): boolean {
   return left > 0 && room - left < DEMAND_BALANCE.homeFullShare * room;
+}
+
+/**
+ * The most homes newcomers can reach that may be still filling at once
+ * before the grower holds new homes back, in a city of `population`: the
+ * larger of `unfilledHomesMax` and one for every `residentsPerUnfilledHome`
+ * residents (demand.json, #420). Six homes filling side by side suit a town;
+ * a city of 200,000 fills 20.
+ */
+export function unfilledHomesAllowed(population: number): number {
+  const byCity = Math.floor(population / DEMAND_BALANCE.residentsPerUnfilledHome);
+  return byCity > DEMAND_BALANCE.unfilledHomesMax ? byCity : DEMAND_BALANCE.unfilledHomesMax;
 }
 
 /**
@@ -208,6 +221,6 @@ export function whyNoNewcomers(state: SimState, id: number): "abandoned" | "noRo
   if (!isBuilding(state.buildings, id) || (state.buildings.residents[id] ?? 0) <= 0) return null;
   if (isAbandoned(state.buildings, id)) return "abandoned";
   if (!homeReachesOutside(state, id)) return "noRoute";
-  if (state.demand.residential.value <= 0) return "noDemand";
+  if (demandPull(state.demand, "residential") <= 0) return "noDemand";
   return null;
 }

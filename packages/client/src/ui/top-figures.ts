@@ -2,7 +2,7 @@
 // only: everything here reads the client's read-only copy and nothing feeds
 // back into state.
 
-import { DEMAND_PARTS, TIME_BALANCE, isMonthStart, type DemandBar, type StatsState } from "@city-council/sim";
+import { DEMAND_PARTS, TIME_BALANCE, WAITING_PART, isMonthStart, type DemandBar, type StatsState } from "@city-council/sim";
 
 /** Which way the population has gone over the last game month. */
 export type Trend = "up" | "down" | "level";
@@ -65,21 +65,25 @@ export const PART_WORDS: Record<DemandBar, Record<string, string>> = {
     unemployment: "Unemployment",
     satisfaction: "Satisfaction",
     outsidePull: "Newcomers from outside",
+    homesFilling: "Homes still filling",
   },
   commercial: {
     spendingPower: "Spending power",
     availableWorkers: "Available workers",
     shopSurplus: "More shop jobs than customers",
+    jobsOpen: "Shop jobs still open",
   },
   office: {
     educatedWorkers: "Educated workers",
     serviceBuyers: "Buyers of services",
+    jobsOpen: "Office jobs still open",
   },
   industrial: {
     unemployedWorkers: "Unemployed workers",
     goodsNeeded: "Goods shops need",
     openOfficeJobs: "Open office jobs",
     outsideRoute: "No road to an outside connection",
+    jobsOpen: "Factory jobs still open",
   },
 };
 
@@ -106,21 +110,38 @@ export function formatParts(bar: DemandBar, parts: Readonly<Record<string, numbe
 /**
  * The line the residential bar's tooltip adds while new homes are held
  * (#330): the homes newcomers can reach still filling hold the grower and
- * redevelopment back, so a bar above zero builds nothing. `empty` is the
- * room left in them, the mirror's `homesWaiting().empty`.
+ * redevelopment back, so nothing new is built. `empty` is the room left in
+ * them, the mirror's `homesWaiting().empty`.
  */
 export function formatHomesWaiting(empty: number): string {
   return `New homes waiting: ${whole(empty)} empty ${empty === 1 ? "place" : "places"} to fill first.`;
 }
 
+/** What each workplace bar's zone builds, as its waiting line names it. */
+const WORKPLACES: Record<Exclude<DemandBar, "residential">, string> = { commercial: "shops", office: "offices", industrial: "factories" };
+
+/**
+ * The line a bar's tooltip adds while the grower holds its zone back for
+ * what is already waiting: homes still filling (#330), or a workplace zone's
+ * open jobs (#420). `waiting` is the empty places in those homes, or the
+ * zone's open jobs, the mirror's `waitingFor`.
+ */
+export function formatWaiting(bar: DemandBar, waiting: number): string {
+  if (bar === "residential") return formatHomesWaiting(waiting);
+  return `New ${WORKPLACES[bar]} waiting: ${whole(waiting)} open ${waiting === 1 ? "job" : "jobs"} to fill first.`;
+}
+
 /**
  * The tooltip on a demand bar: its name and value, then its parts. With
- * `waiting`, the empty places in homes still filling, and the bar above
- * zero as shown, rounded, a second line says new homes are held (#330).
+ * `waiting`, while the grower holds the bar's zone back, and the bar pulling
+ * above zero without its waiting part, rounded, a second line says what it
+ * waits for (#330, #420). The bar itself may read 0 then: its waiting part
+ * takes away what is waiting.
  */
 export function formatDemandTitle(bar: DemandBar, value: number | null, parts: Readonly<Record<string, number>> | null, waiting: number | null = null): string {
   if (value === null || parts === null) return `${BAR_NAMES[bar]} demand`;
   const why = formatParts(bar, parts);
   const title = `${BAR_NAMES[bar]} demand ${signed(value)}. ${why === "" ? "Nothing pushes it either way." : why}`;
-  return waiting !== null && Math.round(value) > 0 ? `${title}\n${formatHomesWaiting(waiting)}` : title;
+  const pull = value - (parts[WAITING_PART[bar]] ?? 0);
+  return waiting !== null && Math.round(pull) > 0 ? `${title}\n${formatWaiting(bar, waiting)}` : title;
 }

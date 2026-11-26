@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, DEMAND_BALANCE, NONE, ROAD_TYPES, ZONING_BALANCE, connectionEnd, createState, generateTerrain, heightAt, reachableRoom, step, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, NONE, ROAD_TYPES, WAITING_PART, ZONING_BALANCE, cityPopulation, connectionEnd, createState, generateTerrain, heightAt, reachableRoom, step, syncCells, unfilledHomesAllowed, type SimState } from "../packages/sim/src/index";
 import { formatDemandTitle } from "../packages/client/src/ui/top-figures";
 import { buildEverySide, finishConstruction, zoneSides } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
@@ -20,8 +20,10 @@ import { frames, openCity, ready, settingsButton } from "./helpers";
 //
 // Issue #330: a third city has six empty towers facing office towers, the
 // residential bar well above zero. While the towers fill the grower adds no
-// home, and the bar's tooltip says so; once fewer than `unfilledHomesMax`
-// are still filling, the line goes.
+// home, and the bar's tooltip says so; once fewer than `unfilledHomesAllowed`
+// are still filling, the line goes. Since #420 the bar's last part takes
+// away what the filling homes hold back, so the steps read the bar without
+// it, its pull, which is what the line needs above zero.
 
 type Vec3 = readonly [number, number, number];
 interface Bar {
@@ -122,6 +124,11 @@ async function copy(page: Page): Promise<{ population: number; room: number; mir
     if (!bar) throw new Error("no residential bar");
     return { population: s.stats.totals["population"] ?? 0, room, mirrorRoom: window.cityCouncil.mirror.room, residential: { value: bar.value, parts: { ...bar.parts } } };
   }, [BUILDING_ALIVE, BUILDING_ABANDONED] as const);
+}
+
+/** The residential bar without its part for homes still filling (#420): what newcomers and the grower read. */
+function pullOf(bar: Bar): number {
+  return bar.value - (bar.parts[WAITING_PART.residential] ?? 0);
 }
 
 async function setSpeed(page: Page, speed: number): Promise<void> {
@@ -294,7 +301,7 @@ function towersCity(): { state: SimState; street: Street } {
   const counts = buildEverySide(state);
   const towers = BUILDING_TYPES.filter((t) => t.zone === "residential").reduce((n, t) => n + (counts[t.index] ?? 0), 0);
   if (towers !== 6) throw new Error(`the street took ${towers} towers, not 6`);
-  if (reachableRoom(state).unfilled < DEMAND_BALANCE.unfilledHomesMax) throw new Error("the towers do not hold new homes back");
+  if (reachableRoom(state).unfilled < unfilledHomesAllowed(cityPopulation(state))) throw new Error("the towers do not hold new homes back");
   finishConstruction(state);
   state.speed = 0;
   return { state, street };
@@ -316,7 +323,7 @@ test("while six towers fill, the residential bar's tooltip says new homes are wa
     await expect(bar).not.toHaveAttribute("data-tip", waitingLine);
     await bar.hover();
     const c = await copy(page);
-    expect(c.residential.value).toBeGreaterThan(0);
+    expect(pullOf(c.residential)).toBeGreaterThan(0);
     const waiting = await page.evaluate(() => window.cityCouncil.mirror.homesWaiting());
     expect(waiting?.unfilled).toBe(6);
     expect(waiting?.empty).toBe(c.room);
@@ -335,7 +342,7 @@ test("while six towers fill, the residential bar's tooltip says new homes are wa
     await expect.poll(() => page.evaluate(() => window.cityCouncil.mirror.homesWaiting()), { timeout: 120_000 }).toBeNull();
     await setSpeed(page, 0);
     const c = await copy(page);
-    expect(c.residential.value).toBeGreaterThan(0);
+    expect(pullOf(c.residential)).toBeGreaterThan(0);
     expect(c.population).toBeGreaterThan(0);
     expect(await page.evaluate(() => window.cityCouncil.mirror.homesWaiting())).toBeNull();
     await bar.hover();

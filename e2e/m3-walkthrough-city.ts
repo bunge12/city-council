@@ -25,6 +25,7 @@ import {
   ZONING_BALANCE,
   cellAt,
   createState,
+  demandPull,
   deserialize,
   isAbandoned,
   seeBuilding,
@@ -162,8 +163,9 @@ export function redevelopmentCity(): { bytes: Uint8Array; rezonedOnDay: number; 
   zone(state, { z: SHORE, piece: "east", side: "south" }, "office", 2, 4);
   zone(state, { z: MAIN, piece: "west", side: "north" }, "industrial", 1, 5);
   // Until homes are wanted, then the houses zoned up.
-  for (let d = 0; d < 400 && state.demand.residential.value <= 15; d++) runDay(state);
-  if (state.demand.residential.value <= 15) throw new Error(`residential demand did not rise past 15: ${state.demand.residential.value}`);
+  // The pull, not the bar as shown: since #420 the bar's last part takes away what the homes still filling hold back.
+  for (let d = 0; d < 400 && demandPull(state.demand, "residential") <= 15; d++) runDay(state);
+  if (demandPull(state.demand, "residential") <= 15) throw new Error(`residential demand did not rise past 15: ${demandPull(state.demand, "residential")}`);
   const houses = onStrip(state, REZONED, 1, 1);
   if (houses.length < 4) throw new Error(`only ${houses.length} houses to rezone`);
   zone(state, REZONED, "residential", 3, 6);

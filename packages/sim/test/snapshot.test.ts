@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { syncCells } from "../src/zoning/cell-index";
 import {
   BALANCE_STAMP,
+  DEMAND_BARS,
+  WAITING_PART,
   recountTotals,
   DEMAND_BALANCE,
   replaysUnderThisBalance,
@@ -64,6 +66,7 @@ import v28Fixture from "./fixtures/snapshots/v28.json";
 import v29Fixture from "./fixtures/snapshots/v29.json";
 import v30Fixture from "./fixtures/snapshots/v30.json";
 import v31Fixture from "./fixtures/snapshots/v31.json";
+import v32Fixture from "./fixtures/snapshots/v32.json";
 import { withoutSatisfaction } from "./before-satisfaction";
 import { withoutVacancy } from "./before-vacancy";
 import { withoutDisplaced } from "./before-displaced";
@@ -73,6 +76,7 @@ import { withoutTiers } from "./before-tiers";
 import { withoutGrace } from "./before-grace";
 import { withoutMoney } from "./before-money";
 import { withoutSpending } from "./before-spending";
+import { withoutWaiting } from "./before-waiting";
 import { serializeStepsOf, snapshotChecksum, type SnapshotSteps } from "../src/snapshot";
 import { Fnv64 } from "../src/hash";
 import { checkConnections } from "../src/roads/connections";
@@ -523,14 +527,16 @@ describe("committed snapshots", () => {
     // 56fd8f4be81af521 before version 31 kept the money each command moved (M4-03).
     expect(hashState(withoutSpending({ ...state, version: 30 }))).toBe("56fd8f4be81af521");
     expect(state.logSpent).toEqual(state.log.map(() => 0));
-    expect(hashState(state)).toBe("2936d5641bcb8bd4");
+    // 2936d5641bcb8bd4 before version 32 gave each demand bar its waiting part (#420).
+    expect(hashState(withoutWaiting({ ...state, version: 31 }))).toBe("2936d5641bcb8bd4");
+    expect(hashState(state)).toBe("ade63b3456add5be");
   });
 
   it("loads the version 4 fixture to its recorded hash, with the ids its undo history holds", () => {
     const { state, header } = deserialize(fromHex(v4Fixture.hex));
     expect(header.stateVersion).toBe(4);
-    // Migrated, it is the version 31 fixture.
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    // Migrated, it is the version 32 fixture.
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(state.undo.map((r) => [r.playerId, r.type])).toEqual([
       ["p1", "BuildRoad"],
@@ -546,8 +552,8 @@ describe("committed snapshots", () => {
   it("loads the version 5 fixture with each segment's level at both its ends", () => {
     const { state, header } = deserialize(fromHex(v5Fixture.hex));
     expect(header.stateVersion).toBe(5);
-    // Migrated, it is the version 31 fixture.
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    // Migrated, it is the version 32 fixture.
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v5Fixture.held);
     expect(Array.from(state.connections)).toEqual(v5Fixture.connections);
     expect(Array.from(state.roads.segLevelB)).toEqual(Array.from(state.roads.segLevelA));
@@ -567,8 +573,8 @@ describe("committed snapshots", () => {
   it("loads the version 6 fixture with every undo op saying which road it means", () => {
     const { state, header } = deserialize(fromHex(v6Fixture.hex));
     expect(header.stateVersion).toBe(6);
-    // Migrated, it is the version 31 fixture.
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    // Migrated, it is the version 32 fixture.
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v6Fixture.held);
     expect(Array.from(state.connections)).toEqual(v6Fixture.connections);
     let filled = 0;
@@ -595,8 +601,8 @@ describe("committed snapshots", () => {
     expect(header.stateVersion).toBe(7);
     expect(state.balance).toBe("");
     expect(replaysUnderThisBalance(state)).toBe(false);
-    // Migrated, it is the version 31 fixture.
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    // Migrated, it is the version 32 fixture.
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v7Fixture.held);
     expect(Array.from(state.connections)).toEqual(v7Fixture.connections);
   });
@@ -605,8 +611,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v8Fixture.hex));
     expect(header.stateVersion).toBe(8);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 31 fixture.
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    // Migrated, it is the version 32 fixture.
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v8Fixture.held);
     expect(Array.from(state.connections)).toEqual(v8Fixture.connections);
     const net = state.roads;
@@ -633,8 +639,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v9Fixture.hex));
     expect(header.stateVersion).toBe(9);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 31 fixture.
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    // Migrated, it is the version 32 fixture.
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.cells.zone).toHaveLength(v10Fixture.cells);
     expect(state.cells.zone.every((z) => z === 0) && state.cells.density.every((d) => d === 0)).toBe(true);
     expect(state.cells.offset).toHaveLength(state.roads.segFlags.length + 1);
@@ -645,8 +651,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v10Fixture.hex));
     expect(header.stateVersion).toBe(10);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 31 fixture.
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    // Migrated, it is the version 32 fixture.
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.buildings).toEqual(createBareState(0).buildings);
     expect(heldIds(state.undo)).toEqual(v10Fixture.held);
     expect(Array.from(state.connections)).toEqual(v10Fixture.connections);
@@ -656,8 +662,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v11Fixture.hex));
     expect(header.stateVersion).toBe(11);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 31 fixture.
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    // Migrated, it is the version 32 fixture.
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.buildings).toEqual(createBareState(0).buildings);
     expect(heldIds(state.undo)).toEqual(v11Fixture.held);
     expect(Array.from(state.connections)).toEqual(v11Fixture.connections);
@@ -667,8 +673,8 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v12Fixture.hex));
     expect(header.stateVersion).toBe(12);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    // Migrated, it is the version 31 fixture.
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    // Migrated, it is the version 32 fixture.
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v12Fixture.held);
     expect(Array.from(state.connections)).toEqual(v12Fixture.connections);
   });
@@ -676,7 +682,7 @@ describe("committed snapshots", () => {
   it("loads the version 13 fixture with an empty zone journal on every undo record", () => {
     const { state, header } = deserialize(fromHex(v13Fixture.hex));
     expect(header.stateVersion).toBe(13);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.undo.map((r) => [r.playerId, r.type])).toEqual(v14Fixture.undo);
     for (const record of state.undo) expect(record.zones).toEqual(new Int32Array(0));
     expect(heldIds(state.undo)).toEqual(v13Fixture.held);
@@ -690,7 +696,7 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v14Fixture.hex));
     expect(header.stateVersion).toBe(14);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     const { cellReads, pops, centre, stats, travelReadyAt, demand, ...before } = state;
     expect(stats).toEqual(createStats());
     expect(cellReads).toBe(0);
@@ -708,7 +714,7 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v15Fixture.hex));
     expect(header.stateVersion).toBe(15);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     const { pops, centre, stats, travelReadyAt, demand, ...before } = state;
     expect(stats).toEqual(createStats());
     expect(centre).toEqual({ x: 0, z: 0, weight: 0, due: state.tick });
@@ -725,7 +731,7 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v16Fixture.hex));
     expect(header.stateVersion).toBe(16);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     const { centre, stats, travelReadyAt, demand, ...before } = state;
     expect(stats).toEqual(createStats());
     expect(centre).toEqual({ x: 0, z: 0, weight: 0, due: state.tick });
@@ -740,7 +746,7 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v17Fixture.hex));
     expect(header.stateVersion).toBe(17);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     const { stats, travelReadyAt, demand, ...before } = state;
     // No buildings and no pops, so every total is 0.
     expect(stats).toEqual(createStats());
@@ -755,7 +761,7 @@ describe("committed snapshots", () => {
     const { state, header } = deserialize(fromHex(v18Fixture.hex));
     expect(header.stateVersion).toBe(18);
     expect(state.version).toBe(SNAPSHOT_VERSION);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     const { travelReadyAt, demand, ...before } = state;
     expect(travelReadyAt).toBe(0);
     expect(demand).toEqual(createDemand());
@@ -764,11 +770,11 @@ describe("committed snapshots", () => {
     expect(Array.from(state.connections)).toEqual(v18Fixture.connections);
   });
 
-  it("loads the version 19 fixture and migrates it to version 31, adding only the version and the demand bars, all at 0, dropping the grower's plan and adding the plan of arrivals", () => {
+  it("loads the version 19 fixture and migrates it to version 32, adding only the version and the demand bars, all at 0, dropping the grower's plan and adding the plan of arrivals", () => {
     const { state, header } = deserialize(fromHex(v19Fixture.hex));
     expect(header.stateVersion).toBe(19);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     const { demand, ...before } = state;
     expect(demand).toEqual(createDemand());
     expect(hashState(withPlan(withoutRedevelopment(withoutTravelLast(withoutGrace(withoutTiers({ ...before, version: 19 }))))))).toBe(v19Fixture.hash);
@@ -776,33 +782,33 @@ describe("committed snapshots", () => {
     expect(Array.from(state.connections)).toEqual(v19Fixture.connections);
   });
 
-  it("loads the version 20 fixture and migrates it to version 31, dropping only the grower's plan and adding the plan of arrivals", () => {
+  it("loads the version 20 fixture and migrates it to version 32, dropping only the grower's plan and adding the plan of arrivals", () => {
     const { state, header } = deserialize(fromHex(v20Fixture.hex));
     expect(header.stateVersion).toBe(20);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect("growth" in state).toBe(false);
     expect(hashState(withPlan(withoutRedevelopment(withoutTravelLast(withoutGrace(withoutTiers({ ...state, version: 20 }))))))).toBe(v20Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v20Fixture.held);
     expect(Array.from(state.connections)).toEqual(v20Fixture.connections);
   });
 
-  it("loads the version 21 fixture and migrates it to version 31, adding only the plan of arrivals, at 0", () => {
+  it("loads the version 21 fixture and migrates it to version 32, adding only the plan of arrivals, at 0", () => {
     const { state, header } = deserialize(fromHex(v21Fixture.hex));
     expect(header.stateVersion).toBe(21);
-    expect(state.version).toBe(31);
+    expect(state.version).toBe(32);
     expect(state.pops.owed).toBe(0);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(hashState(withoutOwed(withoutRedevelopment(withoutTravelLast(withoutGrace(withoutTiers({ ...state, version: 21 }))))))).toBe(v21Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v21Fixture.held);
     expect(Array.from(state.connections)).toEqual(v21Fixture.connections);
   });
 
-  it("loads the version 22 fixture and migrates it to version 31, adding only the days low, no plan of departures, the residents' summed satisfaction and the bar's satisfaction part", () => {
+  it("loads the version 22 fixture and migrates it to version 32, adding only the days low, no plan of departures, the residents' summed satisfaction and the bar's satisfaction part", () => {
     const { state, header } = deserialize(fromHex(v22Fixture.hex));
     expect(header.stateVersion).toBe(22);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.pops.leaveScore).toBe(NO_LEAVING);
     expect(state.pops.leaveAtScore).toBe(0);
     expect(state.stats.totals["residentSatisfaction"]).toBe(0);
@@ -813,55 +819,55 @@ describe("committed snapshots", () => {
     expect(Array.from(state.connections)).toEqual(v22Fixture.connections);
   });
 
-  it("loads the version 23 fixture and migrates it to version 31, adding only the tick each building became what it is", () => {
+  it("loads the version 23 fixture and migrates it to version 32, adding only the tick each building became what it is", () => {
     const { state, header } = deserialize(fromHex(v23Fixture.hex));
     expect(header.stateVersion).toBe(23);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.buildings.statusSince).toEqual(new Float64Array(0));
     expect(hashState(withoutVacancy(withoutRedevelopment(withoutTravelLast(withoutGrace(withoutTiers({ ...state, version: 23 }))))))).toBe(v23Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v23Fixture.held);
     expect(Array.from(state.connections)).toEqual(v23Fixture.connections);
   });
 
-  it("loads the version 24 fixture and migrates it to version 31, adding only an empty queue of displaced pops", () => {
+  it("loads the version 24 fixture and migrates it to version 32, adding only an empty queue of displaced pops", () => {
     const { state, header } = deserialize(fromHex(v24Fixture.hex));
     expect(header.stateVersion).toBe(24);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.pops.displaced).toEqual(new Int32Array(0));
     expect(hashState(withoutDisplaced(withoutRedevelopment(withoutTravelLast(withoutGrace(withoutTiers({ ...state, version: 24 }))))))).toBe(v24Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v24Fixture.held);
     expect(Array.from(state.connections)).toEqual(v24Fixture.connections);
   });
 
-  it("loads the version 25 fixture and migrates it to version 31, adding only no buildings redeveloped today", () => {
+  it("loads the version 25 fixture and migrates it to version 32, adding only no buildings redeveloped today", () => {
     const { state, header } = deserialize(fromHex(v25Fixture.hex));
     expect(header.stateVersion).toBe(25);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.redevelopedToday).toBe(0);
     expect(hashState(withoutRedevelopment(withoutTravelLast(withoutGrace(withoutTiers({ ...state, version: 25 })))))).toBe(v25Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v25Fixture.held);
     expect(Array.from(state.connections)).toEqual(v25Fixture.connections);
   });
 
-  it("loads the version 26 fixture and migrates it to version 31, adding only no last travel-time table", () => {
+  it("loads the version 26 fixture and migrates it to version 32, adding only no last travel-time table", () => {
     const { state, header } = deserialize(fromHex(v26Fixture.hex));
     expect(header.stateVersion).toBe(26);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.travelLast).toBeNull();
     expect(hashState(withoutTravelLast(withoutGrace(withoutTiers({ ...state, version: 26 }))))).toBe(v26Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v26Fixture.held);
     expect(Array.from(state.connections)).toEqual(v26Fixture.connections);
   });
 
-  it("loads the version 27 fixture and migrates it to version 31, adding only strip tiers that front no block, and no days of grace", () => {
+  it("loads the version 27 fixture and migrates it to version 32, adding only strip tiers that front no block, and no days of grace", () => {
     const { state, header } = deserialize(fromHex(v27Fixture.hex));
     expect(header.stateVersion).toBe(27);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     for (let seg = 0; seg < state.roads.segFlags.length; seg++) {
       const want = isSegment(state.roads, seg) ? NO_TIER : 0;
       expect([state.roads.segTierL[seg], state.roads.segTierR[seg]]).toEqual([want, want]);
@@ -871,11 +877,11 @@ describe("committed snapshots", () => {
     expect(Array.from(state.connections)).toEqual(v27Fixture.connections);
   });
 
-  it("loads the version 28 fixture and migrates it to version 31, adding only no days of grace and no unemployed newcomers", () => {
+  it("loads the version 28 fixture and migrates it to version 32, adding only no days of grace and no unemployed newcomers", () => {
     const { state, header } = deserialize(fromHex(v28Fixture.hex));
     expect(header.stateVersion).toBe(28);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(Array.from(state.pops.graceDays).every((d) => d === 0)).toBe(true);
     expect(state.pops.graceDays.length).toBe(state.pops.flags.length);
     expect(state.stats.totals["workersUnemployedNew"]).toBe(0);
@@ -886,11 +892,11 @@ describe("committed snapshots", () => {
     expect(Array.from(state.connections)).toEqual(v28Fixture.connections);
   });
 
-  it("loads the version 29 fixture and migrates it to version 31, adding only the starting grant, an empty ledger and money series of zeros", () => {
+  it("loads the version 29 fixture and migrates it to version 32, adding only the starting grant, an empty ledger and money series of zeros", () => {
     const { state, header } = deserialize(fromHex(v29Fixture.hex));
     expect(header.stateVersion).toBe(29);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.budget.treasury).toBe(ECONOMY.startingGrant);
     expect(state.budget.opening).toBe(ECONOMY.startingGrant);
     expect(Array.from(state.budget.month).every((n) => n === 0)).toBe(true);
@@ -904,11 +910,11 @@ describe("committed snapshots", () => {
     expect(Array.from(state.connections)).toEqual(v29Fixture.connections);
   });
 
-  it("loads the version 30 fixture and migrates it to version 31, adding only no money moved by its log entries and undo records", () => {
+  it("loads the version 30 fixture and migrates it to version 32, adding only no money moved by its log entries and undo records", () => {
     const { state, header } = deserialize(fromHex(v30Fixture.hex));
     expect(header.stateVersion).toBe(30);
-    expect(state.version).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
     expect(state.logSpent).toEqual(state.log.map(() => 0));
     expect(state.undo.length).toBeGreaterThan(0);
     for (const record of state.undo) expect(record.spent).toBe(0);
@@ -917,12 +923,23 @@ describe("committed snapshots", () => {
     expect(Array.from(state.connections)).toEqual(v30Fixture.connections);
   });
 
-  it("loads the version 31 fixture to its recorded hash", () => {
+  it("loads the version 31 fixture and migrates it to version 32, adding only each demand bar's waiting part, at 0", () => {
     const { state, header } = deserialize(fromHex(v31Fixture.hex));
     expect(header.stateVersion).toBe(31);
-    expect(hashState(state)).toBe(v31Fixture.hash);
+    expect(state.version).toBe(SNAPSHOT_VERSION);
+    expect(hashState(state)).toBe(v32Fixture.hash);
+    for (const bar of DEMAND_BARS) expect(state.demand[bar].parts[WAITING_PART[bar]]).toBe(0);
+    expect(hashState(withoutWaiting({ ...state, version: 31 }))).toBe(v31Fixture.hash);
     expect(heldIds(state.undo)).toEqual(v31Fixture.held);
     expect(Array.from(state.connections)).toEqual(v31Fixture.connections);
+  });
+
+  it("loads the version 32 fixture to its recorded hash", () => {
+    const { state, header } = deserialize(fromHex(v32Fixture.hex));
+    expect(header.stateVersion).toBe(32);
+    expect(hashState(state)).toBe(v32Fixture.hash);
+    expect(heldIds(state.undo)).toEqual(v32Fixture.held);
+    expect(Array.from(state.connections)).toEqual(v32Fixture.connections);
   });
 
   it("refuses a save whose money beside the log is not one whole dollar amount per live entry", () => {
@@ -932,7 +949,7 @@ describe("committed snapshots", () => {
       (s) => (s["logSpent"] = (s["logSpent"] as number[]).map(() => 0.5)),
     ];
     for (const breakIt of breaks) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       expect(state.log.length).toBeGreaterThan(0);
       breakIt(state as unknown as Record<string, unknown>);
       const error = refusal(serialize(state));
@@ -942,11 +959,11 @@ describe("committed snapshots", () => {
   });
 
   it("refuses a save whose undo record holds money that is not whole dollars, or any on a ZoneCells", () => {
-    const { state } = deserialize(fromHex(v31Fixture.hex));
+    const { state } = deserialize(fromHex(v32Fixture.hex));
     (state.undo[0] as { spent: number }).spent = 0.5;
     expect(refusal(serialize(state)).message).toMatch(/undo history/);
     const zoning = { ...state.undo[0], type: "ZoneCells", ops: [], spent: 5, painted: { zone: 1, density: 1 } } as unknown as SimState["undo"][number];
-    const again = deserialize(fromHex(v31Fixture.hex)).state;
+    const again = deserialize(fromHex(v32Fixture.hex)).state;
     again.undo = [...again.undo, zoning];
     expect(refusal(serialize(again)).message).toMatch(/undo history/);
   });
@@ -963,7 +980,7 @@ describe("committed snapshots", () => {
       (b) => (b["extra"] = 1),
     ];
     for (const breakIt of breaks) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       breakIt(state.budget as unknown as Record<string, unknown>);
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");
@@ -978,7 +995,7 @@ describe("committed snapshots", () => {
       (m) => (m["income"] = new Float64Array(1).fill(0.5)),
     ];
     for (const breakIt of breaks) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       // One sample, so a series can hold a fraction of a dollar.
       takeSample(state.stats, { treasury: 1, income: 2, expenses: 3, taxIncome: 1 });
       expect(state.stats.money.income.length).toBe(1);
@@ -1002,7 +1019,7 @@ describe("committed snapshots", () => {
       { table: new Uint16Array(zones * zones), sources: new Int32Array(zones), tick: 0, more: 1 },
     ];
     for (const travelLast of breaks) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       (state as unknown as Record<string, unknown>)["travelLast"] = travelLast;
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");
@@ -1011,7 +1028,7 @@ describe("committed snapshots", () => {
   });
 
   it("keeps a last travel-time table through a save, byte for byte", () => {
-    const { state } = deserialize(fromHex(v31Fixture.hex));
+    const { state } = deserialize(fromHex(v32Fixture.hex));
     const table = new Uint16Array(576 * 576).map((_, i) => i % 65536);
     const sources = new Int32Array(576).map((_, i) => i - 1);
     state.travelLast = { table, sources, tick: state.tick };
@@ -1020,16 +1037,16 @@ describe("committed snapshots", () => {
     expect(hashState(back)).toBe(hashState(state));
   });
 
-  it("still writes the version 31 fixture byte for byte", () => {
+  it("still writes the version 32 fixture byte for byte", () => {
     // If this fails the byte layout changed: bump SNAPSHOT_FORMAT_VERSION and
     // keep reading the old layout, or explain in the pull request why not.
-    const { state } = deserialize(fromHex(v31Fixture.hex));
-    expect(toHex(serialize(state))).toBe(v31Fixture.hex);
+    const { state } = deserialize(fromHex(v32Fixture.hex));
+    expect(toHex(serialize(state))).toBe(v32Fixture.hex);
   });
 
   it("refuses a save whose count of buildings redeveloped today is not a whole number of 0 or more", () => {
     for (const redevelopedToday of [undefined, -1, 0.5]) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       (state as unknown as Record<string, unknown>)["redevelopedToday"] = redevelopedToday;
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");
@@ -1047,7 +1064,7 @@ describe("committed snapshots", () => {
       (p) => delete p["daysLow"],
     ];
     for (const breakIt of breaks) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       breakIt(state.pops as unknown as Record<string, unknown>);
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");
@@ -1057,7 +1074,7 @@ describe("committed snapshots", () => {
 
   it("refuses a save whose plan of arrivals is not a whole number of 0 or below", () => {
     for (const owed of [undefined, -0.5, 3]) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       (state.pops as unknown as Record<string, unknown>)["owed"] = owed;
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");
@@ -1076,7 +1093,7 @@ describe("committed snapshots", () => {
       (d) => (((d as unknown as DemandState).office.parts as Record<string, unknown>)["serviceBuyers"] = "1"),
     ];
     for (const breakIt of breaks) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       breakIt(state.demand as unknown as Loose);
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");
@@ -1086,7 +1103,7 @@ describe("committed snapshots", () => {
 
   it("refuses a save whose tick for the travel times is not a whole number", () => {
     for (const travelReadyAt of [undefined, -1, 0.5]) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       (state as unknown as Record<string, unknown>)["travelReadyAt"] = travelReadyAt;
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");
@@ -1108,7 +1125,7 @@ describe("committed snapshots", () => {
       (st) => (st["next"] = HISTORY_LENGTH),
     ];
     for (const breakIt of breaks) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       // Under this build's numbers: a city from another balance has its totals counted again instead (below).
       state.balance = BALANCE_STAMP;
       breakIt(state.stats as unknown as Record<string, unknown>);
@@ -1119,7 +1136,7 @@ describe("committed snapshots", () => {
   });
 
   it("counts the totals of a city from another balance again as it loads, whatever they were (M3 review, #365)", () => {
-    const { state } = deserialize(fromHex(v31Fixture.hex));
+    const { state } = deserialize(fromHex(v32Fixture.hex));
     expect(state.balance).not.toBe(BALANCE_STAMP);
     const recounted = recountTotals(state);
     expect(state.stats.totals).toEqual(recounted);
@@ -1131,7 +1148,7 @@ describe("committed snapshots", () => {
 
   it("refuses a save whose city centre is malformed", () => {
     for (const centre of [undefined, { x: 0, z: 0, weight: -1, due: 0 }, { x: Number.NaN, z: 0, weight: 0, due: 0 }, { x: 0, z: 0, weight: 0, due: 0.5 }, { x: 0, z: 0, weight: 0 }]) {
-      const { state } = deserialize(fromHex(v31Fixture.hex));
+      const { state } = deserialize(fromHex(v32Fixture.hex));
       (state as unknown as Record<string, unknown>)["centre"] = centre;
       const error = refusal(serialize(state));
       expect(error.code).toBe("corrupt");
@@ -1140,7 +1157,7 @@ describe("committed snapshots", () => {
   });
 
   it("refuses a save whose undo history gives a stroke id to a road record, or a bad one", () => {
-    const { state } = deserialize(fromHex(v31Fixture.hex));
+    const { state } = deserialize(fromHex(v32Fixture.hex));
     const road = state.undo[0];
     if (!road) throw new Error("the fixture has no undo record");
     state.undo = [{ ...road, stroke: 3 }, ...state.undo.slice(1)];
@@ -1148,7 +1165,7 @@ describe("committed snapshots", () => {
   });
 
   it("refuses a save whose undo history holds a bad cell anchor", () => {
-    const { state } = deserialize(fromHex(v31Fixture.hex));
+    const { state } = deserialize(fromHex(v32Fixture.hex));
     const op = state.undo.flatMap((r) => r.ops).find((o) => o.op === "removeSeg");
     if (op?.op !== "removeSeg") throw new Error("the fixture's undo history removes no segment");
     op.row.anchor = { ...op.row.anchor, tA: 2 };
@@ -1158,7 +1175,7 @@ describe("committed snapshots", () => {
   });
 
   it("refuses a save whose zoning cells do not fit its roads", () => {
-    const { state } = deserialize(fromHex(v31Fixture.hex));
+    const { state } = deserialize(fromHex(v32Fixture.hex));
     state.cells = { ...state.cells, zone: state.cells.zone.slice(1) };
     const error = refusal(serialize(state));
     expect(error.code).toBe("corrupt");
@@ -1166,7 +1183,7 @@ describe("committed snapshots", () => {
   });
 
   it("refuses a save whose balance stamp is not text", () => {
-    const { state } = deserialize(fromHex(v31Fixture.hex));
+    const { state } = deserialize(fromHex(v32Fixture.hex));
     (state as unknown as Record<string, unknown>)["balance"] = 7;
     const error = refusal(serialize(state));
     expect(error.code).toBe("corrupt");
@@ -1183,7 +1200,7 @@ describe("committed snapshots", () => {
   });
 
   it("refuses a save whose connection list names a node that is not a connection", () => {
-    const { state } = deserialize(fromHex(v31Fixture.hex));
+    const { state } = deserialize(fromHex(v32Fixture.hex));
     state.connections = Int32Array.of(0);
     const error = refusal(serialize(state));
     expect(error.code).toBe("corrupt");
@@ -1351,8 +1368,12 @@ describe("snapshots with a road network", () => {
     expect(digest(serialize(v30))).toBe("21640:1ee3431e5995d193");
     expect(digest(serializeDetached(v30))).toBe("21616:4f7a50d129b3e3f6");
     // M4-03's money beside the log and on the undo records, version 31, moved them again.
-    expect(digest(serialize(old))).toBe("21672:30ee59b0a0f8c5d3");
-    expect(digest(serializeDetached(old))).toBe("21648:9781ef771ac22259");
+    // #420's waiting parts, version 32, and its number in demand.json moved them again: taken out, with the version and the stamp set back, the bytes are main's.
+    const v31 = { ...withoutWaiting(old), version: 31, balance: "6c9d9e70e48201d9" } as SimState;
+    expect(digest(serialize(v31))).toBe("21672:30ee59b0a0f8c5d3");
+    expect(digest(serializeDetached(v31))).toBe("21648:9781ef771ac22259");
+    expect(digest(serialize(old))).toBe("21784:e1c963bf65d733c0");
+    expect(digest(serializeDetached(old))).toBe("21760:61a60e6eb31070ba");
     expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 
