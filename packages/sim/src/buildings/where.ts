@@ -875,6 +875,27 @@ export function buildingsOnStretch(state: SimState, seg: number, from: number, t
   return [...out].sort((p, q) => p - q);
 }
 
+/**
+ * `buildingsOnCells` as the building index stands now, kept through a
+ * change of roads made after it: the buildings on cells of the index as it
+ * was. For a command that builds and then asks what its build would clear,
+ * before the cells are laid out for it (`buildGridOnOpenGround`). Good
+ * until the building index is next queried, so ask before anything else
+ * reads it.
+ */
+export function buildingsOnCellsBefore(state: SimState): (keys: readonly number[], stride: number) => number[] {
+  const segCells = indexOf(state).bi.segCells.slice();
+  return (keys, stride) => {
+    const out = new Set<number>();
+    for (const key of keys) {
+      const seg = Math.floor(key / stride);
+      const id = segCells[seg]?.[key - seg * stride] ?? NO_BUILDING;
+      if (id !== NO_BUILDING) out.add(id);
+    }
+    return [...out].sort((p, q) => p - q);
+  };
+}
+
 /** The ids of the buildings filed on any cell of `keys`, as `segment * CELL_KEY_STRIDE + place in its run`, ascending. */
 export function buildingsOnCells(state: SimState, keys: readonly number[], stride: number): number[] {
   const { bi } = indexOf(state);

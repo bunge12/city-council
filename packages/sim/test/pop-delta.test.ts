@@ -162,10 +162,10 @@ describe("people deltas", () => {
 
 describe("protocol version 17", () => {
   it("refuses a client on version 17, before the grower's plan left the deltas, with the usual message", () => {
-    expect(PROTOCOL_VERSION).toBe(26);
-    expect(parseToSimMessage({ v: 17, type: "requestSnapshot" })).toBe("protocol version 17 is not supported, expected 26");
+    expect(PROTOCOL_VERSION).toBe(28);
+    expect(parseToSimMessage({ v: 17, type: "requestSnapshot" })).toBe("protocol version 17 is not supported, expected 28");
     expect(parseToSimMessage({ v: 17, type: "command", command: { seq: 1, playerId: "p", type: "NoOp", payload: {} } })).toBe(
-      "protocol version 17 is not supported, expected 26",
+      "protocol version 17 is not supported, expected 28",
     );
   });
 });

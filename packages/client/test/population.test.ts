@@ -158,17 +158,14 @@ describe("the room the homes hold", () => {
     expect(await send("BulldozeBuilding", { buildings: [seen] })).toEqual({ ok: true });
     expect(check()).toBe(grown - room);
 
-    // A road takes every building on its cells. Undo brings the road and
-    // its zoning back, not the buildings: the grower builds them again.
+    // A road takes every building on its cells, and with them every room.
+    // It cannot be undone, since it took buildings (M4-09), so the count stays at none.
     const seg = street(copy());
     const net = copy().roads;
     expect(await send("BulldozeRoad", { segments: [seg], ends: [segmentEnds(net, seg)], types: [segmentTypeId(net, seg)] })).toEqual({ ok: true });
     expect(check()).toBe(0);
-    expect(await send("Undo")).toEqual({ ok: true });
+    expect((await send("Undo")).ok).toBe(false);
     expect(check()).toBe(0);
-    expect(await send("SetSpeed", { speed: 4 })).toEqual({ ok: true });
-    for (let i = 0; i < 40 && (mirror.room ?? 0) === 0; i++) ticks(100);
-    expect(check()).toBeGreaterThan(0);
   });
 
   it("counts a building cut off past a shrunk id limit as gone, and an abandoned one as holding no room", () => {

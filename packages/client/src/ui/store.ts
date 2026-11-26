@@ -4,7 +4,7 @@
 // `useSim` (hooks.ts) and change it only by sending commands.
 
 import { create } from "zustand";
-import type { BuildingGround, BuildingInfo, LandValue } from "@city-council/sim";
+import type { AreaBudget, BuildingGround, BuildingInfo, LandValue } from "@city-council/sim";
 import type { StatRange } from "./stat-series";
 import { DEFAULT_PRESET } from "../render/config";
 import type { Occupants } from "./BuildingReadout";
@@ -329,6 +329,28 @@ export function setLandValueHover(hover: LandValueHover | null): void {
   if (current === hover) return;
   if (current && hover && current.x === hover.x && current.y === hover.y && current.value === hover.value) return;
   useLandValueHover.setState({ hover });
+}
+
+/**
+ * The block or open ground under the pointer while the budget overlay is on
+ * (issue M4-18): the pointer in CSS pixels over the canvas, the area as the
+ * sim's `budgetAreasOfSlots` names it, a block id or `-1 - chunk`, and its
+ * yearly figures.
+ */
+export interface BudgetHover {
+  x: number;
+  y: number;
+  area: number;
+  budget: AreaBudget;
+}
+
+export const useBudgetHover = create<{ hover: BudgetHover | null }>(() => ({ hover: null }));
+
+export function setBudgetHover(hover: BudgetHover | null): void {
+  const current = useBudgetHover.getState().hover;
+  if (current === hover) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.budget === hover.budget) return;
+  useBudgetHover.setState({ hover });
 }
 
 /** A block's area label on screen: CSS pixels over the canvas. */

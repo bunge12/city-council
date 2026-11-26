@@ -26,7 +26,8 @@ import { frames, openCity } from "./helpers";
 type Vec3 = readonly [number, number, number];
 declare const window: {
   cityCouncil: {
-    mirror: { state: { buildings: { flags: Uint8Array; firstPlace: Int32Array }; log: { type: string; payload: unknown }[]; roads: { segFlags: Uint8Array; segA: Int32Array; segB: Int32Array; nodeX: Float64Array; nodeZ: Float64Array } } | null };
+    sendCommand(type: string, payload: unknown): Promise<{ ok: boolean }>;
+    mirror: { state: { buildings: { flags: Uint8Array; firstPlace: Int32Array }; log: { type: string; payload: unknown }[]; logSpent: number[]; roads: { segFlags: Uint8Array; segA: Int32Array; segB: Int32Array; nodeX: Float64Array; nodeZ: Float64Array } } | null };
     view: Promise<{ buildingTop(id: number): { x: number; y: number; z: number } | null }>;
     camera: Promise<{
       rig: { setPose(position: Vec3, target: Vec3): void };
@@ -115,6 +116,12 @@ async function moveToTop(page: Page, id: number): Promise<{ x: number; y: number
   return p;
 }
 
+/** Sets the game speed by command, as the speed buttons do, and waits for the top bar to show it. */
+async function setSpeed(page: Page, speed: number): Promise<void> {
+  expect(await page.evaluate((s) => window.cityCouncil.sendCommand("SetSpeed", { speed: s }), speed)).toEqual({ ok: true });
+  await expect(page.locator("#sim-speed")).toHaveText(speed === 0 ? "paused" : `${speed}x`);
+}
+
 async function away(page: Page): Promise<void> {
   await page.mouse.move(640, 20);
   await frames(page, 4);
@@ -196,7 +203,8 @@ test("the bulldozer: its own tool, a price tag on what it picks, clicks and drag
     await expect(tag).toHaveAttribute("data-kind", "road");
     await expect(tag).toHaveAttribute("data-ok", "true");
     await expect(tag.locator(".what")).toHaveText("Bulldoze this road");
-    await expect(tag.locator(".price")).toHaveText(/^192 m · \$[\d.]+K$/);
+    // The road's demolition less its refund, plus the houses on it at their eminent domain price (M4-09).
+    await expect(tag.locator(".price")).toHaveText(/^192 m · \$[\d.]+M$/);
     await expect(page.locator("#bulldoze-clears")).toHaveText(`Takes ${houses} buildings, ${houses * 2} residents`);
     await expect(tag).toHaveAttribute("data-buildings", String(houses));
     await attach(page, testInfo, "a road's price tag, and the houses it takes marked");
@@ -214,18 +222,26 @@ test("the bulldozer: its own tool, a price tag on what it picks, clicks and drag
     await expect(tag.locator(".what")).toHaveText("Single family home");
     await expect(tag.locator(".detail")).toHaveText(/^Residential R1 \(2 × 4 lot\) · 2\/3 residents$/);
     await expect(tag).toHaveAttribute("data-residents", "2");
-    await expect(page.locator("#bulldoze-cost")).toHaveText("$0");
+    // The eminent domain price for an occupied house (M4-09): its value, its residents' relocation and the premium.
+    expect(Number(await tag.getAttribute("data-cost"))).toBeGreaterThan(100_000);
+    await expect(page.locator("#bulldoze-cost")).toHaveText(/^\$\d+(\.\d)?K$/);
     await expect(page.locator("#bulldoze-no-undo")).toHaveText("Can't be undone");
     await attach(page, testInfo, "a house's price tag");
   });
 
-  await test.step("a click on a house removes it at once, with no dialog, in one log entry", async () => {
+  await test.step("a click on a house removes it at once, with no dialog, in one log entry, charged the tag's price", async () => {
+    // Paused, so nobody moves in or out between the tag and the charge: a paused step still applies the click.
+    await setSpeed(page, 0);
     const log = (await logTypes(page)).length;
+    await frames(page, 2);
+    const price = Number(await tag.getAttribute("data-cost"));
     await page.mouse.down();
     await page.mouse.up();
     // The grower may build on the free lot at once, so the log says what went.
     await expect.poll(async () => bulldozedFrom(page, log), { timeout: 30_000 }).toEqual([[fourth]]);
     expect((await logTypes(page)).slice(log)).toEqual(["BulldozeBuilding"]);
+    expect(await page.evaluate((at) => window.cityCouncil.mirror.state?.logSpent[at], log)).toBe(price);
+    await setSpeed(page, 1);
     await away(page);
     await attach(page, testInfo, "the house is gone, one log entry");
   });

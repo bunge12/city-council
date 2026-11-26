@@ -2,10 +2,10 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { devices, expect, test, type Page, type TestInfo } from "@playwright/test";
 import { PLAYER_STATE } from "./browser-state";
-import { TIME_BALANCE, WAITING_PART, YEAR_COUNTS, ZONING_BALANCE, deserialize, hashState, heightAt, generateTerrain, replay } from "../packages/sim/src/index";
+import { TIME_BALANCE, WAITING_PART, YEAR_COUNTS, ZONING_BALANCE, deserialize, hashState, heightAt, generateTerrain, replayFrom } from "../packages/sim/src/index";
 import { MENU_SHIFT } from "./dock";
 import { cityReady, frames, hideNotes, openCity, openSettings, settingsButton, settle } from "./helpers";
-import { HALF, HOMES, MAIN, REZONED, SEED, SHOPS, SHORE, UPPER, X0, X1, XM, abandonmentCity, fillPoint, redevelopmentCity, stripCell, townCity, type Strip } from "./m3-walkthrough-city";
+import { HALF, HOMES, MAIN, REZONED, SEED, SHOPS, SHORE, UPPER, X0, X1, XM, abandonmentCity, fillPoint, redevelopmentCity, stripCell, townCity, townStart, type Strip } from "./m3-walkthrough-city";
 
 // The M3 exit test from docs/milestones/M3.md (issue M3-22), as one
 // walkthrough a player could do by hand, run once on WebGPU (when the
@@ -997,7 +997,9 @@ for (const variant of [
       const fullLog = [...pagedLog, ...state.log];
       expect(fullLog.map((e) => e.type)).toEqual(saved.log.map((e) => e.type));
       for (const e of fullLog) expect(["fixture", "local"]).toContain(e.playerId);
-      const rebuilt = replay(header.seed, fullLog, header.tick);
+      // From a city funded as the walkthrough's cities are: funding is not a command (M4-09).
+      expect(header.seed).toBe(SEED);
+      const rebuilt = replayFrom(townStart(), fullLog, header.tick);
       const hash = hashState(rebuilt);
       expect(hash).toBe(hashState(state));
       expect(rebuilt.stats.totals).toEqual(state.stats.totals);

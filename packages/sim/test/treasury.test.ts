@@ -32,11 +32,13 @@ describe("the treasury", () => {
   });
 
   it("has a line for each income and expense of the PRD's table, the other city spending included", () => {
-    expect(LEDGER_LINES).toHaveLength(18);
+    // Five charge lines since M4-08, mixed among them.
+    expect(LEDGER_LINES).toHaveLength(19);
     expect(LEDGER_LINES.slice(0, INCOME_LINES).every(isIncome)).toBe(true);
     expect(LEDGER_LINES.slice(INCOME_LINES).some(isIncome)).toBe(false);
     expect(isIncome("otherSpending")).toBe(false);
     expect(isIncome("chargeIndustrial")).toBe(true);
+    expect(isIncome("chargeMixed")).toBe(true);
   });
 
   it("moves money on each line, and the treasury is the starting grant plus every line ever moved", () => {

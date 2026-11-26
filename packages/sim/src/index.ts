@@ -169,12 +169,23 @@ export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
-export { GROWER_SYSTEM, cityPopulation, dayOf, dayQuotas, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
-export { BUSINESS_OUTPUTS, ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
-export type { DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
+export { GROWER_SYSTEM, cityPopulation, dayOf, extraChances, dayQuotas, dayWants, dueOnTick, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
+export { BUSINESS_OUTPUTS, CHARGE_ZONES, ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
+export type { ChargeZone, DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
+export {
+  buildingFloorSpace,
+  chargeOn,
+  chargePayload,
+  chargeShareAt,
+  chargeShares,
+  chargeZoneOf,
+  payDevelopmentCharge,
+  type SetDevelopmentChargePayload,
+} from "./economy/charges";
 export { floorSpaceOf, propertyValue, propertyValueOf, propertyValues, type FloorSpace } from "./economy/value";
 export {
   BUDGET_SYSTEM,
+  CHARGE_LINES,
   INCOME_LINES,
   LEDGER_LINES,
   LINE,
@@ -194,6 +205,7 @@ export {
 export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
 export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
 export { TAX_SYSTEM, buildingTaxByLine, buildingTaxPerYear, businessTaxOf, collectTax, residentialTaxOf, shopSalesScale, type BusinessTaxTerms, type JobsFilled, type TaxByLine } from "./economy/tax";
+export { areaBudget, blockBudget, blockBudgets, blockBudgetsWith, budgetAreasOfSlots, chunkBudget, type AreaBudget, type BlockBudgets } from "./economy/block-budget";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";
@@ -227,6 +239,8 @@ export {
   bulldozeClears,
   gridEffects,
   gridClears,
+  gridClearsReason,
+  gridRehearsal,
   planBulldozeBuildings,
   previewBuildRoad,
   previewBuildRoadGrid,
@@ -235,8 +249,11 @@ export {
   roadEffects,
   roadClears,
   seeBuilding,
+  upgradeClears,
 } from "./buildings/bulldoze";
-export type { BuildingSeen, BuildingsInTheWay, RoadEffects, BulldozeBuildingPayload, PeopleIn, Refusal } from "./buildings/bulldoze";
+export type { BuildingSeen, BuildingsInTheWay, RoadEffects, RoadPreview, BulldozeBuildingPayload, FilledIn, PeopleIn, Refusal } from "./buildings/bulldoze";
+export { NO_COMPENSATION, applyExpropriationDelta, checkExpropriations, compensationFor, expropriationDelta, expropriationTicks } from "./economy/compensation";
+export type { Compensation, CountIn, Expropriation, ExpropriationDelta } from "./economy/compensation";
 export { applyBuildingDelta, drainBuildingDelta, recordBuildingChanges } from "./buildings/delta";
 export type { BuildingDelta } from "./buildings/delta";
 export type { ZoneCellsPayload, ZonePlan, ZonePlanResult, ZonePoint, ZoneRect } from "./zoning/zone";
@@ -311,7 +328,7 @@ export type { LevelledShape } from "./roads/levels";
 export { applyRoadDelta, drainRoadChanges, encodeRoadDelta, mergeRoadChanges, recordRoadChanges } from "./roads/delta";
 export type { RoadChanges, RoadDelta } from "./roads/delta";
 export { CHUNKS_PER_SIDE, CHUNK_SIZE } from "./chunks";
-export { UNDO_STEPS, applyUndoDelta, diffUndo, planUndo } from "./undo";
+export { UNDO_STEPS, applyUndoDelta, diffUndo, planUndo, tookReason } from "./undo";
 export type { UndoDelta, UndoPlanResult, UndoRecord } from "./undo";
 export type { NetworkOp, SegmentRow } from "./roads/network";
 export { DERIVED_STAGES, prepareDerived, type DerivedStage } from "./derived";
@@ -364,5 +381,5 @@ export {
 export type { ConnectionBalance, ConnectionSite } from "./roads/connections";
 export { SCALE_BUILDINGS, SCALE_CITY_RESIDENTS, SCALE_PLAYER, SCALE_SEED, SCALE_SEGMENTS, SCALE_TREASURY, buildScaleCity, createScaleState, generateScaleCity, growScaleCity } from "./scale";
 export type { GeneratedScaleCity, ScaleCity, ScaleCityResidents, ScaleCityTotals, ScaleCounts, ScaleTown } from "./scale";
-export { BLOCK_MIN_AREA, blockById, blockIndexOf, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
+export { BLOCK_MIN_AREA, blockById, blockIndexOf, blockOnSide, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
 export type { Block, BlockIndex } from "./roads/blocks";

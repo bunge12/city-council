@@ -712,7 +712,8 @@ function playSession(): SimState {
   until(4 * DAY);
   send("BulldozeRoad", withEnds(state.roads, { segments: [cellAt(state, 4300, south - HALF - 4)?.segment as number] }), "p2");
   until(6 * DAY);
-  send("Undo", {}, "p2");
+  // The bulldoze took through-lots, so it cannot be undone (M4-09): refused, and not in the log.
+  expect(submit(state, { seq: 99, playerId: "p2", type: "Undo", payload: {} }).ok).toBe(false);
   until(10 * DAY);
   return state;
 }
@@ -738,24 +739,21 @@ describe("replay fixture through-lots", () => {
     expect(hashState(state)).toBe(fixture.hash);
   });
 
-  it("builds a through-lot, loses it with its back road, and grows again after the undo", () => {
+  it("builds a through-lot, loses it with its back road, and grows again on the free ground", () => {
     const at = (tick: number) => replayFixture(fixture, tick);
     const grown = at(2 * DAY);
     expect(throughIds(grown).length).toBeGreaterThan(0);
     // The split outside the block leaves them standing.
     const split = at(2 * DAY + 1);
     expect(throughIds(split)).toEqual(throughIds(grown));
-    // The bulldoze takes the one on the piece it removed.
+    // The bulldoze takes the one on the piece it removed, and cannot be undone (M4-09).
     const beforeBulldoze = at(4 * DAY);
     const bulldozed = at(4 * DAY + 1);
     expect(throughIds(bulldozed).length).toBeLessThan(throughIds(beforeBulldoze).length);
-    // The undo brings the road back with its zoning but not its buildings
-    // (issue 111), and the block grows again.
-    const undone = at(6 * DAY + 1);
-    expect(undone.cells.zone.filter((z) => z !== 0).length).toBe(beforeBulldoze.cells.zone.filter((z) => z !== 0).length);
-    expect(live(undone).length).toBeLessThanOrEqual(live(at(6 * DAY)).length);
+    expect(bulldozed.undo.at(-1)?.took).toBeGreaterThan(0);
+    // The block grows again on the strips the bulldoze left.
     const end = at(fixture.untilTick);
-    expect(live(end).length).toBeGreaterThan(live(undone).length);
+    expect(live(end).length).toBeGreaterThan(live(bulldozed).length);
     expect(live(end).filter((id) => (end.buildings.backDepth[id] ?? 0) === 0).length).toBeGreaterThan(0);
   });
 

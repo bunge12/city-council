@@ -26,7 +26,7 @@ import { addBuilding, checkBuildings } from "../src/buildings/buildings";
 import { candidateSets } from "../src/buildings/candidates";
 import { segmentBuildings } from "../src/buildings/where";
 import { checkRoadNetwork, isSegment, segmentIdLimit } from "../src/roads/network";
-import { checkUndoHistory, heldIds } from "../src/undo";
+import { checkUndoHistory, heldIds, tookReason } from "../src/undo";
 import { cellsSettled, syncCells } from "../src/zoning/cell-index";
 import { ZONE_UNTOUCHED, anchorHash, journalCells, journalLostZones, readJournals } from "../src/zoning/zone-undo";
 import { Fnv64 } from "../src/hash";
@@ -320,26 +320,37 @@ describe("Undo of ZoneCells", () => {
 });
 
 describe("Undo of a road change over zoned cells", () => {
-  it("brings a bulldozed street back with its zoning and no buildings", () => {
+  it("brings a bulldozed street back with its zoning", () => {
     const state = street();
     ok(state, paint("residential", 1, 0, 24, 4, "both"));
     ok(state, paint("commercial", 2, 10, 6, 6, "south"));
-    const ids = fill(state);
-    expect(ids.length).toBeGreaterThan(5);
+    // Nothing built yet: a bulldoze that takes buildings cannot be undone (M4-09).
+    expect(liveBuildings(state)).toEqual([]);
     const zoned = zones(state);
     const streetSegs = liveSegments(state).filter((s) => state.roads.segType[s] === 0);
     ok(state, command("BulldozeRoad", { segments: streetSegs }));
-    expect(liveBuildings(state)).toEqual([]);
     expect(readJournals(state.undo.at(-1)?.zones ?? new Int32Array(0)).length).toBe(streetSegs.length);
     ok(state, undo());
     expect(liveSegments(state).filter((s) => state.roads.segType[s] === 0)).toEqual(streetSegs);
     expect(zones(state)).toEqual(zoned);
-    expect(liveBuildings(state)).toEqual([]);
     expectSound(state);
-    // And the grower builds again.
+    // And the grower builds on it.
     const until = state.tick + 10 * DAY;
     while (state.tick < until) step(state);
     expect(liveBuildings(state).length).toBeGreaterThan(3);
+  });
+
+  it("refuses to undo a bulldozed street that took buildings, and keeps the undo record (M4-09)", () => {
+    const state = street();
+    ok(state, paint("residential", 1, 0, 24, 4, "both"));
+    const ids = fill(state);
+    expect(ids.length).toBeGreaterThan(5);
+    const streetSegs = liveSegments(state).filter((s) => state.roads.segType[s] === 0);
+    ok(state, command("BulldozeRoad", { segments: streetSegs }));
+    expect(liveBuildings(state)).toEqual([]);
+    expect(state.undo.at(-1)?.took).toBe(ids.length);
+    expect(submit(state, undo())).toEqual({ ok: false, reason: tookReason(ids.length) });
+    expect(state.undo.at(-1)?.type).toBe("BulldozeRoad");
   });
 
   it("brings back the zoning of one piece of a cut road, bulldozed", () => {
@@ -390,18 +401,34 @@ describe("Undo of a road change over zoned cells", () => {
   it("removes a road built across zoned cells and brings back the zoning it blocked", () => {
     const state = street();
     ok(state, paint("residential", 1, 0, 24, 6, "both"));
-    const houses = fill(state);
+    // Nothing built yet: a road that takes buildings cannot be undone (M4-09).
+    expect(liveBuildings(state)).toEqual([]);
     const segs = liveSegments(state);
     const zoned = zones(state);
     ok(state, road([4300, 4500], [4300, 4700]));
-    // The new road took the houses on its ground, in the step on the tick its cells settle by.
     while (!cellsSettled(state)) step(state);
-    step(state);
-    expect(liveBuildings(state).length).toBeLessThan(houses.length);
     ok(state, undo());
     expect(liveSegments(state)).toEqual(segs);
     expect(zones(state)).toEqual(zoned);
     expectSound(state);
+  });
+
+  it("refuses to undo a road built across houses, before or after they go (M4-09)", () => {
+    const state = street();
+    ok(state, paint("residential", 1, 0, 24, 6, "both"));
+    const houses = fill(state);
+    state.speed = 0;
+    ok(state, road([4300, 4500], [4300, 4700]));
+    const took = state.undo.at(-1)?.took ?? 0;
+    expect(took).toBeGreaterThan(0);
+    // Paused, the houses still stand, already paid for, and undo is refused all the same.
+    expect(liveBuildings(state)).toEqual(houses);
+    expect(submit(state, undo())).toEqual({ ok: false, reason: tookReason(took) });
+    state.speed = 1;
+    while (!cellsSettled(state)) step(state);
+    step(state);
+    expect(liveBuildings(state).length).toBe(houses.length - took);
+    expect(submit(state, undo())).toEqual({ ok: false, reason: tookReason(took) });
   });
 
   it("removes a grid laid over zoned streets and brings back their zoning", () => {

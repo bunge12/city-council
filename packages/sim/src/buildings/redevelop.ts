@@ -43,7 +43,9 @@
 // through `removeBuildings`, which displaces the pops of a home (M3-12) and
 // frees the jobs of a workplace. The new building is the type of the lot
 // it takes, with residents for its lot and a variant drawn, as the grower
-// makes one. Redevelopment is free (M3, M4). Nothing runs while a change of
+// makes one. The city pays nothing for it. From M4-08 the developer pays a
+// development charge on the floor space the new building adds over the
+// ones it replaces (economy/charges.ts). Nothing runs while a change of
 // roads is settling, since the cells cannot be read.
 //
 // A home is not replaced while the grower holds new homes back (M3-21,
@@ -55,6 +57,7 @@
 // homes are counted on a tick that considers one, and again after each
 // home it replaces.
 
+import { buildingFloorSpace, payDevelopmentCharge } from "../economy/charges";
 import { TIME_BALANCE } from "../calendar";
 import { DEMAND_BALANCE } from "../demand/balance";
 import { LAND_VALUE_BALANCE, LAND_VALUE_MAX } from "../landvalue/balance";
@@ -173,13 +176,21 @@ export function planRedevelopment(state: SimState, id: number, density = zonedUp
   return { lot: best.lot, replaces: ids, worth: value, worthReplaced };
 }
 
-/** Replaces the buildings `plan` names with the building on its lot. Returns the new building's id. */
-function redevelop(state: SimState, plan: RedevelopmentPlan): number {
+/**
+ * Replaces the buildings `plan` names with the building on its lot, whose
+ * developer pays the development charge on the floor space it adds over
+ * theirs (M4-08). Returns the new building's id.
+ */
+export function redevelop(state: SimState, plan: RedevelopmentPlan): number {
+  let replaced = 0;
+  for (const id of plan.replaces) replaced += buildingFloorSpace(state.buildings, id);
   removeBuildings(state, plan.replaces);
   const type = BUILDING_TYPES[plan.lot.type] as BuildingType;
   const residents = residentsFor(type, plan.lot.width, plan.lot.depth);
   const variant = nextInt(state.rng, VARIANTS);
-  return addBuilding(state, { ...plan.lot, residents, variant });
+  const id = addBuilding(state, { ...plan.lot, residents, variant });
+  payDevelopmentCharge(state, id, replaced);
+  return id;
 }
 
 /** Whether the owner of building `id`, worth `value` in land, with its zone's bar at `bar`, rebuilds today: one draw from the generator. */

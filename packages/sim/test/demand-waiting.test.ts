@@ -185,9 +185,11 @@ describe("what waits, counted on a real city", () => {
 
   it("brings a held zone's bar down to 0 over the days, while its pull stays above zero", () => {
     const state = grown();
-    // Any open job holds a zone back: every workplace zone with an open job is held.
-    withValue(DEMAND_BALANCE, "openJobsMin", 0, () =>
-      withValue(DEMAND_BALANCE, "openJobsShareMax", 0, () => {
+    // Every workplace zone is held, open jobs or not: with thresholds below zero the hold never lifts as the
+    // jobs fill. Since M4-08's charges this town's office zone fills its last open jobs in about 20 days,
+    // and a hold that lifts lets the bar climb back before the test can read where it ends.
+    withValue(DEMAND_BALANCE, "openJobsMin", -1, () =>
+      withValue(DEMAND_BALANCE, "openJobsShareMax", -1, () => {
         const counts = zoneJobs(state);
         const office = ZONING_BALANCE.zones.findIndex((z) => z.id === "office") + 1;
         expect(counts.open[office]).toBeGreaterThan(0);
