@@ -126,9 +126,11 @@ describe("save and resume with zoning and growth on the scale city (issue M2-17)
     while (resumed.tick < start + TICKS) zoningTick(resumed, grids, seqB);
 
     const sessionEntries = straight.log.filter((e) => e.tick >= start);
-    for (const type of ["ZoneCells", "BulldozeBuilding", "BuildRoad", "BulldozeRoad", "Undo"]) {
+    for (const type of ["ZoneCells", "BulldozeBuilding", "BuildRoad", "BulldozeRoad"]) {
       expect(sessionEntries.filter((e) => e.type === type).length, type).toBeGreaterThan(5);
     }
+    // Most of the session's road commands go through houses, and a road change that took buildings cannot be undone (M4-09).
+    expect(sessionEntries.filter((e) => e.type === "Undo").length, "Undo").toBeGreaterThan(0);
     expect(mostBuildings).toBeGreaterThan(200);
     expect(resumed.tick).toBe(straight.tick);
     expect(buildingCount(resumed.buildings)).toBe(buildingCount(straight.buildings));

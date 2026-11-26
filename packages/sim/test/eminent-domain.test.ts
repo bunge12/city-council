@@ -22,6 +22,7 @@ import {
   expropriationTicks,
   floorSpaceOf,
   fundCity,
+  gridClearsReason,
   hashState,
   isBuilding,
   jobsFilled,
@@ -38,6 +39,7 @@ import {
   step,
   applyExpropriationDelta,
   expropriationDelta,
+  tookReason,
   type BuildingsInTheWay,
   type Expropriation,
   type Command,
@@ -45,7 +47,7 @@ import {
   type LedgerLine,
   type SimState,
 } from "../src/index";
-import { gridProblemReason } from "../src/roads/grid";
+import { enqueue } from "../src/commands";
 import { isSegment } from "../src/roads/network";
 import { cloneState } from "../src/state";
 import { holdDemand } from "./demand-helper";
@@ -316,16 +318,34 @@ describe("the commands that clear buildings charge what their plan says", () => 
     expectCharged(state, command("BuildRoad", payload), preview.plan.cost, "construction", preview.clears);
   });
 
-  it("BuildRoadGrid: a grid over the towers and the factories", () => {
+  it("BuildRoadGrid: refused over buildings, with nothing built or charged; on open ground, its cost alone", () => {
     const { state, s } = fresh();
     const x = s.x + 130;
     const z = s.z - 60;
-    const payload = { origin: { x, z }, along: { x: x + 96, z }, across: { x, z: z + 96 }, depth: 86, width: 86, type: "street" };
-    const preview = previewBuildRoadGrid(state, payload);
+    const over = { origin: { x, z }, along: { x: x + 96, z }, across: { x, z: z + 96 }, depth: 86, width: 86, type: "street" };
+    const preview = previewBuildRoadGrid(state, over);
     if (!preview.ok) throw new Error(preview.reason);
-    expect(preview.problem === null ? null : gridProblemReason(preview.plan, preview.problem)).toBeNull();
-    expect(preview.clears.compensation.occupied).toBeGreaterThan(0);
-    expectCharged(state, command("BuildRoadGrid", payload), preview.plan.cost, "construction", preview.clears);
+    expect(preview.problem).toBeNull();
+    const n = preview.clears.ids.length;
+    expect(n).toBeGreaterThan(0);
+    expect(preview.refusal).toBe(gridClearsReason(n));
+    expect(preview.price).toBe(preview.plan.cost);
+    const hash = hashState(state);
+    expect(submit(state, command("BuildRoadGrid", over))).toEqual({ ok: false, reason: gridClearsReason(n) });
+    // Queued past `submit`, as a replay queues it: the step refuses it the same way, from its one build.
+    enqueue(state, command("BuildRoadGrid", over));
+    state.speed = 0;
+    expect(step(state).map((d) => d.reason)).toEqual([gridClearsReason(n)]);
+    state.speed = 1;
+    expect(hashState({ ...state, speed: 1 })).toBe(hash);
+    // South of the town, on open ground, joining nothing built: charged its cost, on the construction line.
+    const open = { origin: { x: s.x + 40, z: s.z + 140 }, along: { x: s.x + 40 + 2 * 96, z: s.z + 140 }, across: { x: s.x + 40, z: s.z + 140 + 96 }, depth: 86, width: 86, type: "street" };
+    const fine = previewBuildRoadGrid(state, open);
+    if (!fine.ok) throw new Error(fine.reason);
+    expect(fine.refusal).toBeNull();
+    expect(fine.clears.ids).toEqual([]);
+    expectCharged(state, command("BuildRoadGrid", open), fine.plan.cost, "construction", fine.clears);
+    expect(state.undo.at(-1)?.took).toBe(0);
   });
 
   // An upgrade's lots move out with its wider surface, so on open ground it
@@ -366,24 +386,39 @@ describe("the commands that clear buildings charge what their plan says", () => 
 });
 
 describe("buildings paid for and not yet gone", () => {
-  /** The grid over the towers and factories from the test above, applied paused: its buildings stand until the game runs on past its settle. */
-  function pausedGrid(): { state: SimState; clears: BuildingsInTheWay } {
+  /**
+   * Streets across the houses and towers, all applied on one paused tick:
+   * too big a change to settle at once, so its buildings stand, paid for,
+   * until the game runs on past the settle. Not a grid, which never
+   * demolishes.
+   */
+  function pausedRoads(): { state: SimState; clears: BuildingsInTheWay } {
     const { state, s } = fresh();
     state.speed = 0;
-    const x = s.x + 130;
-    const z = s.z - 60;
-    const payload = { origin: { x, z }, along: { x: x + 96, z }, across: { x, z: z + 96 }, depth: 86, width: 86, type: "street" };
-    const preview = previewBuildRoadGrid(state, payload);
-    if (!preview.ok) throw new Error(preview.reason);
-    ok(state, command("BuildRoadGrid", payload));
+    const payloads = [3.5, 9.5, 16.5, 23.5, 30.5].map((p) => {
+      const at = CELL * p;
+      return { from: { x: s.x + s.dx * at - s.dz * 90, z: s.z + s.dz * at + s.dx * 90 }, to: { x: s.x + s.dx * at + s.dz * 90, z: s.z + s.dz * at - s.dx * 90 }, type: "street" };
+    });
+    const ids = new Set<number>();
+    let total = 0;
+    for (const payload of payloads) {
+      const preview = previewBuildRoad(state, payload);
+      if (!preview.ok) throw new Error(preview.reason);
+      for (const id of preview.clears.ids) ids.add(id);
+      total += preview.clears.compensation.total;
+      expect(submit(state, command("BuildRoad", payload)).ok).toBe(true);
+    }
+    expect(step(state)).toEqual([]);
     expect(cellsSettled(state)).toBe(false);
-    for (const id of preview.clears.ids) expect(isBuilding(state.buildings, id)).toBe(true);
-    for (const id of preview.clears.ids) expect(state.buildings.paid[id]).toBe(1);
-    return { state, clears: preview.clears };
+    const cleared = [...ids].sort((p, q) => p - q);
+    expect(cleared.length).toBeGreaterThan(0);
+    for (const id of cleared) expect(isBuilding(state.buildings, id)).toBe(true);
+    for (const id of cleared) expect(state.buildings.paid[id]).toBe(1);
+    return { state, clears: { ids: cleared, residents: 0, compensation: { ...compensationFor(state, [], people(state), filled(state)), total } } };
   }
 
   it("charges nothing again for a building a road has paid for, and records it once", () => {
-    const { state, clears } = pausedGrid();
+    const { state, clears } = pausedRoads();
     const charged = onLine(state, "compensation");
     expect(charged).toBe(clears.compensation.total);
     const records = state.expropriations.length;
@@ -397,30 +432,21 @@ describe("buildings paid for and not yet gone", () => {
     expect(state.expropriations).toHaveLength(records);
   });
 
-  it("leaves a road's buildings standing and paid for when it is undone before they go, and refunds only the road", () => {
-    const { state, clears } = pausedGrid();
-    const charged = onLine(state, "compensation");
-    const construction = onLine(state, "construction");
-    ok(state, command("Undo", {}));
-    expect(onLine(state, "construction")).toBe(0);
-    expect(construction).toBeGreaterThan(0);
-    // Compensation stays paid, as undo never brings a building back.
-    expect(onLine(state, "compensation")).toBe(charged);
+  it("refuses to undo a road that has paid for buildings, before they go and after", () => {
+    const { state } = pausedRoads();
+    const took = state.undo.at(-1)?.took ?? 0;
+    expect(took).toBeGreaterThan(0);
+    expect(submit(state, command("Undo", {}))).toEqual({ ok: false, reason: tookReason(took) });
     state.speed = 1;
     holdDemand({ residential: 0, commercial: 0, office: 0, industrial: 0 }, () => {
       while (!cellsSettled(state)) step(state);
       step(state);
     });
-    const standing = clears.ids.filter((id) => isBuilding(state.buildings, id));
-    expect(standing.length).toBeGreaterThan(0);
-    for (const id of standing) expect(state.buildings.paid[id]).toBe(1);
-    // Clearing one now costs nothing more.
-    const plan = planBulldozeBuildings(state, { buildings: standing.map((id) => seeBuilding(state.buildings, id)) });
-    expect(plan.ok && plan.compensation.total).toBe(0);
+    expect(submit(state, command("Undo", {}))).toEqual({ ok: false, reason: tookReason(took) });
   });
 
   it("starts every new building unpaid, a lot rebuilt on a paid id included", () => {
-    const { state, clears } = pausedGrid();
+    const { state, clears } = pausedRoads();
     state.speed = 1;
     holdDemand({ residential: 80, commercial: 80, office: 80, industrial: 80 }, () => {
       for (let i = 0; i < 5 * DAY; i++) step(state);

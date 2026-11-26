@@ -997,7 +997,7 @@ for (const variant of [
       await noteHomes("a road through the houses");
     });
 
-    await test.step("9. bulldoze a built street: its cells and buildings go; undo brings back the street and its zoning, and buildings grow again", async () => {
+    await test.step("9. bulldoze a built street: its cells and buildings go; undo is refused, since the bulldoze took buildings (M4-09)", async () => {
       await look(page, BULLDOZED.x, BULLDOZED.z, 260);
       const seg = await segmentNear(page, BULLDOZED.x, BULLDOZED.z);
       expect(seg).toBeGreaterThanOrEqual(0);
@@ -1008,7 +1008,6 @@ for (const variant of [
       const southCell = stripCell({ row: 4570, col: 3, north: false }, 2);
       const zonedBefore = [await cellZone(page, ...northCell), await cellZone(page, ...southCell)];
       expect(zonedBefore.map((c) => c?.zone)).toEqual([zoneNumber("mixed"), zoneNumber("residential")]);
-      const zonesBefore = await zoning(page);
       await settleBuilt(page);
       await shot(page, info, dir, "9-the-built-street");
 
@@ -1039,19 +1038,14 @@ for (const variant of [
       await settleBuilt(page);
       await shot(page, info, dir, "9-bulldozed-cells-and-buildings-gone");
 
+      // Buildings never come back, so neither does the street that took them: Ctrl+Z is refused, with the reason.
+      const logBefore = (await logTypes(page)).length;
       await page.keyboard.press("Control+KeyZ");
-      await expect.poll(() => segmentNear(page, BULLDOZED.x, BULLDOZED.z)).toBe(seg);
-      expect((await logTypes(page)).at(-1)).toBe("Undo");
-      await expect.poll(async () => [await cellZone(page, ...northCell), await cellZone(page, ...southCell)]).toEqual(zonedBefore);
-      expect(await zoning(page)).toEqual(zonesBefore);
-      // The buildings do not come back with it: the grower builds again.
-      expect((await buildings(page)).filter((b) => sides.includes(b.strip))).toEqual([]);
-      await settleBuilt(page);
-      await shot(page, info, dir, "9-undo-street-and-zoning-back");
-      await growUntil(page, "buildings on the street again", () => buildings(page), (bs) => sides.every((s) => bs.some((b) => b.strip === s)), 24_000);
-      await settleBuilt(page);
-      await shot(page, info, dir, "9-buildings-grow-again");
-      await noteHomes("the street bulldozed and undone, and grown again");
+      await expect(page.locator("#undo-note")).toHaveText(/^Can't undo: that change demolished \d+ buildings, and buildings never come back$/);
+      expect((await logTypes(page)).length).toBe(logBefore);
+      expect(await segmentNear(page, BULLDOZED.x, BULLDOZED.z)).toBe(-1);
+      await shot(page, info, dir, "9-undo-refused");
+      await noteHomes("the street bulldozed, its undo refused");
     });
 
     await test.step("10. a street drawn beside a zoned strip: its end snaps to a cell corner", async () => {
@@ -1238,7 +1232,7 @@ for (const variant of [
       const fullLog = [...pagedLog, ...state.log];
       expect(fullLog.map((e) => e.type)).toEqual(saved.log.map((e) => e.type));
       for (const e of fullLog) expect(["fixture", "local"]).toContain(e.playerId);
-      for (const type of ["ZoneCells", "BuildRoad", "BulldozeBuilding", "BulldozeRoad", "Undo", "SetSpeed"]) expect(fullLog.map((e) => e.type)).toContain(type);
+      for (const type of ["ZoneCells", "BuildRoad", "BulldozeBuilding", "BulldozeRoad", "SetSpeed"]) expect(fullLog.map((e) => e.type)).toContain(type);
       // The page held every bar, so the replay does too.
       const v = WALKTHROUGH_DEMAND;
       expect(header.seed).toBe(SEED);

@@ -1,5 +1,6 @@
 // A state as it was before version 32 (M4-09): no list of expropriations,
-// and no mark on the buildings the city has paid to clear. For the
+// no mark on the buildings the city has paid to clear, and no count on the
+// undo records of the buildings each command took. For the
 // migration and snapshot tests, which check that a version 31 save loads to
 // the same city with only those added. Every older `without...` helper
 // takes them out too, through `withoutSpending`, since a state from before
@@ -15,6 +16,13 @@ export function withoutExpropriations<T extends object>(state: T): T {
     const buildings: Loose = { ...(out["buildings"] as Loose) };
     delete buildings["paid"];
     out["buildings"] = buildings;
+  }
+  if (Array.isArray(out["undo"])) {
+    out["undo"] = (out["undo"] as Loose[]).map((record) => {
+      const rest: Loose = { ...record };
+      delete rest["took"];
+      return rest;
+    });
   }
   return out as T;
 }

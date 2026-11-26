@@ -493,7 +493,8 @@ describe("job matching", () => {
     expect([cut.roadOk[near], cut.roadOk[far]]).toEqual([1, 0]);
     expect(cut.zoneOf[far]).toBe(-1);
     expect(openingsProblem(state)).toBeNull();
-    ok(state, "Undo", {});
+    // The bulldoze took buildings, so it cannot be undone (M4-09): a new street joins the pieces again.
+    ok(state, "BuildRoad", { from: { x: x + CELL * 10, z }, to: { x: x + CELL * 50, z }, type: "street" });
     const joined = openingsOf(state);
     expect([joined.roadOk[near], joined.roadOk[far]]).toEqual([1, 1]);
     expect(openingsProblem(state)).toBeNull();

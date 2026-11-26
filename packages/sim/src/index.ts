@@ -224,6 +224,7 @@ export {
   bulldozeClears,
   gridEffects,
   gridClears,
+  gridClearsReason,
   gridRehearsal,
   planBulldozeBuildings,
   previewBuildRoad,
@@ -312,7 +313,7 @@ export type { LevelledShape } from "./roads/levels";
 export { applyRoadDelta, drainRoadChanges, encodeRoadDelta, mergeRoadChanges, recordRoadChanges } from "./roads/delta";
 export type { RoadChanges, RoadDelta } from "./roads/delta";
 export { CHUNKS_PER_SIDE, CHUNK_SIZE } from "./chunks";
-export { UNDO_STEPS, applyUndoDelta, diffUndo, planUndo } from "./undo";
+export { UNDO_STEPS, applyUndoDelta, diffUndo, planUndo, tookReason } from "./undo";
 export type { UndoDelta, UndoPlanResult, UndoRecord } from "./undo";
 export type { NetworkOp, SegmentRow } from "./roads/network";
 export { DERIVED_STAGES, prepareDerived, type DerivedStage } from "./derived";

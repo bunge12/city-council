@@ -1412,7 +1412,7 @@ describe("snapshots with a road network", () => {
 
   it("captures a state that a save can be written from while the city changes", () => {
     const state = withRoads();
-    state.undo = [{ playerId: "p1", entry: 0, type: "BuildRoad", ops: [{ op: "addNode", id: 1, grown: true }], zones: new Int32Array(0), spent: 0 }];
+    state.undo = [{ playerId: "p1", entry: 0, type: "BuildRoad", ops: [{ op: "addNode", id: 1, grown: true }], zones: new Int32Array(0), spent: 0, took: 0 }];
     const before = toHex(serialize(state));
     const hash = hashState(state);
     const captured = captureState(state);
@@ -1436,7 +1436,7 @@ describe("snapshots with a road network", () => {
       r.nodeX[0] = 999 + n;
       submit(state, { seq: 100 + n, playerId: "p1", type: "NoOp", payload: { n } });
       step(state);
-      state.undo = [...state.undo, { playerId: "p2", entry: n, type: "BuildRoad", ops: [], zones: new Int32Array(0), spent: 0 }];
+      state.undo = [...state.undo, { playerId: "p2", entry: n, type: "BuildRoad", ops: [], zones: new Int32Array(0), spent: 0, took: 0 }];
     };
     let n = 0;
     let part = steps.next();

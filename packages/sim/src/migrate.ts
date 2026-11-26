@@ -160,11 +160,19 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
     undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, spent: 0 })),
     logSpent: (old["log"] as unknown[]).map(() => 0),
   }),
-  // Version 32 keeps the expropriations of the last game year, and marks
-  // each building the city has paid to clear (M4-09). Clearing a building
-  // cost nothing before it and left no record, so an older city has no
-  // records and no building paid for.
-  31: (old) => ({ ...old, version: 32, buildings: buildingsWithPaid(old["buildings"]), expropriations: [] }),
+  // Version 32 keeps the expropriations of the last game year, marks each
+  // building the city has paid to clear, and counts on each undo record the
+  // buildings its command took (M4-09). Clearing a building cost nothing
+  // before it and left no record, so an older city has no records, no
+  // building paid for, and undo records that took none: they undo as they
+  // did.
+  31: (old) => ({
+    ...old,
+    version: 32,
+    undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, took: 0 })),
+    buildings: buildingsWithPaid(old["buildings"]),
+    expropriations: [],
+  }),
 };
 
 /** Version 29 statistics with money series of zeros as long as the history, after `next`. */

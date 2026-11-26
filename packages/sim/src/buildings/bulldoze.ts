@@ -22,7 +22,7 @@ import { chargeCompensation, compensationFor, type Compensation } from "../econo
 import { spendingRefusal } from "../economy/spend";
 import { planBulldoze, planUpgrade, upgradeRoad, type BulldozePlan, type UpgradePlan } from "../roads/edit";
 import { buildRoad, planRoad, type RoadPlan } from "../roads/build";
-import { buildRoadGrid, planRoadGrid, type GridPlan, type GridProblem } from "../roads/grid";
+import { buildRoadGrid, gridProblemReason, planRoadGrid, type GridPlan, type GridProblem } from "../roads/grid";
 import { endJournal, reverseOps, startJournal, type NetworkOp, type RoadNetwork } from "../roads/network";
 import type { SimState } from "../state";
 import { terrainOf } from "../terrain/cache";
@@ -31,7 +31,7 @@ import { newCellsOf, openCellsUnder, syncCells, type CellIndex } from "../zoning
 import { BUILDINGS_BALANCE } from "./balance";
 import { popIndexOf } from "../pops/where";
 import { isBuilding, removeBuildings, type BuildingState } from "./buildings";
-import { buildingsOnCells, buildingsOnSegments, buildingsOnStretch } from "./where";
+import { buildingsOnCells, buildingsOnCellsBefore, buildingsOnSegments, buildingsOnStretch } from "./where";
 
 /** One building a `BulldozeBuilding` names, as the player saw it: its id, its lot's first cell and the tick it was built on. */
 export interface BuildingSeen {
@@ -180,16 +180,24 @@ function rehearse<T>(state: SimState, build: (net: RoadNetwork) => boolean, read
   try {
     if (!build(net)) return none;
     ops = endJournal(net);
-    const added = new Set<number>();
-    // A restyled segment counts as new: an upgrade's wider surface covers ground its old one did not.
-    for (const op of ops) {
-      if (op.op === "addSeg" || op.op === "restyle") added.add(op.id);
-      else if (op.op === "removeSeg") added.delete(op.id);
-    }
-    return read(index, [...added].sort((p, q) => p - q));
+    return read(index, segmentsAdded(ops));
   } finally {
     reverseOps(net, ops ?? endJournal(net));
   }
+}
+
+/**
+ * The segments a journal added or restyled and left standing, ascending:
+ * the ones whose surface may cover ground. A restyled segment counts, as an
+ * upgrade's wider surface covers ground its old one did not.
+ */
+function segmentsAdded(ops: readonly NetworkOp[]): number[] {
+  const added = new Set<number>();
+  for (const op of ops) {
+    if (op.op === "addSeg" || op.op === "restyle") added.add(op.id);
+    else if (op.op === "removeSeg") added.delete(op.id);
+  }
+  return [...added].sort((p, q) => p - q);
 }
 
 /** The open cells the new segments' surfaces would cover, by key. */
@@ -272,8 +280,8 @@ export function gridClears(state: SimState, plan: GridPlan, people: PeopleIn = p
 
 /**
  * One rehearsal of a grid: the street it is refused at, or null, and the
- * buildings it would clear, none when refused. `BuildRoadGrid` checks the
- * grid and prices what it clears with it, in one build taken back.
+ * buildings it would clear, none when refused. For the grid tool's
+ * preview and `BuildRoadGrid`'s `validate`.
  */
 export function gridRehearsal(state: SimState, plan: GridPlan, people: PeopleIn = peopleOf(state), filled: FilledIn = filledOf(state)): { problem: GridProblem | null; clears: BuildingsInTheWay } {
   const terrain = terrainOf(state.seed);
@@ -328,9 +336,51 @@ export function previewBuildRoad(state: SimState, payload: unknown, people: Peop
 }
 
 /**
- * `planRoadGrid` on `state`, priced as `previewBuildRoad` prices a road.
- * For the grid tool's preview. A grid a street of which is refused clears
- * nothing, and `problem` says where it is refused, or is null.
+ * Why a grid that would clear `count` buildings is refused. A grid never
+ * demolishes: it is drawn on open ground, and may cross or join streets
+ * where no building stands on the ground it covers (M4-09).
+ */
+export function gridClearsReason(count: number): string {
+  return `A grid can't demolish buildings, and this one would take ${count === 1 ? "1 building" : `${count} buildings`}. Move it, or bulldoze them first`;
+}
+
+/**
+ * Builds the grid `plan` on `state` with the network's journal open and
+ * returns what it wrote, or takes it back and says why it is refused: the
+ * street a refusal came from, or the buildings it would clear
+ * (`gridClearsReason`). One build, with no rehearsal: which cells it covers
+ * is read with the build standing, against the cells and buildings as they
+ * were before it (`buildingsOnCellsBefore`), as a rehearsal reads them.
+ */
+export function buildGridOnOpenGround(state: SimState, plan: GridPlan): { ok: true; ops: NetworkOp[] } | { ok: false; reason: string } {
+  const terrain = terrainOf(state.seed);
+  const index = syncCells(state);
+  const buildingsOn = buildingsOnCellsBefore(state);
+  const net = state.roads;
+  startJournal(net);
+  let problem: GridProblem | null = null;
+  let ops: NetworkOp[];
+  try {
+    problem = buildRoadGrid(net, terrain, plan);
+  } finally {
+    ops = endJournal(net);
+    if (problem !== null) reverseOps(net, ops);
+  }
+  if (problem !== null) return { ok: false, reason: gridProblemReason(plan, problem) };
+  const clears = buildingsOn(openCellsUnder(index, net, segmentsAdded(ops)), CELL_KEY_STRIDE);
+  if (clears.length > 0) {
+    reverseOps(net, ops);
+    return { ok: false, reason: gridClearsReason(clears.length) };
+  }
+  return { ok: true, ops };
+}
+
+/**
+ * `planRoadGrid` on `state`, with the buildings it would clear, for the
+ * grid tool's preview and `BuildRoadGrid`'s check. A grid a street of which
+ * is refused clears nothing, and `problem` says where it is refused, or is
+ * null. A grid never demolishes, so one that would clear a building is
+ * refused (`gridClearsReason`), and `price` is the grid's cost alone.
  */
 export function previewBuildRoadGrid(
   state: SimState,
@@ -341,7 +391,9 @@ export function previewBuildRoadGrid(
   const result = planRoadGrid(state.roads, terrainOf(state.seed), payload);
   if (!result.ok) return result;
   const { problem, clears } = gridRehearsal(state, result.plan, people, filled);
-  return { ...priced(state, result.plan, clears), problem };
+  const price = result.plan.cost;
+  const refusal = clears.ids.length > 0 ? gridClearsReason(clears.ids.length) : spendingRefusal(state, price);
+  return { ok: true, plan: result.plan, clears, price, refusal, problem };
 }
 
 /** `planBulldoze` on `state`, priced: the road's demolition less its refund, plus the compensation for the buildings on it. For the bulldoze tool's preview. */
