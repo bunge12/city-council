@@ -20,7 +20,7 @@ import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
 import { INITIAL_ZONE_TOOL, type ZonePreview, type ZoneToolState } from "../tools/zone-tool";
 import { toggledOverlay, type OverlayEntry, type OverlayId } from "./overlays";
-import { columnOrder, stacked, stackedForTool, type PanelId, type WindowId } from "./windows";
+import { columnOrder, stacked, stackedForOverlay, stackedForTool, type PanelId, type WindowId } from "./windows";
 
 export interface UiState extends RoadToolState, GridToolState, EditToolState, BulldozeToolState, RouteToolState, BlockOverlayState, ZoneToolState {
   debugOpen: boolean;
@@ -106,6 +106,11 @@ export const toggleMenu = (): void => togglePanel("city");
 export const toggleStats = (): void => togglePanel("stats");
 export const toggleSettings = (): void => togglePanel("settings");
 
+/** Puts away the overlay the player turned on, as its key would (overlays.ts, `toggledOverlay`). */
+export function closeOverlay(): void {
+  useUi.setState((s) => (s.overlay === null || s.overlay === "zoning" ? {} : { overlay: toggledOverlay(s.overlay, s.overlay, s.tool) }));
+}
+
 /** Turns overlay `id` on, putting away the one showing, or off again (overlays.ts, `toggledOverlay`). */
 export function toggleOverlay(id: OverlayEntry["id"]): void {
   useUi.setState((s) => ({ overlay: toggledOverlay(s.overlay, id, s.tool) }));
@@ -115,6 +120,13 @@ export function toggleOverlay(id: OverlayEntry["id"]): void {
 useUi.subscribe((s, prev) => {
   if (s.tool === prev.tool) return;
   const windows = stackedForTool(s.windows, s.tool, prev.tool);
+  if (windows !== s.windows) useUi.setState({ windows });
+});
+
+// So is an overlay the player turned on, however it came on or went away.
+useUi.subscribe((s, prev) => {
+  if (s.overlay === prev.overlay) return;
+  const windows = stackedForOverlay(s.windows, s.overlay, prev.overlay);
   if (windows !== s.windows) useUi.setState({ windows });
 });
 

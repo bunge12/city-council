@@ -18,7 +18,7 @@ declare const window: {
   cityCouncil: {
     mirror: { state: { log: { type: string }[]; roads: Record<string, ArrayLike<number>> } | null };
     camera: Promise<{
-      rig: { setPose(position: Vec3, target: Vec3): void };
+      rig: { setPose(position: Vec3, target: Vec3): void; pose: { target: { x: number; z: number } } };
       project(x: number, y: number, z: number): { x: number; y: number };
     }>;
   };
@@ -259,4 +259,27 @@ test("Enter builds a grid laid out after the Grid button was clicked, rather tha
   await expect(page.locator("#grid-tool")).toHaveAttribute("aria-pressed", "true");
   await away(page);
   await attach(page, testInfo, "7 Enter built it, and the grid tool is still on");
+});
+
+test("W A S D move the camera while a grid size field has focus, and leave its value alone", async ({ page }) => {
+  await openCity(page, startCity(), { name: "Grid" });
+  await look(page, 4240, 4610, 420);
+  await page.keyboard.press("KeyG");
+  const depth = page.locator("#grid-depth");
+  await depth.fill("6");
+  // The field keeps focus through a drag on the map, so the keys come from it.
+  await rectangle(page, [4350, 4480], [4350, 4740], [4120, 4600]);
+  await expect(depth).toBeFocused();
+
+  const target = () => page.evaluate(async () => (await window.cityCouncil.camera).rig.pose.target).then((t) => ({ x: t.x, z: t.z }));
+  for (const key of ["KeyW", "KeyA", "KeyS", "KeyD"]) {
+    const before = await target();
+    await page.keyboard.down(key);
+    await frames(page, 10);
+    await page.keyboard.up(key);
+    const after = await target();
+    expect(Math.hypot(after.x - before.x, after.z - before.z), key).toBeGreaterThan(1);
+  }
+  await expect(depth).toBeFocused();
+  await expect(depth).toHaveValue("6");
 });

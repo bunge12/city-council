@@ -7,8 +7,8 @@ import { TickRateMeter } from "../src/ui/rate";
 import { parseSeed, randomSeed } from "../src/ui/seed";
 import { DRAW_MODES, TOOL_ROAD_TYPES } from "../src/tools/road-tool";
 import { SHORTCUTS, shortcutFor, toggledSpeed, type KeyPress } from "../src/ui/shortcuts";
-import { setPanel, setViewReadout, togglePanel, useUi, useViewReadout } from "../src/ui/store";
-import { columnOrder, escapeTarget, stacked, stackedForTool } from "../src/ui/windows";
+import { closeOverlay, setPanel, setViewReadout, toggleOverlay, togglePanel, useUi, useViewReadout } from "../src/ui/store";
+import { columnOrder, escapeTarget, stacked, stackedForOverlay, stackedForTool } from "../src/ui/windows";
 
 describe("formatMoneyShort", () => {
   it.each([
@@ -257,5 +257,33 @@ describe("the order Escape closes windows in (issue #332)", () => {
     useUi.setState({ tool: null });
     setPanel("city", false);
     expect(useUi.getState()).toMatchObject({ menuOpen: false, windows: ["settings", "debug"] });
+  });
+
+  it("counts an overlay the player turned on as a window, and zoning as none", () => {
+    expect(stackedForOverlay(["debug"], "landValue", null)).toEqual(["debug", "overlay"]);
+    expect(stackedForOverlay(["overlay", "tool"], "zoning", "landValue")).toEqual(["tool"]);
+    expect(stackedForOverlay(["overlay"], null, "landValue")).toEqual([]);
+    expect(stackedForOverlay(["tool"], "zoning", null)).toEqual(["tool"]);
+    const same = ["overlay"] as const;
+    expect(stackedForOverlay(same, "landValue", "landValue")).toBe(same);
+  });
+
+  it("puts the land value overlay away on Escape, back to zoning while a tool brings it", () => {
+    useUi.setState({ windows: [], settingsOpen: false, menuOpen: false, debugOpen: false, statsOpen: false, logOpen: false, tool: null, overlay: null });
+    setPanel("stats", true);
+    toggleOverlay("landValue");
+    expect(useUi.getState().windows).toEqual(["stats", "overlay"]);
+    expect(escapeTarget(useUi.getState().windows)).toBe("overlay");
+    closeOverlay();
+    expect(useUi.getState()).toMatchObject({ overlay: null, windows: ["stats"] });
+    useUi.setState({ tool: "road", overlay: "zoning" });
+    toggleOverlay("landValue");
+    expect(useUi.getState().windows).toEqual(["stats", "tool", "overlay"]);
+    closeOverlay();
+    expect(useUi.getState()).toMatchObject({ overlay: "zoning", windows: ["stats", "tool"] });
+    // With zoning or nothing showing there is no overlay to put away.
+    closeOverlay();
+    expect(useUi.getState().overlay).toBe("zoning");
+    useUi.setState({ tool: null, overlay: null, windows: [], statsOpen: false });
   });
 });

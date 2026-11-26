@@ -893,7 +893,6 @@ kbd {
 /* Next to the cursor while a road is drawn. Clicks pass through to the map. */
 .road-readout {
   position: absolute;
-  max-width: 280px;
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -902,6 +901,18 @@ kbd {
   line-height: 1.35;
   pointer-events: none;
   white-space: nowrap;
+}
+
+/*
+ * Every readout grows to fit its lines, which do not wrap: a mixed tower's
+ * "Mixed M3 (6 × 6 lot) · 798/800 residents · 168/216 jobs" ran past a
+ * fixed width. The lines written as sentences wrap instead, at 280px, the
+ * width they wrapped at when the readout was capped at 280px.
+ */
+.road-readout .reason,
+.road-readout .lot-note,
+.building-readout .ground {
+  max-width: 280px;
 }
 
 .road-readout .reason {
@@ -1015,7 +1026,10 @@ kbd {
   transform: translate(-50%, -100%);
   pointer-events: none;
   border-color: #ff8a1f;
-  /* A house's line says the people living there against its room (M3-12), wider than the readouts' 280px. */
+}
+
+/* Why the bulldozer is refused wraps at 400px, its width when the tag was capped at 400px. */
+.bulldoze-tag .reason {
   max-width: 400px;
 }
 

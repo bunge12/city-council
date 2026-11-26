@@ -1,11 +1,13 @@
 // The order windows were opened in, so Escape closes the newest first
 // (issue #332). A panel is a window, and so is a tool with its menu: Escape
 // on a tool drops what it holds and then leaves it, so a tool stays on top
-// until it is off. Pure, so the order is checked without a page.
+// until it is off. An overlay the player turned on, such as land value, is
+// a window too, so Escape puts it away. Zoning is not: it comes and goes
+// with the tools that bring it. Pure, so the order is checked without a page.
 
 /** The panels that open from a button, and the tool on the dock. */
 export type PanelId = "settings" | "city" | "stats" | "log" | "debug";
-export type WindowId = PanelId | "tool";
+export type WindowId = PanelId | "tool" | "overlay";
 
 /** The element each panel is, by id, for focus and the buttons that control it. */
 export const PANEL_ELEMENTS: Record<PanelId, string> = {
@@ -41,6 +43,16 @@ export function stacked(windows: readonly WindowId[], id: WindowId, open: boolea
 export function stackedForTool(windows: readonly WindowId[], now: string | null, before: string | null): readonly WindowId[] {
   if (now === before) return windows;
   return stacked(windows, "tool", now !== null);
+}
+
+/**
+ * The stack after the overlay changes from `before` to `now`. Turning on
+ * one the player chooses, or another one, puts the overlay on top; going
+ * to zoning or to none takes it out.
+ */
+export function stackedForOverlay(windows: readonly WindowId[], now: string | null, before: string | null): readonly WindowId[] {
+  if (now === before) return windows;
+  return stacked(windows, "overlay", now !== null && now !== "zoning");
 }
 
 /** The window Escape closes: the newest, or null with none open. */
