@@ -158,11 +158,6 @@ function withOldMoney(state: SimState): SimState {
 }
 
 /**
- * Gives `state`, in place, the demand the version 32 migration gives a city
- * saved before it: each bar's waiting part at 0, the bar reading what it
- * pulled (#420). Returns it.
- */
-/**
  * Gives `state`, in place, the tax parts the version 34 migration gives a
  * city saved before it: each at 0, the bar reading what it did. Takes the
  * part's value off the bar so the bar is still the sum of its parts.
@@ -183,6 +178,11 @@ function withNoCharges(state: SimState): SimState {
   return state;
 }
 
+/**
+ * Gives `state`, in place, the demand the version 32 migration gives a city
+ * saved before it: each bar's waiting part at 0, the bar reading what it
+ * pulled (#420). Returns it.
+ */
 function withNoWaiting(state: SimState): SimState {
   for (const bar of DEMAND_BARS) {
     const b = state.demand[bar];

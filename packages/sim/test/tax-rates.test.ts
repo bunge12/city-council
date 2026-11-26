@@ -166,6 +166,9 @@ describe("SetTaxRate", () => {
     expect(state.budget.taxRates[office]).toBe(rate);
     expect(Array.from(state.budget.taxRates).filter((_, i) => i !== office)).toEqual(was.filter((_, i) => i !== office));
     expect(state.log.at(-1)?.type).toBe("SetTaxRate");
+    // -0 is stored as 0, as a JSON log would carry it, so the hash agrees.
+    ok(state, "SetTaxRate", { zone: "office", rate: -0 });
+    expect(Object.is(state.budget.taxRates[office], 0)).toBe(true);
   });
 
   it("refuses a rate outside the range in economy.json with a reason, and a zone or rate it does not know", () => {

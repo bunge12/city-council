@@ -67,7 +67,8 @@ export function taxRatePayload(payload: unknown): SetTaxRatePayload | string {
   if (typeof rate !== "number" || !Number.isFinite(rate)) return "SetTaxRate payload.rate must be a number, a fraction such as 0.01 for one percent";
   const range = ECONOMY.taxRates[zone as EconomySlider];
   if (rate < range.min || rate > range.max) return `The ${zone} tax rate runs from ${percent(range.min)} to ${percent(range.max)}`;
-  return { zone: zone as EconomySlider, rate };
+  // -0 passes the range check but a JSON log turns it into 0, and the hash reads the bytes.
+  return { zone: zone as EconomySlider, rate: rate === 0 ? 0 : rate };
 }
 
 /** `rate` as a percentage for a reason: 0.015 as "1.5%". */

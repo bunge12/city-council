@@ -159,7 +159,7 @@ export interface DeltaMessage {
   /**
    * The four demand bars and their parts after the last step, a copy (M3-06,
    * protocol version 17; the residential bar's satisfaction part, M3-10,
-   * version 19). Always sent, like `centre`: the bars move once a
+   * version 19; each bar's tax part, M4-07, version 28). Always sent, like `centre`: the bars move once a
    * day, the client shows what pushes them, and a copy whose bars fell
    * behind would hash differently from the sim.
    */
