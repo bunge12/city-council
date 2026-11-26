@@ -33,8 +33,12 @@ export function builtNote(preview: ZonePreview): string | null {
   return preview.whole ? `Including ${n} under buildings; the buildings stay` : `Hold Shift to include ${n} under buildings`;
 }
 
-/** The readout's line over mixed ground, which has no demand bar of its own (issue M3-15). */
-export const MIXED_NOTE = "Builds when residential and commercial demand are both above zero";
+/**
+ * The readout's line over mixed ground, which has no demand bar of its own
+ * (issue M3-15). The grower reads each bar without its part for what is
+ * already waiting (#420), so mixed can build while a bar shows 0.
+ */
+export const MIXED_NOTE = "Builds when residential and commercial demand are both above zero, not counting homes and jobs still filling";
 
 /**
  * Next to the cursor while the zone tool is over cells: how many a click

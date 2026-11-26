@@ -19,7 +19,7 @@ import { unzonedCells, type CellState } from "./zoning/cells";
  * Shape version of SimState. Any change to the shape bumps this and ships a
  * migration with a test (CLAUDE.md rule 11).
  */
-export const SNAPSHOT_VERSION = 31;
+export const SNAPSHOT_VERSION = 33;
 
 /** Game speeds. The number is how many ticks run per 100 ms of real time. */
 export const SPEEDS = [0, 1, 2, 4] as const;
@@ -136,8 +136,9 @@ export interface SimState {
    */
   travelLast: TravelLast | null;
   /**
-   * The treasury, the month's ledger and the month before's, and the four
-   * tax rates (economy/budget.ts, M4-02). Only `moveMoney` writes the
+   * The treasury, the month's ledger and the month before's, the four tax
+   * rates (economy/budget.ts, M4-02), and the five development charges
+   * (M4-08). Only `moveMoney` writes the
    * treasury or the ledger. A new city starts with the starting grant on
    * the grants line.
    */

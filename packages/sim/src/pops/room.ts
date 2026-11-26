@@ -22,6 +22,7 @@ import { NETWORK_ROAD } from "../roads/network";
 import { outsideReachByNode } from "../roads/outside";
 import type { SimState } from "../state";
 import { DEMAND_BALANCE } from "../demand/balance";
+import { demandPull } from "../demand/pull";
 import { POPS_BALANCE } from "./balance";
 import { popIndexOf } from "./where";
 
@@ -45,8 +46,8 @@ function usableRoom(left: number, density: number): number {
   return left >= leastNewcomers(density) ? left : 0;
 }
 
-/** Whether live building `id`'s road reaches an outside connection, read from `reach` (`outsideReachByNode`). */
-function roadReaches(state: SimState, reach: Uint8Array, id: number): boolean {
+/** Whether live building `id`'s road reaches an outside connection, read from `reach` (`outsideReachByNode`), for a caller asking of many buildings in one tick. */
+export function roadReaches(state: SimState, reach: Uint8Array, id: number): boolean {
   const net = state.roads;
   const seg = state.buildings.firstSeg[id] ?? -1;
   return net.segNetwork[seg] === NETWORK_ROAD && reach[net.segA[seg] ?? -1] === 1;
@@ -208,6 +209,6 @@ export function whyNoNewcomers(state: SimState, id: number): "abandoned" | "noRo
   if (!isBuilding(state.buildings, id) || (state.buildings.residents[id] ?? 0) <= 0) return null;
   if (isAbandoned(state.buildings, id)) return "abandoned";
   if (!homeReachesOutside(state, id)) return "noRoute";
-  if (state.demand.residential.value <= 0) return "noDemand";
+  if (demandPull(state.demand, "residential") <= 0) return "noDemand";
   return null;
 }

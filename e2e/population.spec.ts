@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, DEMAND_BALANCE, NONE, ROAD_TYPES, ZONING_BALANCE, connectionEnd, createState, generateTerrain, heightAt, reachableRoom, step, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, DEMAND_BALANCE, NONE, ROAD_TYPES, SCALE_TREASURY, TIME_BALANCE, WAITING_PART, ZONING_BALANCE, connectionEnd, createState, demandPull, fundCity, generateTerrain, heightAt, reachableRoom, step, syncCells, waitingShares, yearDays, type SimState } from "../packages/sim/src/index";
 import { formatDemandTitle } from "../packages/client/src/ui/top-figures";
+import { CITIES, Player, SEED as BALANCE_SEED } from "../packages/sim/test/balance/cities";
 import { buildEverySide, finishConstruction, zoneSides } from "./building-fixtures";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { frames, openCity, ready, settingsButton } from "./helpers";
@@ -21,7 +22,9 @@ import { frames, openCity, ready, settingsButton } from "./helpers";
 // Issue #330: a third city has six empty towers facing office towers, the
 // residential bar well above zero. While the towers fill the grower adds no
 // home, and the bar's tooltip says so; once fewer than `unfilledHomesMax`
-// are still filling, the line goes.
+// are still filling, the line goes. Since #420 the bar's last part takes
+// away what the filling homes hold back, so the steps read the bar without
+// it, its pull, which is what the line needs above zero.
 
 type Vec3 = readonly [number, number, number];
 interface Bar {
@@ -34,6 +37,7 @@ declare const window: {
     mirror: {
       room: number | null;
       homesWaiting(): { capacity: number; empty: number; unfilled: number } | null;
+      waitingFor(bar: string): number | null;
       state: {
         tick: number;
         log: { type: string }[];
@@ -122,6 +126,11 @@ async function copy(page: Page): Promise<{ population: number; room: number; mir
     if (!bar) throw new Error("no residential bar");
     return { population: s.stats.totals["population"] ?? 0, room, mirrorRoom: window.cityCouncil.mirror.room, residential: { value: bar.value, parts: { ...bar.parts } } };
   }, [BUILDING_ALIVE, BUILDING_ABANDONED] as const);
+}
+
+/** The residential bar without its part for homes still filling (#420): what newcomers and the grower read. */
+function pullOf(bar: Bar): number {
+  return bar.value - (bar.parts[WAITING_PART.residential] ?? 0);
 }
 
 async function setSpeed(page: Page, speed: number): Promise<void> {
@@ -316,7 +325,7 @@ test("while six towers fill, the residential bar's tooltip says new homes are wa
     await expect(bar).not.toHaveAttribute("data-tip", waitingLine);
     await bar.hover();
     const c = await copy(page);
-    expect(c.residential.value).toBeGreaterThan(0);
+    expect(pullOf(c.residential)).toBeGreaterThan(0);
     const waiting = await page.evaluate(() => window.cityCouncil.mirror.homesWaiting());
     expect(waiting?.unfilled).toBe(6);
     expect(waiting?.empty).toBe(c.room);
@@ -335,7 +344,7 @@ test("while six towers fill, the residential bar's tooltip says new homes are wa
     await expect.poll(() => page.evaluate(() => window.cityCouncil.mirror.homesWaiting()), { timeout: 120_000 }).toBeNull();
     await setSpeed(page, 0);
     const c = await copy(page);
-    expect(c.residential.value).toBeGreaterThan(0);
+    expect(pullOf(c.residential)).toBeGreaterThan(0);
     expect(c.population).toBeGreaterThan(0);
     expect(await page.evaluate(() => window.cityCouncil.mirror.homesWaiting())).toBeNull();
     await bar.hover();
@@ -343,5 +352,62 @@ test("while six towers fill, the residential bar's tooltip says new homes are wa
     await expect(bar).toHaveAttribute("data-tip", formatDemandTitle("residential", c.residential.value, c.residential.parts));
     await expect(tip).not.toHaveText(/New homes waiting/);
     await attach(page, testInfo, `${c.population} people in, nothing waiting`, true);
+  });
+});
+
+/**
+ * Issue #420: the balance check's balanced town after its first game year,
+ * built in Node. Its educated workers pull the office bar above zero, while
+ * its offices stand with more open jobs than the grower allows, so no office
+ * is built. The bar reads near 0, its tooltip names the open office jobs as
+ * what holds it, and says new offices are waiting.
+ */
+function officesHeldCity(): SimState {
+  const state = createState(BALANCE_SEED);
+  fundCity(state, SCALE_TREASURY);
+  const balanced = CITIES.find((c) => c.name === "balanced");
+  if (!balanced) throw new Error("no balanced town");
+  balanced.setup(new Player(state));
+  const year = yearDays() * TIME_BALANCE.ticksPerDay;
+  while (state.tick < year) step(state);
+  if (waitingShares(state).office !== 1) throw new Error("the grower does not hold offices back");
+  if (demandPull(state.demand, "office") < 5) throw new Error(`nothing pulls offices: ${demandPull(state.demand, "office")}`);
+  state.speed = 0;
+  return state;
+}
+
+test("a town whose offices stand with open jobs reads 0 office demand, and its tooltip says new offices are waiting (#420)", async ({ page }, testInfo) => {
+  const state = officesHeldCity();
+  await openCity(page, state, { name: "Balanced Town" });
+  await setSpeed(page, 0);
+  await look(page, 5976, 2112, 900);
+
+  await test.step("the office bar reads well under what pulls it, and the tooltip names the open jobs", async () => {
+    const office = page.locator("#demand-office");
+    await office.hover();
+    const bar = await page.evaluate(() => window.cityCouncil.mirror.state?.demand["office"]);
+    if (!bar) throw new Error("no office bar");
+    const pull = bar.value - (bar.parts[WAITING_PART.office] ?? 0);
+    expect(pull).toBeGreaterThan(5);
+    expect(bar.value).toBeLessThan(pull / 2);
+    const waiting = await page.evaluate(() => window.cityCouncil.mirror.waitingFor("office"));
+    expect(waiting).toBeGreaterThan(0);
+    await expect(office).toHaveAttribute("data-tip", formatDemandTitle("office", bar.value, bar.parts, waiting));
+    const tip = page.locator("#demand-office [role=tooltip]");
+    await expect(tip).toBeVisible();
+    await expect(tip).toContainText("Office jobs still open");
+    await expect(tip).toHaveText(new RegExp(`New offices waiting: ${(waiting ?? 0).toLocaleString("en-US")} open jobs to fill first\\.$`));
+    await attach(page, testInfo, "offices held, office bar and tooltip", true);
+  });
+
+  await test.step("the residential bar's tooltip shows its parts the same way", async () => {
+    const residential = page.locator("#demand-residential");
+    await residential.hover();
+    const bar = await page.evaluate(() => window.cityCouncil.mirror.state?.demand["residential"]);
+    if (!bar) throw new Error("no residential bar");
+    const waiting = await page.evaluate(() => window.cityCouncil.mirror.waitingFor("residential"));
+    await expect(residential).toHaveAttribute("data-tip", formatDemandTitle("residential", bar.value, bar.parts, waiting));
+    await expect(page.locator("#demand-residential [role=tooltip]")).toBeVisible();
+    await attach(page, testInfo, "residential bar and tooltip", true);
   });
 });

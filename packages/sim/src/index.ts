@@ -136,7 +136,7 @@ export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/ma
 export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
 export { TURNOVER, TURNOVER_SYSTEM, dayChances, turnOver, turnoverEvent } from "./pops/turnover";
 export type { DayChances, TurnoverEvent } from "./pops/turnover";
-export { countZoneJobs, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";
+export { countZoneJobs, countZoneJobsWith, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";
 export { zoneJobs } from "./pops/openings";
 export type { ZoneJobs } from "./pops/open-jobs";
 export type { ReachableRoom } from "./pops/room";
@@ -151,13 +151,16 @@ export {
   copyDemand,
   createDemand,
   demandTargets,
+  spendingPower,
   moveDemand,
+  waitingShares,
   type BarState,
   type DemandBar,
   type DemandInputs,
   type DemandState,
   type DemandTargets,
 } from "./demand/demand";
+export { WAITING_PART, demandPull } from "./demand/pull";
 export { nodeReachesOutside, prepareOutside, segmentReachesOutside, segmentsReachingOutside } from "./roads/outside";
 export { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_FLAG_VALUES, BUILDING_UNZONED, BUILDING_VACANT, buildingCount, buildingIdLimit, homeRoom, isAbandoned, isBuilding, isVacant, readBuilding } from "./buildings/buildings";
 export { VACANCY, VACANCY_SYSTEM, abandonedWaiting, buildingEmpty, checkVacancy, mayComeBack } from "./buildings/vacancy";
@@ -166,12 +169,23 @@ export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
-export { GROWER_SYSTEM, dayOf, dayQuotas, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
-export { ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
-export type { DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
+export { GROWER_SYSTEM, dayOf, extraChances, dayQuotas, dayWants, dueOnTick, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
+export { BUSINESS_OUTPUTS, CHARGE_ZONES, ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
+export type { ChargeZone, DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
+export {
+  buildingFloorSpace,
+  chargeOn,
+  chargePayload,
+  chargeShareAt,
+  chargeShares,
+  chargeZoneOf,
+  payDevelopmentCharge,
+  type SetDevelopmentChargePayload,
+} from "./economy/charges";
 export { floorSpaceOf, propertyValue, propertyValueOf, propertyValues, type FloorSpace } from "./economy/value";
 export {
   BUDGET_SYSTEM,
+  CHARGE_LINES,
   INCOME_LINES,
   LEDGER_LINES,
   LINE,
@@ -190,7 +204,7 @@ export {
 } from "./economy/budget";
 export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
 export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
-export { TAX_SYSTEM, buildingTaxPerYear, collectTax, residentialTaxOf } from "./economy/tax";
+export { TAX_SYSTEM, buildingTaxByLine, buildingTaxPerYear, businessTaxOf, collectTax, residentialTaxOf, shopSalesScale, type BusinessTaxTerms, type JobsFilled, type TaxByLine } from "./economy/tax";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";

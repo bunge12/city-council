@@ -10,6 +10,7 @@ import {
   TAX_SYSTEM,
   TIME_BALANCE,
   UPKEEP_SYSTEM,
+  buildingTaxByLine,
   buildingTaxPerYear,
   collectTax,
   dailyShare,
@@ -64,6 +65,12 @@ function occupiedHomes(state: SimState): number[] {
     if ((b.residents[id] ?? 0) > 0 && (people[id] ?? 0) > 0) out.push(id);
   }
   return out;
+}
+
+/** What this month's commercial, office and industrial tax lines hold together. */
+function businessLines(state: SimState): number {
+  const m = state.budget.month;
+  return (m[LINE.taxCommercial] as number) + (m[LINE.taxOffice] as number) + (m[LINE.taxIndustrial] as number);
 }
 
 /** The town, replayed and stepped on to the first tick of the next day. */
@@ -141,12 +148,14 @@ describe("the tax sweep", () => {
     let total = 0;
     for (let k = 0; k < DAY; k++) {
       state.tick = start + k;
-      const due = homes.filter((id) => id % DAY === k).reduce((sum, id) => sum + dailyShare(buildingTaxPerYear(state, id), day), 0);
+      const due = homes.filter((id) => id % DAY === k).reduce((sum, id) => sum + dailyShare(buildingTaxByLine(state, id)[RESIDENTIAL], day), 0);
       const before = state.budget.month[LINE.taxResidential] as number;
+      const business = businessLines(state);
       const treasury = state.budget.treasury;
       collectTax(state);
       expect(state.budget.month[LINE.taxResidential], `tick ${k} of the day`).toBe(before + due);
-      expect(state.budget.treasury).toBe(treasury + due);
+      // The rest of what the treasury gained went on the business lines (M4-06).
+      expect(state.budget.treasury).toBe(treasury + due + businessLines(state) - business);
       total += due;
     }
     expect(total).toBeGreaterThan(0);
@@ -197,7 +206,7 @@ describe("a game year of the town", () => {
         const day = Math.floor(state.tick / DAY) % yearDays();
         for (const id of occupiedHomes(state)) {
           if (id % DAY !== k) continue;
-          const yearly = buildingTaxPerYear(state, id);
+          const yearly = buildingTaxByLine(state, id)[RESIDENTIAL];
           const share = dailyShare(yearly, day);
           const row = owed.get(id) ?? { paid: 0, days: 0, yearly: new Set<number>() };
           row.paid += share;

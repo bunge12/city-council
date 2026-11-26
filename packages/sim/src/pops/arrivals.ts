@@ -37,6 +37,7 @@
 import { growthOnTick } from "../buildings/grower";
 import { yearDays } from "../calendar";
 import { DEMAND_BALANCE } from "../demand/balance";
+import { demandPull } from "../demand/pull";
 import { nextFloat, nextInt } from "../rng";
 import type { SimState } from "../state";
 import type { System } from "../step";
@@ -220,7 +221,7 @@ export function prepareArrivals(state: SimState): void {
 /** The arrivals system's work for one tick, as the header says. */
 export function arrive(state: SimState): void {
   const p = state.pops;
-  const bar = state.demand.residential.value;
+  const bar = demandPull(state.demand, "residential");
   if (!(bar > 0) && p.owed <= 0) return;
   // One pass over the buildings gives both the empty room the day's people follow and the homes they draw among.
   const { homes, empty } = homesAndEmptyRoom(state);

@@ -49,9 +49,13 @@ import {
   checkDemand,
   copyBudget,
   copyDemand,
+  ZONING_BALANCE,
+  countZoneJobsWith,
   holdsHomes,
   reachableRoomWith,
   whyNoNewcomers,
+  workplacesHeldBy,
+  type DemandBar,
   type ReachableRoom,
 } from "@city-council/sim";
 import { countRoom, roomAfter, roomBefore } from "./room";
@@ -214,6 +218,23 @@ export class SimMirror {
     if (!this.current) return null;
     const room = reachableRoomWith(this.current, this.occupancy.people);
     return holdsHomes(room) ? room : null;
+  }
+
+  /**
+   * What bar `bar`'s zone waits for while the grower holds it back, for its
+   * tooltip (#330, #420): the empty places in the homes still filling for
+   * residential (`homesWaiting`), or the open jobs in the zone's workplaces
+   * while there are too many of them (`workplacesHeldBy`). Null while the
+   * zone is not held, and before the first snapshot. Counted from the copy's
+   * buildings and roads and each building's people or jobs filled, with one
+   * pass over the buildings, so ask it while the tooltip is open.
+   */
+  waitingFor(bar: DemandBar): number | null {
+    if (bar === "residential") return this.homesWaiting()?.empty ?? null;
+    if (!this.current) return null;
+    const zone = ZONING_BALANCE.zones.findIndex((z) => z.id === bar) + 1;
+    const jobs = countZoneJobsWith(this.current, this.occupancy.filled);
+    return workplacesHeldBy(jobs, zone) ? (jobs.open[zone] ?? 0) : null;
   }
 
   /**

@@ -537,18 +537,69 @@ describe("an undo in the same step as a continuous road's segment", () => {
 });
 
 describe("switching part way through a road", () => {
-  it("drops the road being drawn and leaves nothing behind", () => {
-    const { tool, sent, state } = setup();
+  it("keeps the start when the mode changes, and drops a curve's direction", async () => {
+    const { tool, tick, settle, sent, state } = setup();
     tool.pickMode("curved");
     tool.click({ x: 4200, z: 4700 });
     tool.click({ x: 4300, z: 4600 });
     tool.pickMode("straight");
-    expect(state()).toMatchObject({ roadMode: "straight", roadStart: null, roadControl: null, roadPending: [] });
+    expect(state()).toMatchObject({ roadMode: "straight", roadStart: { x: 4200, z: 4700 }, roadControl: null, roadChain: 0 });
+    expect(tool.preview({ x: 4400, z: 4700 })).toMatchObject({ ok: true, control: null });
+    // Back to curved: the start stays, the direction is asked for again.
+    tool.pickMode("curved");
+    expect(state()).toMatchObject({ roadStart: { x: 4200, z: 4700 }, roadControl: null });
+    expect(tool.preview({ x: 4400, z: 4700 })).toBeNull();
+    tool.pickMode("straight");
+    tool.click({ x: 4400, z: 4700 });
+    expect(sent).toEqual([{ from: { x: 4200, z: 4700 }, to: { x: 4400, z: 4700 }, type: "street" }]);
+    expect(state().roadStart).toBeNull();
+    await settle();
+    tick();
+    await settle();
+    expect(state().roadPending).toEqual([]);
+  });
+
+  it("carries a straight start on into continuous mode, and continuous on into a single road", async () => {
+    const { tool, tick, settle, sent, state } = setup();
+    tool.pickMode("straight");
+    tool.click({ x: 4200, z: 4700 });
+    tool.pickMode("continuous");
+    expect(state().roadChain).not.toBe(0);
+    tool.click({ x: 4300, z: 4700 });
+    tool.click({ x: 4400, z: 4700 });
+    // The second segment waits for the first.
+    expect(sent).toHaveLength(1);
+    const chain = state().roadChain;
+    tool.pickMode("curved");
+    expect(state()).toMatchObject({ roadStart: { x: 4400, z: 4700 }, roadControl: null, roadChain: chain });
+    tool.click({ x: 4500, z: 4650 });
+    tool.click({ x: 4550, z: 4550 });
+    // The curve waits behind the chain it starts from, and ends the road.
+    expect(sent).toHaveLength(1);
+    expect(state()).toMatchObject({ roadStart: null, roadChain: 0 });
+    for (let i = 0; i < 3; i++) {
+      await settle();
+      tick();
+      await settle();
+    }
+    expect(sent.map((p) => p.from)).toEqual([
+      { x: 4200, z: 4700 },
+      { x: 4300, z: 4700 },
+      { x: 4400, z: 4700 },
+    ]);
+    expect(sent[2]?.control).toEqual({ x: 4500, z: 4650 });
+    expect(state().roadPending).toEqual([]);
+  });
+
+  it("drops the road being drawn when the tool is left", () => {
+    const { tool, sent, state } = setup();
     tool.pickMode("continuous");
     tool.click({ x: 4200, z: 4700 });
     tool.toggle();
     expect(state()).toMatchObject({ tool: null, roadStart: null, roadChain: 0, roadPending: [] });
     tool.toggle();
+    expect(state().roadStart).toBeNull();
+    tool.pickMode("curved");
     expect(state().roadStart).toBeNull();
     expect(sent).toEqual([]);
   });

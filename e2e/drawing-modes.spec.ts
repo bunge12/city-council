@@ -9,8 +9,8 @@ import { frames, openCity } from "./helpers";
 // from open ground ends on an existing node, a curved street leaves the end
 // of a road in line with it, a three-segment road is drawn in continuous
 // mode and ended with a double click, a continuous road stops at a segment
-// the sim refuses, and switching mode or tool part way through a road leaves
-// nothing behind.
+// the sim refuses, switching mode part way through a road keeps its start,
+// and switching tool part way through a road leaves nothing behind.
 
 type Vec3 = readonly [number, number, number];
 interface Net {
@@ -287,7 +287,7 @@ test("a continuous road stops at a refused segment and keeps the ones built", as
   expect(await segments(page)).toHaveLength(1);
 });
 
-test("switching mode or tool part way through a road cancels it and leaves nothing behind", async ({ page }) => {
+test("switching mode part way through a road keeps its start; switching tool leaves nothing behind", async ({ page }, testInfo) => {
   await openCity(page, city(true), { name: "Modes" });
   await look(page, 4380, 4680, 260);
   await page.keyboard.press("KeyR");
@@ -295,17 +295,26 @@ test("switching mode or tool part way through a road cancels it and leaves nothi
   await click(page, 4300, 4760);
   await click(page, 4400, 4700);
   await expect(step(page)).toHaveAttribute("data-step", "end");
-  // Mode switch: the curve goes.
+  // Mode switch: the curve's direction goes, its start stays.
   await page.keyboard.press("KeyT");
   await expect(page.locator("#draw-mode-straight")).toHaveAttribute("aria-pressed", "true");
-  await expect(step(page)).toHaveAttribute("data-step", "start");
+  await expect(step(page)).toHaveAttribute("data-step", "end");
   await hover(page, 4480, 4760);
-  await expect(page.locator("#road-readout")).toBeHidden();
+  await expect(page.locator("#road-readout")).toBeVisible();
+  await attach(page, testInfo, "curve switched to straight keeps its start");
+  // And back: a straight road switched to curved asks for its direction.
+  await page.keyboard.press("KeyY");
+  await expect(step(page)).toHaveAttribute("data-step", "direction");
+  await page.keyboard.press("KeyT");
+  await click(page, 4480, 4760);
+  await expect.poll(() => logLength(page)).toBe(2);
+  expect(await segments(page)).toHaveLength(2);
+  await expect(step(page)).toHaveAttribute("data-step", "start");
   // Tool switch, part way through a continuous road.
   await page.keyboard.press("KeyU");
-  await click(page, 4300, 4760);
-  await click(page, 4400, 4760);
-  await expect.poll(() => logLength(page)).toBe(2);
+  await click(page, 4300, 4700);
+  await click(page, 4400, 4700);
+  await expect.poll(() => logLength(page)).toBe(3);
   await hover(page, 4400, 4660);
   await expect(page.locator("#road-readout")).toBeVisible();
   await page.locator("#road-tool").click();
@@ -315,7 +324,7 @@ test("switching mode or tool part way through a road cancels it and leaves nothi
   // No road at the cursor. A parallel offset beside the street may still show its gap.
   await expect(page.locator("#road-cells")).toBeHidden();
   await expect(step(page)).toHaveAttribute("data-step", "start");
-  // Only the street and the one segment clicked before the switch.
-  expect(await logLength(page)).toBe(2);
-  expect(await segments(page)).toHaveLength(2);
+  // Only the street, the straight road and the one segment clicked before the switch.
+  expect(await logLength(page)).toBe(3);
+  expect(await segments(page)).toHaveLength(3);
 });
