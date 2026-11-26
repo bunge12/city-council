@@ -80,7 +80,7 @@ export interface BudgetState {
   month: Float64Array;
   /** The same for the month that last closed. All 0 until the first close. */
   lastMonth: Float64Array;
-  /** The four tax rates, in `ECONOMY_SLIDERS` order, as fractions. Issue M4-07 adds the command that sets them. */
+  /** The four tax rates, in `ECONOMY_SLIDERS` order, as fractions. Set by `SetTaxRate` (M4-07). */
   taxRates: Float64Array;
   /**
    * The five development charges, in `CHARGE_ZONES` order: whole dollars

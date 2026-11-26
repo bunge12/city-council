@@ -181,16 +181,48 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
     buildings: buildingsWithPaid(old["buildings"]),
     expropriations: [],
   }),
+  // Version 35 gives each demand bar a part for its zone's tax rate (M4-07),
+  // at 0, after its other weighted parts. The bar reads what it did, and the
+  // part takes its first step on the next day, from the rates the city has.
+  34: (old) => ({ ...old, version: 35, demand: demandWithTax(old["demand"]) }),
 };
 
-/** Version 31 demand bars with each bar's waiting part, at 0, in `DEMAND_PARTS` order. */
+/**
+ * Each bar's parts in version 35, the tax part's place fixed here so a later
+ * change of parts cannot move it in old saves: the version 34 parts with
+ * `tax` before the first name in `TAX_PART_BEFORE`.
+ */
+const TAX_PART_BEFORE: Readonly<Record<string, string>> = {
+  residential: "outsidePull",
+  commercial: "jobsOpen",
+  office: "jobsOpen",
+  industrial: "outsideRoute",
+};
+
+/** Version 34 demand bars with each bar's tax part, at 0, in its place before `TAX_PART_BEFORE`. */
+function demandWithTax(value: unknown): Record<string, unknown> {
+  const demand = value as Record<string, { value: number; parts: Record<string, number> }>;
+  const out: Record<string, unknown> = {};
+  for (const [bar, state] of Object.entries(demand)) {
+    const parts: Record<string, number> = {};
+    for (const [name, part] of Object.entries(state.parts)) {
+      if (name === TAX_PART_BEFORE[bar]) parts["tax"] = 0;
+      parts[name] = part;
+    }
+    out[bar] = { value: state.value, parts };
+  }
+  return out;
+}
+
+/** Version 31 demand bars with each bar's waiting part, at 0, in `DEMAND_PARTS` order, without the tax part. */
 function demandWithWaiting(value: unknown): Record<string, unknown> {
   const demand = value as Record<string, { value: number; parts: Record<string, number> }>;
   const out: Record<string, unknown> = {};
   for (const bar of DEMAND_BARS) {
     const state = demand[bar] as { value: number; parts: Record<string, number> };
     const parts: Record<string, number> = {};
-    for (const name of DEMAND_PARTS[bar]) parts[name] = state.parts[name] ?? 0;
+    // Version 32's parts: today's but the tax part version 35 adds.
+    for (const name of DEMAND_PARTS[bar]) if (name !== "tax") parts[name] = state.parts[name] ?? 0;
     out[bar] = { value: state.value, parts };
   }
   return out;

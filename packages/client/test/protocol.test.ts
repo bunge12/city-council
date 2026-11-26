@@ -6,6 +6,7 @@ import {
   CHUNK_SIZE,
   CHARGE_ZONES,
   ECONOMY,
+  ECONOMY_SLIDERS,
   LINE,
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
@@ -281,6 +282,33 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     runUntil(33 * day);
     expect(deltas().length).toBeGreaterThan(seen);
     expect(deltas().slice(seen).every((d) => d.budget === undefined)).toBe(true);
+  });
+
+  it("sends a tax rate the player sets in the next delta, with the budget, and its bar's tax part from the next day (M4-07)", async () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    const state = createBareState(7);
+    const host = new SimHost(state, hostEnd, () => now);
+    const mirror = new SimMirror(client, "p1");
+    const pump = () => {
+      now += PUMP_INTERVAL_MS;
+      host.pump();
+    };
+    pump();
+    const before = received.length;
+    const rate = ECONOMY.taxRates.commercial.max;
+    await mirror.sendCommand("SetTaxRate", { zone: "commercial", rate });
+    const commercial = ECONOMY_SLIDERS.indexOf("commercial");
+    for (let i = 0; i < 50 && mirror.state?.budget.taxRates[commercial] !== rate; i++) pump();
+    const deltas = received.slice(before).filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    expect(deltas.filter((d) => d.budget !== undefined)).toHaveLength(1);
+    expect(mirror.state?.budget.taxRates[commercial]).toBe(rate);
+    // The day after, the commercial bar's tax part pulls it down, on the mirror too.
+    for (let i = 0; i < 500 && (mirror.state?.demand.commercial.parts["tax"] ?? 0) === 0; i++) pump();
+    expect(mirror.state?.demand.commercial.parts["tax"]).toBeLessThan(0);
+    expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
   });
 
   it("sends a development charge the player sets in the next delta, with the budget (M4-08)", async () => {
