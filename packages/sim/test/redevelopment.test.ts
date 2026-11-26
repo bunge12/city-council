@@ -158,6 +158,8 @@ function houses(depth = 6): { state: SimState; street: Street; avenue: Street } 
   zoneBoth(state, s, "residential", 1, 0, 24, depth);
   // An avenue's edge is further from its middle than a street's.
   zoneBoth(state, end, "residential", 1, 0, 24, depth, 9);
+  // No development charge, so the houses grow at the bar's full pace (M4-08).
+  ok(state, "SetDevelopmentCharge", { zone: "residential", rate: 0 });
   holdDemand({ residential: 60 }, () => {
     toDayStart(state);
     runDays(state, 25);
@@ -264,11 +266,15 @@ describe("a built R1 street rezoned to R3", () => {
       expect(streetTowers.length).toBeGreaterThan(2);
       // The houses on the most valuable ground went first (M3-21: by the houses' own value, since a
       // tower count of a dozen made the avenue's and the street's median towers a matter of chance).
-      const gone = [...goneOn].sort((p, q) => p[1] - q[1]).map(([id]) => worthAt.get(id) ?? 0);
-      const half = Math.floor(gone.length / 2);
+      // Since M4-08 by the day each went: a tower takes two or three houses at once, so the first and
+      // second half of the houses by the order they went was a dozen draws, and swung either way.
+      const gone = [...goneOn].sort((p, q) => p[1] - q[1]);
       const mean = (xs: number[]) => xs.reduce((sum, x) => sum + x, 0) / Math.max(1, xs.length);
+      const wentOn = (keep: (worth: number) => boolean) => mean(gone.filter(([id]) => keep(worthAt.get(id) ?? 0)).map(([, tick]) => tick / DAY));
       expect(gone.length).toBeGreaterThan(20);
-      expect(mean(gone.slice(0, half))).toBeGreaterThan(mean(gone.slice(half)) + 5);
+      // The avenue's houses stand on ground worth 100 and the street's on 60 (`avenueWorthMore`).
+      expect(gone.some(([id]) => (worthAt.get(id) ?? 0) < 80)).toBe(true);
+      expect(wentOn((worth) => worth > 80) + 15).toBeLessThan(wentOn((worth) => worth < 80));
       // The pops of the houses replaced live elsewhere now, nobody waits, and the towers hold more people than the houses did.
       let moved = 0;
       for (const [pop, home] of lived) {

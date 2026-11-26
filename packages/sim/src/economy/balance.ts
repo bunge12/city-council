@@ -8,9 +8,16 @@ import { isRecord, isShare, unknownKeys } from "../balance-fields";
 import { JOB_KINDS, type JobKind } from "../buildings/balance";
 import { ROAD_BALANCE } from "../roads/balance";
 
-/** The four tax and charge sliders (M4.md). Mixed pays the residential and commercial ones. */
+/** The four tax sliders and price keys (M4.md). Mixed pays the residential and commercial tax rates. */
 export const ECONOMY_SLIDERS = ["residential", "commercial", "office", "industrial"] as const;
 export type EconomySlider = (typeof ECONOMY_SLIDERS)[number];
+
+/**
+ * The five development charge sliders, in zone order (zoning.json). Mixed
+ * has its own, since a mixed building is one project (M4-08).
+ */
+export const CHARGE_ZONES = ["residential", "commercial", "office", "industrial", "mixed"] as const;
+export type ChargeZone = (typeof CHARGE_ZONES)[number];
 
 /** Which index raises a price to 2026. */
 export type PriceIndex = "construction" | "general";
@@ -65,7 +72,8 @@ export interface EconomyBalanceFile {
   startingGrant: EconomyPrice;
   overdraft: EconomyPrice;
   taxRates: Record<EconomySlider, EconomyRate>;
-  developmentCharges: Record<EconomySlider, EconomyPriceRange>;
+  developmentCharges: Record<ChargeZone, EconomyPriceRange>;
+  developmentChargeGrowth: { shareAtMax: number; source: string; sourceUrl?: string; placeholder?: boolean; note?: string };
   value: {
     perSquareMetre: Record<EconomySlider, EconomyPrice>;
     landValueReference: number;
@@ -97,7 +105,9 @@ export interface Economy {
   startingGrant: number;
   overdraft: number;
   taxRates: Record<EconomySlider, { default: number; min: number; max: number }>;
-  developmentCharges: Record<EconomySlider, DevelopmentCharge>;
+  developmentCharges: Record<ChargeZone, DevelopmentCharge>;
+  /** The share of a zone's daily quota left with its charge at the top of its range (M4-08). */
+  developmentChargeGrowth: { shareAtMax: number };
   value: { perSquareMetre: Record<EconomySlider, number>; landValueReference: number; landValueWeight: number };
   floorSpace: { perResident: number; perJob: Record<JobKind, number> };
   eminentDomain: {
@@ -188,12 +198,12 @@ function shareRecordProblems(value: unknown, where: string, toYear: number): str
   return errors;
 }
 
-/** Problems with `value` as one entry per slider, each checked by `check`. */
-function perSlider(value: unknown, where: string, check: (entry: unknown, at: string) => string[]): string[] {
+/** Problems with `value` as one entry per slider of `sliders`, the four tax sliders by default, each checked by `check`. */
+function perSlider(value: unknown, where: string, check: (entry: unknown, at: string) => string[], sliders: readonly string[] = ECONOMY_SLIDERS): string[] {
   if (!isRecord(value)) return [`${where} is missing`];
   const errors: string[] = [];
-  for (const slider of ECONOMY_SLIDERS) errors.push(...check(value[slider], `${where}.${slider}`));
-  errors.push(...unknownKeys(value, ECONOMY_SLIDERS, where));
+  for (const slider of sliders) errors.push(...check(value[slider], `${where}.${slider}`));
+  errors.push(...unknownKeys(value, sliders, where));
   return errors;
 }
 
@@ -226,7 +236,15 @@ export function checkEconomyBalance(data: unknown): string[] {
   errors.push(...priceProblems(data["startingGrant"], "startingGrant", toYear));
   errors.push(...priceProblems(data["overdraft"], "overdraft", toYear));
   errors.push(...perSlider(data["taxRates"], "taxRates", rateProblems));
-  errors.push(...perSlider(data["developmentCharges"], "developmentCharges", (v, at) => rangeProblems(v, at, toYear)));
+  errors.push(...perSlider(data["developmentCharges"], "developmentCharges", (v, at) => rangeProblems(v, at, toYear), CHARGE_ZONES));
+  errors.push(
+    ...blockProblems(data, "developmentChargeGrowth", (g) => {
+      const out: string[] = [];
+      if (!isShare(g["shareAtMax"])) out.push("developmentChargeGrowth.shareAtMax must be a share from 0 to 1");
+      out.push(...sourceProblems(g, "developmentChargeGrowth"), ...unknownKeys(g, ["shareAtMax", ...WORDS], "developmentChargeGrowth"));
+      return out;
+    }),
+  );
   errors.push(
     ...blockProblems(data, "value", (v) => {
       const out = perSlider(v["perSquareMetre"], "value.perSquareMetre", (p, at) => priceProblems(p, at, toYear));
@@ -290,7 +308,7 @@ export function checkEconomyBalance(data: unknown): string[] {
       return out;
     }),
   );
-  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "value", "floorSpace", "eminentDomain", "loans", "creditLimit"], "the file"));
+  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "developmentChargeGrowth", "value", "floorSpace", "eminentDomain", "loans", "creditLimit"], "the file"));
   return errors;
 }
 
@@ -320,7 +338,13 @@ export function resolveEconomy(data: unknown): Economy {
     startingGrant: at(file.startingGrant),
     overdraft: at(file.overdraft),
     taxRates: sliders(file.taxRates, (r) => ({ default: r.default, min: r.min, max: r.max })),
-    developmentCharges: sliders(file.developmentCharges, (c) => ({ default: at(c), min: at(c, c.min), max: at(c, c.max) })),
+    developmentCharges: Object.fromEntries(
+      CHARGE_ZONES.map((zone) => {
+        const c = file.developmentCharges[zone];
+        return [zone, { default: at(c), min: at(c, c.min), max: at(c, c.max) }];
+      }),
+    ) as Record<ChargeZone, DevelopmentCharge>,
+    developmentChargeGrowth: { shareAtMax: file.developmentChargeGrowth.shareAtMax },
     value: {
       perSquareMetre: sliders(file.value.perSquareMetre, (p) => at(p)),
       landValueReference: file.value.landValueReference,

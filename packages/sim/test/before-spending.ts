@@ -5,11 +5,13 @@
 // through `withoutMoney`, since a state from before any earlier version is
 // from before this one.
 
+import { withoutCharges } from "./before-charges";
+
 type Loose = Record<string, unknown>;
 
-/** `state` with the fields version 31 added taken out. Leaves a state that has none as it is. */
+/** `state` with the fields version 31 added taken out, and version 32's. Leaves a state that has none as it is. */
 export function withoutSpending<T extends object>(state: T): T {
-  const out: Loose = { ...(state as Loose) };
+  const out: Loose = { ...(withoutCharges(state) as Loose) };
   delete out["logSpent"];
   if (Array.isArray(out["undo"])) {
     out["undo"] = (out["undo"] as Loose[]).map((record) => {

@@ -6,7 +6,7 @@ import { terrainOf } from "../src/terrain/cache";
 import { checkUndoHistory } from "../src/undo";
 import { createDemand } from "../src/demand/demand";
 import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
-import { ECONOMY } from "../src/economy/balance";
+import { CHARGE_ZONES, ECONOMY } from "../src/economy/balance";
 import { dailyShare, emptyBudget } from "../src/economy/budget";
 import { roadUpkeepPerYear } from "../src/economy/upkeep";
 import { addBuilding } from "../src/buildings/buildings";
@@ -14,6 +14,7 @@ import { addPop, setPopWork } from "../src/pops/pops";
 import { withEnds } from "./seen-ends";
 import { withoutSatisfaction } from "./before-satisfaction";
 import { withoutVacancy } from "./before-vacancy";
+import { withoutCharges } from "./before-charges";
 
 /**
  * `state` as an older version: its fields minus the ones that version did
@@ -35,6 +36,10 @@ import { withoutVacancy } from "./before-vacancy";
  */
 function older(state: SimState, version: number, ...drop: (keyof SimState)[]): { version: number } & Record<string, unknown> {
   const gone: string[] = [...drop];
+  // Before version 32 no city had development charges (M4-08), and its
+  // migration gives the defaults and an empty mixed charge line. `state`
+  // gets the same in place.
+  if (version < 32) withNoCharges(state);
   // Before version 31 nothing kept the money a command moved (M4-03), and
   // its migration gives every amount as 0. `state` gets the same in place.
   if (version < 31) {
@@ -57,6 +62,7 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   if (version < 26) gone.push("redevelopedToday");
   if (version < 27) gone.push("travelLast");
   const kept = Object.fromEntries(Object.entries(state).filter(([key]) => !gone.includes(key)));
+  if (version < 32 && kept["budget"]) kept["budget"] = (withoutCharges({ budget: kept["budget"] }) as { budget: unknown }).budget;
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
       const { spent, ...rest } = record;
@@ -139,6 +145,13 @@ function withOldMoney(state: SimState): SimState {
   return withNoSpending(state);
 }
 
+/** Gives `state`, in place, the development charges the version 32 migration gives a city saved before it, and returns it. */
+function withNoCharges(state: SimState): SimState {
+  if (state.budget.month[LINE.chargeMixed] !== 0 || state.budget.lastMonth[LINE.chargeMixed] !== 0) throw new Error("a city from before version 32 paid no mixed charge");
+  state.budget.chargeRates = Float64Array.from(CHARGE_ZONES, (zone) => ECONOMY.developmentCharges[zone].default);
+  return state;
+}
+
 /** Gives `state`, in place, the amounts the version 31 migration gives a city saved before it, all 0, and returns it. */
 function withNoSpending(state: SimState): SimState {
   state.logSpent = state.log.map(() => 0);
@@ -204,7 +217,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(31);
+    expect(SNAPSHOT_VERSION).toBe(32);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
@@ -778,6 +791,33 @@ describe("migrateState", () => {
     step(migrated);
     expect(migrated.undo).toHaveLength(1);
     expect(money(migrated)).toBe(treasury);
+  });
+
+  it("upgrades a version 31 city by giving it the development charges at their defaults and an empty mixed charge line, and changes nothing else", () => {
+    const state = createState(SEED_WITH_FLAT_GROUND);
+    expect(submit(state, { seq: 1, playerId: "p1", type: "BuildRoad", payload: { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" } })).toEqual({ ok: true });
+    step(state);
+    const rects = [{ from: { x: 4202, z: 4583 }, to: { x: 4390, z: 4583 }, width: 20 }];
+    expect(submit(state, { seq: 2, playerId: "p1", type: "ZoneCells", payload: { zone: "residential", density: 1, rects } })).toEqual({ ok: true });
+    // Into the second month, so the ledger has a closed month, and houses have paid their charges.
+    while (state.tick < 33 * TIME_BALANCE.ticksPerDay) step(state);
+    expect(state.budget.lastMonth[LINE.chargeResidential]).toBeGreaterThan(0);
+    // A version 31 city with other rates set: the migration gives the defaults.
+    state.budget.chargeRates.fill(0);
+    const v31 = older(structuredClone(state), 31);
+    // The city the migration means: this one with the rates at their defaults.
+    withNoCharges(state);
+    const budget = v31["budget"] as Record<string, unknown>;
+    expect("chargeRates" in budget).toBe(false);
+    expect((budget["month"] as Float64Array).length).toBe(18);
+    expect((budget["lastMonth"] as Float64Array)[LINE.chargeIndustrial + 1]).toBe(state.budget.lastMonth[LINE.grants]);
+    const migrated = migrateState(v31);
+    expect(migrated.version).toBe(SNAPSHOT_VERSION);
+    expect(Array.from(migrated.budget.chargeRates)).toEqual(CHARGE_ZONES.map((zone) => ECONOMY.developmentCharges[zone].default));
+    expect(Object.keys(migrated)).toEqual(Object.keys(state));
+    expect(Object.keys(migrated.budget)).toEqual(Object.keys(state.budget));
+    expect(migrated).toEqual(state);
+    expect(hashState(migrated)).toBe(hashState(state));
   });
 
   it("leaves a current state as it is", () => {

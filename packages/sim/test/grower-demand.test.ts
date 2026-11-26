@@ -8,6 +8,7 @@ import {
   createDemand,
   createState,
   dayQuotas,
+  extraChances,
   deserialize,
   hashState,
   readBuilding,
@@ -88,14 +89,17 @@ describe("the day's quota for each zone", () => {
     expect(dayQuotas(bars({ residential: -30, commercial: -1, office: -100, industrial: 0 }))).toEqual([0, 0, 0, 0, 0, 0]);
   });
 
-  it("follows the bar: the full rate at 100, the rate times the bar over 100 rounded up below it, and one a day barely above zero", () => {
-    const at = (bar: number) => dayQuotas(bars({ residential: bar, commercial: bar, office: bar, industrial: bar }));
+  it("follows the bar: the full rate at 100, the whole part of the rate times the bar over 100 below it, and the fraction as the chance of one more (M4-08)", () => {
+    const all = (bar: number) => bars({ residential: bar, commercial: bar, office: bar, industrial: bar });
     for (const id of ["residential", "commercial", "office", "industrial", "mixed"]) {
       const rate = RATES[id] ?? 0;
       expect(rate, id).toBeGreaterThan(0);
-      expect(at(100)[index(id)], id).toBe(rate);
-      expect(at(50)[index(id)], id).toBe(Math.ceil(rate / 2));
-      expect(at(0.01)[index(id)], id).toBe(1);
+      expect(dayQuotas(all(100))[index(id)], id).toBe(rate);
+      expect(dayQuotas(all(50))[index(id)], id).toBe(Math.floor(rate / 2));
+      expect(extraChances(all(50))[index(id)], id).toBeCloseTo(rate / 2 - Math.floor(rate / 2), 12);
+      // Barely above zero: none for certain, and a small chance of one.
+      expect(dayQuotas(all(0.01))[index(id)], id).toBe(0);
+      expect(extraChances(all(0.01))[index(id)], id).toBeCloseTo((rate * 0.01) / 100, 12);
     }
   });
 
@@ -103,7 +107,7 @@ describe("the day's quota for each zone", () => {
     expect(zoneBar(bars({ residential: 60, commercial: 20 }), "mixed")).toBe(20);
     expect(zoneBar(bars({ residential: 10, commercial: 70 }), "mixed")).toBe(10);
     const mixed = index("mixed");
-    expect(dayQuotas(bars({ residential: 60, commercial: 20 }))[mixed]).toBe(Math.ceil((RATES["mixed"] ?? 0) * 0.2));
+    expect(dayQuotas(bars({ residential: 60, commercial: 20 }))[mixed]).toBe(Math.floor((RATES["mixed"] ?? 0) * 0.2));
     expect(dayQuotas(bars({ residential: 60, commercial: 0 }))[mixed]).toBe(0);
     expect(dayQuotas(bars({ residential: -5, commercial: 90 }))[mixed]).toBe(0);
   });
@@ -147,8 +151,9 @@ describe("the grower follows demand", () => {
     zone(state, "residential", 3, 0, 4, 4);
     holdDemand({ residential: -10 }, () => runDays(state, 2));
     expect(buildings(state)).toEqual([]);
-    // The weakest demand the bar can show: a day's quota of one.
-    holdDemand({ residential: 0.5 }, () => runDays(state, 1));
+    // A day's quota of one for certain: a bar of 2 with no development charge (M4-08).
+    ok(state, "SetDevelopmentCharge", { zone: "residential", rate: 0 });
+    holdDemand({ residential: 100 / (RATES["residential"] ?? 1) }, () => runDays(state, 1));
     const all = buildings(state);
     expect(all.length).toBe(1);
     expect(typeOf(all[0] as BuildingRow)).toBe("low-tower");
@@ -167,10 +172,12 @@ describe("the grower follows demand", () => {
         zone(state, "residential", 1, 0, 24, 6, false, z);
         zone(state, "residential", 1, 0, 24, 6, true, z);
       }
+      // With no development charge, so a day builds the bar's whole want (M4-08).
+      ok(state, "SetDevelopmentCharge", { zone: "residential", rate: 0 });
       while (state.tick % DAY !== 0) step(state);
       const before = buildings(state).length;
       holdDemand({ residential: bar }, () => runDays(state, 1));
-      expect(buildings(state).length - before, `bar ${bar}`).toBe(Math.ceil(((RATES["residential"] ?? 0) * bar) / 100));
+      expect(buildings(state).length - before, `bar ${bar}`).toBe(((RATES["residential"] ?? 0) * bar) / 100);
     }
   });
 

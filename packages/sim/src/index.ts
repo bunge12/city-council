@@ -166,12 +166,23 @@ export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
-export { GROWER_SYSTEM, dayOf, dayQuotas, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
-export { ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
-export type { DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
+export { GROWER_SYSTEM, dayOf, extraChances, dayQuotas, dayWants, dueOnTick, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
+export { CHARGE_ZONES, ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
+export type { ChargeZone, DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
+export {
+  buildingFloorSpace,
+  chargeOn,
+  chargePayload,
+  chargeShareAt,
+  chargeShares,
+  chargeZoneOf,
+  payDevelopmentCharge,
+  type SetDevelopmentChargePayload,
+} from "./economy/charges";
 export { floorSpaceOf, propertyValue, propertyValueOf, propertyValues, type FloorSpace } from "./economy/value";
 export {
   BUDGET_SYSTEM,
+  CHARGE_LINES,
   INCOME_LINES,
   LEDGER_LINES,
   LINE,
