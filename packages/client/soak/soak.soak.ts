@@ -821,7 +821,7 @@ describe("soak: one hour of game time at 4x", () => {
     // buildings over the hour. On the city of 200,000 (M3-20) the homes
     // stand part empty from the start, at 1.1 times the room, and empty
     // as people come and go, so the grower holds new homes back while
-    // homes are still filling (`unfilledHomesAllowed`, #331, #420) and adds few: one
+    // homes are still filling (`unfilledHomesMax`, #331) and adds few: one
     // run grew 147 past the start while the clearing took about 1,500 (15
     // while it took about 15,000, before #326). The grower is
     // timed at full size in scale-cities.bench.ts instead. #324

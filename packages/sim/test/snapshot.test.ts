@@ -1369,15 +1369,15 @@ describe("snapshots with a road network", () => {
     expect(digest(serializeDetached(v30))).toBe("21616:4f7a50d129b3e3f6");
     // M4-03's money beside the log and on the undo records, version 31, moved them again.
     // M4-06's sales and output per job in economy.json moved the stamp: with #379's stamp put back, the bytes are main's.
-    // #420's waiting parts, version 32, and its number in demand.json moved them again: taken out, with the version and the stamp set back, the bytes are main's.
+    // #420's waiting parts, version 32, moved them again: taken out, with the version and the stamp set back, the bytes are main's.
     const v31 = { ...withoutWaiting(old), version: 31, balance: "6c9d9e70e48201d9" } as SimState;
     expect(digest(serialize(v31))).toBe("21672:30ee59b0a0f8c5d3");
     expect(digest(serializeDetached(v31))).toBe("21648:9781ef771ac22259");
     const m406 = { ...withoutWaiting(old), version: 31, balance: "822e51681489bea7" } as SimState;
     expect(digest(serialize(m406))).toBe("21672:9bb096139e876f4d");
     expect(digest(serializeDetached(m406))).toBe("21648:17ac7a8191f322e3");
-    expect(digest(serialize(old))).toBe("21784:6b0b7bd2fde65f3b");
-    expect(digest(serializeDetached(old))).toBe("21760:911f9797ebb5dbe7");
+    expect(digest(serialize(old))).toBe("21784:da3a751939f4b5c9");
+    expect(digest(serializeDetached(old))).toBe("21760:d4a6cd894128db68");
     expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 

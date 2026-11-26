@@ -106,18 +106,6 @@ export function homeUnfilled(room: number, left: number): boolean {
 }
 
 /**
- * The most homes newcomers can reach that may be still filling at once
- * before the grower holds new homes back, in a city of `population`: the
- * larger of `unfilledHomesMax` and one for every `residentsPerUnfilledHome`
- * residents (demand.json, #420). Six homes filling side by side suit a town;
- * a city of 200,000 fills 20.
- */
-export function unfilledHomesAllowed(population: number): number {
-  const byCity = Math.floor(population / DEMAND_BALANCE.residentsPerUnfilledHome);
-  return byCity > DEMAND_BALANCE.unfilledHomesMax ? byCity : DEMAND_BALANCE.unfilledHomesMax;
-}
-
-/**
  * One pass over the buildings: calls `visit` with each live home, abandoned ones aside, whose road
  * reaches outside, its room and the room it has left, in id order. The one
  * loop both questions below share, kept tight: it runs over every building

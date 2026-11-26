@@ -16,7 +16,6 @@ import {
   TIME_BALANCE,
   ZONING_BALANCE,
   buildingCount,
-  cityPopulation,
   connectionEnd,
   countZoneJobs,
   createState,
@@ -28,7 +27,6 @@ import {
   segmentTypeId,
   step,
   submit,
-  unfilledHomesAllowed,
   workplacesHeldBy,
   type DemandBar,
   type SimState,
@@ -232,7 +230,7 @@ describe("the homes waiting to fill", () => {
         await settle();
         const room = reachableRoom(state);
         const waiting = mirror.homesWaiting();
-        if (room.unfilled >= unfilledHomesAllowed(cityPopulation(state))) {
+        if (room.unfilled >= DEMAND_BALANCE.unfilledHomesMax) {
           expect(waiting, `day ${day}`).toEqual(room);
           held++;
         } else {

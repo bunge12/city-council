@@ -43,7 +43,7 @@
 // a player zoned more of what was not being built. The part's target takes
 // away a share of what the bar's other targets add above zero: the homes
 // still filling over the most the grower allows at once
-// (`unfilledHomesAllowed`), or the zone's open jobs over the most it allows
+// (`unfilledHomesMax`), or the zone's open jobs over the most it allows
 // (`openJobsMin`, `openJobsShareMax`), at most all of it. So a bar reads 0
 // while its zone is held and something in between as it nears the hold. It
 // moves `dailyShare` a day like the rest, and then is held between 0 and the
@@ -65,7 +65,7 @@ import { TIME_BALANCE } from "../calendar";
 import type { StatTotals } from "../stats/stats";
 import { DEMAND_BALANCE, type DemandBalance } from "./balance";
 import { WAITING_PART } from "./pull";
-import { reachableRoom, unfilledHomesAllowed } from "../pops/room";
+import { reachableRoom } from "../pops/room";
 import { zoneJobs } from "../pops/openings";
 import { workplacesHeldBy } from "../pops/open-jobs";
 import { ZONING_BALANCE } from "../zoning/balance";
@@ -262,14 +262,14 @@ const BAR_ZONES = Object.fromEntries(
 /**
  * How near the grower is to holding each zone back for what is already
  * waiting, from 0 to 1, as the header says: the homes newcomers can reach
- * still filling over `unfilledHomesAllowed`, and for each workplace zone its
+ * still filling over `unfilledHomesMax`, and for each workplace zone its
  * open jobs over the most it may have, 1 while the grower holds it
  * (`workplacesHeldBy`). One pass over the buildings for the homes.
  */
 export function waitingShares(state: SimState): Record<DemandBar, number> {
   const room = reachableRoom(state);
   const jobs = zoneJobs(state);
-  const shares = { residential: shareOf(room.unfilled, unfilledHomesAllowed(state.stats.totals["population"] ?? 0)) } as Record<DemandBar, number>;
+  const shares = { residential: shareOf(room.unfilled, DEMAND_BALANCE.unfilledHomesMax) } as Record<DemandBar, number>;
   for (const [bar, zone] of Object.entries(BAR_ZONES) as [Exclude<DemandBar, "residential">, number][]) {
     const most = Math.max(DEMAND_BALANCE.openJobsMin, DEMAND_BALANCE.openJobsShareMax * (jobs.jobs[zone] ?? 0));
     shares[bar] = workplacesHeldBy(jobs, zone) ? 1 : shareOf(jobs.open[zone] ?? 0, most);

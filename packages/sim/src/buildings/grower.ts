@@ -23,10 +23,9 @@
 //
 // Homes standing fill before more are built (M3-08, PRD "Turnover"; a
 // count since M3-21): the grower adds no building to a zone people live in,
-// residential or mixed, while `unfilledHomesAllowed` or more of the homes
+// residential or mixed, while `unfilledHomesMax` or more of the homes
 // newcomers can reach are still filling (demand.json, pops/room.ts,
-// `homeUnfilled`): `unfilledHomesMax`, or one for every
-// `residentsPerUnfilledHome` residents in a bigger city (#420). A count and not a share of the room, so a few towers
+// `homeUnfilled`). A count and not a share of the room, so a few towers
 // fill side by side as a street of houses does, and arrivals, which follow
 // the empty room (pops/arrivals.ts), tell the densities apart. It counts
 // once on a tick it adds such a building, after the tick's arrivals, and
@@ -102,7 +101,7 @@ import { addBuilding } from "./buildings";
 import { bestCandidate, candidateCount, setAside } from "./candidates";
 import { freeFrontage, lotOptions, type Lot, type LotOptions } from "./lots";
 import { pollutionGrid, segmentBuildings } from "./where";
-import { buildingReachesOutside, homeUnfilled, newcomerRoomLeft, reachableRoom, unfilledHomesAllowed, type ReachableRoom } from "../pops/room";
+import { buildingReachesOutside, homeUnfilled, newcomerRoomLeft, reachableRoom, type ReachableRoom } from "../pops/room";
 import { workplacesHeldBy, type ZoneJobs } from "../pops/open-jobs";
 import { zoneJobs } from "../pops/openings";
 import { buildingJobs } from "./jobs";
@@ -319,19 +318,14 @@ const HOME_ZONES: ReadonlySet<number> = new Set(BUILDING_TYPES.filter((t) => t.r
 /** Zone numbers with a type that offers jobs: commercial, office, industrial and mixed. */
 const WORK_ZONES: ReadonlySet<number> = new Set(BUILDING_TYPES.filter((t) => t.jobsPerCell > 0).map((t) => t.zoneNumber));
 
-/** Whether `room` holds new homes back in a city of `population`: `unfilledHomesAllowed` or more of its homes are still filling. */
-export function holdsHomes(room: ReachableRoom, population: number): boolean {
-  return room.unfilled >= unfilledHomesAllowed(population);
+/** Whether `room` holds new homes back: `unfilledHomesMax` or more of its homes are still filling. */
+export function holdsHomes(room: ReachableRoom): boolean {
+  return room.unfilled >= DEMAND_BALANCE.unfilledHomesMax;
 }
 
-/** Whether the grower holds new homes back: `unfilledHomesAllowed` or more of the homes newcomers can reach are still filling. */
+/** Whether the grower holds new homes back: `unfilledHomesMax` or more of the homes newcomers can reach are still filling. */
 export function homesHeld(state: SimState): boolean {
-  return holdsHomes(reachableRoom(state), cityPopulation(state));
-}
-
-/** The residents the city has, the running total, as the homes hold reads it. */
-export function cityPopulation(state: SimState): number {
-  return state.stats.totals["population"] ?? 0;
+  return holdsHomes(reachableRoom(state));
 }
 
 /** Adds new home `id` to `room`, as `reachableRoom` would count it, if newcomers can reach it: all its room is empty. */
@@ -363,7 +357,7 @@ export function grow(state: SimState): void {
     for (let i = 0; i < due; i++) {
       if (homes) {
         room ??= reachableRoom(state);
-        if (holdsHomes(room, cityPopulation(state))) break;
+        if (holdsHomes(room)) break;
       }
       if (work) {
         jobs ??= zoneJobs(state);

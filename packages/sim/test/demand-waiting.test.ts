@@ -14,7 +14,6 @@ import {
   moveDemand,
   reachableRoom,
   step,
-  unfilledHomesAllowed,
   waitingShares,
   workplacesHeldBy,
   zoneBar,
@@ -146,22 +145,6 @@ describe("the waiting part day by day", () => {
   });
 });
 
-describe("the homes hold scales with the city", () => {
-  it("lets unfilledHomesMax homes fill at once in a town, and one more for every residentsPerUnfilledHome residents in a city", () => {
-    const per = DEMAND_BALANCE.residentsPerUnfilledHome;
-    const most = DEMAND_BALANCE.unfilledHomesMax;
-    expect(unfilledHomesAllowed(0)).toBe(most);
-    expect(unfilledHomesAllowed(most * per)).toBe(most);
-    expect(unfilledHomesAllowed((most + 1) * per - 1)).toBe(most);
-    expect(unfilledHomesAllowed((most + 1) * per)).toBe(most + 1);
-    expect(unfilledHomesAllowed(200_000)).toBe(Math.max(most, Math.floor(200_000 / per)));
-    const room = { capacity: 0, empty: 0, unfilled: 20 };
-    expect(holdsHomes(room, 0)).toBe(20 >= most);
-    expect(holdsHomes(room, 21 * per)).toBe(false);
-    expect(holdsHomes(room, 20 * per)).toBe(true);
-  });
-});
-
 describe("what waits, counted on a real city", () => {
   /** The job matching fixture's city: homes filling, shops, offices and factories open, its bars no longer held. */
   const grown = () => replayFixture(jobs);
@@ -170,8 +153,7 @@ describe("what waits, counted on a real city", () => {
     const state = grown();
     const shares = waitingShares(state);
     const room = reachableRoom(state);
-    const population = state.stats.totals["population"] ?? 0;
-    expect(shares.residential).toBe(holdsHomes(room, population) ? 1 : room.unfilled / unfilledHomesAllowed(population));
+    expect(shares.residential).toBe(holdsHomes(room) ? 1 : room.unfilled / DEMAND_BALANCE.unfilledHomesMax);
     const counts = zoneJobs(state);
     for (const bar of ["commercial", "office", "industrial"] as const) {
       const zone = ZONING_BALANCE.zones.findIndex((z) => z.id === bar) + 1;

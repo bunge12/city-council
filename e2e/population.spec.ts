@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, NONE, ROAD_TYPES, SCALE_TREASURY, TIME_BALANCE, WAITING_PART, ZONING_BALANCE, cityPopulation, connectionEnd, createState, demandPull, fundCity, generateTerrain, heightAt, reachableRoom, step, syncCells, unfilledHomesAllowed, waitingShares, yearDays, type SimState } from "../packages/sim/src/index";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, DEMAND_BALANCE, NONE, ROAD_TYPES, SCALE_TREASURY, TIME_BALANCE, WAITING_PART, ZONING_BALANCE, connectionEnd, createState, demandPull, fundCity, generateTerrain, heightAt, reachableRoom, step, syncCells, waitingShares, yearDays, type SimState } from "../packages/sim/src/index";
 import { formatDemandTitle } from "../packages/client/src/ui/top-figures";
 import { CITIES, Player, SEED as BALANCE_SEED } from "../packages/sim/test/balance/cities";
 import { buildEverySide, finishConstruction, zoneSides } from "./building-fixtures";
@@ -21,7 +21,7 @@ import { frames, openCity, ready, settingsButton } from "./helpers";
 //
 // Issue #330: a third city has six empty towers facing office towers, the
 // residential bar well above zero. While the towers fill the grower adds no
-// home, and the bar's tooltip says so; once fewer than `unfilledHomesAllowed`
+// home, and the bar's tooltip says so; once fewer than `unfilledHomesMax`
 // are still filling, the line goes. Since #420 the bar's last part takes
 // away what the filling homes hold back, so the steps read the bar without
 // it, its pull, which is what the line needs above zero.
@@ -303,7 +303,7 @@ function towersCity(): { state: SimState; street: Street } {
   const counts = buildEverySide(state);
   const towers = BUILDING_TYPES.filter((t) => t.zone === "residential").reduce((n, t) => n + (counts[t.index] ?? 0), 0);
   if (towers !== 6) throw new Error(`the street took ${towers} towers, not 6`);
-  if (reachableRoom(state).unfilled < unfilledHomesAllowed(cityPopulation(state))) throw new Error("the towers do not hold new homes back");
+  if (reachableRoom(state).unfilled < DEMAND_BALANCE.unfilledHomesMax) throw new Error("the towers do not hold new homes back");
   finishConstruction(state);
   state.speed = 0;
   return { state, street };
