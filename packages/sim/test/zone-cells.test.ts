@@ -24,6 +24,7 @@ import {
   type ZoneRect,
 } from "../src/index";
 import { submit } from "./seen-ends";
+import { credited } from "./credited";
 import { cloneState } from "../src/state";
 import { fromLocal } from "../src/zoning/cells";
 import fixtureJson from "./fixtures/replay/zoning.json";
@@ -72,7 +73,7 @@ function refused(state: SimState, c: Command, reason: RegExp): void {
 
 /** A street running east from (4200, 4600) for 24 cells: its left strip is north of it, from z 4595 back to 4547. */
 function street(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   ok(state, road([4200, 4600], [4392, 4600]));
   return state;
 }
@@ -182,7 +183,7 @@ describe("ZoneCells", () => {
   });
 
   it("paints only the open cells of a rectangle half over blocked ones", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, road([4200, 4700], [4600, 4700]));
     ok(state, road([4400, 4500], [4400, 4900]));
     // Across the junction: cells under the crossing street, cells that lost
@@ -210,7 +211,7 @@ describe("ZoneCells", () => {
   it("finds the same cells as a look at every open cell, for strokes of many rectangles over roads changed since (issue #204)", () => {
     // A grid of streets, then some taken away and built again, so cells
     // are filed out and in again and bucket entries are reused.
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     for (let k = 0; k <= 4; k++) {
       ok(state, road([4150, 4450 + 120 * k], [4650, 4450 + 120 * k]));
       ok(state, road([4150 + 120 * k, 4450], [4150 + 120 * k, 4950]));
@@ -257,7 +258,7 @@ describe("ZoneCells", () => {
   });
 
   it("plans the cells the command then changes", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, road([4200, 4700], [4600, 4700]));
     ok(state, road([4400, 4500], [4400, 4900]));
     ok(state, zone("residential", 1, [rect([4300, 4660], [4500, 4660], 40)]));
@@ -374,7 +375,7 @@ describe("ZoneCells", () => {
       zone("commercial", 3, [rect([4150, 4450], [4330, 4630], 120)]),
     ];
     // One city zones in the tick right after the grid, before its cells settle.
-    const early = createState(SEED);
+    const early = credited(createState(SEED));
     ok(early, grid);
     expect(cellsSettled(early)).toBe(false);
     const ready = early.cellsReadyAt;
@@ -394,7 +395,7 @@ describe("ZoneCells", () => {
     while (loaded.tick < early.tick) step(loaded);
     expect(hashState(loaded)).toBe(hashState(early));
     // A third pauses first: with no tick to wait for, its strokes apply at once.
-    const paused = createState(SEED);
+    const paused = credited(createState(SEED));
     ok(paused, grid);
     ok(paused, command("SetSpeed", { speed: 0 }));
     ok(paused, strokes[0] as Command);
@@ -405,7 +406,7 @@ describe("ZoneCells", () => {
   });
 
   it("holds the player's later strokes behind a waiting one, in order, and lets their road go on", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4404 }, along: { x: 4680, z: 4404 }, across: { x: 4104, z: 4980 }, depth: 86, width: 86, type: "street" }));
     const stroke = zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200)]);
     const street = road([4150, 4300], [4400, 4300]);
@@ -420,7 +421,7 @@ describe("ZoneCells", () => {
   });
 
   it("lets another player's commands go on while one player's stroke waits", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4404 }, along: { x: 4680, z: 4404 }, across: { x: 4104, z: 4980 }, depth: 86, width: 86, type: "street" }));
     const stroke = zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200)]);
     const street = command("BuildRoad", { from: { x: 4150, z: 4300 }, to: { x: 4400, z: 4300 }, type: "street" }, "p2");
@@ -438,7 +439,7 @@ describe("ZoneCells", () => {
  * through zoned cells. `pausedSteps` extra steps run while paused at tick 9.
  */
 function playLive(pausedSteps: number, reloadAt = -1): SimState {
-  let state = createState(fixture.seed);
+  let state = credited(createState(fixture.seed));
   let n = 0;
   const send = (playerId: string, type: string, payload: unknown) =>
     expect(submit(state, { seq: ++n, playerId, type, payload }), type).toEqual({ ok: true });
@@ -532,7 +533,7 @@ describe("replay fixture zoning", () => {
 
 describe("pausing while a stroke waits (M2 review, #147)", () => {
   it("applies the player's SetSpeed at once, and the stroke with it once paused", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, command("BuildRoadGrid", { origin: { x: 4104, z: 4404 }, along: { x: 4680, z: 4404 }, across: { x: 4104, z: 4980 }, depth: 86, width: 86, type: "street" }));
     const stroke = zone("residential", 1, [rect([4110, 4500], [4366, 4500], 200)]);
     const pause = command("SetSpeed", { speed: 0 });
