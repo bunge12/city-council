@@ -778,7 +778,8 @@ for (const variant of [
       const other = await context.newPage();
       const city = redevelopment();
       await openOn(other, info, city.bytes, variant, "M3 walkthrough, redevelopment");
-      const r = await bar(other, "residential");
+      // Redevelopment reads the bar without its part for homes still filling (#420), which the bar as shown takes away.
+      const r = await pull(other, "residential");
       expect(r).toBeGreaterThan(15);
       // The ground is zoned R3 under standing houses.
       expect(await stripZone(other, REZONED)).toEqual({ zone: RESIDENTIAL, density: 3 });
