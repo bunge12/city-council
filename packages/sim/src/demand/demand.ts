@@ -112,6 +112,17 @@ const per = (n: number, d: number): number => n / Math.max(1, d);
 const positive = (v: number): number => (v > 0 ? v : 0);
 
 /**
+ * The residents' spending power: each resident counted at their wealth
+ * level's weight in `spendingByWealth`, from the running totals. The
+ * commercial bar reads it, and so does the sales tax (M4-06), which scales
+ * shops' sales down while there are more shop jobs filled than it keeps busy.
+ */
+export function spendingPower(t: StatTotals, balance: DemandBalance = DEMAND_BALANCE): number {
+  const w = balance.spendingByWealth;
+  return at(t, "residentsWealthLow") * w.low + at(t, "residentsWealthMedium") * w.medium + at(t, "residentsWealthHigh") * w.high;
+}
+
+/**
  * Where the inputs put every part of every bar, scaled so no bar's parts
  * add up to more than 100 either way. For tests, and the system below.
  */
@@ -152,8 +163,7 @@ export function demandTargets(inputs: DemandInputs, balance: DemandBalance = DEM
   // spending keeps at most one shop job busy per worker, so a city with
   // more shop jobs than workers does not want shops.
   const c = balance.commercial;
-  const w = balance.spendingByWealth;
-  const spending = at(t, "residentsWealthLow") * w.low + at(t, "residentsWealthMedium") * w.medium + at(t, "residentsWealthHigh") * w.high;
+  const spending = spendingPower(t, balance);
   // Shops cannot staff more jobs than the city has workers.
   const servedJobs = Math.min(spending * balance.shopJobsPerSpending, workers);
   const commercial: Record<string, number> = {

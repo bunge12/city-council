@@ -1351,8 +1351,12 @@ describe("snapshots with a road network", () => {
     expect(digest(serialize(v30))).toBe("21640:1ee3431e5995d193");
     expect(digest(serializeDetached(v30))).toBe("21616:4f7a50d129b3e3f6");
     // M4-03's money beside the log and on the undo records, version 31, moved them again.
-    expect(digest(serialize(old))).toBe("21672:30ee59b0a0f8c5d3");
-    expect(digest(serializeDetached(old))).toBe("21648:9781ef771ac22259");
+    // M4-06's sales and output per job in economy.json moved the stamp: with #379's stamp put back, the bytes are main's.
+    const v31 = { ...old, balance: "6c9d9e70e48201d9" } as SimState;
+    expect(digest(serialize(v31))).toBe("21672:30ee59b0a0f8c5d3");
+    expect(digest(serializeDetached(v31))).toBe("21648:9781ef771ac22259");
+    expect(digest(serialize(old))).toBe("21672:9bb096139e876f4d");
+    expect(digest(serializeDetached(old))).toBe("21648:17ac7a8191f322e3");
     expect(() => serializeStepsOf(state, null, Number.NaN)).toThrow(RangeError);
   });
 
