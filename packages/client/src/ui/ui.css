@@ -1347,14 +1347,38 @@ kbd {
   font-weight: 700;
 }
 
-.budget-section {
-  margin-top: 10px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
+/* Its tabs: budget, charts, loans, taxes and development charges, under the title, one shown at a time. */
+.budget-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 6px -4px -5px;
 }
 
-.budget-section h3 {
-  margin: 0 0 4px;
+#ui .budget-tabs button {
+  flex: 1 1 auto;
+  padding: 4px 6px 5px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#ui .budget-tabs button:hover:not(:disabled) {
+  background: none;
+  color: var(--ink);
+}
+
+#ui .budget-tabs button[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.budget-section {
+  margin-top: 8px;
 }
 
 .budget-section h4 {

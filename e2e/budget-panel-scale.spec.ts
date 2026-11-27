@@ -56,8 +56,8 @@ test("opening the budget panel on the scale city of 500,000 residents", async ({
       const t0 = performance.now();
       button.click();
       // React renders a click's update in a microtask queued by the click; a few turns of the queue let it commit.
-      for (let i = 0; i < 10 && !document.querySelector("#budget-credit"); i++) await Promise.resolve();
-      if (!document.querySelector("#budget-credit")) throw new Error("the panel did not draw");
+      for (let i = 0; i < 10 && !document.querySelector("#budget-ledger"); i++) await Promise.resolve();
+      if (!document.querySelector("#budget-ledger")) throw new Error("the panel did not draw");
       document.querySelector("#budget-panel")?.getBoundingClientRect();
       const laidOut = performance.now() - t0;
       await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
