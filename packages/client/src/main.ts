@@ -33,7 +33,8 @@ import { createWorkerTransport } from "./protocol/transport";
 import { holdDemandBars } from "./protocol/held-demand";
 import { readTestSwitch } from "./test-switch";
 import { Ambience, type AmbienceReport } from "./sound/ambience";
-import { CommandCues } from "./sound/command-cues";
+import { CommandCues, moneyCue } from "./sound/command-cues";
+import { MilestoneWatch } from "./ui/milestone-watch";
 import { SoundEngine, type CueRecord } from "./sound/engine";
 import { loadSound, saveSound, type SoundSettings } from "./sound/settings";
 import { SaveClient, fetchCityFile, requestPersistence, takeLoadAddress, type PersistenceResult } from "./save/page";
@@ -224,13 +225,28 @@ document.addEventListener("visibilitychange", () => {
  * did not, and records that for the activity log.
  */
 async function sendCommand(type: string, payload: unknown = {}): Promise<CommandResult> {
-  const result = await mirror.sendCommandSettled(type, payload);
+  const settled = await mirror.sendCommandSpending(type, payload);
+  const result: CommandResult = settled.ok ? { ok: true } : settled;
   useUi.setState({ lastCommand: result.ok ? `${type}: ok` : `${type}: refused, ${result.reason}` });
   // The cue follows the sim's answer, so a refusal never sounds like a success.
   const cue = commandCues.cueFor(type, payload, result);
   if (cue) sound.play(cue);
+  // And one for the money it took, once per command however many segments it built (M4-14).
+  const money = moneyCue(settled);
+  if (money) sound.play(money);
   return result;
 }
+
+// A milestone reached in play (M4-14): its sound, and the notice. One the
+// city had already, on opening it or after a reload, makes neither.
+const milestoneWatch = new MilestoneWatch();
+mirror.subscribe((update) => {
+  const state = mirror.state;
+  const reached = milestoneWatch.update(state?.milestones ?? null, state?.tick ?? 0, update.kind);
+  if (reached.length === 0 || !state) return;
+  sound.play("milestone");
+  useUi.setState({ milestoneNotice: { milestones: reached, tick: state.tick } });
+});
 
 // A refusal's reason is about the history as it stood. Once the history
 // changes, as when the player builds again, it no longer applies.

@@ -47,6 +47,13 @@ export interface UiState extends RoadToolState, GridToolState, EditToolState, Bu
   busy: boolean;
   /** Why the sim refused the last undo, until the next one is sent. */
   undoNote: string | null;
+  /**
+   * The milestones the notice is telling the player about, by index in
+   * `MILESTONES`, lowest first, and the copy's tick when it opened: those
+   * reached in play on the latest update that brought any (M4-14). Null
+   * once closed.
+   */
+  milestoneNotice: { milestones: readonly number[]; tick: number } | null;
   /** The overlay on the map, one at a time (issue M3-18): zoning while the zone tool is on, one from `OVERLAYS`, or none. */
   overlay: OverlayId | null;
 }
@@ -67,6 +74,7 @@ export const useUi = create<UiState>(() => ({
   reminderDismissed: false,
   busy: false,
   undoNote: null,
+  milestoneNotice: null,
   overlay: null,
   ...INITIAL_ROAD_TOOL,
   ...INITIAL_GRID_TOOL,
