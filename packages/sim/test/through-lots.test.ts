@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILDING_TYPES,
+  DEMAND_BALANCE,
   TIME_BALANCE,
   ZONING_BALANCE,
   applyBuildingDelta,
@@ -32,7 +33,7 @@ import {
 } from "../src/index";
 import { resolveBuildingsBalance } from "../src/buildings/balance";
 import { addBuilding, checkBuildings } from "../src/buildings/buildings";
-import { candidateSets } from "../src/buildings/candidates";
+import { candidateSets, isCandidateSetAside, setAsideCount } from "../src/buildings/candidates";
 import { buildingIndexSets, lotStands, segmentBuildings } from "../src/buildings/where";
 import { enqueue } from "../src/commands";
 import { cellsSettled, syncCells } from "../src/zoning/cell-index";
@@ -44,6 +45,7 @@ import fixtureJson from "./fixtures/replay/through-lots.json";
 import { expectReplay, replayFixture, type ReplayFixture } from "./replay-helper";
 import { submit, withEnds } from "./seen-ends";
 import { credited } from "./credited";
+import { withValue } from "./with-value";
 
 // M2-14: through-lots for large commercial and industrial buildings.
 
@@ -284,6 +286,205 @@ describe("the grower", () => {
     expect(live(state).length).toBeGreaterThan(0);
     expect(throughIds(state)).toEqual([]);
     expectSound(state);
+  });
+});
+
+describe("set-aside cells that grow through-lots (#426)", () => {
+  /** Commercial alone, slow enough to build about one a day, and not held back by its own open jobs. */
+  const slowShops = <T>(body: () => T): T =>
+    holdDemand({ commercial: 5, residential: -1, office: -1, industrial: -1 }, () => withValue(DEMAND_BALANCE, "openJobsShareMax", 1, body));
+
+  /** A street elsewhere in the flat square, 350 m south of the north street: well beyond what a try there reads. */
+  const elsewhere = () => road([WEST, NORTH + 350], [EAST, NORTH + 350]);
+
+  it("tries C3 runs too short for any lot once, and a change of roads elsewhere brings none back", () => {
+    const state = credited(createState(SEED));
+    ok(state, road([WEST, NORTH], [EAST, NORTH]));
+    // Five runs of two cells, six deep: no C3 building is under three cells wide, and a through-lot needs six.
+    for (let i = 0; i < 5; i++) {
+      const x = WEST + CELL * (4 + 4 * i);
+      const z = NORTH + HALF + (CELL * DEPTH) / 2;
+      ok(state, command("ZoneCells", { zone: "commercial", density: 3, rects: [{ from: { x: x + 2, z }, to: { x: x + 2 * CELL - 2, z }, width: CELL * DEPTH - 4 }] }));
+    }
+    slowShops(() => {
+      grow(state, 1);
+      const tried = setAsideCount(state);
+      expect(tried).toBe(10);
+      // Until #426 every C3 cell set aside came back on any change of roads, and was tried again.
+      ok(state, elsewhere());
+      grow(state, 2);
+      expect(setAsideCount(state)).toBe(tried);
+      // A city loaded from a save tries them once more, and builds the same.
+      const loaded = deserialize(serialize(state)).state;
+      grow(loaded, 1);
+      expect(setAsideCount(loaded)).toBe(tried);
+      grow(state, 1);
+      expect(hashState(loaded)).toBe(hashState(state));
+    });
+    expect(live(state)).toEqual([]);
+  });
+
+  /**
+   * A C3 strip two cells deep on the south side of a north avenue, backing
+   * onto one six deep along an older street 64 m south, with the ends open:
+   * no block, so no through-lot, and the avenue's strip is too shallow for
+   * any other C3 building. The avenue's strip is worth more, so the grower
+   * tries it first and sets every cell of it aside, then builds on the
+   * street's strip.
+   */
+  function openEnded(): { state: SimState; south: number } {
+    const state = credited(createState(SEED));
+    const edge = NORTH + 9;
+    const south = edge + 8 * CELL + HALF;
+    ok(state, road([WEST, south], [EAST, south]));
+    ok(state, command("BuildRoad", { from: { x: WEST, z: NORTH }, to: { x: EAST, z: NORTH }, type: "avenue" }));
+    ok(state, command("ZoneCells", { zone: "commercial", density: 3, rects: [{ from: { x: WEST + 2, z: edge + 4 * CELL }, to: { x: EAST - 2, z: edge + 4 * CELL }, width: 8 * CELL - 4 }] }));
+    return { state, south };
+  }
+
+  /** The north cell at x as `northCell` gives it for the avenue, whose edge is 9 m from its line. */
+  const avenueColumn = (state: SimState, x: number) => {
+    const cell = cellAt(state, x, NORTH + 9 + CELL / 2);
+    if (!cell) throw new Error(`no cell at x ${x}`);
+    return { seg: cell.segment, col: cell.place * 2 + cell.side, depth: cell.depth };
+  };
+
+  it("waits on its roads' faces where it faces no block: a street elsewhere leaves it set aside, and closing the block grows a through-lot", () => {
+    const { state, south } = openEnded();
+    const at = avenueColumn(state, 4300);
+    expect(at.depth).toBe(0);
+    expect(lotOptions(state, { segment: at.seg, side: at.col % 2, place: (at.col - (at.col % 2)) / 2, depth: 0 }).ok).toBe(false);
+    slowShops(() => {
+      grow(state, 1);
+      expect(isCandidateSetAside(state, at.seg, at.col)).toBe(true);
+      const tried = setAsideCount(state);
+      expect(tried).toBeGreaterThan(20);
+      ok(state, elsewhere());
+      grow(state, 1);
+      expect(isCandidateSetAside(state, at.seg, at.col)).toBe(true);
+      expect(setAsideCount(state)).toBe(tried);
+      expect(throughIds(state)).toEqual([]);
+      // A street down each end closes the block: its faces are walked again.
+      ok(state, road([WEST, NORTH], [WEST, south]));
+      ok(state, road([EAST, NORTH], [EAST, south]));
+      grow(state, 3);
+      expect(throughIds(state).length).toBeGreaterThan(0);
+    });
+    expectSound(state);
+  });
+
+  /**
+   * `openEnded`'s strips in a closed block, the street's strip zoned O3
+   * rather than C3: the avenue's C3 strip looks across the block and finds
+   * no back lot of its own zone, every block test passing.
+   */
+  function officeBehind(): { state: SimState; south: number } {
+    const state = credited(createState(SEED));
+    const edge = NORTH + 9;
+    const south = edge + 8 * CELL + HALF;
+    ok(state, road([WEST, south], [EAST, south]));
+    ok(state, command("BuildRoad", { from: { x: WEST, z: NORTH }, to: { x: EAST, z: NORTH }, type: "avenue" }));
+    ok(state, road([WEST, NORTH], [WEST, south]));
+    ok(state, road([EAST, NORTH], [EAST, south]));
+    const rect = (z0: number, z1: number) => ({ from: { x: WEST + 2, z: (z0 + z1) / 2 }, to: { x: EAST - 2, z: (z0 + z1) / 2 }, width: z1 - z0 - 4 });
+    ok(state, command("ZoneCells", { zone: "commercial", density: 3, rects: [rect(edge, edge + 2 * CELL)] }));
+    ok(state, command("ZoneCells", { zone: "office", density: 3, rects: [rect(edge + 2 * CELL, south - HALF)] }));
+    return { state, south };
+  }
+
+  /** The street's strip in `officeBehind`, zoned C3. */
+  const shopsBehind = (south: number) =>
+    command("ZoneCells", { zone: "commercial", density: 3, rects: [{ from: { x: WEST + 2, z: south - HALF - 3 * CELL }, to: { x: EAST - 2, z: south - HALF - 3 * CELL }, width: 6 * CELL - 4 }] });
+
+  /** Zoning on a street elsewhere in the flat square. */
+  const zonedElsewhere = () => command("ZoneCells", { zone: "commercial", density: 3, rects: [{ from: { x: WEST + 2, z: NORTH + 350 - HALF - 24 }, to: { x: EAST - 2, z: NORTH + 350 - HALF - 24 }, width: 44 }] });
+
+  it("comes back for a change near what it read across the block, and not for one elsewhere", () => {
+    const { state, south } = officeBehind();
+    const at = avenueColumn(state, 4300);
+    slowShops(() => {
+      grow(state, 1);
+      expect(isCandidateSetAside(state, at.seg, at.col)).toBe(true);
+      const tried = setAsideCount(state);
+      expect(tried).toBeGreaterThan(20);
+      // Until #426 a street or zoning within 1.2 km of a C3 cell set aside brought it back.
+      ok(state, elsewhere());
+      ok(state, zonedElsewhere());
+      grow(state, 1);
+      expect(isCandidateSetAside(state, at.seg, at.col)).toBe(true);
+      expect(setAsideCount(state)).toBe(tried);
+      expect(throughIds(state)).toEqual([]);
+      // C3 on the strip behind: the cells come back, and one takes a through-lot across both.
+      ok(state, shopsBehind(south));
+      grow(state, 2);
+      expect(throughIds(state).length).toBeGreaterThan(0);
+    });
+    expectSound(state);
+  });
+
+  it("builds the same saved and loaded as a city that never stopped, through a street elsewhere and the block closing", () => {
+    const run = (saveAt: number[], prepared = false): string => {
+      seq = 0;
+      const built = openEnded();
+      let state = built.state;
+      const south = built.south;
+      const start = state.tick;
+      const send = (c: Command) => expect(submit(state, c), c.type).toEqual({ ok: true });
+      slowShops(() => {
+        while (state.tick < start + 6 * DAY) {
+          const t = state.tick - start;
+          if (saveAt.includes(t)) {
+            state = deserialize(serialize(state)).state;
+            // As a host loads a city (issue #324): the grower's tries at load land the same buildings.
+            if (prepared) prepareDerived(state);
+          }
+          if (t === DAY + 10) send(elsewhere());
+          if (t === 2 * DAY + 10) send(road([WEST, NORTH], [WEST, south]));
+          if (t === 2 * DAY + 20) send(road([EAST, NORTH], [EAST, south]));
+          step(state);
+        }
+      });
+      expect(state.log.filter((e) => e.tick >= start).map((e) => e.type)).toEqual(["BuildRoad", "BuildRoad", "BuildRoad"]);
+      expect(throughIds(state).length).toBeGreaterThan(0);
+      return hashState(state);
+    };
+    const straight = run([]);
+    for (const at of [100, DAY + 11, 2 * DAY + 15, 2 * DAY + 21, 3 * DAY]) {
+      expect(run([at]), `saved at ${at}`).toBe(straight);
+      expect(run([at], true), `saved at ${at} and prepared`).toBe(straight);
+    }
+  });
+
+  it("builds the same saved and loaded as a city that never stopped, through changes elsewhere and the strip behind zoned C3", () => {
+    const run = (saveAt: number[], prepared = false): string => {
+      seq = 0;
+      const built = officeBehind();
+      let state = built.state;
+      const south = built.south;
+      const start = state.tick;
+      const send = (c: Command) => expect(submit(state, c), c.type).toEqual({ ok: true });
+      slowShops(() => {
+        while (state.tick < start + 5 * DAY) {
+          const t = state.tick - start;
+          if (saveAt.includes(t)) {
+            state = deserialize(serialize(state)).state;
+            if (prepared) prepareDerived(state);
+          }
+          if (t === DAY + 10) send(elsewhere());
+          if (t === DAY + 40) send(zonedElsewhere());
+          if (t === 2 * DAY + 10) send(shopsBehind(south));
+          step(state);
+        }
+      });
+      expect(state.log.filter((e) => e.tick >= start).map((e) => e.type)).toEqual(["BuildRoad", "ZoneCells", "ZoneCells"]);
+      expect(throughIds(state).length).toBeGreaterThan(0);
+      return hashState(state);
+    };
+    const straight = run([]);
+    for (const at of [100, DAY + 11, DAY + 41, 2 * DAY + 11, 3 * DAY]) {
+      expect(run([at]), `saved at ${at}`).toBe(straight);
+      expect(run([at], true), `saved at ${at} and prepared`).toBe(straight);
+    }
   });
 });
 

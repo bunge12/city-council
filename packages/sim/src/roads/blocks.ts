@@ -91,6 +91,14 @@ export interface BlockIndex {
   dirtyFaces: Set<number>;
   /** Half-edges added since the last read. */
   fresh: Set<number>;
+  /** How many reads have walked faces again: bumped by each that walks any (#426). */
+  walks: number;
+  /**
+   * For each half-edge, the `walks` of the last read that walked its face,
+   * or of the next one when its segment was let go. A half-edge stamped no
+   * later than some `walks` has kept its face, and so its block, since then.
+   */
+  walkedAt: Int32Array;
 }
 
 /** Whether segment `seg` bounds blocks: a live road segment at ground level. */
@@ -108,9 +116,12 @@ function ensureSegments(index: BlockIndex, seg: number): void {
   next.set(index.next);
   const face = new Int32Array(2 * size).fill(NONE);
   face.set(index.face);
+  const walkedAt = new Int32Array(2 * size);
+  walkedAt.set(index.walkedAt);
   index.inGraph = inGraph;
   index.next = next;
   index.face = face;
+  index.walkedAt = walkedAt;
 }
 
 // ---- The order of half-edges around a node ----
@@ -257,6 +268,9 @@ export function removeBlockSegment(index: BlockIndex, seg: number): void {
   dirtyHalfEdge(index, 2 * seg);
   dirtyHalfEdge(index, 2 * seg + 1);
   index.inGraph[seg] = 0;
+  // Its half-edges are on no face from the next read, so they count as walked by it.
+  index.walkedAt[2 * seg] = index.walks + 1;
+  index.walkedAt[2 * seg + 1] = index.walks + 1;
   index.next[2 * seg] = NONE;
   index.next[2 * seg + 1] = NONE;
   index.face[2 * seg] = NONE;
@@ -301,6 +315,7 @@ function twiceArea(net: RoadNetwork, h: number, ox: number, oz: number): number 
 function settle(index: BlockIndex): void {
   if (index.dirtyFaces.size === 0 && index.fresh.size === 0) return;
   const { net, inGraph, face, next } = index;
+  const walks = ++index.walks;
   // The half-edges to walk again, and each walk, go in buffers kept between
   // reads. A grid at the edge of the city touches its outer face, thousands
   // of half-edges long, and lists of them were garbage (issue #204).
@@ -357,7 +372,10 @@ function settle(index: BlockIndex): void {
     const loop = new Int32Array(length);
     loop.set(walk.subarray(at, length));
     loop.set(walk.subarray(0, at), length - at);
-    for (let i = 0; i < length; i++) face[loop[i] ?? 0] = low;
+    for (let i = 0; i < length; i++) {
+      face[loop[i] ?? 0] = low;
+      index.walkedAt[loop[i] ?? 0] = walks;
+    }
     index.faces.set(low, loop);
     // Measured from the loop's first node, so the numbers stay small.
     const first = ((low & 1) === 0 ? net.segA[low >> 1] : net.segB[low >> 1]) ?? 0;
@@ -394,6 +412,8 @@ function emptyIndex(net: RoadNetwork): BlockIndex {
     blocks: new Map(),
     dirtyFaces: new Set(),
     fresh: new Set(),
+    walks: 0,
+    walkedAt: new Int32Array(2 * size),
   };
 }
 
@@ -452,6 +472,29 @@ export function existingBlockIndex(net: RoadNetwork): BlockIndex | null {
  */
 export function settleBlocks(index: BlockIndex): void {
   settle(index);
+}
+
+/**
+ * How many reads of `index` have walked faces again (`BlockIndex.walks`),
+ * after walking any a change touched since the last read. With
+ * `faceWalkedSince`, it tells whether a side of a road still faces what it
+ * faced when this was read (#426).
+ */
+export function blockWalks(index: BlockIndex): number {
+  settle(index);
+  return index.walks;
+}
+
+/**
+ * Whether the face on half-edge `h`, a side of a road as `blockOnSide`
+ * reads it (`2 * segment`, plus 1 for the left side), has been walked again
+ * since `blockWalks` gave `walks`. Settles first. False means `blockOnSide`
+ * gives the same answer for that side as it gave then.
+ */
+export function faceWalkedSince(index: BlockIndex, h: number, walks: number): boolean {
+  settle(index);
+  // A segment taken in since is walked by the read after, so a half-edge beyond the arrays is new.
+  return h >= index.walkedAt.length || (index.walkedAt[h] ?? 0) > walks;
 }
 
 /** Every block, by ascending id. */
