@@ -7,11 +7,13 @@ import {
   SYSTEMS,
   TIME_BALANCE,
   UPKEEP_SYSTEM,
+  ECONOMY,
   chargeUpkeep,
   createBareState,
   createState,
   dailyShare,
   deserialize,
+  otherSpendingPerYear,
   hashState,
   prepareDerived,
   recountRoadUpkeep,
@@ -279,6 +281,43 @@ describe("the daily charge", () => {
     while (state.tick % DAY !== 0) step(state);
     step(state);
     expect(state.budget.treasury).toBeLessThan(treasury);
+  });
+});
+
+describe("the other city spending (M4-19)", () => {
+  /** A bare city with `people` residents, as the statistics count them. */
+  function peopled(people: number): SimState {
+    const state = createBareState(1);
+    state.stats.totals["population"] = people;
+    return state;
+  }
+
+  it("is the price a resident in economy.json times the population", () => {
+    expect(ECONOMY.otherSpendingPerResident).toBeGreaterThan(0);
+    expect(otherSpendingPerYear(peopled(0))).toBe(0);
+    expect(otherSpendingPerYear(peopled(1234))).toBe(1234 * ECONOMY.otherSpendingPerResident);
+  });
+
+  it("charges the day's share at the day's population on its own line, on a day's first tick only", () => {
+    const state = peopled(1234);
+    const yearly = otherSpendingPerYear(state);
+    state.tick = 37 * DAY + 1;
+    chargeUpkeep(state);
+    expect(state.budget.month[LINE.otherSpending]).toBe(0);
+    state.tick = 37 * DAY;
+    const treasury = state.budget.treasury;
+    chargeUpkeep(state);
+    expect(state.budget.month[LINE.otherSpending]).toBe(dailyShare(yearly, 37));
+    expect(state.budget.treasury).toBe(treasury - dailyShare(yearly, 37));
+  });
+
+  it("adds up to the yearly figure over a year at a steady population", () => {
+    const state = peopled(777);
+    for (let d = 0; d < yearDays(); d++) {
+      state.tick = (2 * yearDays() + d) * DAY;
+      chargeUpkeep(state);
+    }
+    expect(state.budget.month[LINE.otherSpending]).toBe(777 * ECONOMY.otherSpendingPerResident);
   });
 });
 

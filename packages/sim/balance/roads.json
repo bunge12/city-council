@@ -56,9 +56,10 @@
         "note": "FDOT's Cost Per Mile Models list a new 2-lane undivided urban arterial (U01) at about $9.1M per mile, but that is an arterial with bike lanes and drainage, its price year could not be confirmed, and it would make a street cost more than an avenue."
       },
       "upkeepShare": {
-        "share": 0.01,
+        "share": 0.05,
         "sourceYear": 2026,
-        "source": "Placeholder. One percent of the build cost a year, the figure the per-metre placeholders used before M4-04, until issue M4-19 tunes it.",
+        "sourceUrl": "https://www.toronto.ca/wp-content/uploads/2026/03/95f7-2026-Public-Book-TS-V1.pdf",
+        "source": "Placeholder. Five percent of the build cost a year (M4-19). City of Toronto Transportation Services' 2026 gross operating budget of C$516.0 million over the 5,760 km of road the city keeps is C$89.6 a metre a year, 4.7% of the 2026 street price; rounded up, since resurfacing and rebuilding come out of the capital budget on top. One city's figure, for every road type alike.",
         "placeholder": true,
         "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear."
       },
@@ -98,9 +99,10 @@
         "sourceUrl": "https://web-prod.phoenix.gov/content/dam/phoenix/pddsite/documents/impact-fees/2025-if-update/Major%20Arterial%20IIP%20Final.pdf"
       },
       "upkeepShare": {
-        "share": 0.01,
+        "share": 0.05,
         "sourceYear": 2026,
-        "source": "Placeholder. One percent of the build cost a year, the figure the per-metre placeholders used before M4-04, until issue M4-19 tunes it.",
+        "sourceUrl": "https://www.toronto.ca/wp-content/uploads/2026/03/95f7-2026-Public-Book-TS-V1.pdf",
+        "source": "Placeholder. Five percent of the build cost a year (M4-19). City of Toronto Transportation Services' 2026 gross operating budget of C$516.0 million over the 5,760 km of road the city keeps is C$89.6 a metre a year, 4.7% of the 2026 street price; rounded up, since resurfacing and rebuilding come out of the capital budget on top. One city's figure, for every road type alike.",
         "placeholder": true,
         "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear."
       },
@@ -140,9 +142,10 @@
         "placeholder": true
       },
       "upkeepShare": {
-        "share": 0.01,
+        "share": 0.05,
         "sourceYear": 2026,
-        "source": "Placeholder. One percent of the build cost a year, the figure the per-metre placeholders used before M4-04, until issue M4-19 tunes it.",
+        "sourceUrl": "https://www.toronto.ca/wp-content/uploads/2026/03/95f7-2026-Public-Book-TS-V1.pdf",
+        "source": "Placeholder. Five percent of the build cost a year (M4-19). City of Toronto Transportation Services' 2026 gross operating budget of C$516.0 million over the 5,760 km of road the city keeps is C$89.6 a metre a year, 4.7% of the 2026 street price; rounded up, since resurfacing and rebuilding come out of the capital budget on top. One city's figure, for every road type alike.",
         "placeholder": true,
         "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear."
       },
@@ -182,9 +185,10 @@
         "sourceUrl": "https://www.thepricer.org/how-much-does-a-lane-of-highway-cost/"
       },
       "upkeepShare": {
-        "share": 0.01,
+        "share": 0.05,
         "sourceYear": 2026,
-        "source": "Placeholder. One percent of the build cost a year, the figure the per-metre placeholders used before M4-04, until issue M4-19 tunes it.",
+        "sourceUrl": "https://www.toronto.ca/wp-content/uploads/2026/03/95f7-2026-Public-Book-TS-V1.pdf",
+        "source": "Placeholder. Five percent of the build cost a year (M4-19). City of Toronto Transportation Services' 2026 gross operating budget of C$516.0 million over the 5,760 km of road the city keeps is C$89.6 a metre a year, 4.7% of the 2026 street price; rounded up, since resurfacing and rebuilding come out of the capital budget on top. One city's figure, for every road type alike.",
         "placeholder": true,
         "note": "M4-01 looked for a source and found none it could read. The Municipal Benchmarking Network Canada reported Montreal's paved road cost at $11,883 a lane-km in 2015, the highest of its cities, by way of the Montreal Gazette (8 November 2018); that is about $12 a lane-metre a year, $24 a metre of two-lane street or about 1.2 percent of its 2026 build cost, but it is a newspaper's figure and its definition is unclear."
       },

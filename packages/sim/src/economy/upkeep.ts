@@ -28,6 +28,7 @@ import type { SimState } from "../state";
 import type { System } from "../step";
 import { dailyShare, moveMoney } from "./budget";
 import { landmarkUpkeepPerYear } from "../buildings/landmarks";
+import { ECONOMY } from "./balance";
 
 /**
  * What segment `seg` costs a year to keep, in whole dollars: its build cost,
@@ -112,10 +113,23 @@ export function buildingUpkeepPerYear(state: Pick<SimState, "buildings">): numbe
 }
 
 /**
+ * What the city's other spending costs a year at today's population, in
+ * whole dollars: `otherSpending.perResident` in economy.json for each
+ * resident (M4-19). It stands in for the services that have no building
+ * yet, which M8 and M9 replace a service at a time (PRD, "Other city
+ * spending"). The population is the running total the statistics keep, so
+ * nothing is counted.
+ */
+export function otherSpendingPerYear(state: Pick<SimState, "stats">): number {
+  return ECONOMY.otherSpendingPerResident * (state.stats.totals["population"] ?? 0);
+}
+
+/**
  * On a day's first tick, moves that day's share of the yearly road upkeep
- * onto the road upkeep line and of the yearly building upkeep onto the
- * building upkeep line. Does nothing on any other tick. Runs past the
- * overdraft too: a broke city still pays to keep its roads (PRD).
+ * onto the road upkeep line, of the yearly building upkeep onto the
+ * building upkeep line, and of the other spending at the day's population
+ * onto its line. Does nothing on any other tick. Runs past the overdraft
+ * too: a broke city still pays to keep its roads (PRD).
  */
 export function chargeUpkeep(state: SimState): void {
   const perDay = TIME_BALANCE.ticksPerDay;
@@ -125,6 +139,8 @@ export function chargeUpkeep(state: SimState): void {
   if (roads !== 0) moveMoney(state, "roadUpkeep", roads);
   const buildings = dailyShare(buildingUpkeepPerYear(state), day);
   if (buildings !== 0) moveMoney(state, "buildingUpkeep", buildings);
+  const other = dailyShare(otherSpendingPerYear(state), day);
+  if (other !== 0) moveMoney(state, "otherSpending", other);
 }
 
 /** The name the timer hook reports for the upkeep system, as the debug panel shows it. */

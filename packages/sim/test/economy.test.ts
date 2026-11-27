@@ -73,13 +73,22 @@ describe("economy.json", () => {
     expect(errors).toContain("eminentDomain.relocationPerJob.source is missing");
   });
 
+  it("names the other city spending's price when it has no source or is not whole dollars (M4-19)", () => {
+    const data = copy();
+    delete at(data, "otherSpending", "perResident")["source"];
+    at(data, "otherSpending", "perResident")["amount"] = 4700.5;
+    const errors = checkEconomyBalance(data);
+    expect(errors).toContain("otherSpending.perResident.source is missing");
+    expect(errors).toContain("otherSpending.perResident.amount must be a whole number of dollars");
+  });
+
   it("names a rate or a charge outside its range", () => {
     const data = copy();
-    at(data, "taxRates", "residential")["default"] = 0.05;
+    at(data, "taxRates", "residential")["default"] = 0.06;
     at(data, "developmentCharges", "office")["amount"] = 1000;
     at(data, "taxRates", "commercial")["max"] = 1.5;
     const errors = checkEconomyBalance(data);
-    expect(errors).toContain("taxRates.residential.default 0.05 is outside its range 0 to 0.03");
+    expect(errors).toContain("taxRates.residential.default 0.06 is outside its range 0 to 0.05");
     expect(errors).toContain("developmentCharges.office.amount 1000 is outside its range 0 to 450");
     expect(errors).toContain("taxRates.commercial.max must be a rate from 0 to 1");
   });

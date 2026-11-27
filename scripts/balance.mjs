@@ -19,7 +19,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const runner = fileURLToPath(new URL("../packages/sim/test/balance/run.ts", import.meta.url));
 const hook = pathToFileURL(fileURLToPath(new URL("./ts-hook.mjs", import.meta.url))).href;
 const register = `data:text/javascript,import{register}from"node:module";register(${JSON.stringify(hook)});`;
-const CITIES = ["homes", "balanced", "industry-lost", "rezoned"];
+const CITIES = ["new-town", "homes", "balanced", "industry-lost", "rezoned"];
 
 const args = process.argv.slice(2).filter((arg) => arg !== "--");
 const cities = [];

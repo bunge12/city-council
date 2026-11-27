@@ -18,12 +18,16 @@
 
 import buildings from "../../balance/buildings.json" with { type: "json" };
 import demand from "../../balance/demand.json" with { type: "json" };
+import economy from "../../balance/economy.json" with { type: "json" };
 import landvalue from "../../balance/landvalue.json" with { type: "json" };
 import pops from "../../balance/pops.json" with { type: "json" };
+import progression from "../../balance/progression.json" with { type: "json" };
+import roads from "../../balance/roads.json" with { type: "json" };
+import time from "../../balance/time.json" with { type: "json" };
 import type { City } from "./cities";
 
 /** The balance files `--set` may change. Each is the module the sim itself imports, so a change here is a change there. */
-const FILES: Readonly<Record<string, unknown>> = { buildings, demand, landvalue, pops };
+const FILES: Readonly<Record<string, unknown>> = { buildings, demand, economy, landvalue, pops, progression, roads, time };
 
 interface Options {
   city: string;
@@ -81,7 +85,7 @@ for (const spec of options.sets) applySet(spec);
 // Only now import the sim and the cities, so the sim reads the changed files as it loads.
 const sim = await import("../../src/index");
 const { CITIES, Player, SEED } = await import("./cities");
-const { BUILDING_TYPES, DEMAND_BARS, SCALE_TREASURY, TIME_BALANCE, buildingIdLimit, buildingOnSlot, createState, creditMilestones, fundCity, homeRoom, isAbandoned, isBuilding, isVacant, step, yearDays, ZONING_BALANCE } = sim;
+const { BUILDING_TYPES, CHARGE_LINES, DEMAND_BARS, ECONOMY, LEDGER_LINES, LINE, SCALE_TREASURY, TAX_LINES, TIME_BALANCE, buildingIdLimit, buildingOnSlot, buildingTaxPerYear, createState, creditMilestones, fundCity, homeRoom, isAbandoned, isBuilding, isLandmark, isMonthStart, isVacant, milestonesReached, step, yearDays, ZONING_BALANCE } = sim;
 type SimState = import("../../src/index").SimState;
 
 const city: City | undefined = CITIES.find((c) => c.name === options.city);
@@ -136,10 +140,14 @@ function builtShare(state: SimState, zone: string, density: number): number {
 const pad = (value: string | number, width: number): string => String(value).padStart(width);
 
 const state = createState(SEED);
-// Funded as the scale cities are (M4-03), so each city builds what it built before roads cost money.
-fundCity(state, SCALE_TREASURY);
-// And credited with every milestone (M4-12), so a city zones densities 2 and 3 from its first year.
-creditMilestones(state);
+if (!city.onGrant) {
+  // Funded as the scale cities are (M4-03), so each city builds what it built before roads cost money.
+  fundCity(state, SCALE_TREASURY);
+  // And credited with every milestone (M4-12), so a city zones densities 2 and 3 from its first year.
+  creditMilestones(state);
+}
+/** What the city was given beyond the starting grant, which the money table takes off the treasury it prints. */
+const funding = state.budget.treasury - ECONOMY.startingGrant;
 const player = new Player(state);
 city.setup(player);
 
@@ -165,19 +173,84 @@ const COLUMNS: [string, number][] = [
 ];
 if (city.watch) COLUMNS.push([`${city.watch.zone[0]?.toUpperCase()}${city.watch.density} built`, 9]);
 
+const MONEY: [string, number][] = [
+  ["Year", 4],
+  ["Treasury", 8],
+  ["Tax R", 7],
+  ["Tax C", 7],
+  ["Tax O", 7],
+  ["Tax I", 7],
+  ["Charges", 7],
+  ["Grants", 7],
+  ["Loans", 6],
+  ["Build", 7],
+  ["Roads", 6],
+  ["Bldgs", 6],
+  ["Repay", 6],
+  ["Other", 7],
+  ["Net", 7],
+  ["Tax/res", 7],
+  ["Spend/res", 9],
+  ["Tax/cell 1/2/3", 20],
+  ["Ratio", 9],
+  ["Milestone", 9],
+];
+
 console.log(`${city.name}: ${city.about}`);
 console.log(`Seed ${SEED}, ${options.years} game years. ${options.sets.length === 0 ? "Balance as in packages/sim/balance/." : `Balance changed: ${options.sets.join(", ")}.`}`);
 console.log("Res to Ind: each bar's average over the year. Flips: times each bar changed sign in the year, as the top bar shows it, rounded. The rest at the year's end. Unemp: workers without a job. Room: empty places in homes. Open R/C/O/I: the percent of each zone's cells with no building. Shop/Off/Fac: the jobs by kind, in percent.");
 console.log(COLUMNS.map(([name, width]) => pad(name, width)).join(" "));
 
+/** Whole dollars in the short form the UI uses: $950, $12K, $4.2M, $3.1B, with a minus sign before a loss. */
+function money(dollars: number): string {
+  const sign = dollars < 0 ? "-" : "";
+  const d = Math.abs(dollars);
+  if (d >= 1e9) return `${sign}${(d / 1e9).toFixed(d >= 1e10 ? 0 : 1)}B`;
+  if (d >= 1e6) return `${sign}${(d / 1e6).toFixed(d >= 1e7 ? 0 : 1)}M`;
+  if (d >= 1e3) return `${sign}${(d / 1e3).toFixed(0)}K`;
+  return `${sign}${Math.round(d)}`;
+}
+
+/**
+ * The tax the city's private buildings pay a year for each cell of their
+ * lots, by the density they were built under, every zone together, at
+ * today's rates, land values and jobs filled (`buildingTaxPerYear`). The
+ * PRD's ratios to aim for are 1x, 10x and 50x.
+ */
+function taxPerCell(state: SimState): number[] {
+  const b = state.buildings;
+  const tax = [0, 0, 0];
+  const cells = [0, 0, 0];
+  for (let id = 0; id < buildingIdLimit(b); id++) {
+    if (!isBuilding(b, id) || isLandmark(b, id)) continue;
+    const d = (b.density[id] ?? 0) - 1;
+    if (d < 0 || d > 2) continue;
+    tax[d] = (tax[d] ?? 0) + buildingTaxPerYear(state, id);
+    cells[d] = (cells[d] ?? 0) + (b.width[id] ?? 0) * (b.depth[id] ?? 0);
+  }
+  return tax.map((t, d) => ((cells[d] ?? 0) === 0 ? 0 : t / (cells[d] ?? 1)));
+}
+
+/** The ledger lines a game year moved, summed over its months as each closes. */
+const yearLedger = new Float64Array(LEDGER_LINES.length);
+const at = (line: string): number => yearLedger[LINE[line as keyof typeof LINE]] ?? 0;
+const sumOf = (lines: readonly string[]): number => lines.reduce((sum, line) => sum + at(line), 0);
+const moneyRows: string[] = [];
+
 // The year the setup ran in counts as year 1: setting up takes a few ticks.
 for (let year = 1; year <= options.years; year++) {
-  if (year > 1) city.atYear?.(player, year);
+  if (year > 1) {
+    city.atYear?.(player, year);
+    city.atMonth?.(player);
+  }
   const end = year * YEAR;
   const sums: Record<string, number> = {};
   const flips: Record<string, number> = {};
   const signs: Record<string, number> = {};
   let days = 0;
+  yearLedger.fill(0);
+  // Year 1 counts the month a new city files before its first, the starting grant, too.
+  if (year === 1) yearLedger.set(createState(SEED).budget.lastMonth);
   for (const bar of DEMAND_BARS) {
     sums[bar] = 0;
     flips[bar] = 0;
@@ -185,6 +258,11 @@ for (let year = 1; year <= options.years; year++) {
   }
   while (state.tick < end) {
     step(state);
+    if (isMonthStart(state.tick)) {
+      for (let i = 0; i < yearLedger.length; i++) yearLedger[i] = (yearLedger[i] ?? 0) + (state.budget.lastMonth[i] ?? 0);
+      // The year's last tick is the next year's first, whose month the next pass starts.
+      if (state.tick < end) city.atMonth?.(player);
+    }
     // The bars move on a day's first tick; read them once it has run.
     if (state.tick % DAY !== 1) continue;
     days++;
@@ -199,6 +277,7 @@ for (let year = 1; year <= options.years; year++) {
       }
     }
   }
+  if (year === 1) yearLedger.set(yearLedger.map((v, i) => v - (i === LINE.grants ? funding : 0)));
   const t = state.stats.totals;
   const workers = (t["workersEmployed"] ?? 0) + (t["workersUnemployed"] ?? 0);
   const jobs = (t["jobsCommercial"] ?? 0) + (t["jobsOffice"] ?? 0) + (t["jobsIndustrial"] ?? 0);
@@ -228,4 +307,41 @@ for (let year = 1; year <= options.years; year++) {
   ];
   if (city.watch) row.push(`${Math.round(100 * builtShare(state, city.watch.zone, city.watch.density))}%`);
   console.log(row.map((value, k) => pad(value, COLUMNS[k]?.[1] ?? 0)).join(" "));
+
+  const tax = sumOf(TAX_LINES);
+  const upkeep = sumOf(["roadUpkeep", "buildingUpkeep"]);
+  const repay = sumOf(["loanRepayments", "interest"]);
+  const other = at("otherSpending");
+  const perCell = taxPerCell(state);
+  const base = perCell[0] ?? 0;
+  const reached = milestonesReached(state);
+  const firstAt = state.milestones[0];
+  moneyRows.push(
+    [
+      year,
+      money(state.budget.treasury - funding),
+      ...TAX_LINES.map((line) => money(at(line))),
+      money(sumOf(CHARGE_LINES)),
+      money(at("grants")),
+      money(at("loansTaken")),
+      money(sumOf(["construction", "demolition", "compensation"])),
+      money(at("roadUpkeep")),
+      money(at("buildingUpkeep")),
+      money(repay),
+      money(other),
+      money(tax - upkeep - repay - other),
+      money(tax / Math.max(1, people)),
+      money((upkeep + other) / Math.max(1, people)),
+      perCell.map((v) => money(v)).join("/"),
+      base === 0 ? "-" : perCell.map((v) => Math.round(v / base)).join("/"),
+      firstAt === undefined ? "none" : firstAt < 0 ? `${reached} given` : `${reached}, 1st d${Math.floor(firstAt / DAY)}`,
+    ]
+      .map((value, k) => pad(value, MONEY[k]?.[1] ?? 0))
+      .join(" "),
+  );
 }
+
+console.log("");
+console.log(`Money by game year${city.onGrant ? ", on the starting grant alone" : ", the funding the city was given taken off the treasury"}. Tax R to I, Charges and Grants are income; Build (construction, demolition and compensation), Roads and Bldgs (upkeep), Repay (loan repayments and interest) and Other (other city spending) are expenses. Net: tax less upkeep, repayments and other spending, so growth's one-off money is left out. Tax/res and Spend/res: tax, and upkeep with other spending, per resident at the year's end. Tax/cell: what private buildings pay a year a cell of lot by the density they were built under, today; Ratio: the same over density 1's. Milestone: how many are reached, and the day the first was.`);
+console.log(MONEY.map(([name, width]) => pad(name, width)).join(" "));
+for (const line of moneyRows) console.log(line);

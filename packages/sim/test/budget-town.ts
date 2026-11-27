@@ -10,9 +10,10 @@
 // a house or two carry a long road. A spur on open ground past the large
 // block holds a few houses outside any block.
 //
-// At M4's starting prices a street costs about $19 a metre a year to keep
-// and a house pays a few thousand, so houses all along a cul-de-sac still
-// pay their way; issue M4-19 tunes that.
+// Since M4-19 a street costs about $95 a metre a year to keep and a house
+// pays a few thousand, so the cul-de-sac's few houses do not pay for its
+// road. The overlay leaves out the other city spending, which is the same
+// for each resident wherever they live (PRD, "Other city spending").
 
 import { CONNECTION_BALANCE, NONE, TIME_BALANCE, ZONING_BALANCE, connectionEnd, createState, step, submit, type SimState } from "../src/index";
 import { FULL_DEMAND, holdDemand } from "./demand-helper";
