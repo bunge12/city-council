@@ -45,7 +45,7 @@
     "blocks.spec.ts": 23,
     "bridges.spec.ts": 37,
     "budget-overlay.spec.ts": 90,
-    "budget-panel-scale.spec.ts": 300,
+    "budget-panel-scale.spec.ts": 150,
     "budget-panel.spec.ts": 60,
     "building-lod-memory.spec.ts": 121,
     "building-lod-overlay.spec.ts": 90,
