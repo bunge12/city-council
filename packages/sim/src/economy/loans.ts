@@ -166,8 +166,18 @@ export function takeLoanPayload(payload: unknown): TakeLoanPayload | string {
   return { principal: principal as number, termMonths: termMonths as number };
 }
 
-/** Why `state` cannot take a loan of `principal` whole dollars, or null when it can: every slot taken, or past the credit limit. */
-export function loanRefusal(state: SimState, principal: number): string | null {
+/**
+ * Why `state` cannot take a loan of `principal` whole dollars over
+ * `termMonths`, or null when it can: every slot taken, past the credit
+ * limit, or so small that its whole-dollar repayment would not pay down
+ * the balance after the first month's interest, which would leave a loan
+ * that owes nothing until its last month and holds a slot meanwhile.
+ */
+export function loanRefusal(state: SimState, principal: number, termMonths: number): string | null {
+  const offer = ECONOMY.loans.offers.find((o) => o.termMonths === termMonths);
+  if (offer && monthlyRepayment(principal, offer.annualRate, termMonths) <= monthInterest(principal, offer.annualRate)) {
+    return `A loan of ${formatMoneyShort(principal)} over ${termMonths} months is too small to repay in whole dollars`;
+  }
   const max = ECONOMY.loans.maxOpen;
   if (loanCount(state.budget) >= max) return `The city has ${max} loans open, the most it may hold`;
   const left = creditLeft(state);
@@ -178,7 +188,7 @@ export function loanRefusal(state: SimState, principal: number): string | null {
 /** Why a `TakeLoan` is refused in `state`, or null when it applies. */
 export function checkTakeLoan(state: SimState, payload: unknown): string | null {
   const result = takeLoanPayload(payload);
-  return typeof result === "string" ? result : loanRefusal(state, result.principal);
+  return typeof result === "string" ? result : loanRefusal(state, result.principal, result.termMonths);
 }
 
 /** Takes a checked loan: its principal on the loans line, and the loan on the end of the list. */

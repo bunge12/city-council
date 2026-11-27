@@ -100,7 +100,7 @@ describe("a loan run to its term", () => {
     [250_000_000, TEN_YEARS],
     [7_654_321, TWENTY_YEARS],
     [99_999_999, THIRTY_YEARS],
-    [37, THIRTY_YEARS],
+    [1_000, THIRTY_YEARS],
   ] as const) {
     it(`repays $${principal} over ${term} months to a balance of exactly zero, its payments the principal plus the interest`, () => {
       const state = cityWithLimit(principal);
@@ -113,6 +113,7 @@ describe("a loan run to its term", () => {
       expect(loan?.annualRate).toBe(ECONOMY.loans.offers.find((o) => o.termMonths === term)?.annualRate);
       let interest = 0;
       const payments: number[] = [];
+      let closedAfter = -1;
       // Taken in the first month, it pays from the close after that month's: one close more than its term.
       for (const [k, tick] of monthStartsAfter(state.tick, term + 1).entries()) {
         state.tick = tick;
@@ -121,15 +122,18 @@ describe("a loan run to its term", () => {
         interest += state.budget.lastMonth[LINE.interest] ?? 0;
         if (k === 0) expect(month, "nothing on the close of the month it was taken in").toBe(0);
         else payments.push(month);
-        if (k < term) expect(loansOf(state.budget), `still open after ${k} closes`).toHaveLength(1);
+        if (loansOf(state.budget).length === 0 && closedAfter < 0) closedAfter = k;
       }
       expect(loansOf(state.budget)).toEqual([]);
       expect(debtOf(state.budget)).toBe(0);
       const paid = payments.reduce((a, b) => a + b, 0);
       expect(paid).toBe(principal + interest);
-      expect(payments).toHaveLength(term);
-      // Every payment but the last is the fixed repayment; the last takes what remains.
-      for (const p of payments.slice(0, -1)) expect(p).toBe(loan?.repayment);
+      // Closed on its last month, or a little before where the floors of the interest paid it down early.
+      expect(closedAfter).toBeGreaterThan(term * 0.9);
+      expect(closedAfter).toBeLessThanOrEqual(term);
+      // Every payment but the last is the fixed repayment; the last takes what remains, and nothing after.
+      for (const p of payments.slice(0, closedAfter - 1)) expect(p).toBe(loan?.repayment);
+      for (const p of payments.slice(closedAfter)) expect(p).toBe(0);
       expect(state.budget.treasury).toBe(before + principal - paid);
     });
   }
@@ -178,7 +182,7 @@ describe("TakeLoan", () => {
   it("is refused past the credit limit, with what is left to borrow", () => {
     const state = createState(SEED);
     expect(creditLimit(state)).toBe(0);
-    expect(refusal(state, "TakeLoan", { principal: 1, termMonths: TEN_YEARS })).toBe("Borrowing $1 is past the credit limit, $0 left to borrow");
+    expect(refusal(state, "TakeLoan", { principal: 1_000, termMonths: TEN_YEARS })).toBe("Borrowing $1K is past the credit limit, $0 left to borrow");
     state.stats.totals["population"] = 2_000;
     expect(creditLimit(state)).toBe(2_000 * ECONOMY.creditLimit.perResident);
     apply(state, "TakeLoan", { principal: 1_500_000, termMonths: TEN_YEARS });
@@ -192,13 +196,15 @@ describe("TakeLoan", () => {
     const state = cityWithLimit();
     for (let i = 0; i < ECONOMY.loans.maxOpen; i++) apply(state, "TakeLoan", { principal: 1_000_000, termMonths: TEN_YEARS });
     expect(loansOf(state.budget).map((l) => l.id)).toEqual([...Array(ECONOMY.loans.maxOpen).keys()]);
-    expect(refusal(state, "TakeLoan", { principal: 1, termMonths: TEN_YEARS })).toBe(`The city has ${ECONOMY.loans.maxOpen} loans open, the most it may hold`);
+    expect(refusal(state, "TakeLoan", { principal: 1_000, termMonths: TEN_YEARS })).toBe(`The city has ${ECONOMY.loans.maxOpen} loans open, the most it may hold`);
   });
 
   it("is refused a principal that is not whole dollars, or a term the file does not offer", () => {
     const state = cityWithLimit();
     expect(refusal(state, "TakeLoan", null)).toBe("TakeLoan needs a principal and a term");
     for (const principal of [0, -5, 1.5, "100", undefined]) expect(refusal(state, "TakeLoan", { principal, termMonths: TEN_YEARS })).toMatch(/principal must be whole dollars/);
+    // $100 over thirty years repays floor($0.54) = $0 a month: refused, not left owing nothing for 359 months.
+    expect(refusal(state, "TakeLoan", { principal: 100, termMonths: THIRTY_YEARS })).toBe("A loan of $100 over 360 months is too small to repay in whole dollars");
     expect(refusal(state, "TakeLoan", { principal: 100, termMonths: 13 })).toBe(`TakeLoan payload.termMonths must be one of ${ECONOMY.loans.offers.map((o) => o.termMonths).join(", ")}`);
   });
 });
