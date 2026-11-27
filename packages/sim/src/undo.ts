@@ -105,6 +105,13 @@ export interface UndoRecord {
    */
   spent: number;
   /**
+   * How many buildings the command took (M4-09): a bulldoze's, and a new
+   * road's or upgrade's, as its plan found them. Undo refuses a record that
+   * took any, since buildings never come back. 0 for a ZoneCells, and for
+   * a record from before version 34, which kept no count.
+   */
+  took: number;
+  /**
    * For a ZoneCells that is one part of a stroke too big for one command:
    * the stroke's id, the same on every part. One undo takes back the run of
    * the sender's newest records that share it (M2 review, #147).
@@ -254,6 +261,11 @@ export function hasUndo(state: SimState, playerId: string): boolean {
   return state.undo.some((r) => r.playerId === playerId);
 }
 
+/** Why a record that took `count` buildings cannot be undone. */
+export function tookReason(count: number): string {
+  return `Can't undo: that change demolished ${count === 1 ? "a building" : `${count} buildings`}, and buildings never come back`;
+}
+
 export type UndoPlanResult = { ok: true; index: number; indices: number[] } | { ok: false; reason: string };
 
 /**
@@ -268,6 +280,7 @@ export function planUndo(state: SimState, playerId: string): UndoPlanResult {
   const record = state.undo[index];
   if (!record) return { ok: false, reason: NOTHING };
   if (record.type !== ZONE_CELLS) {
+    if (record.took > 0) return { ok: false, reason: tookReason(record.took) };
     const reason =
       rehearse(state.roads, record.ops) ?? clearsBuildings(state, record.ops) ?? takesBuiltGround(state, record.ops) ?? spendingRefusal(state, undoPrice(state, indices));
     return reason === null ? { ok: true, index, indices } : { ok: false, reason };
@@ -669,6 +682,8 @@ function isOp(value: unknown): boolean {
 function isRecordZones(record: Record<string, unknown>): boolean {
   const zones = record["zones"];
   if (!Number.isSafeInteger(record["spent"]) || (record["type"] === ZONE_CELLS && record["spent"] !== 0)) return false;
+  const took = record["took"];
+  if (!Number.isSafeInteger(took) || (took as number) < 0 || (record["type"] === ZONE_CELLS && took !== 0)) return false;
   if (record["type"] !== ZONE_CELLS) return record["painted"] === undefined && record["stroke"] === undefined && checkJournals(zones, false);
   const painted = record["painted"];
   if (!isRecord(painted) || !isZoneValue(painted["zone"], painted["density"])) return false;

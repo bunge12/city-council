@@ -38,6 +38,7 @@ import {
 import { DAYS_LOW_LIMIT } from "../src/pops/balance";
 import { popIndexOf } from "../src/pops/where";
 import { submit } from "./seen-ends";
+import { funded } from "./funds";
 import { holdDemand } from "./demand-helper";
 import { expectReplay, replayFixture, type ReplayFixture } from "./replay-helper";
 import { withValue } from "./with-value";
@@ -153,7 +154,7 @@ function homesOnly(): { state: SimState; s: Street } {
 
 /** Homes and a retail podium on one street, filled with its bars held up until most pops work. */
 function workingCity(): SimState {
-  const state = credited(createState(SEED));
+  const state = credited(funded(createState(SEED)));
   const s = street(state, 30);
   zone(state, s, "commercial", 3, 0, 4, 4, 1);
   zone(state, s, "commercial", 3, 0, 4, 4, -1);

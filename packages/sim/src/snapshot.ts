@@ -50,6 +50,7 @@ import { checkBuildings, type BuildingState } from "./buildings/buildings";
 import { checkPops } from "./pops/pops";
 import { checkStats, recountTotals } from "./stats/stats";
 import { checkBudget } from "./economy/budget";
+import { checkExpropriations } from "./economy/compensation";
 import { checkMilestones } from "./progression/milestones";
 import { replaysUnderThisBalance } from "./balance-stamp";
 import { checkDemand } from "./demand/demand";
@@ -745,7 +746,7 @@ function isCentre(value: unknown): boolean {
 
 /** Checks the decoded state has the current shape, so a bad save fails here and not later in play. */
 function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, header: SnapshotHeader): void {
-  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, cellReads, buildings, pops, centre, stats, travelReadyAt, demand, redevelopedToday, travelLast, budget, logSpent, milestones } = state;
+  const { tick, seed, rng, speed, pending, log, logOffset, roads, undo, connections, balance, cells, cellsReadyAt, cellReads, buildings, pops, centre, stats, travelReadyAt, demand, redevelopedToday, travelLast, budget, logSpent, expropriations, milestones } = state;
   if (!Number.isSafeInteger(tick) || (tick as number) < 0) throw corrupt("its tick is not a whole number");
   if (!isUint32(seed)) throw corrupt("its seed is not a 32-bit integer");
   if (tick !== header.tick || seed !== header.seed) throw corrupt("its header does not match its contents");
@@ -774,7 +775,7 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   if (!Number.isSafeInteger(cellReads) || (cellReads as number) < 0) throw corrupt("its count of cell commands this tick is not a whole number");
   const buildingProblem = checkBuildings(buildings, roads as RoadNetwork, tick as number);
   if (buildingProblem !== null) throw corrupt(`its buildings are malformed: ${buildingProblem}`);
-  const popProblem = checkPops(pops, buildings as BuildingState);
+  const popProblem = checkPops(pops, buildings as BuildingState, tick as number);
   if (popProblem !== null) throw corrupt(`its pops are malformed: ${popProblem}`);
   if (!isCentre(centre)) throw corrupt("its city centre is malformed");
   // Before the statistics are checked: totals that drifted below zero under a build's other numbers are counted again, not refused.
@@ -789,6 +790,8 @@ function checkState(state: Record<string, unknown>, pagedLog: unknown[] | null, 
   if (lastProblem !== null) throw corrupt(`its last travel-time table is malformed: ${lastProblem}`);
   const budgetProblem = checkBudget(budget);
   if (budgetProblem !== null) throw corrupt(`its treasury and ledger are malformed: ${budgetProblem}`);
+  const expropriationProblem = checkExpropriations(expropriations, tick as number);
+  if (expropriationProblem !== null) throw corrupt(`its expropriations are malformed: ${expropriationProblem}`);
   const milestoneProblem = checkMilestones(milestones, tick as number);
   if (milestoneProblem !== null) throw corrupt(`its milestones reached are malformed: ${milestoneProblem}`);
 }

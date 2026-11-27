@@ -106,6 +106,15 @@ export interface BuildingState {
   builtAt: Float64Array;
   /** The tick it became vacant or abandoned, as `flags` says it is; while it is in use, the tick it was built or came back into use (M3-24). */
   statusSince: Float64Array;
+  /**
+   * 1 once the city has paid to clear it (M4-09), and 0 before. A road
+   * command pays for the buildings it takes on the tick it applies, but a
+   * new road's buildings go only once its cells settle; a building paid
+   * for and still standing costs nothing to clear again
+   * (economy/compensation.ts). One the road's undo leaves standing stays
+   * paid for.
+   */
+  paid: Uint8Array;
   /** Removed ids, the next one to reuse last. */
   free: Int32Array;
 }
@@ -134,6 +143,7 @@ export const BUILDING_ARRAYS = [
   "variant",
   "builtAt",
   "statusSince",
+  "paid",
 ] as const;
 
 export type BuildingKey = (typeof BUILDING_ARRAYS)[number];
@@ -158,6 +168,7 @@ const ARRAY_TYPES: Readonly<Record<keyof BuildingState, new (n: number) => AnyTy
   variant: Uint8Array,
   builtAt: Float64Array,
   statusSince: Float64Array,
+  paid: Uint8Array,
   free: Int32Array,
 };
 
@@ -183,6 +194,7 @@ export function createBuildings(): BuildingState {
     variant: new Uint8Array(0),
     builtAt: new Float64Array(0),
     statusSince: new Float64Array(0),
+    paid: new Uint8Array(0),
     free: new Int32Array(0),
   };
 }
@@ -269,6 +281,8 @@ export interface BuildingRow extends NewBuilding {
   vacant: boolean;
   abandoned: boolean;
   statusSince: number;
+  /** Whether the city has paid to clear it (M4-09). */
+  paid: number;
 }
 
 /** The row of building `id`. Throws if there is no such building. */
@@ -296,6 +310,7 @@ export function readBuilding(b: BuildingState, id: number): BuildingRow {
     vacant: isVacant(b, id),
     abandoned: isAbandoned(b, id),
     statusSince: b.statusSince[id] ?? 0,
+    paid: b.paid[id] ?? 0,
   };
 }
 
@@ -353,6 +368,7 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   b.variant[id] = spec.variant;
   b.builtAt[id] = state.tick;
   b.statusSince[id] = state.tick;
+  b.paid[id] = 0;
   countBuilding(state, id, 1);
   noteBuildingChanged(b, id);
   noteOpening(state.pops, id);
@@ -399,9 +415,10 @@ export function removeBuilding(state: SimState, id: number): void {
  * free list ends with them in that order. Throws, changing nothing, if any
  * is not a live building or is named twice. One pass for the lot, so a
  * clear of thousands catches the building index up once, not once a
- * building (issue #162).
+ * building (issue #162). `byOwner` says an owner is redeveloping them,
+ * which marks their residents as displaced by it (M4-10).
  */
-export function removeBuildings(state: SimState, ids: readonly number[]): void {
+export function removeBuildings(state: SimState, ids: readonly number[], byOwner = false): void {
   const b = state.buildings;
   // Only a list can name one twice; the upkeep removes one at a time.
   const named = ids.length > 1 ? new Uint8Array(b.flags.length) : null;
@@ -415,7 +432,7 @@ export function removeBuildings(state: SimState, ids: readonly number[]): void {
   if (ids.length === 0) return;
   // Their residents are displaced, to find new homes (M3-12), and their
   // jobs are freed, while the rows still say what each building was.
-  displaceBuildingPops(state, ids);
+  displaceBuildingPops(state, ids, byOwner);
   // The columns each was filed on, which a lot a change of roads took may
   // no longer walk to from its row.
   unfileBuildings(state, ids);
@@ -459,6 +476,7 @@ function clearRow(b: BuildingState, id: number): void {
   b.variant[id] = 0;
   b.builtAt[id] = 0;
   b.statusSince[id] = 0;
+  b.paid[id] = 0;
 }
 
 /**
@@ -522,6 +540,7 @@ export function checkBuildings(value: unknown, net: RoadNetwork, tick: number): 
     const since = b.statusSince[id] ?? 0;
     if (!Number.isSafeInteger(since) || since < built || since > tick) return `building ${id} became what it is on a bad tick`;
     if ((b.residents[id] ?? 0) < 0) return `building ${id} has fewer than no residents`;
+    if ((b.paid[id] ?? 0) > 1) return `building ${id} is neither paid for nor not`;
   }
   return null;
 }

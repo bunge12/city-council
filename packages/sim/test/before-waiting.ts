@@ -2,7 +2,8 @@
 // what is already waiting. For the migration and snapshot tests, which check
 // that a version 31 save loads to the same city with only those added. Every
 // older `without...` helper takes them out too, through `withoutSpending`,
-// since a state from before any earlier version is from before this one.
+// since a state from before any earlier version is from before this one. It
+// takes out what version 33 added too.
 
 import { DEMAND_BARS, WAITING_PART } from "../src/index";
 import { withoutCharges } from "./before-charges";

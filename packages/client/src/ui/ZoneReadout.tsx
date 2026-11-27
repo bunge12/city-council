@@ -23,6 +23,17 @@ export function zoneTitle(preview: ZonePreview): string {
 }
 
 /**
+ * The readout's line about cells under buildings (#417), or null when the
+ * stroke would change none: how many Shift would add, or with Shift held how
+ * many it takes.
+ */
+export function builtNote(preview: ZonePreview): string | null {
+  if (preview.built === 0) return null;
+  const n = cells(preview.built);
+  return preview.whole ? `Including ${n} under buildings; the buildings stay` : `Hold Shift to include ${n} under buildings`;
+}
+
+/**
  * The readout's line over mixed ground, which has no demand bar of its own
  * (issue M3-15). The grower reads each bar without its part for what is
  * already waiting (#420), so mixed can build while a bar shows 0.
@@ -46,6 +57,8 @@ export function ZoneReadout() {
       role="status"
       data-ok={String(preview.ok)}
       data-cells={String(preview.cells.length)}
+      data-built={String(preview.built)}
+      data-whole={String(preview.whole)}
       data-zone={preview.zone}
       data-lot-note={hover.lotNote ?? ""}
       style={{ left: hover.x + OFFSET, top: hover.y + OFFSET }}
@@ -54,7 +67,12 @@ export function ZoneReadout() {
         <div className="what">{zoneTitle(preview)}</div>
       ) : (
         <div className="reason" id="zone-reason">
-          Nothing to change here
+          {preview.built > 0 ? "Only buildings here" : "Nothing to change here"}
+        </div>
+      )}
+      {builtNote(preview) && (
+        <div className="lot-note" id="zone-built-note">
+          {builtNote(preview)}
         </div>
       )}
       {preview.zone === "mixed" && (

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PER_SIDE, CHUNK_SIZE, ROAD_TYPES, ZONING_BALANCE, cellAt, cellCorners, cellStatuses, createState, deserialize, generateTerrain, creditMilestones, hashState, heightAt, replayFrom, step, submit, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PER_SIDE, CHUNK_SIZE, ROAD_TYPES, SCALE_TREASURY, ZONING_BALANCE, cellAt, cellCorners, cellStatuses, createState, deserialize, creditMilestones, fundCity, generateTerrain, hashState, heightAt, replayFrom, step, submit, syncCells, type SimState } from "../packages/sim/src/index";
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
@@ -118,12 +118,6 @@ declare const navigator: { gpu?: { requestAdapter(): Promise<unknown> } };
 
 const VIEWPORT = { width: 1280, height: 800 };
 
-/** A new city on `seed` with every milestone credited, as the page's new city is under the walkthrough's test switch (M4-12). */
-function creditedState(seed: number): SimState {
-  const state = createState(seed);
-  creditMilestones(state);
-  return state;
-}
 test.use({ viewport: VIEWPORT, storageState: HELD_DEMAND_STATE });
 // Several page loads, game months of growth at 4x and many redraws, on a
 // machine that may have no GPU. On software WebGPU it took 9 to 14.5
@@ -190,10 +184,24 @@ const DEEP_R2 = PAINT[1]?.strip ?? { row: 4570, col: 2, north: false };
 /** Step 9: the piece of the middle street between its two eastern junctions, with M1 on its north side and R3 on its south. */
 const BULLDOZED = { x: 4602.5, z: 4570 };
 
-function walkthroughCity(): SimState {
+/**
+ * A new city on the seed, funded at `SCALE_TREASURY`: step 9 bulldozes a
+ * street with towers on it, which at the eminent domain price (M4-09) costs
+ * more than the starting grant. Credited with every milestone (M4-12), as
+ * the page's new city is under the test switch, so it zones densities 2 and
+ * 3. What the walkthrough's city and its replay start from; neither is a
+ * command, so neither is in the log.
+ */
+function walkthroughStart(): SimState {
   const state = createState(SEED);
+  fundCity(state, SCALE_TREASURY);
   // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start.
   creditMilestones(state);
+  return state;
+}
+
+function walkthroughCity(): SimState {
+  const state = walkthroughStart();
   buildRoads(state, [
     ...ROWS.map((z) => [[COLS[0], z], [COLS[4], z], "street"] as [[number, number], [number, number], string]),
     ...COLS.map((x) => [[x, ROWS[0]], [x, ROWS[2]], "street"] as [[number, number], [number, number], string]),
@@ -371,12 +379,18 @@ async function pick(page: Page, zone: string, density: number, depth = DEPTH): P
 }
 
 /** Fills `strip` with the zone tool's current pick: one ZoneCells, checked in the log. */
-async function fill(page: Page, strip: Strip): Promise<void> {
+/** Fills `strip` with the zone tool. With `whole`, Shift is held, so cells under buildings are zoned too (#417). */
+async function fill(page: Page, strip: Strip, whole = false): Promise<void> {
   const before = (await log(page)).filter((e) => e.type === "ZoneCells").length;
   const [x, z] = fillPoint(strip);
-  await hover(page, x, z);
-  await expect(page.locator("#zone-readout")).toHaveAttribute("data-ok", "true");
-  await click(page, x, z);
+  if (whole) await page.keyboard.down("Shift");
+  try {
+    await hover(page, x, z);
+    await expect(page.locator("#zone-readout")).toHaveAttribute("data-ok", "true");
+    await click(page, x, z);
+  } finally {
+    if (whole) await page.keyboard.up("Shift");
+  }
   await expect.poll(async () => (await log(page)).filter((e) => e.type === "ZoneCells").length).toBe(before + 1);
 }
 
@@ -839,7 +853,21 @@ for (const variant of [
       await look(page, centre(R1_STRIP)[0], centre(R1_STRIP)[1] - 20, 220);
       await zoneTool(page);
       await pick(page, "commercial", 2);
-      await fill(page, R1_STRIP);
+      // Without Shift the fill leaves the houses' ground alone and says Shift takes it (#417).
+      await hover(page, ...fillPoint(R1_STRIP));
+      const readout = page.locator("#zone-readout");
+      await expect(readout).toHaveAttribute("data-whole", "false");
+      // The sim runs on, and a house can grow on the strip meanwhile, so the count is not pinned.
+      await expect.poll(async () => Number(await readout.getAttribute("data-built"))).toBeGreaterThan(0);
+      await expect(page.locator("#zone-built-note")).toHaveText(/^Hold Shift to include \d+ cells? under buildings$/);
+      await shot(page, info, dir, "6-fill-leaves-the-houses-ground");
+      await page.keyboard.down("Shift");
+      await frames(page, 3);
+      await expect(readout).toHaveAttribute("data-whole", "true");
+      await expect(page.locator("#zone-built-note")).toContainText("under buildings; the buildings stay");
+      await shot(page, info, dir, "6-shift-fill-takes-the-houses-ground");
+      await page.keyboard.up("Shift");
+      await fill(page, R1_STRIP, true);
       for (let depth = 0; depth < DEPTH; depth++) expect(await cellZone(page, ...stripCell(R1_STRIP, depth))).toMatchObject({ zone: zoneNumber("commercial"), density: 2 });
       // Every house on it still stands, as it was.
       const after = (await buildings(page)).filter((b) => b.strip === strip);
@@ -1012,7 +1040,7 @@ for (const variant of [
       await noteHomes("a road through the houses");
     });
 
-    await test.step("9. bulldoze a built street: its cells and buildings go; undo brings back the street and its zoning, and buildings grow again", async () => {
+    await test.step("9. bulldoze a built street: its cells and buildings go; undo is refused, since the bulldoze took buildings (M4-09)", async () => {
       await look(page, BULLDOZED.x, BULLDOZED.z, 260);
       const seg = await segmentNear(page, BULLDOZED.x, BULLDOZED.z);
       expect(seg).toBeGreaterThanOrEqual(0);
@@ -1023,7 +1051,6 @@ for (const variant of [
       const southCell = stripCell({ row: 4570, col: 3, north: false }, 2);
       const zonedBefore = [await cellZone(page, ...northCell), await cellZone(page, ...southCell)];
       expect(zonedBefore.map((c) => c?.zone)).toEqual([zoneNumber("mixed"), zoneNumber("residential")]);
-      const zonesBefore = await zoning(page);
       await settleBuilt(page);
       await shot(page, info, dir, "9-the-built-street");
 
@@ -1054,19 +1081,14 @@ for (const variant of [
       await settleBuilt(page);
       await shot(page, info, dir, "9-bulldozed-cells-and-buildings-gone");
 
+      // Buildings never come back, so neither does the street that took them: Ctrl+Z is refused, with the reason.
+      const logBefore = (await logTypes(page)).length;
       await page.keyboard.press("Control+KeyZ");
-      await expect.poll(() => segmentNear(page, BULLDOZED.x, BULLDOZED.z)).toBe(seg);
-      expect((await logTypes(page)).at(-1)).toBe("Undo");
-      await expect.poll(async () => [await cellZone(page, ...northCell), await cellZone(page, ...southCell)]).toEqual(zonedBefore);
-      expect(await zoning(page)).toEqual(zonesBefore);
-      // The buildings do not come back with it: the grower builds again.
-      expect((await buildings(page)).filter((b) => sides.includes(b.strip))).toEqual([]);
-      await settleBuilt(page);
-      await shot(page, info, dir, "9-undo-street-and-zoning-back");
-      await growUntil(page, "buildings on the street again", () => buildings(page), (bs) => sides.every((s) => bs.some((b) => b.strip === s)), 24_000);
-      await settleBuilt(page);
-      await shot(page, info, dir, "9-buildings-grow-again");
-      await noteHomes("the street bulldozed and undone, and grown again");
+      await expect(page.locator("#undo-note")).toHaveText(/^Can't undo: that change demolished \d+ buildings, and buildings never come back$/);
+      expect((await logTypes(page)).length).toBe(logBefore);
+      expect(await segmentNear(page, BULLDOZED.x, BULLDOZED.z)).toBe(-1);
+      await shot(page, info, dir, "9-undo-refused");
+      await noteHomes("the street bulldozed, its undo refused");
     });
 
     await test.step("10. a street drawn beside a zoned strip: its end snaps to a cell corner", async () => {
@@ -1253,10 +1275,11 @@ for (const variant of [
       const fullLog = [...pagedLog, ...state.log];
       expect(fullLog.map((e) => e.type)).toEqual(saved.log.map((e) => e.type));
       for (const e of fullLog) expect(["fixture", "local"]).toContain(e.playerId);
-      for (const type of ["ZoneCells", "BuildRoad", "BulldozeBuilding", "BulldozeRoad", "Undo", "SetSpeed"]) expect(fullLog.map((e) => e.type)).toContain(type);
-      // The page held every bar, so the replay does too, and its new city was credited with every milestone (M4-12), so the replay's is.
+      for (const type of ["ZoneCells", "BuildRoad", "BulldozeBuilding", "BulldozeRoad", "SetSpeed"]) expect(fullLog.map((e) => e.type)).toContain(type);
+      // The page held every bar, so the replay does too, and its new city was credited with every milestone (M4-12), as `walkthroughStart` credits its own.
       const v = WALKTHROUGH_DEMAND;
-      const rebuilt = holdDemand({ residential: v, commercial: v, office: v, industrial: v }, () => replayFrom(creditedState(header.seed), fullLog, header.tick));
+      expect(header.seed).toBe(SEED);
+      const rebuilt = holdDemand({ residential: v, commercial: v, office: v, industrial: v }, () => replayFrom(walkthroughStart(), fullLog, header.tick));
       const hash = hashState(rebuilt);
       expect(hash).toBe(hashState(state));
       info.annotations.push({ type: "replay", description: `seed ${header.seed}, ${fullLog.length} commands, tick ${header.tick}, ${state.buildings.flags.filter((f) => f !== 0).length} buildings, hash ${hash}` });

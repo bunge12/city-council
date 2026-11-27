@@ -43,6 +43,7 @@
     "ambience.spec.ts": 47,
     "blocks.spec.ts": 23,
     "bridges.spec.ts": 37,
+    "budget-overlay.spec.ts": 90,
     "building-lod-memory.spec.ts": 121,
     "building-lod-overlay.spec.ts": 90,
     "building-lod-scale-balanced.spec.ts": 233,

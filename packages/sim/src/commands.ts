@@ -1,13 +1,23 @@
-import { bulldozeBuildings, planBulldozeBuildings } from "./buildings/bulldoze";
+import {
+  buildGridOnOpenGround,
+  bulldozeBuildings,
+  chargeClears,
+  planBulldozeBuildings,
+  previewBuildRoad,
+  previewBuildRoadGrid,
+  previewBulldozeRoad,
+  previewUpgradeRoad,
+} from "./buildings/bulldoze";
 import { moveMoney } from "./economy/budget";
 import { chargePayload, setDevelopmentCharge } from "./economy/charges";
-import { spendingRefusal } from "./economy/spend";
+import { setTaxRate, taxRatePayload } from "./economy/tax-rates";
 import { keepBuildings } from "./buildings/upkeep";
 import { LOG_PAGE_SIZE, logLength, recordEntry } from "./log";
-import { buildRoad, planRoad } from "./roads/build";
-import { buildRoadGrid, checkRoadGrid, gridProblemReason, planRoadGrid, type GridProblem } from "./roads/grid";
-import { bulldozeRoad, planBulldoze, planUpgrade, upgradeRoad } from "./roads/edit";
-import { endJournal, reverseOps, startJournal, type NetworkOp } from "./roads/network";
+import { buildRoad } from "./roads/build";
+import { gridProblemReason, planRoadGrid } from "./roads/grid";
+import { spendingRefusal } from "./economy/spend";
+import { bulldozeRoad, upgradeRoad } from "./roads/edit";
+import { endJournal, startJournal, type NetworkOp } from "./roads/network";
 import { SPEEDS, type SimState, type Speed } from "./state";
 import { terrainOf } from "./terrain/cache";
 import { applyUndo, hasUndo, planUndo, recordUndo, undoLine, undoReadsCells } from "./undo";
@@ -89,9 +99,9 @@ const SetSpeed: CommandDef = {
  * laid out for the roads before the command: the step lays them out again
  * after it.
  */
-function recordRoadUndo(state: SimState, command: Command, ops: NetworkOp[], spent: number): void {
+function recordRoadUndo(state: SimState, command: Command, ops: NetworkOp[], spent: number, took: number): void {
   const zones = journalLostZones(state.roads, state.cells, ops);
-  recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops, zones, spent });
+  recordUndo(state, { playerId: command.playerId, entry: logLength(state), type: command.type, ops, zones, spent, took });
 }
 
 /**
@@ -100,15 +110,23 @@ function recordRoadUndo(state: SimState, command: Command, ops: NetworkOp[], spe
  * it charged (`recordRoadUndo`). The price is the one its plan worked out,
  * the number the tools show, so the readout and the charge cannot
  * disagree (M4-03).
+ *
+ * A road command that clears buildings charges their compensation too,
+ * from the same preview (M4-09), on the tick it applies and before the
+ * road changes, while the buildings and their pops are as the preview saw
+ * them, though a new road's buildings go only once the cells settle
+ * (buildings/upkeep.ts). The record keeps how many buildings it took
+ * (`took`), and undo refuses a command that took any: buildings never come
+ * back, so neither does the road that took them.
  */
-function undoable(state: SimState, command: Command, price: number, run: () => void): void {
+function undoable(state: SimState, command: Command, price: number, took: number, run: () => void): void {
   startJournal(state.roads);
   let built = false;
   try {
     run();
     built = true;
   } finally {
-    recordRoadUndo(state, command, endJournal(state.roads), built ? price : 0);
+    recordRoadUndo(state, command, endJournal(state.roads), built ? price : 0, built ? took : 0);
   }
   // Only reached once the roads are built and their record kept.
   if (price !== 0) moveMoney(state, undoLine(command.type), price);
@@ -119,18 +137,21 @@ function undoable(state: SimState, command: Command, price: number, run: () => v
  * straight or, with `payload.control`, one quadratic curve through it. See
  * roads/build.ts for the checks. The terrain comes from the seed, so a
  * worker, a server and a replay check against the same ground. Its plan's
- * cost goes on the construction line, and it is refused when the treasury
- * cannot pay it (economy/spend.ts).
+ * cost goes on the construction line and the compensation for the
+ * buildings it clears on the compensation line, and it is refused when the
+ * treasury cannot pay both (`previewBuildRoad`, economy/spend.ts).
  */
 const BuildRoad: CommandDef = {
   validate: (state, command) => {
-    const result = planRoad(state.roads, terrainOf(state.seed), command.payload);
-    return result.ok ? spendingRefusal(state, result.plan.cost) : result.reason;
+    const preview = previewBuildRoad(state, command.payload);
+    return preview.ok ? preview.refusal : preview.reason;
   },
   apply: (state, command) => {
     const terrain = terrainOf(state.seed);
-    const result = planRoad(state.roads, terrain, command.payload);
-    if (result.ok) undoable(state, command, result.plan.cost, () => buildRoad(state.roads, terrain, result.plan));
+    const preview = previewBuildRoad(state, command.payload);
+    if (!preview.ok) return;
+    chargeClears(state, command.playerId, preview.clears);
+    undoable(state, command, preview.plan.cost, preview.clears.ids.length, () => buildRoad(state.roads, terrain, preview.plan));
   },
 };
 
@@ -138,81 +159,77 @@ const BuildRoad: CommandDef = {
  * A whole street grid: the rectangle from `payload.origin` along to
  * `payload.along` and across to `payload.across`, blocks `payload.depth` by
  * `payload.width` metres between road edges, of road type `payload.type`.
- * See roads/grid.ts. Validation rehearses the whole grid on the network and
- * takes it back, so a grid is built whole or refused whole, with the street
- * the refusal came from. Its price is checked first, before any street.
+ * See roads/grid.ts. A grid is built whole or refused whole, with the
+ * street the refusal came from. It never demolishes: one whose streets
+ * would cover a building's ground is refused, so it is drawn on open ground
+ * and may cross or join streets only where no building stands (M4-09). Its
+ * price, its cost alone, is checked first, before any street.
  */
 const BuildRoadGrid: CommandDef = {
   validate: (state, command) => {
-    const terrain = terrainOf(state.seed);
-    const result = planRoadGrid(state.roads, terrain, command.payload);
-    if (!result.ok) return result.reason;
-    const refusal = spendingRefusal(state, result.plan.cost);
-    if (refusal !== null) return refusal;
-    const problem = checkRoadGrid(state.roads, terrain, result.plan);
-    return problem === null ? null : gridProblemReason(result.plan, problem);
+    const preview = previewBuildRoadGrid(state, command.payload);
+    if (!preview.ok) return preview.reason;
+    if (preview.problem !== null) return gridProblemReason(preview.plan, preview.problem);
+    return preview.refusal;
   },
-  apply: (state, command) => {
-    const terrain = terrainOf(state.seed);
-    const result = planRoadGrid(state.roads, terrain, command.payload);
-    if (result.ok) undoable(state, command, result.plan.cost, () => buildRoadGrid(state.roads, terrain, result.plan));
-  },
+  apply: (state, command) => void buildGrid(state, command),
   // The step builds the grid once with the journal open, and takes it back
-  // if a street is refused, rather than rehearsing it and building it again.
-  applyIfValid: (state, command) => {
-    const terrain = terrainOf(state.seed);
-    const result = planRoadGrid(state.roads, terrain, command.payload);
-    if (!result.ok) return result.reason;
-    const price = result.plan.cost;
-    const refusal = spendingRefusal(state, price);
-    if (refusal !== null) return refusal;
-    startJournal(state.roads);
-    let problem: GridProblem | null = null;
-    let ops: NetworkOp[];
-    try {
-      problem = buildRoadGrid(state.roads, terrain, result.plan);
-    } finally {
-      ops = endJournal(state.roads);
-      if (problem !== null) reverseOps(state.roads, ops);
-    }
-    if (problem !== null) return gridProblemReason(result.plan, problem);
-    if (price !== 0) moveMoney(state, undoLine(command.type), price);
-    recordRoadUndo(state, command, ops, price);
-    return null;
-  },
+  // if a street is refused or it would clear a building, rather than
+  // running `validate`'s rehearsal and building it again.
+  applyIfValid: (state, command) => buildGrid(state, command),
 };
+
+/** Checks, builds and charges a `BuildRoadGrid` in one build: null once applied, or the reason, with the network as it was. */
+function buildGrid(state: SimState, command: Command): string | null {
+  const result = planRoadGrid(state.roads, terrainOf(state.seed), command.payload);
+  if (!result.ok) return result.reason;
+  const price = result.plan.cost;
+  const refusal = spendingRefusal(state, price);
+  if (refusal !== null) return refusal;
+  const built = buildGridOnOpenGround(state, result.plan);
+  if (!built.ok) return built.reason;
+  if (price !== 0) moveMoney(state, undoLine(command.type), price);
+  recordRoadUndo(state, command, built.ops, price, 0);
+  return null;
+}
 
 /**
  * Removes the segments in `payload.segments`, or the stretch of each that
  * `payload.sections` names, and every node they leave with no segments.
  * See roads/edit.ts. Its plan's demolition less its refund goes on the
- * demolition line; a bulldoze whose refund is the larger pays in.
+ * demolition line; a bulldoze whose refund is the larger pays in. The
+ * buildings on the road's cells go with it, at their compensation.
  */
 const BulldozeRoad: CommandDef = {
   validate: (state, command) => {
-    const result = planBulldoze(state.roads, command.payload);
-    return result.ok ? spendingRefusal(state, result.plan.cost) : result.reason;
+    const preview = previewBulldozeRoad(state, command.payload);
+    return preview.ok ? preview.refusal : preview.reason;
   },
   apply: (state, command) => {
-    const result = planBulldoze(state.roads, command.payload);
-    if (result.ok) undoable(state, command, result.plan.cost, () => bulldozeRoad(state.roads, terrainOf(state.seed), result.plan));
+    const preview = previewBulldozeRoad(state, command.payload);
+    if (!preview.ok) return;
+    chargeClears(state, command.playerId, preview.clears);
+    undoable(state, command, preview.plan.cost, preview.clears.ids.length, () => bulldozeRoad(state.roads, terrainOf(state.seed), preview.plan));
   },
 };
 
 /**
  * Changes the segments in `payload.segments` to road type `payload.type` in
  * place, or reverses one-ways given their own type. See roads/edit.ts. Its
- * plan's cost goes on the construction line.
+ * plan's cost goes on the construction line, and the compensation for the
+ * buildings a wider road takes on the compensation line.
  */
 const UpgradeRoad: CommandDef = {
   validate: (state, command) => {
-    const result = planUpgrade(state.roads, terrainOf(state.seed), command.payload);
-    return result.ok ? spendingRefusal(state, result.plan.cost) : result.reason;
+    const preview = previewUpgradeRoad(state, command.payload);
+    return preview.ok ? preview.refusal : preview.reason;
   },
   apply: (state, command) => {
     const terrain = terrainOf(state.seed);
-    const result = planUpgrade(state.roads, terrain, command.payload);
-    if (result.ok) undoable(state, command, result.plan.cost, () => upgradeRoad(state.roads, terrain, result.plan));
+    const preview = previewUpgradeRoad(state, command.payload);
+    if (!preview.ok) return;
+    chargeClears(state, command.playerId, preview.clears);
+    undoable(state, command, preview.plan.cost, preview.clears.ids.length, () => upgradeRoad(state.roads, terrain, preview.plan));
   },
 };
 
@@ -275,7 +292,7 @@ function zoneCells(state: SimState, command: Command): string | null {
     const stroke = strokeOf(command.payload);
     // Free, so it moved nothing. Last, where the version 31 migration puts it.
     const record = { playerId: command.playerId, entry: logLength(state), type: command.type, ops: [], zones, painted };
-    recordUndo(state, stroke === undefined ? { ...record, spent: 0 } : { ...record, stroke, spent: 0 });
+    recordUndo(state, stroke === undefined ? { ...record, spent: 0, took: 0 } : { ...record, stroke, spent: 0, took: 0 });
   }
   return reason;
 }
@@ -283,26 +300,30 @@ function zoneCells(state: SimState, command: Command): string | null {
 /**
  * Clears the buildings in `payload.buildings`, each named by its id and its
  * lot's first cell as the player saw them, and refuses the whole command if
- * any changed since. See buildings/bulldoze.ts. Free until M4-09 prices it. No undo
- * record: the grower owns buildings, and undo never brings one back.
+ * any changed since. See buildings/bulldoze.ts. Charged at the eminent
+ * domain price on the compensation line, and refused when the treasury
+ * cannot pay it (M4-09). No undo record: the grower owns buildings, and
+ * undo never brings one back.
  */
 const BulldozeBuilding: CommandDef = {
   validate: (state, command) => {
     const result = planBulldozeBuildings(state, command.payload);
-    return result.ok ? null : result.reason;
+    return result.ok ? result.refusal : result.reason;
   },
-  apply: (state, command) => {
-    const result = planBulldozeBuildings(state, command.payload);
-    if (result.ok) bulldozeBuildings(state, result.ids);
-  },
-  // Checking 5,000 buildings costs as much as clearing them, so the step does it once (issue #162).
-  applyIfValid: (state, command) => {
-    const result = planBulldozeBuildings(state, command.payload);
-    if (!result.ok) return result.reason;
-    bulldozeBuildings(state, result.ids);
-    return null;
-  },
+  apply: (state, command) => void clearBuildings(state, command),
+  // Checking 1,000 buildings costs as much as clearing them, so the step does it once (issue #162).
+  applyIfValid: (state, command) => clearBuildings(state, command),
 };
+
+/** Checks, charges and clears a `BulldozeBuilding` in one pass: null once applied, or the reason, with state as it was. */
+function clearBuildings(state: SimState, command: Command): string | null {
+  const result = planBulldozeBuildings(state, command.payload);
+  if (!result.ok) return result.reason;
+  if (result.refusal !== null) return result.refusal;
+  chargeClears(state, command.playerId, result);
+  bulldozeBuildings(state, result.ids);
+  return null;
+}
 
 /**
  * Sets one zone's development charge, `payload.zone` one of the five zones
@@ -322,6 +343,24 @@ const SetDevelopmentCharge: CommandDef = {
   },
 };
 
+/**
+ * Sets one zone's tax rate, `payload.zone` one of the four sliders and
+ * `payload.rate` a fraction, 0.01 for one percent (M4-07,
+ * economy/tax-rates.ts). Refused outside the slider's range in
+ * economy.json. Costs nothing and has no undo record, like
+ * `SetDevelopmentCharge`: the player sets it back with another.
+ */
+const SetTaxRate: CommandDef = {
+  validate: (_state, command) => {
+    const result = taxRatePayload(command.payload);
+    return typeof result === "string" ? result : null;
+  },
+  apply: (state, command) => {
+    const result = taxRatePayload(command.payload);
+    if (typeof result !== "string") setTaxRate(state, result);
+  },
+};
+
 /** Every command type the sim accepts, by name. */
 export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   NoOp,
@@ -334,6 +373,7 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   ZoneCells,
   BulldozeBuilding,
   SetDevelopmentCharge,
+  SetTaxRate,
 });
 
 /** Checks a command against the current state without changing anything. */
@@ -521,7 +561,7 @@ export function applyPending(state: SimState): DroppedCommand[] {
       if (counted) state.cellReads++;
       stepCells(state);
       keepBuildings(state);
-      // Everything the command moved, the buildings it took included once M4-09 prices them, so the log can name who spent it.
+      // Everything the command moved, the compensation for the buildings it took included (M4-09), so the log can name who spent it.
       recordEntry(
         state,
         { tick: state.tick, seq: command.seq, playerId: command.playerId, type: command.type, payload: command.payload },

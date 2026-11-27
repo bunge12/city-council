@@ -169,21 +169,71 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // mixed, after industrial's, at 0 in both months; the five rates at their
   // defaults. Nothing was charged before it.
   32: (old) => ({ ...old, version: 33, budget: budgetWithCharges(old["budget"]) }),
-  // Version 34 adds the milestones reached (M4-12). A city saved before them
+  // Version 34 keeps the expropriations of the last game year, marks each
+  // building the city has paid to clear, and counts on each undo record the
+  // buildings its command took (M4-09). Clearing a building cost nothing
+  // before it and left no record, so an older city has no records, no
+  // building paid for, and undo records that took none: they undo as they
+  // did.
+  33: (old) => ({
+    ...old,
+    version: 34,
+    undo: (old["undo"] as Record<string, unknown>[]).map((record) => ({ ...record, took: 0 })),
+    buildings: buildingsWithPaid(old["buildings"]),
+    expropriations: [],
+  }),
+  // Version 35 gives each demand bar a part for its zone's tax rate (M4-07),
+  // at 0, after its other weighted parts. The bar reads what it did, and the
+  // part takes its first step on the next day, from the rates the city has.
+  34: (old) => ({ ...old, version: 35, demand: demandWithTax(old["demand"]) }),
+  // Version 36 marks each pop displaced by the city or by its home's owner
+  // (M4-10): who, the tick and the people displaced with it. Nothing was
+  // marked before it, so an older city's pops carry no mark, and only
+  // its expropriation records lower its neighbours' satisfaction.
+  35: (old) => ({ ...old, version: 36, pops: popsWithDisplacedMarks(old["pops"]) }),
+  // Version 37 adds the milestones reached (M4-12). A city saved before them
   // is credited with every milestone its highest population passed, without
   // their grants, so a city zoned at densities 2 and 3 keeps painting them.
   // Its starting grant it had from version 30.
-  33: (old) => ({ ...old, version: 34, milestones: creditedFor((old["stats"] as { highestPopulation: number }).highestPopulation) }),
+  36: (old) => ({ ...old, version: 37, milestones: creditedFor((old["stats"] as { highestPopulation: number }).highestPopulation) }),
 };
 
-/** Version 31 demand bars with each bar's waiting part, at 0, in `DEMAND_PARTS` order. */
+/**
+ * Each bar's parts in version 35, the tax part's place fixed here so a later
+ * change of parts cannot move it in old saves: the version 34 parts with
+ * `tax` before the first name in `TAX_PART_BEFORE`.
+ */
+const TAX_PART_BEFORE: Readonly<Record<string, string>> = {
+  residential: "outsidePull",
+  commercial: "jobsOpen",
+  office: "jobsOpen",
+  industrial: "outsideRoute",
+};
+
+/** Version 34 demand bars with each bar's tax part, at 0, in its place before `TAX_PART_BEFORE`. */
+function demandWithTax(value: unknown): Record<string, unknown> {
+  const demand = value as Record<string, { value: number; parts: Record<string, number> }>;
+  const out: Record<string, unknown> = {};
+  for (const [bar, state] of Object.entries(demand)) {
+    const parts: Record<string, number> = {};
+    for (const [name, part] of Object.entries(state.parts)) {
+      if (name === TAX_PART_BEFORE[bar]) parts["tax"] = 0;
+      parts[name] = part;
+    }
+    out[bar] = { value: state.value, parts };
+  }
+  return out;
+}
+
+/** Version 31 demand bars with each bar's waiting part, at 0, in `DEMAND_PARTS` order, without the tax part. */
 function demandWithWaiting(value: unknown): Record<string, unknown> {
   const demand = value as Record<string, { value: number; parts: Record<string, number> }>;
   const out: Record<string, unknown> = {};
   for (const bar of DEMAND_BARS) {
     const state = demand[bar] as { value: number; parts: Record<string, number> };
     const parts: Record<string, number> = {};
-    for (const name of DEMAND_PARTS[bar]) parts[name] = state.parts[name] ?? 0;
+    // Version 32's parts: today's but the tax part version 35 adds.
+    for (const name of DEMAND_PARTS[bar]) if (name !== "tax") parts[name] = state.parts[name] ?? 0;
     out[bar] = { value: state.value, parts };
   }
   return out;
@@ -241,6 +291,19 @@ function popsWithGrace(value: unknown): Record<string, unknown> {
   return out;
 }
 
+/** A version 35 set of pops with the marks version 36 adds, none, in the order a new state has them. */
+function popsWithDisplacedMarks(value: unknown): Record<string, unknown> {
+  const pops = value as Record<string, unknown> & { flags: Uint8Array };
+  const n = pops.flags.length;
+  const marks: Record<string, unknown> = { displacedBy: new Uint8Array(n), displacedTick: new Int32Array(n), displacedWith: new Uint16Array(n) };
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(createPops())) {
+    if (key in marks) out[key] = marks[key];
+    else if (key in pops) out[key] = pops[key];
+  }
+  return out;
+}
+
 /** Version 28 statistics with the unemployed workers in their grace, none, and a history of zeros. Totals and history keep `STAT_TOTALS` order. */
 function statsWithNewcomers(value: unknown): Record<string, unknown> {
   const stats = value as Record<string, unknown> & { totals: Record<string, number>; history: Record<string, Int32Array> };
@@ -275,6 +338,18 @@ function stripTiers(old: Record<string, unknown>): Record<string, unknown> {
     ops: record.ops.map((op) => (op.row ? { ...op, row: { ...op.row, tierL: NO_TIER, tierR: NO_TIER } } : op)),
   }));
   return { ...old, roads, undo };
+}
+
+/** A version 33 set of buildings with `paid`, none paid for, after `statusSince` as a new state has it. Left as it is when it has one. */
+function buildingsWithPaid(value: unknown): Record<string, unknown> {
+  const b = value as Record<string, unknown> & { flags: Uint8Array };
+  if (b["paid"] !== undefined) return b;
+  const out: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(b)) {
+    out[key] = field;
+    if (key === "statusSince") out["paid"] = new Uint8Array(b.flags.length);
+  }
+  return out;
 }
 
 /** A version 23 set of buildings with `statusSince`, each building's `builtAt`, after `builtAt` as a new state has it. */

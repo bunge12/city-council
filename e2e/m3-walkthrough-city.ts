@@ -1,7 +1,10 @@
 // The cities the M3 walkthrough opens (issue M3-22), built in Node through
 // ordinary commands by the player id "fixture", so their logs replay from
 // the seed. Nothing here holds the demand bars: M3's exit test is about
-// demand, so every city runs on its own economy.
+// demand, so every city runs on its own economy. Step 9 clears every
+// workplace in town, which at the eminent domain price (M4-09) costs far
+// more than the starting grant, so each city starts funded (`townStart`),
+// and step 15's replay starts from a city funded the same way.
 //
 // The town sits on seed 2026's flat ground between the west outside
 // connection, whose stub ends at (200, 3608) heading east, and the sea to
@@ -23,10 +26,12 @@ import {
   ROAD_TYPES,
   TIME_BALANCE,
   ZONING_BALANCE,
+  SCALE_TREASURY,
   cellAt,
   createState,
   creditMilestones,
   demandPull,
+  fundCity,
   deserialize,
   isAbandoned,
   seeBuilding,
@@ -108,20 +113,17 @@ function zone(state: SimState, s: Strip, zoneId: string, density: number, depth:
   send(state, "ZoneCells", { zone: zoneId, density, rects: [{ from: { x: a + 6, z: mid }, to: { x: b - 6, z: mid }, width: depth * CELL - 2 }] });
 }
 
-/**
- * A new city on the walkthrough's seed with every milestone credited, without
- * grants (M4-12), so the town zones densities 2 and 3 as it did before the
- * locks. The page's replay starts from one credited the same way.
- */
-export function creditedCity(): SimState {
+/** A new city on the walkthrough's seed, funded at `SCALE_TREASURY` and credited with every milestone (M4-12), as each of its cities starts and its replay starts. Neither is a command, so neither is in the log. */
+export function townStart(): SimState {
   const state = createState(SEED);
+  fundCity(state, SCALE_TREASURY);
   creditMilestones(state);
   return state;
 }
 
 /** The town as step 1 opens it: streets, nothing zoned, paused by a command so a replay pauses too. */
 export function townCity(): SimState {
-  const state = creditedCity();
+  const state = townStart();
   townRoads(state);
   send(state, "SetSpeed", { speed: 0 });
   return state;
@@ -158,7 +160,7 @@ const runDay = (state: SimState): void => {
  * months on this town, which the walkthrough cannot wait for in the page.
  */
 export function redevelopmentCity(): { bytes: Uint8Array; rezonedOnDay: number; houses: number[] } {
-  const state = creditedCity();
+  const state = townStart();
   townRoads(state);
   for (const piece of ["west", "east"] as const) {
     zone(state, { z: HOMES, piece, side: "north" }, "residential", 1, 6);
@@ -222,7 +224,7 @@ export function stripOpen(state: SimState, s: Strip, depth: number): { open: num
  * town's homes before any stood vacant that long.
  */
 export function abandonmentCity(): { bytes: Uint8Array; bulldozedOnDay: number } {
-  const state = creditedCity();
+  const state = townStart();
   townRoads(state);
   for (const piece of ["west", "east"] as const) {
     zone(state, { z: HOMES, piece, side: "north" }, "residential", 1, 6);

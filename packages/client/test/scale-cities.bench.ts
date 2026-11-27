@@ -26,7 +26,9 @@ import { expect, test } from "vitest";
 import {
   ARRIVALS_SYSTEM,
   BUILDINGS_BALANCE,
+  BUILDING_TYPES,
   COMMANDS_SYSTEM,
+  LINE,
   DISPLACED_SYSTEM,
   DEMAND_SYSTEM,
   GROWER_SYSTEM,
@@ -43,7 +45,11 @@ import {
   budgetFigure,
   buildScaleCity,
   buildingCount,
+  buildingInfo,
   buildingPeople,
+  compensationFor,
+  formatMoneyFull,
+  jobsFilled,
   planRoad,
   submit,
   terrainOf,
@@ -241,9 +247,16 @@ interface Checkpoints {
   bulldozedPeople: number;
   bulldozeStepMs: number;
   bulldozeCommandMs: number;
+  /** What it was charged at the eminent domain price (M4-09), whole dollars. */
+  bulldozeCharged: number;
+  /** The price of clearing the occupied house farthest from the centre, and of the occupied tower nearest it (M4-09). */
+  edgeHousePrice: number;
+  downtownTowerPrice: number;
   /** The worst tick, and the displaced pass's worst, over the game day after it. */
   afterBulldozeWorstMs: number;
   displacedWorstMs: number;
+  /** The satisfaction system's worst tick over that day, with the clearing's 1,000 records fresh (M4-10). */
+  satisfactionAfterWorstMs: number;
   /** The travel table's rebuild after one BuildRoad. */
   travelSteps: number;
   travelTotalMs: number;
@@ -338,8 +351,39 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
   const saveTotalMs = performance.now() - s0;
   pending.release();
 
-  // One BulldozeBuilding at its cap, over occupied buildings only.
+  // A house at the edge against a tower downtown: value follows land value and floor space (M4-09).
   const b = state.buildings;
+  const people = (id: number) => buildingPeople(state, id);
+  const filled = (id: number) => jobsFilled(state, id);
+  // How far its lot's corners lie from the city centre, on average.
+  const centreOf = (id: number): number => {
+    const c = buildingInfo(state, id)?.corners;
+    if (!c) return 0;
+    const at = (i: number): number => c[i] ?? 0;
+    const cx = (at(0) + at(2) + at(4) + at(6)) / 4;
+    const cz = (at(1) + at(3) + at(5) + at(7)) / 4;
+    return Math.hypot(cx - state.centre.x, cz - state.centre.z);
+  };
+  let edgeHouse = -1;
+  let edgeDistance = -1;
+  let tower = -1;
+  let towerDistance = Infinity;
+  for (let id = 0; id < b.flags.length; id++) {
+    if (!b.flags[id] || people(id) === 0) continue;
+    const type = BUILDING_TYPES[b.type[id] ?? 0];
+    if (type?.oneHousehold) {
+      const d = centreOf(id);
+      if (d > edgeDistance) [edgeHouse, edgeDistance] = [id, d];
+    } else if (type?.zone === "residential" && type.density === 3) {
+      const d = centreOf(id);
+      if (d < towerDistance) [tower, towerDistance] = [id, d];
+    }
+  }
+  const priceOf = (id: number): number => (id < 0 ? 0 : compensationFor(state, [id], people, filled).total);
+  const edgeHousePrice = priceOf(edgeHouse);
+  const downtownTowerPrice = priceOf(tower);
+
+  // One BulldozeBuilding at its cap, over occupied buildings only.
   const chosen: { id: number; segment: number; side: number; place: number; builtAt: number }[] = [];
   let bulldozedPeople = 0;
   for (let id = 0; id < b.flags.length && chosen.length < BUILDINGS_BALANCE.bulldozeMaxBuildings; id++) {
@@ -351,13 +395,18 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
   }
   collect();
   send("BulldozeBuilding", { buildings: chosen });
+  const compensationBefore = state.budget.month[LINE.compensation] ?? 0;
   const bulldoze = tick();
+  // Read off the line, which only the bulldoze moves: taxes and upkeep move the treasury on the same tick.
+  const bulldozeCharged = (state.budget.month[LINE.compensation] ?? 0) - compensationBefore;
   let afterBulldozeWorstMs = 0;
   let displacedWorstMs = systemMs(bulldoze.timings, DISPLACED_SYSTEM);
+  let satisfactionAfterWorstMs = systemMs(bulldoze.timings, SATISFACTION_SYSTEM);
   for (let k = 0; k < TIME_BALANCE.ticksPerDay; k++) {
     const t = tick();
     afterBulldozeWorstMs = Math.max(afterBulldozeWorstMs, t.ms);
     displacedWorstMs = Math.max(displacedWorstMs, systemMs(t.timings, DISPLACED_SYSTEM));
+    satisfactionAfterWorstMs = Math.max(satisfactionAfterWorstMs, systemMs(t.timings, SATISFACTION_SYSTEM));
   }
 
   // One BuildRoad, and the steps until its travel table is whole.
@@ -392,8 +441,12 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
     bulldozedPeople,
     bulldozeStepMs: bulldoze.ms,
     bulldozeCommandMs: systemMs(bulldoze.timings, COMMANDS_SYSTEM),
+    bulldozeCharged,
+    edgeHousePrice,
+    downtownTowerPrice,
     afterBulldozeWorstMs,
     displacedWorstMs,
+    satisfactionAfterWorstMs,
     travelSteps,
     travelTotalMs,
     travelWorstMs,
@@ -424,8 +477,12 @@ function checkpointTable(rows: readonly Checkpoints[]): string {
     row("BulldozeBuilding: buildings, people in them", rows.map((r) => `${r.bulldozed.toLocaleString("en")}, ${r.bulldozedPeople.toLocaleString("en")}`)),
     row("BulldozeBuilding: the tick that applies it, ms", rows.map((r) => ms(r.bulldozeStepMs))),
     row("BulldozeBuilding: its command, ms", rows.map((r) => ms(r.bulldozeCommandMs))),
+    row("BulldozeBuilding: charged at the eminent domain price", rows.map((r) => formatMoneyFull(r.bulldozeCharged))),
+    row("Clearing the occupied house farthest from the centre", rows.map((r) => formatMoneyFull(r.edgeHousePrice))),
+    row("Clearing the occupied tower nearest the centre", rows.map((r) => formatMoneyFull(r.downtownTowerPrice))),
     row("The game day after: worst tick, ms", rows.map((r) => ms(r.afterBulldozeWorstMs))),
     row("The game day after: worst displaced pass, ms", rows.map((r) => ms(r.displacedWorstMs))),
+    row(`The game day after: worst satisfaction tick, ms (share ${budgetFigure(SHARES[SATISFACTION_SYSTEM] as string).budget})`, rows.map((r) => ms(r.satisfactionAfterWorstMs))),
     row("Travel rebuild after one BuildRoad: steps", rows.map((r) => `${r.travelSteps}`)),
     row("Travel rebuild: all steps, ms", rows.map((r) => ms(r.travelTotalMs))),
     row("Travel rebuild: worst step's travel, ms", rows.map((r) => ms(r.travelWorstMs))),

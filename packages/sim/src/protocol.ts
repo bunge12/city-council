@@ -8,6 +8,7 @@ import type { Command, CommandResult, DroppedCommand } from "./commands";
 import type { CentreState } from "./landvalue/centre";
 import type { DemandState } from "./demand/demand";
 import type { BudgetState } from "./economy/budget";
+import type { ExpropriationDelta } from "./economy/compensation";
 import type { LogEntry } from "./log";
 import type { PopDelta } from "./pops/delta";
 import type { StatsDelta } from "./stats/stats";
@@ -17,7 +18,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 28;
+export const PROTOCOL_VERSION = 30;
 
 // ---- Client to sim ----
 
@@ -159,7 +160,7 @@ export interface DeltaMessage {
   /**
    * The four demand bars and their parts after the last step, a copy (M3-06,
    * protocol version 17; the residential bar's satisfaction part, M3-10,
-   * version 19). Always sent, like `centre`: the bars move once a
+   * version 19; each bar's tax part, M4-07, version 29). Always sent, like `centre`: the bars move once a
    * day, the client shows what pushes them, and a copy whose bars fell
    * behind would hash differently from the sim.
    */
@@ -178,8 +179,14 @@ export interface DeltaMessage {
    */
   budget?: BudgetState;
   /**
+   * How the expropriation list changed since the last delta, when it did:
+   * the records dropped from its head and the ones added (M4-09, protocol
+   * version 28). Left out otherwise.
+   */
+  expropriations?: ExpropriationDelta;
+  /**
    * The milestones reached, a copy, when one was reached or credited since
-   * the last delta (M4-12, protocol version 28). Left out otherwise. A
+   * the last delta (M4-12, protocol version 30). Left out otherwise. A
    * client finds what a new one opens from `MILESTONES`.
    */
   milestones?: Int32Array;

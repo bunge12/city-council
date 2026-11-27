@@ -291,11 +291,11 @@ describe("milestones in state", () => {
     holdDemand({ residential: 100 }, () => {
       while (densityBuildings(state, 3) === 0) step(state);
     });
-    // A version 33 city: no milestones, a highest population past the first two.
-    const v33 = { ...withoutMilestones(structuredClone(state)), version: 33 } as unknown as { version: number } & Record<string, unknown>;
-    (v33["stats"] as { highestPopulation: number }).highestPopulation = nth(MILESTONES, 1).population + 10;
-    const before = (v33["budget"] as { treasury: number }).treasury;
-    const migrated = migrateState(v33);
+    // A version 36 city: no milestones, a highest population past the first two.
+    const v36 = { ...withoutMilestones(structuredClone(state)), version: 36 } as unknown as { version: number } & Record<string, unknown>;
+    (v36["stats"] as { highestPopulation: number }).highestPopulation = nth(MILESTONES, 1).population + 10;
+    const before = (v36["budget"] as { treasury: number }).treasury;
+    const migrated = migrateState(v36);
     expect(Array.from(migrated.milestones)).toEqual([CREDITED, CREDITED]);
     expect(migrated.budget.treasury).toBe(before);
     expect(isUnlocked(migrated, "density2")).toBe(true);

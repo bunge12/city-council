@@ -5,7 +5,7 @@ import { PLAYER_STATE } from "./browser-state";
 import { TIME_BALANCE, WAITING_PART, YEAR_COUNTS, ZONING_BALANCE, deserialize, hashState, heightAt, generateTerrain, replayFrom } from "../packages/sim/src/index";
 import { MENU_SHIFT } from "./dock";
 import { cityReady, frames, hideNotes, openCity, openSettings, settingsButton, settle } from "./helpers";
-import { HALF, HOMES, MAIN, REZONED, SEED, SHOPS, SHORE, UPPER, X0, X1, XM, abandonmentCity, creditedCity, fillPoint, redevelopmentCity, stripCell, townCity, type Strip } from "./m3-walkthrough-city";
+import { HALF, HOMES, MAIN, REZONED, SEED, SHOPS, SHORE, UPPER, X0, X1, XM, abandonmentCity, fillPoint, redevelopmentCity, stripCell, townCity, townStart, type Strip } from "./m3-walkthrough-city";
 
 // The M3 exit test from docs/milestones/M3.md (issue M3-22), as one
 // walkthrough a player could do by hand, run once on WebGPU (when the
@@ -997,8 +997,9 @@ for (const variant of [
       const fullLog = [...pagedLog, ...state.log];
       expect(fullLog.map((e) => e.type)).toEqual(saved.log.map((e) => e.type));
       for (const e of fullLog) expect(["fixture", "local"]).toContain(e.playerId);
-      // The town was credited with its milestones (M4-12), so the replay starts from a city credited the same way.
-      const rebuilt = replayFrom(creditedCity(), fullLog, header.tick);
+      // From a city funded (M4-09) and credited (M4-12) as the walkthrough's cities are: neither is a command.
+      expect(header.seed).toBe(SEED);
+      const rebuilt = replayFrom(townStart(), fullLog, header.tick);
       const hash = hashState(rebuilt);
       expect(hash).toBe(hashState(state));
       expect(rebuilt.stats.totals).toEqual(state.stats.totals);

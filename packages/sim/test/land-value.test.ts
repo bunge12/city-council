@@ -417,8 +417,8 @@ describe("land value over time", () => {
   it("waits for a change of roads to settle on a month's first tick, and a city saved then hashes and values the same", () => {
     const live = town(30);
     while (live.tick < 31 * DAY - 2) step(live);
-    // A grid of streets big enough to settle over several ticks, past the month's first tick.
-    ok(live, command("BuildRoadGrid", { origin: { x: 4100, z: 4620 }, along: { x: 4100 + 6 * 96, z: 4620 }, across: { x: 4100, z: 4620 + 3 * 96 }, depth: 86, width: 86, type: "street" }));
+    // A grid of streets big enough to settle over several ticks, past the month's first tick, on open ground south of the town: a grid never demolishes (M4-09).
+    ok(live, command("BuildRoadGrid", { origin: { x: 4100, z: 4720 }, along: { x: 4100 + 6 * 96, z: 4720 }, across: { x: 4100, z: 4720 + 2 * 96 }, depth: 86, width: 86, type: "street" }));
     expect(live.cellsReadyAt).toBeGreaterThan(31 * DAY + 1);
     while (live.tick < 31 * DAY) step(live);
     expect(live.centre.due).toBe(31 * DAY);
@@ -457,6 +457,9 @@ describe("land value over time", () => {
     ok(state, command("BulldozeRoad", { segments: [frontCell(state, 4500, 4600).segment] }));
     check();
     expect(industrialCount(state)).toBeLessThan(before);
+    // The bulldoze took factories, so it cannot be undone (M4-09). A street onto open ground is built and undone instead.
+    ok(state, command("BuildRoad", { from: { x: 4300, z: 4700 }, to: { x: 4300, z: 4780 }, type: "street" }));
+    check();
     ok(state, command("Undo", {}));
     check();
   });

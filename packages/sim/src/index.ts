@@ -119,7 +119,10 @@ export {
   readPop,
   workersFor,
 } from "./pops/pops";
-export type { PopProfile, PopRow, PopState } from "./pops/pops";
+export type { DisplacedMark, PopProfile, PopRow, PopState } from "./pops/pops";
+export { DISPLACED_BY_CITY, DISPLACED_BY_NONE, DISPLACED_BY_OWNER, popDisplacedMark } from "./pops/pops";
+export { displacementLoss, displacementView, expropriationGridAround, expropriationGridCells, expropriationGridOf, neighbourLoss, ownLoss } from "./pops/displacement";
+export type { DisplacementView, ExpropriationGrid } from "./pops/displacement";
 export { buildingPeople, jobsFilled, popsAtHome, popsAtWork } from "./pops/where";
 export { applyPopDelta, countOccupancy, drainPopDelta, popDeltaProblem, recordPopChanges } from "./pops/delta";
 export type { Occupancy, PopDelta } from "./pops/delta";
@@ -133,7 +136,7 @@ export { ARRIVALS, ARRIVALS_SYSTEM, dayArrivals, drawProfile, drawSize } from ".
 export { DISPLACED, DISPLACED_SYSTEM, placeDisplaced } from "./pops/displaced";
 export { buildingReachesOutside, homeReachesOutside, homeRoomLeft, homeUnfilled, homesAndEmptyRoom, homesWithRoom, leastNewcomers, newcomerRoomLeft, reachableRoom, reachableRoomWith, whyNoNewcomers } from "./pops/room";
 export { JOBS, JOBS_SYSTEM, jobWeight, matchJobs, partThatFits } from "./pops/matching";
-export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, satisfactionTarget, stepScore, updateSatisfaction } from "./pops/satisfaction";
+export { SATISFACTION, SATISFACTION_SYSTEM, dayDepartures, jobFits, jobTarget, satisfactionTarget, targetAfterTax, taxLosses, stepScore, updateSatisfaction } from "./pops/satisfaction";
 export { TURNOVER, TURNOVER_SYSTEM, dayChances, turnOver, turnoverEvent } from "./pops/turnover";
 export type { DayChances, TurnoverEvent } from "./pops/turnover";
 export { countZoneJobs, countZoneJobsWith, jobsUpToLevel, openJobsFor, workplacesHeld, workplacesHeldBy } from "./pops/open-jobs";
@@ -182,6 +185,7 @@ export {
   payDevelopmentCharge,
   type SetDevelopmentChargePayload,
 } from "./economy/charges";
+export { setTaxRate, taxPressure, taxPressures, taxRateIndex, taxRatePayload, type SetTaxRatePayload } from "./economy/tax-rates";
 export { floorSpaceOf, propertyValue, propertyValueOf, propertyValues, type FloorSpace } from "./economy/value";
 export {
   BUDGET_SYSTEM,
@@ -217,6 +221,7 @@ export {
 export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
 export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
 export { TAX_SYSTEM, buildingTaxByLine, buildingTaxPerYear, businessTaxOf, collectTax, residentialTaxOf, shopSalesScale, type BusinessTaxTerms, type JobsFilled, type TaxByLine } from "./economy/tax";
+export { areaBudget, blockBudget, blockBudgets, blockBudgetsWith, budgetAreasOfSlots, chunkBudget, type AreaBudget, type BlockBudgets } from "./economy/block-budget";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";
 export type { Falloff, IndustrySource, LandValueBalance } from "./landvalue/balance";
 export { createCentre, type CentreState } from "./landvalue/centre";
@@ -250,6 +255,8 @@ export {
   bulldozeClears,
   gridEffects,
   gridClears,
+  gridClearsReason,
+  gridRehearsal,
   planBulldozeBuildings,
   previewBuildRoad,
   previewBuildRoadGrid,
@@ -258,8 +265,11 @@ export {
   roadEffects,
   roadClears,
   seeBuilding,
+  upgradeClears,
 } from "./buildings/bulldoze";
-export type { BuildingSeen, BuildingsInTheWay, RoadEffects, BulldozeBuildingPayload, PeopleIn, Refusal } from "./buildings/bulldoze";
+export type { BuildingSeen, BuildingsInTheWay, RoadEffects, RoadPreview, BulldozeBuildingPayload, FilledIn, PeopleIn, Refusal } from "./buildings/bulldoze";
+export { NO_COMPENSATION, applyExpropriationDelta, checkExpropriations, compensationFor, expropriationDelta, expropriationTicks } from "./economy/compensation";
+export type { Compensation, CountIn, Expropriation, ExpropriationDelta } from "./economy/compensation";
 export { applyBuildingDelta, drainBuildingDelta, recordBuildingChanges } from "./buildings/delta";
 export type { BuildingDelta } from "./buildings/delta";
 export type { ZoneCellsPayload, ZonePlan, ZonePlanResult, ZonePoint, ZoneRect } from "./zoning/zone";
@@ -334,7 +344,7 @@ export type { LevelledShape } from "./roads/levels";
 export { applyRoadDelta, drainRoadChanges, encodeRoadDelta, mergeRoadChanges, recordRoadChanges } from "./roads/delta";
 export type { RoadChanges, RoadDelta } from "./roads/delta";
 export { CHUNKS_PER_SIDE, CHUNK_SIZE } from "./chunks";
-export { UNDO_STEPS, applyUndoDelta, diffUndo, planUndo } from "./undo";
+export { UNDO_STEPS, applyUndoDelta, diffUndo, planUndo, tookReason } from "./undo";
 export type { UndoDelta, UndoPlanResult, UndoRecord } from "./undo";
 export type { NetworkOp, SegmentRow } from "./roads/network";
 export { DERIVED_STAGES, prepareDerived, type DerivedStage } from "./derived";
@@ -387,5 +397,5 @@ export {
 export type { ConnectionBalance, ConnectionSite } from "./roads/connections";
 export { SCALE_BUILDINGS, SCALE_CITY_RESIDENTS, SCALE_PLAYER, SCALE_SEED, SCALE_SEGMENTS, SCALE_TREASURY, buildScaleCity, createScaleState, generateScaleCity, growScaleCity } from "./scale";
 export type { GeneratedScaleCity, ScaleCity, ScaleCityResidents, ScaleCityTotals, ScaleCounts, ScaleTown } from "./scale";
-export { BLOCK_MIN_AREA, blockById, blockIndexOf, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
+export { BLOCK_MIN_AREA, blockById, blockIndexOf, blockOnSide, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
 export type { Block, BlockIndex } from "./roads/blocks";

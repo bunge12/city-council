@@ -157,7 +157,7 @@ function reshape(state: SimState, id: number, size: number, children: number): v
   if (part === 0) return;
   setPopSize(state, id, part);
   // The rest keeps the household's score, its days low and its grace, as a split in job matching does.
-  addSplitPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0, graceDays: p.graceDays[id] ?? 0 }, size);
+  addSplitPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0, graceDays: p.graceDays[id] ?? 0 }, size, id);
   setPopWork(state, id, work);
 }
 

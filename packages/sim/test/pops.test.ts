@@ -188,9 +188,10 @@ describe("the rules a pop row follows", () => {
     expect(checkPopsBalance(popsJson)).toEqual([]);
   });
 
-  it("keeps a pop row at 16 bytes", () => {
-    expect(POP_ARRAYS).toEqual(["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow", "graceDays"]);
-    expect(POP_ROW_BYTES).toBe(16);
+  it("keeps a pop row at 23 bytes", () => {
+    expect(POP_ARRAYS).toEqual(["flags", "home", "work", "size", "education", "wealth", "children", "satisfaction", "daysLow", "graceDays", "displacedBy", "displacedTick", "displacedWith"]);
+    // The displacement mark (M4-10) takes 7: who, a byte; the tick, 4; the people, 2.
+    expect(POP_ROW_BYTES).toBe(23);
   });
 });
 
@@ -258,7 +259,7 @@ describe("pops in state", () => {
     expect(jobsFilled(state, mall)).toBe(36);
     expect(() => setPopSatisfaction(state, id, -1)).toThrow(/satisfaction/);
     setPopSatisfaction(state, id, 100);
-    expect(readPop(state.pops, id)).toEqual({ id, home: tower, work: mall, size: 90, education: 2, wealth: 0, children: 1, satisfaction: 100, daysLow: 0, graceDays: 0 });
+    expect(readPop(state.pops, id)).toEqual({ id, home: tower, work: mall, size: 90, education: 2, wealth: 0, children: 1, satisfaction: 100, daysLow: 0, graceDays: 0, displaced: { by: 0, tick: 0, with: 0 } });
     expectConsistent(state);
   });
 

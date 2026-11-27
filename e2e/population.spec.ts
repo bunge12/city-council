@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, DEMAND_BALANCE, NONE, ROAD_TYPES, SCALE_TREASURY, TIME_BALANCE, WAITING_PART, ZONING_BALANCE, connectionEnd, createState, creditMilestones, demandPull, fundCity, generateTerrain, heightAt, reachableRoom, step, syncCells, waitingShares, yearDays, type SimState } from "../packages/sim/src/index";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_TYPES, CONNECTION_BALANCE, DEMAND_BALANCE, ECONOMY, NONE, ROAD_TYPES, SCALE_TREASURY, TIME_BALANCE, WAITING_PART, ZONING_BALANCE, connectionEnd, createState, creditMilestones, demandPull, fundCity, generateTerrain, heightAt, reachableRoom, step, syncCells, waitingShares, yearDays, type SimState } from "../packages/sim/src/index";
 import { formatDemandTitle } from "../packages/client/src/ui/top-figures";
 import { CITIES, Player, SEED as BALANCE_SEED } from "../packages/sim/test/balance/cities";
 import { buildEverySide, finishConstruction, zoneSides } from "./building-fixtures";
@@ -411,5 +411,57 @@ test("a town whose offices stand with open jobs reads 0 office demand, and its t
     await expect(residential).toHaveAttribute("data-tip", formatDemandTitle("residential", bar.value, bar.parts, waiting));
     await expect(page.locator("#demand-residential [role=tooltip]")).toBeVisible();
     await attach(page, testInfo, "residential bar and tooltip", true);
+  });
+});
+
+// Issue M4-07: each tax rate is a part of its zone's demand bar. Until the
+// budget panel's sliders (M4-15) the rate is set with the command itself.
+// The steps wait on the page's copy of the sim's state, never on a figure
+// read twice, so a slow runner that lets more days pass reads the same.
+test("a high residential tax rate shows in the bar's tooltip pulling it down, and a rate of zero lifts it (M4-07)", async ({ page }, testInfo) => {
+  const { state } = streetCity(true);
+  await openCity(page, state, { name: "Tax Street" });
+  await setSpeed(page, 0);
+  const taxOf = () => page.evaluate(() => window.cityCouncil.mirror.state?.demand["residential"]?.parts["tax"] ?? 0);
+
+  await test.step("a rate outside the range is refused with its reason", async () => {
+    const over = ECONOMY.taxRates.residential.max + 0.01;
+    const refused = await page.evaluate((rate) => window.cityCouncil.sendCommand("SetTaxRate", { zone: "residential", rate }), over);
+    expect(refused.ok).toBe(false);
+    expect(refused.reason).toMatch(/^The residential tax rate runs from 0% to \d+(\.\d+)?%$/);
+  });
+
+  let high = 0;
+  await test.step("raise the residential rate to the top: the bar's tooltip shows the tax pulling it down", async () => {
+    const top = ECONOMY.taxRates.residential.max;
+    expect(await page.evaluate((rate) => window.cityCouncil.sendCommand("SetTaxRate", { zone: "residential", rate }), top)).toEqual({ ok: true });
+    await setSpeed(page, 4);
+    await expect.poll(taxOf, { timeout: 90_000 }).toBeLessThanOrEqual(-3);
+    await setSpeed(page, 0);
+    const c = await copy(page);
+    high = c.residential.value;
+    const tax = Math.round(c.residential.parts["tax"] ?? 0);
+    expect(tax).toBeLessThan(0);
+    await expect(page.locator("#demand-residential")).toHaveAttribute("data-tip", new RegExp(`Residential tax rate ${tax}(,|$)`));
+    await page.locator("#demand-residential").hover();
+    const tip = page.locator("#demand-residential [role=tooltip]");
+    await expect(tip).toBeVisible();
+    await expect(tip).toContainText(`Residential tax rate ${tax}`);
+    await attach(page, testInfo, "the residential bar's tooltip with the tax rate pulling it down", true);
+    await page.mouse.move(640, 300);
+  });
+
+  await test.step("set the rate to zero: the tax part turns to a push up and the bar rises", async () => {
+    expect(await page.evaluate(() => window.cityCouncil.sendCommand("SetTaxRate", { zone: "residential", rate: 0 }))).toEqual({ ok: true });
+    await setSpeed(page, 4);
+    await expect.poll(taxOf, { timeout: 120_000 }).toBeGreaterThanOrEqual(1);
+    await setSpeed(page, 0);
+    const c = await copy(page);
+    expect(c.residential.value).toBeGreaterThan(high);
+    const tax = Math.round(c.residential.parts["tax"] ?? 0);
+    await expect(page.locator("#demand-residential")).toHaveAttribute("data-tip", new RegExp(`Residential tax rate \\+${tax}(,|$)`));
+    await page.locator("#demand-residential").hover();
+    await expect(page.locator("#demand-residential [role=tooltip]")).toContainText(`Residential tax rate +${tax}`);
+    await attach(page, testInfo, "the residential bar's tooltip with a rate of zero pushing it up", true);
   });
 });

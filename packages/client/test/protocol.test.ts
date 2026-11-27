@@ -6,6 +6,7 @@ import {
   CHUNK_SIZE,
   CHARGE_ZONES,
   ECONOMY,
+  ECONOMY_SLIDERS,
   LINE,
   MILESTONES,
   LOG_LIVE_LIMIT,
@@ -282,6 +283,33 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     runUntil(33 * day);
     expect(deltas().length).toBeGreaterThan(seen);
     expect(deltas().slice(seen).every((d) => d.budget === undefined)).toBe(true);
+  });
+
+  it("sends a tax rate the player sets in the next delta, with the budget, and its bar's tax part from the next day (M4-07)", async () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    const state = createBareState(7);
+    const host = new SimHost(state, hostEnd, () => now);
+    const mirror = new SimMirror(client, "p1");
+    const pump = () => {
+      now += PUMP_INTERVAL_MS;
+      host.pump();
+    };
+    pump();
+    const before = received.length;
+    const rate = ECONOMY.taxRates.commercial.max;
+    await mirror.sendCommand("SetTaxRate", { zone: "commercial", rate });
+    const commercial = ECONOMY_SLIDERS.indexOf("commercial");
+    for (let i = 0; i < 50 && mirror.state?.budget.taxRates[commercial] !== rate; i++) pump();
+    const deltas = received.slice(before).filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    expect(deltas.filter((d) => d.budget !== undefined)).toHaveLength(1);
+    expect(mirror.state?.budget.taxRates[commercial]).toBe(rate);
+    // The day after, the commercial bar's tax part pulls it down, on the mirror too.
+    for (let i = 0; i < 500 && (mirror.state?.demand.commercial.parts["tax"] ?? 0) === 0; i++) pump();
+    expect(mirror.state?.demand.commercial.parts["tax"]).toBeLessThan(0);
+    expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
   });
 
   it("sends a development charge the player sets in the next delta, with the budget (M4-08)", async () => {
@@ -1003,9 +1031,10 @@ describe("snapshot transfer", () => {
       state.milestones.buffer,
     ]);
     expect(moneyBuffers).toHaveLength(4);
-    expect(buildingBuffers).toHaveLength(20);
-    // Eleven pop arrays, the days of grace among them (#361), and the queue of displaced pops (M3-12).
-    expect(popBuffers).toHaveLength(12);
+    // Twenty-one building arrays, the mark of a building paid for (M4-09) among them.
+    expect(buildingBuffers).toHaveLength(21);
+    // Fourteen pop arrays, the days of grace (#361) and the three of the displacement mark (M4-10) among them, and the queue of displaced pops.
+    expect(popBuffers).toHaveLength(15);
     expect(statBuffers).toHaveLength(STAT_TOTALS.length);
     expect(roadBuffers.length).toBeGreaterThan(10);
   });

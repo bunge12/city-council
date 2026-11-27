@@ -32,6 +32,7 @@ import { checkPopsBalance } from "../src/pops/balance";
 import { checkPops, removePop } from "../src/pops/pops";
 import { popIndexOf } from "../src/pops/where";
 import { nextInt, seedRng } from "../src/rng";
+import { funded } from "./funds";
 import { holdDemand } from "./demand-helper";
 import { submit } from "./seen-ends";
 import { withValue } from "./with-value";
@@ -149,7 +150,7 @@ function workingTown(): SimState {
 
 /** The streets and zoning of `workingTown`, grown 20 days under whatever bars the caller holds. */
 function growTown(): { state: SimState; s: Street } {
-  const state = credited(createState(SEED));
+  const state = credited(funded(createState(SEED)));
   const s = street(state, 30);
   zone(state, s, "commercial", 3, 0, 4, 4, 1);
   zone(state, s, "commercial", 3, 0, 4, 4, -1);
@@ -354,7 +355,7 @@ describe("displaced pops", () => {
       return state;
     });
     expect(state.log.filter((e) => e.type === "BulldozeBuilding").length).toBe(40);
-    const replayed = held(() => replayFrom(credited(createState(SEED)), state.log, state.tick));
+    const replayed = held(() => replayFrom(credited(funded(createState(SEED))), state.log, state.tick));
     expect(hashState(replayed)).toBe(hashState(state));
   });
 

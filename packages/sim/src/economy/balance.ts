@@ -94,6 +94,7 @@ export interface EconomyBalanceFile {
     demolitionPerSquareMetre: EconomyPrice;
     refundShare: EconomyShare;
   };
+  expropriationRecords: { max: number; source: string; placeholder?: boolean };
   loans: { maxOpen: number; offers: LoanOffer[]; source: string; placeholder?: boolean };
   creditLimit: { perResident: EconomyPrice; lastYearTaxMultiple: number; source: string; placeholder?: boolean };
 }
@@ -124,6 +125,8 @@ export interface Economy {
     demolitionPerSquareMetre: number;
     refundShare: number;
   };
+  /** The most expropriation records state keeps (economy/compensation.ts, M4-09). */
+  expropriationsMax: number;
   loans: { maxOpen: number; offers: readonly LoanOffer[] };
   creditLimit: { perResident: number; lastYearTaxMultiple: number };
 }
@@ -302,6 +305,14 @@ export function checkEconomyBalance(data: unknown): string[] {
     ]),
   );
   errors.push(
+    ...blockProblems(data, "expropriationRecords", (r) => {
+      const out: string[] = [];
+      if (!Number.isSafeInteger(r["max"]) || (r["max"] as number) < 1) out.push("expropriationRecords.max must be a whole number of at least 1");
+      out.push(...sourceProblems(r, "expropriationRecords"), ...unknownKeys(r, ["max", ...WORDS], "expropriationRecords"));
+      return out;
+    }),
+  );
+  errors.push(
     ...blockProblems(data, "loans", (l) => {
       const out: string[] = [];
       if (!Number.isSafeInteger(l["maxOpen"]) || (l["maxOpen"] as number) < 1) out.push("loans.maxOpen must be a whole number of at least 1");
@@ -329,7 +340,7 @@ export function checkEconomyBalance(data: unknown): string[] {
       return out;
     }),
   );
-  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "developmentChargeGrowth", "business", "value", "floorSpace", "eminentDomain", "loans", "creditLimit"], "the file"));
+  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "developmentChargeGrowth", "business", "value", "floorSpace", "eminentDomain", "expropriationRecords", "loans", "creditLimit"], "the file"));
   return errors;
 }
 
@@ -383,6 +394,7 @@ export function resolveEconomy(data: unknown): Economy {
       demolitionPerSquareMetre: at(file.eminentDomain.demolitionPerSquareMetre),
       refundShare: file.eminentDomain.refundShare.share,
     },
+    expropriationsMax: file.expropriationRecords.max,
     loans: { maxOpen: file.loans.maxOpen, offers: file.loans.offers.map((o) => ({ ...o })) },
     creditLimit: { perResident: at(file.creditLimit.perResident), lastYearTaxMultiple: file.creditLimit.lastYearTaxMultiple },
   };

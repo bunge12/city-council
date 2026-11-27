@@ -13,10 +13,12 @@ import {
   replayFrom,
   snapToGrid,
   terrainOf,
+  TIME_BALANCE,
   ZONING_BALANCE,
   type Block,
   type BuildingGround,
   type BuildingInfo,
+  type AreaBudget,
   type LandValue,
   type CommandResult,
   type LogEntry,
@@ -69,7 +71,7 @@ import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
 import type { Occupants } from "./ui/BuildingReadout";
-import { setBlockLabels, setBuildingHover, setBulldozeHover, setEditHover, setLandValueHover, setPanel, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
+import { setBlockLabels, setBudgetHover, setBuildingHover, setBulldozeHover, setEditHover, setLandValueHover, setPanel, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
 import { colouringOf, overlayAfterTool } from "./ui/overlays";
 import { createLoadingScreen } from "./ui/loading-screen";
 import type { LoadStageTime } from "./ui/loading";
@@ -385,7 +387,7 @@ const editTool = new EditToolController({
 const bulldozeTool = new BulldozeToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
-  world: () => (mirror.state && shownTerrain ? { state: mirror.state, terrain: shownTerrain, people: (id: number) => mirror.buildingPeople(id) } : null),
+  world: () => (mirror.state && shownTerrain ? { state: mirror.state, terrain: shownTerrain, people: (id: number) => mirror.buildingPeople(id), filled: (id: number) => mirror.jobsFilled(id) } : null),
   send: (type, payload) => sendCommand(type, payload),
 });
 
@@ -396,11 +398,14 @@ mirror.subscribe(() => cityVersion++);
 mirror.subscribe((update) => {
   if (update.kind === "snapshot") setTimeout(() => mirror.prepareTools(), 0);
 });
+/** Whether Shift is held on the map, once the camera controls exist. */
+let controlsShift: () => boolean = () => false;
 const zoneTool = new ZoneToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
   city: () => mirror.state,
   version: () => cityVersion,
+  whole: () => controlsShift(),
   send: (payload) => sendCommand("ZoneCells", payload),
   strokeId: () => mirror.upcomingSeq,
 });
@@ -700,6 +705,8 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
     marks: (chunk, shapes) => mirror.lotMarksInChunk(chunk, shapes),
     // Each cell's land value, worked out from the copy by the sim's own code (issue M3-18).
     values: (shapes) => mirror.landValuesOfShapes(shapes),
+    // Each cell's block's or open ground's net income a year, from the figures last worked out (issue M4-18).
+    budget: (chunk, shapes) => mirror.budgetBytesOfShapes(chunk, shapes),
   });
   // Buildings come from the mirror alone too: a snapshot draws them all,
   // nearest the camera first, and a delta the chunks it changed.
@@ -741,7 +748,26 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
   };
   /** The city centre land value was last drawn from, to see when it moves. */
   let centreKey = "";
+  /**
+   * The game day the budget overlay's figures were last worked out on, or
+   * -1 for not since it was turned on (issue M4-18). They move as people
+   * come and go, so while the overlay shows they are worked out again once a
+   * game day, and when roads change, and every cell coloured
+   * again.
+   */
+  let budgetDay = -1;
+  const refreshBudgets = (force: boolean) => {
+    if (useUi.getState().overlay !== "budget" || !mirror.state) return;
+    const day = Math.floor(mirror.state.tick / TIME_BALANCE.ticksPerDay);
+    if (!force && day === budgetDay) return;
+    budgetDay = day;
+    mirror.refreshBudgets();
+    document.body.dataset["budgetMs"] = mirror.budgetFigures.ms.toFixed(1);
+    view.revalueCells();
+  };
   const showCells = (update: MirrorUpdate) => {
+    // A new block, or one gone, is worked out at once; buildings and people wait for the day's refresh, so a growing city does not work it all out on every delta.
+    refreshBudgets(update.kind === "snapshot" || update.roadChunks.length > 0);
     const c = mirror.state?.centre;
     const centre = c ? `${c.x},${c.z},${c.weight}` : "";
     const moved = centre !== centreKey;
@@ -769,6 +795,9 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
   // One overlay at a time on the same cell meshes, coloured by what it shows (issue M3-18).
   useUi.subscribe((now, before) => {
     if (now.overlay === before.overlay) return;
+    // The figures are worked out before the cells are coloured by them.
+    budgetDay = -1;
+    refreshBudgets(true);
     view.setCellColouring(colouringOf(now.overlay));
     setCellsVisible(now.overlay !== null);
   });
@@ -850,6 +879,7 @@ viewReady.catch((error: unknown) => {
 function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): CameraHooks {
   const rig = createCameraRig(view.camera, terrain, () => ({ width: canvas.clientWidth, height: canvas.clientHeight }));
   const controls = createCameraControls(canvas, rig, view.scene);
+  controlsShift = () => controls.shiftHeld();
   const v = new Vector3();
   let lastSnap: Snap | null = null;
   const hooks: CameraHooks = {
@@ -977,8 +1007,8 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   let gridDragStarting = false;
   controls.setToolDrag({
     active: () => editTool.active() !== null || bulldozeTool.active() || gridTool.active() || zoneTool.brushing(),
-    // Shift takes whole roads with these two (issue 86), so a Shift drag is theirs; the right drag orbits.
-    takesShift: () => editTool.active() !== null || bulldozeTool.active(),
+    // Shift takes whole roads with these two (issue 86), and ground under buildings with the zone tool (#417), so a Shift drag is theirs; the right drag orbits.
+    takesShift: () => editTool.active() !== null || bulldozeTool.active() || zoneTool.active(),
     start: () => {
       if (gridTool.active()) gridDragStarting = true;
       else if (zoneTool.brushing()) zoneTool.dragStart();
@@ -1142,7 +1172,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       return null;
     }
     const targets = zoneTool.targets(hover);
-    const key = `${ui.zoneErase ? "erase" : `${ui.zonePick},${ui.zoneDensity}`},${mirrorVersion},${ui.zonePending.map((p) => p.id).join(";")}`;
+    const key = `${ui.zoneErase ? "erase" : `${ui.zonePick},${ui.zoneDensity}`},${controls.shiftHeld() ? "whole" : "empty"},${mirrorVersion},${ui.zonePending.map((p) => p.id).join(";")}`;
     if (targets !== zoneTargets || key !== zoneKey) {
       zoneTargets = targets;
       zoneKey = key;
@@ -1221,6 +1251,21 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     }
     return land;
   };
+  // The block or open ground under the pointer while the budget overlay is on (issue M4-18), looked up again when the pointer moves or the figures are worked out again.
+  let budgetKey = "";
+  let budgetHere: { area: number; budget: AreaBudget } | null = null;
+  const budgetUnder = (cursor: { x: number; z: number } | null): { area: number; budget: AreaBudget } | null => {
+    const ui = useUi.getState();
+    const figures = mirror.budgetFigures.budgets;
+    const key = ui.overlay === "budget" && ui.tool === null && cursor && figures ? `${cursor.x.toFixed(1)},${cursor.z.toFixed(1)},${worldVersion}` : "";
+    if (key !== budgetKey || (key !== "" && budgetFiguresSeen !== figures)) {
+      budgetKey = key;
+      budgetFiguresSeen = figures;
+      budgetHere = key === "" || !cursor ? null : mirror.budgetAt(cursor.x, cursor.z);
+    }
+    return budgetHere;
+  };
+  let budgetFiguresSeen: unknown = null;
   // Who is in the building under the pointer (issue M3-17), looked up again when the copy changes, as people come and go every tick.
   let occupantsKey = "";
   let occupants: Occupants = { people: 0, filled: 0, why: null };
@@ -1377,7 +1422,11 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const land = landValueUnder(cursor);
     setLandValueHover(land && pointerNow ? { x: pointerNow.x, y: pointerNow.y, value: land.value, roadType: land.roadType } : null);
     document.body.dataset["landValueHover"] = land ? String(land.value.value) : "";
-    const under = land ? null : buildingUnder(cursor);
+    // And while the budget overlay is on, the block under the pointer (issue M4-18).
+    const budgetNow = land ? null : budgetUnder(cursor);
+    setBudgetHover(budgetNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, area: budgetNow.area, budget: budgetNow.budget } : null);
+    document.body.dataset["budgetHover"] = budgetNow ? String(budgetNow.budget.net) : "";
+    const under = land || budgetNow ? null : buildingUnder(cursor);
     setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under, occupants: occupantsOf(under.id), ground: hoverGround } : null);
     document.body.dataset["buildingHover"] = under ? String(under.id) : "";
     document.body.dataset["buildingsToClear"] = String((liveClears?.clears?.ids.length ?? 0) + (gridClearsNow?.clears?.ids.length ?? 0));

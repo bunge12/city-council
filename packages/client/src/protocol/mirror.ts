@@ -3,6 +3,11 @@ import {
   LOG_PAGE_SIZE,
   PROTOCOL_VERSION,
   applyBuildingDelta,
+  areaBudget,
+  blockBudgetsWith,
+  budgetAreasOfSlots,
+  type AreaBudget,
+  type BlockBudgets,
   applyPopDelta,
   applyStatsDelta,
   countOccupancy,
@@ -22,7 +27,9 @@ import {
   cellAt,
   cellShapesInChunk,
   cellsInChunk,
+  applyExpropriationDelta,
   gridEffects,
+  NO_COMPENSATION,
   landValueAt,
   landValuesOfShapes,
   lotMarkAt,
@@ -51,6 +58,7 @@ import {
   copyBudget,
   copyDemand,
   ZONING_BALANCE,
+  CHUNKS_PER_SIDE,
   countZoneJobsWith,
   holdsHomes,
   reachableRoomWith,
@@ -60,6 +68,8 @@ import {
   type ReachableRoom,
 } from "@city-council/sim";
 import { countRoom, roomAfter, roomBefore } from "./room";
+import { budgetByte } from "../render/cell-geometry";
+import { blockContaining, blockOutlines, cellChunkOf, type BlockOutline } from "./block-at";
 import type { ClientTransport } from "./transport";
 
 /** Deeply read-only view of sim state. The client never writes it. */
@@ -151,6 +161,12 @@ export class SimMirror {
   private roomTally: number | null = null;
   /** Every building's people and jobs filled, counted from the last snapshot's pops and moved by each delta. */
   private occupancy: Occupancy = { people: new Int32Array(0), filled: new Int32Array(0) };
+  /** The budget overlay's figures as last worked out (`refreshBudgets`), and the time that took. Derived, never state. */
+  private budgets: BlockBudgets | null = null;
+  private budgetsMs = 0;
+  /** The blocks' outlines for `budgetAt`, read again on the first look after the roads change. */
+  private outlines: { roads: number; list: BlockOutline[] } | null = null;
+  private roadsSeen = 0;
 
   constructor(transport: ClientTransport, playerId: string) {
     this.transport = transport;
@@ -193,6 +209,10 @@ export class SimMirror {
   jobsFilled(id: number): number {
     return this.occupancy.filled[id] ?? 0;
   }
+
+  /** `buildingPeople` and `jobsFilled` as the sim's planners take them, so a preview prices clearing a building as the command will (M4-09). */
+  readonly peopleIn = (id: number): number => this.buildingPeople(id);
+  readonly filledIn = (id: number): number => this.jobsFilled(id);
 
   /**
    * Why no newcomer would move into home `id` today, as the sim's
@@ -389,6 +409,86 @@ export class SimMirror {
     return this.current ? landValuesOfShapes(this.current, shapes) : null;
   }
 
+  /**
+   * Works the budget overlay's figures out again from the copy, with the
+   * sim's own function and each building's people and jobs filled (issue
+   * M4-18), and keeps them for `budgetBytesOfShapes` and `budgetAt`. They
+   * move every tick as people come and go, so the page asks for them again
+   * now and then while the overlay shows, not on every delta. Returns them,
+   * or null before the first snapshot.
+   */
+  refreshBudgets(): BlockBudgets | null {
+    if (!this.current) return null;
+    const start = performance.now();
+    this.budgets = blockBudgetsWith(this.current, this.occupancy.people, this.occupancy.filled);
+    this.budgetsMs = performance.now() - start;
+    return this.budgets;
+  }
+
+  /** The budget figures `refreshBudgets` last worked out, or null, and how long that took in milliseconds. */
+  get budgetFigures(): { budgets: BlockBudgets | null; ms: number } {
+    return { budgets: this.budgets, ms: this.budgetsMs };
+  }
+
+  /**
+   * By the order of `shapes`, chunk `chunk`'s as `cellShapesInChunk` just
+   * gave them, each cell's budget byte: the net income of the block its side
+   * of the road faces, or of open ground in the chunk. Null before the
+   * figures are first worked out.
+   */
+  budgetBytesOfShapes(chunk: number, shapes: ChunkCellShapes): Uint8Array | null {
+    const state = this.current;
+    const budgets = this.budgets;
+    if (!state || !budgets) return null;
+    const areas = budgetAreasOfSlots(state, shapes.slots, chunk);
+    const out = new Uint8Array(areas.length);
+    for (let k = 0; k < areas.length; k++) out[k] = budgetByte(areaBudget(budgets, areas[k] ?? 0)?.net ?? 0);
+    return out;
+  }
+
+  /**
+   * The block or open ground at (x, z) and its figures: the block whose
+   * cell is under the point, or failing a cell the block whose boundary is
+   * round it, or the open ground of the chunk it is in. Null before the
+   * figures are worked out, or where there is none.
+   */
+  budgetAt(x: number, z: number): { area: number; budget: AreaBudget } | null {
+    const state = this.current;
+    const budgets = this.budgets;
+    if (!state || !budgets) return null;
+    const cell = cellAt(state, x, z);
+    let area: number;
+    if (cell) {
+      const chunk = this.chunkListing(cell.index, x, z);
+      area = budgetAreasOfSlots(state, [cell.index], chunk)[0] ?? -1 - chunk;
+    } else {
+      if (!this.outlines || this.outlines.roads !== this.roadsSeen) this.outlines = { roads: this.roadsSeen, list: blockOutlines(state.roads) };
+      const block = blockContaining(this.outlines.list, x, z);
+      area = block >= 0 ? block : -1 - cellChunkOf(x, z);
+    }
+    const budget = areaBudget(budgets, area);
+    return budget ? { area, budget } : null;
+  }
+
+  /**
+   * The chunk whose cells list slot `slot`, so the readout names the open
+   * ground the overlay coloured the cell by: the chunk under (x, z) or one
+   * next to it, for a cell near a chunk's edge.
+   */
+  private chunkListing(slot: number, x: number, z: number): number {
+    const home = cellChunkOf(x, z);
+    const ci = home % CHUNKS_PER_SIDE;
+    const cj = (home - ci) / CHUNKS_PER_SIDE;
+    for (const [di, dj] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      const i = ci + di;
+      const j = cj + dj;
+      if (i < 0 || j < 0 || i >= CHUNKS_PER_SIDE || j >= CHUNKS_PER_SIDE) continue;
+      const slots = this.cellShapesInChunk(j * CHUNKS_PER_SIDE + i)?.slots;
+      if (slots?.includes(slot)) return j * CHUNKS_PER_SIDE + i;
+    }
+    return home;
+  }
+
   /** The land value of the zoning cell at (x, z), its parts, and the type of road it fronts, or null where there is no cell. */
   landValueAt(x: number, z: number): { value: LandValue; roadType: number } | null {
     const state = this.current;
@@ -421,12 +521,12 @@ export class SimMirror {
    * was. Empty until the first snapshot.
    */
   roadClears(plan: RoadPlan): BuildingsInTheWay {
-    return this.effectsOf(plan, (state) => roadEffects(state, plan, (id) => this.buildingPeople(id))).clears;
+    return this.effectsOf(plan, (state) => roadEffects(state, plan, this.peopleIn, this.filledIn)).clears;
   }
 
   /** As `roadClears`, for a grid the sim has planned. */
   gridClears(plan: GridPlan): BuildingsInTheWay {
-    return this.effectsOf(plan, (state) => gridEffects(state, plan, (id) => this.buildingPeople(id))).clears;
+    return this.effectsOf(plan, (state) => gridEffects(state, plan, this.peopleIn, this.filledIn)).clears;
   }
 
   /**
@@ -439,7 +539,7 @@ export class SimMirror {
   private effectsOf(plan: RoadPlan | GridPlan, find: (state: SimState) => RoadEffects): RoadEffects {
     let effects = this.effects.get(plan);
     if (!effects) {
-      effects = this.current ? find(this.current) : { clears: { ids: [], residents: 0 }, cells: new Float64Array(0) };
+      effects = this.current ? find(this.current) : { clears: { ids: [], residents: 0, compensation: { ...NO_COMPENSATION } }, cells: new Float64Array(0) };
       this.effects.set(plan, effects);
     }
     return effects;
@@ -449,12 +549,12 @@ export class SimMirror {
 
   /** The cells a road the sim has planned would open, as corners, eight numbers a cell. Empty until the first snapshot. */
   roadCells(plan: RoadPlan): Float64Array {
-    return this.effectsOf(plan, (state) => roadEffects(state, plan, (id) => this.buildingPeople(id))).cells;
+    return this.effectsOf(plan, (state) => roadEffects(state, plan, this.peopleIn, this.filledIn)).cells;
   }
 
   /** As `roadCells`, for a grid the sim has planned. */
   gridCells(plan: GridPlan): Float64Array {
-    return this.effectsOf(plan, (state) => gridEffects(state, plan, (id) => this.buildingPeople(id))).cells;
+    return this.effectsOf(plan, (state) => gridEffects(state, plan, this.peopleIn, this.filledIn)).cells;
   }
 
   requestSnapshot(): void {
@@ -469,6 +569,7 @@ export class SimMirror {
         this.settleFromSnapshot(message.state);
         this.skipSeqs(message.state);
         this.current = message.state;
+        this.roadsSeen++;
         this.roomTally = countRoom(message.state.buildings);
         this.occupancy = countOccupancy(message.state);
         this.logFrom = message.logFrom;
@@ -535,6 +636,12 @@ export class SimMirror {
       this.outOfStep();
       return;
     }
+    // And the expropriations, which must apply to the list the copy has.
+    const expropriations = delta.expropriations ? applyExpropriationDelta(state.expropriations, delta.expropriations, delta.tick) : null;
+    if (typeof expropriations === "string") {
+      this.outOfStep();
+      return;
+    }
     // And the milestones reached, when they came (M4-12).
     if (delta.milestones && checkMilestones(delta.milestones, delta.tick) !== null) {
       this.outOfStep();
@@ -545,6 +652,7 @@ export class SimMirror {
     let roadNodes: readonly number[] = [];
     let roadSegs: readonly number[] = [];
     if (delta.roads) {
+      this.roadsSeen++;
       const applied = applyRoadDelta(state.roads, delta.roads);
       if (typeof applied === "string") {
         this.outOfStep();
@@ -601,6 +709,7 @@ export class SimMirror {
     state.demand = copyDemand(delta.demand);
     state.redevelopedToday = delta.redevelopedToday;
     if (delta.budget) state.budget = copyBudget(delta.budget);
+    if (expropriations) state.expropriations = expropriations;
     if (delta.milestones) state.milestones = delta.milestones.slice();
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);

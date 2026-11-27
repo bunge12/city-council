@@ -15,6 +15,7 @@ import {
   hashState,
   isBuilding,
   previewBuildRoad,
+  gridClearsReason,
   previewBuildRoadGrid,
   previewBulldozeRoad,
   readBuilding,
@@ -246,17 +247,19 @@ describe("a road that comes", () => {
     expectSound(state);
   });
 
-  it("clears the houses a grid's streets cross, as its preview says", () => {
+  it("refuses a grid whose streets cross houses, and builds nothing (M4-09)", () => {
     const { state } = housesBothSides();
     const payload = { origin: { x: 4248, z: 4520 }, along: { x: 4344, z: 4520 }, across: { x: 4248, z: 4680 }, depth: 70, width: 86, type: "street" };
     const preview = previewBuildRoadGrid(state, payload);
     if (!preview.ok) throw new Error(preview.reason);
-    expect(preview.clears.ids.length).toBeGreaterThan(0);
+    const n = preview.clears.ids.length;
+    expect(n).toBeGreaterThan(0);
+    expect(preview.refusal).toBe(gridClearsReason(n));
     const before = live(state);
-    ok(state, command("BuildRoadGrid", payload));
-    while (!cellsSettled(state)) step(state);
-    step(state);
-    expect(live(state)).toEqual(before.filter((id) => !preview.clears.ids.includes(id)));
+    const hash = hashState(state);
+    expect(submit(state, command("BuildRoadGrid", payload))).toEqual({ ok: false, reason: gridClearsReason(n) });
+    expect(hashState(state)).toBe(hash);
+    expect(live(state)).toEqual(before);
     expectSound(state);
   });
 
@@ -468,8 +471,11 @@ describe("BulldozeBuilding", () => {
 });
 
 describe("a big change of roads", () => {
-  /** A city of houses and a grid over it too big to settle in one tick. */
-  function gridOverHouses(): { state: SimState; payload: unknown } {
+  /**
+   * A city of houses, and streets across it, all applied on one tick, too
+   * big a change to settle in it. Not a grid, which never demolishes (M4-09).
+   */
+  function roadsOverHouses(): { state: SimState; payloads: unknown[] } {
     const state = credited(createState(SEED));
     for (const z of [4500, 4600, 4700, 4800]) ok(state, road([4150, z], [4650, z]));
     const rects = [];
@@ -484,17 +490,24 @@ describe("a big change of roads", () => {
         }
       }
     }
-    const payload = { origin: { x: 4176, z: 4450 }, along: { x: 4624, z: 4450 }, across: { x: 4176, z: 4850 }, depth: 70, width: 60, type: "street" };
-    return { state, payload };
+    const payloads = [4176, 4256, 4336, 4416, 4496, 4576].map((x) => ({ from: { x, z: 4450 }, to: { x, z: 4850 }, type: "street" }));
+    return { state, payloads };
   }
 
   it("removes the buildings it blocks on the tick its cells settle by, and a city saved mid-settle does the same", () => {
-    const { state, payload } = gridOverHouses();
-    const preview = previewBuildRoadGrid(state, payload);
-    if (!preview.ok) throw new Error(preview.reason);
-    expect(preview.clears.ids.length).toBeGreaterThan(0);
+    const { state, payloads } = roadsOverHouses();
+    // Each road's preview on the city as it stands; the six cross no lot of another's.
+    const cleared = new Set<number>();
+    for (const payload of payloads) {
+      const preview = previewBuildRoad(state, payload);
+      if (!preview.ok) throw new Error(preview.reason);
+      for (const id of preview.clears.ids) cleared.add(id);
+    }
+    expect(cleared.size).toBeGreaterThan(0);
     const before = live(state);
-    ok(state, command("BuildRoadGrid", payload));
+    for (const payload of payloads) expect(submit(state, command("BuildRoad", payload)).ok).toBe(true);
+    step(state);
+    expect(state.log.slice(-payloads.length).map((e) => e.type)).toEqual(payloads.map(() => "BuildRoad"));
     const ready = state.cellsReadyAt;
     expect(ready).toBeGreaterThan(state.tick + 1);
     // Following the grid did not walk its cells in one step, past the tick budget.
@@ -518,7 +531,7 @@ describe("a big change of roads", () => {
       if (late) expect(hashState(late), `tick ${tick}`).toBe(hashState(state));
     }
     expect(goneAt).toBe(ready);
-    expect(live(state)).toEqual(before.filter((id) => !preview.clears.ids.includes(id)));
+    expect(live(state)).toEqual(before.filter((id) => !cleared.has(id)));
     expectSound(state);
   });
 });
@@ -885,11 +898,16 @@ describe("undo of a road buildings stand on (#369)", () => {
 
   it("goes through for an upgrade or a bulldoze of a section: the street comes back whole and keeps its buildings", () => {
     const state = street();
-    zone(state, "residential", 1, 0, 24, 3, "north");
+    // Houses short of the street's east end, so the bulldozed stretch takes none: one that took any could not be undone (M4-09).
+    zone(state, "residential", 1, 0, 18, 3, "north");
     expect(fill(state).length).toBeGreaterThan(0);
     for (const type of ["UpgradeRoad", "BulldozeRoad"]) {
       const seg = cellAt(state, 4300, 4591)?.segment as number;
       const payload = type === "UpgradeRoad" ? { segments: [seg], type: "avenue", sections: [[0.4, 0.6]] } : { segments: [seg], sections: [[0.9, 1]] };
+      if (type === "BulldozeRoad") {
+        const preview = previewBulldozeRoad(state, withEnds(state.roads, payload));
+        expect(preview.ok && preview.clears.ids).toEqual([]);
+      }
       ok(state, command(type, withEnds(state.roads, payload)));
       while (!cellsSettled(state)) step(state);
       const kept = live(state);
