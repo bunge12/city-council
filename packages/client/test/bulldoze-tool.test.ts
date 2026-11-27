@@ -337,6 +337,33 @@ describe("BulldozeToolController", () => {
     expect(copy().log.length).toBe(log + 1);
   });
 
+  it("checks a split drag's whole price against the treasury, though each part alone would fit (M4-16)", async () => {
+    const was = BUILDINGS_BALANCE.bulldozeMaxBuildings;
+    BUILDINGS_BALANCE.bulldozeMaxBuildings = 1;
+    try {
+      const { tool, apply, copy, sim } = setup(houseCity());
+      tool.toggle();
+      const lived = housesWestToEast(copy()).filter((id) => popsIn(sim, id) > 0);
+      const [a, b] = lived;
+      if (a === undefined || b === undefined) throw new Error("too few lived-in houses");
+      const one = tool.preview({ kind: "building", id: a });
+      if (!one) throw new Error("no preview");
+      // Enough for either house, not both.
+      fundCity(sim, Math.ceil(one.cost * 1.5) - ECONOMY.overdraft);
+      await apply();
+      tool.dragStart();
+      for (const id of [a, b]) tool.dragOver(tool.pick(pickerOf({ building: id })));
+      const both = tool.preview(null);
+      expect(both?.split).toBe(true);
+      expect(both?.ok).toBe(true);
+      expect(available(copy())).toBeGreaterThan(one.cost);
+      expect(both?.refusal).toBe(costsReason(both?.cost ?? 0, available(copy())));
+      tool.dragCancel();
+    } finally {
+      BUILDINGS_BALANCE.bulldozeMaxBuildings = was;
+    }
+  });
+
   it("splits a drag over more buildings than one command may name, and the sim applies them a step apart (issue #353)", async () => {
     const was = BUILDINGS_BALANCE.bulldozeMaxBuildings;
     BUILDINGS_BALANCE.bulldozeMaxBuildings = 2;

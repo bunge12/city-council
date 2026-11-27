@@ -42,6 +42,7 @@ import {
   buildingInfo,
   isBuilding,
   planBulldozeBuildings,
+  spendingRefusal,
   previewBulldozeRoad,
   seeBuilding,
   type BuildingInfo,
@@ -199,7 +200,6 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
   let cost = 0;
   const compensation: Compensation = { ...NO_COMPENSATION };
   let reason: string | null = null;
-  let refusal: string | null = null;
   for (let from = 0; from < buildings.length; from += most) {
     const payload = { buildings: buildings.slice(from, from + most) };
     commands.push({ type: "BulldozeBuilding", payload });
@@ -208,7 +208,6 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
       reason ??= result.reason;
       continue;
     }
-    refusal ??= result.refusal;
     for (const id of result.ids) cleared.push(id);
     residents += result.residents;
     cost += result.compensation.total;
@@ -226,7 +225,8 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
     compensation: ok ? compensation : { ...NO_COMPENSATION },
     demolition: 0,
     refund: 0,
-    refusal: ok ? refusal : null,
+    // The total against the treasury: the parts of a split drag are charged one a step, so together they must fit.
+    refusal: ok ? spendingRefusal(state, cost) : null,
     split: commands.length > 1,
     length: 0,
     segments: [],

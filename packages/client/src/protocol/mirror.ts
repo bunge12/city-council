@@ -594,9 +594,13 @@ export class SimMirror {
     return this.current ? roadPrice(this.current, cost, clears) : { price: cost, refusal: null };
   }
 
-  /** What building `id` pays a year in tax, the sim's `buildingTaxPerYear` with the jobs filled the copy counts (M4-16). 0 before the first snapshot. */
+  /**
+   * What building `id` pays a year in tax, the sim's `buildingTaxPerYear`
+   * with the people and jobs filled the copy counts (M4-16), so a home
+   * nobody lives in pays none, as the sweep charges it. 0 before the first snapshot.
+   */
   buildingTax(id: number): number {
-    return this.current ? buildingTaxPerYear(this.current, id, this.filledIn) : 0;
+    return this.current ? buildingTaxPerYear(this.current, id, this.filledIn, this.peopleIn) : 0;
   }
 
   /** The cells a road the sim has planned would open, as corners, eight numbers a cell. Empty until the first snapshot. */

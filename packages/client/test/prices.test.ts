@@ -14,6 +14,7 @@ import {
   fundCity,
   generateTerrain,
   previewBuildRoad,
+  previewUpgradeRoad,
   step,
   submit,
   type BuildingInfo,
@@ -182,6 +183,10 @@ describe("the upgrade tool's price (M4-16)", () => {
     expect(p.clears?.ids).toEqual([]);
     expect(p.price).toBe(p.cost);
     expect(p.refusal).toBe(costsReason(p.price, available(copy())));
+    // The sim's own preview of the command the tool would send prices it the same.
+    const sim = previewUpgradeRoad(copy(), p.command.payload);
+    if (!sim.ok) throw new Error(sim.reason);
+    expect({ price: p.price, refusal: p.refusal }).toEqual({ price: sim.price, refusal: sim.refusal });
   });
 });
 

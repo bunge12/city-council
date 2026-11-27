@@ -1106,8 +1106,15 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   mirror.subscribe((u) => {
     if (u.kind === "snapshot" || u.roadNodes.length > 0 || u.roadSegs.length > 0 || u.cellChunks.length > 0 || u.buildingIds.length > 0) worldVersion++;
   });
+  // Counts the updates that moved people or jobs filled, which a price that takes buildings depends on (M4-16).
+  let occupancyVersion = 0;
+  mirror.subscribe((u) => {
+    if (u.kind === "snapshot" || u.peopleIds.length > 0) occupancyVersion++;
+  });
   let previewKey = "";
   let preview: RoadPreview | null = null;
+  let pricedPreview: RoadPreview | null = null;
+  let pricedPreviewFrom: RoadPreview | null = null;
   const livePreview = (cursor: { x: number; z: number } | null): RoadPreview | null => {
     const ui = useUi.getState();
     const start = ui.roadStart;
@@ -1115,13 +1122,22 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const end = cursor ? { x: snapToGrid(cursor.x), z: snapToGrid(cursor.z) } : null;
     const key =
       ui.tool === "road" && start && end
-        ? `${start.x},${start.z},${control ? `${control.x},${control.z}` : "-"},${end.x},${end.z},${ui.roadType},${ui.roadMode},${ui.roadLevel},${worldVersion},${mirror.state?.budget.treasury ?? 0}`
+        ? `${start.x},${start.z},${control ? `${control.x},${control.z}` : "-"},${end.x},${end.z},${ui.roadType},${ui.roadMode},${ui.roadLevel},${worldVersion},${occupancyVersion}`
         : "";
     if (key !== previewKey) {
       previewKey = key;
       preview = key === "" ? null : roadTool.preview(end);
     }
-    return preview;
+    // The treasury moves nearly every tick, so the price is checked against it outside the cache,
+    // and a new object made only when the refusal changes, so the marks are not built again (M4-16).
+    if (!preview?.ok) return preview;
+    const money = mirror.price(preview.cost, preview.clears);
+    if (money.price === preview.price && money.refusal === preview.refusal) return preview;
+    if (pricedPreviewFrom !== preview || pricedPreview?.price !== money.price || pricedPreview.refusal !== money.refusal) {
+      pricedPreview = { ...preview, ...money };
+      pricedPreviewFrom = preview;
+    }
+    return pricedPreview;
   };
   // The edit under the pointer, worked out again only when what it depends on changes.
   let editKey = "";
@@ -1140,16 +1156,26 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   // What the bulldozer would remove, worked out again only when the target, the drag, the filters or the city change.
   let bulldozeKey = "";
   let bulldozeNow: BulldozePreview | null = null;
+  let pricedBulldoze: BulldozePreview | null = null;
+  let pricedFrom: BulldozePreview | null = null;
   const liveBulldoze = (target: BulldozeTarget | null): BulldozePreview | null => {
     const ui = useUi.getState();
     const key = bulldozeTool.active()
-      ? `${target ? `${target.kind}:${target.id}:${sectionKey(target.section)}` : "-"},${ui.bulldozeDrag ? `${ui.bulldozeDrag.kind ?? "?"}:${ui.bulldozeDrag.ids.join(";")}:${bulldozeTool.dragKey()}` : "-"},${ui.bulldozePending.map((p) => p.id).join(";")},${worldVersion}`
+      ? `${target ? `${target.kind}:${target.id}:${sectionKey(target.section)}` : "-"},${ui.bulldozeDrag ? `${ui.bulldozeDrag.kind ?? "?"}:${ui.bulldozeDrag.ids.join(";")}:${bulldozeTool.dragKey()}` : "-"},${ui.bulldozePending.map((p) => p.id).join(";")},${worldVersion},${occupancyVersion}`
       : "";
     if (key !== bulldozeKey) {
       bulldozeKey = key;
       bulldozeNow = key === "" ? null : bulldozeTool.preview(target);
     }
-    return bulldozeNow;
+    // The plan's total checked against the treasury as it is now, outside the cache (M4-16).
+    if (!bulldozeNow?.ok) return bulldozeNow;
+    const refusal = mirror.price(bulldozeNow.cost, null).refusal;
+    if (refusal === bulldozeNow.refusal) return bulldozeNow;
+    if (pricedFrom !== bulldozeNow || pricedBulldoze?.refusal !== refusal) {
+      pricedBulldoze = { ...bulldozeNow, refusal };
+      pricedFrom = bulldozeNow;
+    }
+    return pricedBulldoze;
   };
   // The bulldozer's pick, worked out again only when the pointer, the camera, the filters or the city change.
   let targetKey = "";
