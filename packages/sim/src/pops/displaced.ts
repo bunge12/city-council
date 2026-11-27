@@ -25,8 +25,10 @@
 // another tower. Among the homes that take it, one is drawn from the
 // generator in state, each as likely.
 //
-// The relocation payment, the satisfaction hit and the record of each
-// expropriation are M4's.
+// The relocation payment and the record of each expropriation are M4-09's
+// (economy/compensation.ts). The mark a moved pop carries and the
+// satisfaction hit from displacement are M4-10's (pops.ts,
+// displacement.ts).
 
 import { BUILDING_TYPES } from "../buildings/balance";
 import { BUILDING_ABANDONED, BUILDING_ALIVE } from "../buildings/buildings";

@@ -119,7 +119,10 @@ export {
   readPop,
   workersFor,
 } from "./pops/pops";
-export type { PopProfile, PopRow, PopState } from "./pops/pops";
+export type { DisplacedMark, PopProfile, PopRow, PopState } from "./pops/pops";
+export { DISPLACED_BY_CITY, DISPLACED_BY_NONE, DISPLACED_BY_OWNER, popDisplacedMark } from "./pops/pops";
+export { displacementLoss, displacementView, expropriationGridAround, expropriationGridCells, expropriationGridOf, neighbourLoss, ownLoss } from "./pops/displacement";
+export type { DisplacementView, ExpropriationGrid } from "./pops/displacement";
 export { buildingPeople, jobsFilled, popsAtHome, popsAtWork } from "./pops/where";
 export { applyPopDelta, countOccupancy, drainPopDelta, popDeltaProblem, recordPopChanges } from "./pops/delta";
 export type { Occupancy, PopDelta } from "./pops/delta";

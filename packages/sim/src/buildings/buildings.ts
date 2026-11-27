@@ -415,9 +415,10 @@ export function removeBuilding(state: SimState, id: number): void {
  * free list ends with them in that order. Throws, changing nothing, if any
  * is not a live building or is named twice. One pass for the lot, so a
  * clear of thousands catches the building index up once, not once a
- * building (issue #162).
+ * building (issue #162). `byOwner` says an owner is redeveloping them,
+ * which marks their residents as displaced by it (M4-10).
  */
-export function removeBuildings(state: SimState, ids: readonly number[]): void {
+export function removeBuildings(state: SimState, ids: readonly number[], byOwner = false): void {
   const b = state.buildings;
   // Only a list can name one twice; the upkeep removes one at a time.
   const named = ids.length > 1 ? new Uint8Array(b.flags.length) : null;
@@ -431,7 +432,7 @@ export function removeBuildings(state: SimState, ids: readonly number[]): void {
   if (ids.length === 0) return;
   // Their residents are displaced, to find new homes (M3-12), and their
   // jobs are freed, while the rows still say what each building was.
-  displaceBuildingPops(state, ids);
+  displaceBuildingPops(state, ids, byOwner);
   // The columns each was filed on, which a lot a change of roads took may
   // no longer walk to from its row.
   unfileBuildings(state, ids);

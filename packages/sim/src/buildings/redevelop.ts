@@ -184,7 +184,7 @@ export function planRedevelopment(state: SimState, id: number, density = zonedUp
 export function redevelop(state: SimState, plan: RedevelopmentPlan): number {
   let replaced = 0;
   for (const id of plan.replaces) replaced += buildingFloorSpace(state.buildings, id);
-  removeBuildings(state, plan.replaces);
+  removeBuildings(state, plan.replaces, true);
   const type = BUILDING_TYPES[plan.lot.type] as BuildingType;
   const residents = residentsFor(type, plan.lot.width, plan.lot.depth);
   const variant = nextInt(state.rng, VARIANTS);
