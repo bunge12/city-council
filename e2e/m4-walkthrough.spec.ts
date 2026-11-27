@@ -976,10 +976,11 @@ for (const variant of [
       const grown = (await mirror(page)).stats.totals["population"] ?? 0;
       expect(grown, "the population").toBeGreaterThan(population);
       expect(grown, "the new city stays short of its first milestone").toBeLessThan(firstMilestone.population);
-      expect(Number(await credit.getAttribute("data-limit")), "the credit limit once the city has grown").toBeGreaterThan(limit);
+      const grownLimit = Number(await credit.getAttribute("data-limit"));
+      expect(grownLimit, "the credit limit once the city has grown").toBeGreaterThan(limit);
       await shot(page, info, dir, "8-larger-credit-limit", page.locator("#budget-panel"));
       await closeBudget(page);
-      info.annotations.push({ type: "step 8", description: `loan ${formatMoneyShort(principal)} repaying ${formatMoneyShort(repayment)} a month; credit limit ${formatMoneyShort(limit)} at ${population} residents, ${formatMoneyShort(Number(await credit.getAttribute("data-limit")))} at ${grown}` });
+      info.annotations.push({ type: "step 8", description: `loan ${formatMoneyShort(principal)} repaying ${formatMoneyShort(repayment)} a month; credit limit ${formatMoneyShort(limit)} at ${population} residents, ${formatMoneyShort(grownLimit)} at ${grown}` });
     });
 
     // Steps 9 to 12 and half of 14: the milestone town, in a context of its own.
