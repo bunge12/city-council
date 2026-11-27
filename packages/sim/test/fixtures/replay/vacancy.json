@@ -2,6 +2,7 @@
   "description": "Vacancy on seed 2026 (M3-24). p1 builds a street three cells short of the first outside connection's stub, joined to nothing, and zones R1 along its north side, p2 along its south side. The pull from outside holds the residential bar above zero, so houses grow in the first days, but nobody can reach them. Each stands in use for a game month, then vacant. With the bar above zero none is abandoned: it would come straight back. 135 game days.",
   "seed": 2026,
   "untilTick": 13500,
+  "credited": true,
   "log": [
     {
       "tick": 0,
@@ -67,6 +68,6 @@
       }
     }
   ],
-  "balance": "171c0e4853668cbf",
-  "hash": "dba5c482f0952f24"
+  "balance": "e6539edbabada062",
+  "hash": "ba361c1b739121b2"
 }

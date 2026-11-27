@@ -13,6 +13,10 @@
 //   at, or null for none (M3-07). The M2 walkthrough zones shops, offices
 //   and factories on an empty city, which wants houses only. A held city
 //   replays to its own hash only with the bars held the same way.
+// - `milestones`: every new city starts with every population milestone
+//   credited, without grants (M4-12), so a walkthrough can zone densities 2
+//   and 3 on an empty city. A credited city replays to its own hash only
+//   from a city credited the same way.
 
 /** The localStorage key that holds the switch, as JSON. */
 export const TEST_SWITCH_KEY = "city-council:test";
@@ -21,10 +25,11 @@ export interface TestSwitch {
   cheapFrames: boolean;
   autosave: boolean;
   heldDemand: number | null;
+  milestones: boolean;
 }
 
 /** What a player gets: every frame drawn at the real settings, autosave on, and the bars as the city has them. */
-export const PLAYER_SETTINGS: TestSwitch = { cheapFrames: false, autosave: true, heldDemand: null };
+export const PLAYER_SETTINGS: TestSwitch = { cheapFrames: false, autosave: true, heldDemand: null, milestones: false };
 
 /** The switch stored in `storage`, with each missing or unreadable field as a player has it. */
 export function readTestSwitch(storage: Pick<Storage, "getItem"> | null): TestSwitch {
@@ -47,5 +52,6 @@ export function readTestSwitch(storage: Pick<Storage, "getItem"> | null): TestSw
     cheapFrames: typeof value.cheapFrames === "boolean" ? value.cheapFrames : PLAYER_SETTINGS.cheapFrames,
     autosave: typeof value.autosave === "boolean" ? value.autosave : PLAYER_SETTINGS.autosave,
     heldDemand: typeof value.heldDemand === "number" && value.heldDemand >= -100 && value.heldDemand <= 100 ? value.heldDemand : PLAYER_SETTINGS.heldDemand,
+    milestones: typeof value.milestones === "boolean" ? value.milestones : PLAYER_SETTINGS.milestones,
   };
 }

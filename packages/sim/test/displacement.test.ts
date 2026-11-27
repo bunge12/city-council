@@ -46,6 +46,7 @@ import { redevelop } from "../src/buildings/redevelop";
 import { lotCentres } from "../src/buildings/where";
 import { cloneState } from "../src/state";
 import { holdDemand } from "./demand-helper";
+import { credited } from "./credited";
 import { funded } from "./funds";
 import { submit } from "./seen-ends";
 import { withValue } from "./with-value";
@@ -115,7 +116,7 @@ const PLACES = 100;
  * for a pop the city moves. Funded, since clearing houses costs money.
  */
 function houseStreet(room: number): { state: SimState; s: Street; houses: number[]; pops: Map<number, number> } {
-  const state = funded(createState(SEED));
+  const state = credited(funded(createState(SEED)));
   const s = street(state, PLACES);
   zone(state, s, 1, 0, PLACES, 6);
   holdDemand({ residential: 80 }, () => {

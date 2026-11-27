@@ -18,7 +18,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 29;
+export const PROTOCOL_VERSION = 30;
 
 // ---- Client to sim ----
 
@@ -184,6 +184,12 @@ export interface DeltaMessage {
    * version 28). Left out otherwise.
    */
   expropriations?: ExpropriationDelta;
+  /**
+   * The milestones reached, a copy, when one was reached or credited since
+   * the last delta (M4-12, protocol version 30). Left out otherwise. A
+   * client finds what a new one opens from `MILESTONES`.
+   */
+  milestones?: Int32Array;
   /**
    * The commands still queued, the ones waiting for the cells to settle,
    * when the queue changed since the last delta. Left out otherwise: a

@@ -5,6 +5,7 @@ import {
   BUILDINGS_SYSTEM,
   COMMANDS_SYSTEM,
   GROWER_SYSTEM,
+  PROGRESSION,
   POPS_SYSTEM,
   ARRIVALS_SYSTEM,
   DISPLACED_SYSTEM,
@@ -120,6 +121,8 @@ describe("step", () => {
       `end ${REDEVELOP_SYSTEM}`,
       `start ${GROWER_SYSTEM}`,
       `end ${GROWER_SYSTEM}`,
+      `start ${PROGRESSION.name}`,
+      `end ${PROGRESSION.name}`,
       `start ${BUDGET_SYSTEM}`,
       `end ${BUDGET_SYSTEM}`,
     ]);

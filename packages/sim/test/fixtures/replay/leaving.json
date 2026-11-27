@@ -2,6 +2,7 @@
   "description": "Leaving for lack of work on seed 2026 (M3-10). p1 builds a street from the first outside connection and zones R2 along its north side, p2 along its south side, and nothing else: a city with no jobs. Newcomers arrive on the pull from outside and find no work; each pop's score falls a little each day, and from about day 30 those that have stayed low for long enough move out while others keep arriving. Forty-five game days.",
   "seed": 2026,
   "untilTick": 4500,
+  "credited": true,
   "log": [
     {
       "tick": 0,
@@ -67,6 +68,6 @@
       }
     }
   ],
-  "balance": "171c0e4853668cbf",
-  "hash": "16ffa5cacc054661"
+  "balance": "e6539edbabada062",
+  "hash": "02a81037375fd203"
 }

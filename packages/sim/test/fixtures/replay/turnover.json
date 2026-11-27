@@ -2,6 +2,7 @@
   "description": "Turnover on seed 2026 (M3-11). p1 builds a street from the first outside connection, zones C3 by the connection on its north side and R1 houses along the rest of it, and p2 zones R1 houses along its south side. Every bar is held at 40. The houses fill and the shops take workers in the first weeks; over the next two game years a few households a month are replaced, children grow up and leave, people die and babies are born, and the vacant houses fill again.",
   "seed": 2026,
   "untilTick": 73000,
+  "credited": true,
   "log": [
     {
       "tick": 0,
@@ -90,7 +91,7 @@
       }
     }
   ],
-  "balance": "171c0e4853668cbf",
-  "hash": "239d831155199f64",
+  "balance": "e6539edbabada062",
+  "hash": "77bc794dc8516362",
   "heldDemand": 40
 }

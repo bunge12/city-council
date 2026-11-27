@@ -32,7 +32,7 @@ import {
   recordPopChanges,
   recordRoadChanges,
   recountTotals,
-  replay,
+  replayFrom,
   seeBuilding,
   serialize,
   serializeDetachedSteps,
@@ -44,6 +44,7 @@ import {
 import { SEG_FIXED, isSegment, segmentIdLimit } from "../src/roads/network";
 import { submit } from "./seen-ends";
 import { withValue } from "./with-value";
+import { credited } from "./credited";
 
 const SEED = 2026;
 const CELL = ZONING_BALANCE.cellSize;
@@ -197,11 +198,11 @@ function loadAsHost(bytes: Uint8Array): SimState {
 
 describe("a town saved and resumed at any point ends as the uninterrupted run does (M3 review, #365)", () => {
   const saves = new Map<string, Uint8Array>();
-  let straight = createState(SEED);
+  let straight = credited(createState(SEED));
   let want = "";
   // In a hook, not the describe body, so the test time limit stops a hang here too.
   beforeAll(() => {
-    straight = createState(SEED);
+    straight = credited(createState(SEED));
     inBalance(() => {
       for (let i = 0; i < END; i++) {
         const at = POINTS.includes(i - W) ? i - W : -1;
@@ -242,8 +243,8 @@ describe("a town saved and resumed at any point ends as the uninterrupted run do
   }
 
   it("leaves another city in the same process alone", () => {
-    const a = createState(SEED);
-    const b = createState(77);
+    const a = credited(createState(SEED));
+    const b = credited(createState(77));
     inBalance(() => {
       for (let i = 0; i < 1234; i++) {
         commands(b, i);
@@ -260,6 +261,6 @@ describe("a town saved and resumed at any point ends as the uninterrupted run do
   });
 
   it("replays its log to the same hash", () => {
-    expect(hashState(inBalance(() => replay(SEED, straight.log, straight.tick)))).toBe(want);
+    expect(hashState(inBalance(() => replayFrom(credited(createState(SEED)), straight.log, straight.tick)))).toBe(want);
   });
 });

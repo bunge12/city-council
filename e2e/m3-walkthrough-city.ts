@@ -29,6 +29,7 @@ import {
   SCALE_TREASURY,
   cellAt,
   createState,
+  creditMilestones,
   demandPull,
   fundCity,
   deserialize,
@@ -112,10 +113,11 @@ function zone(state: SimState, s: Strip, zoneId: string, density: number, depth:
   send(state, "ZoneCells", { zone: zoneId, density, rects: [{ from: { x: a + 6, z: mid }, to: { x: b - 6, z: mid }, width: depth * CELL - 2 }] });
 }
 
-/** A new city on the walkthrough's seed, funded at `SCALE_TREASURY`, as each of its cities starts and its replay starts. Not a command, so not in the log. */
+/** A new city on the walkthrough's seed, funded at `SCALE_TREASURY` and credited with every milestone (M4-12), as each of its cities starts and its replay starts. Neither is a command, so neither is in the log. */
 export function townStart(): SimState {
   const state = createState(SEED);
   fundCity(state, SCALE_TREASURY);
+  creditMilestones(state);
   return state;
 }
 

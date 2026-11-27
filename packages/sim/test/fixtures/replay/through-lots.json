@@ -2,6 +2,7 @@
   "description": "Through-lots on seed 2026. p1 builds a block between two streets twelve cells apart, closed by a street down each end, and zones both long strips C3. Growth puts through-lots across the block. On day 2 p2 runs a street south off the south street, outside the block, which splits it under the back lots and leaves them standing. On day 4 p2 bulldozes the piece of the south street under x 4300, which takes the through-lots on it,. Since M4-09 that bulldoze cannot be undone, because it took buildings, so the Undo on day 6 the fixture recorded before is gone from its log. Ten game days. Since M3-07 the grower follows demand, and a city with no residents wants no shops, so the fixture holds every bar at 100 (`heldDemand`), in Node and in the browser.",
   "seed": 2026,
   "untilTick": 1000,
+  "credited": true,
   "log": [
     {
       "tick": 0,
@@ -134,7 +135,7 @@
       }
     }
   ],
-  "balance": "171c0e4853668cbf",
+  "balance": "e6539edbabada062",
   "heldDemand": 100,
-  "hash": "33240f961935b3d1"
+  "hash": "df1dbdb660737cd7"
 }

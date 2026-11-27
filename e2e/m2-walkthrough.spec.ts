@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PER_SIDE, CHUNK_SIZE, ROAD_TYPES, SCALE_TREASURY, ZONING_BALANCE, cellAt, cellCorners, cellStatuses, createState, deserialize, fundCity, generateTerrain, hashState, heightAt, replayFrom, step, submit, syncCells, type SimState } from "../packages/sim/src/index";
+import { BUILDING_TYPES, CELL_OPEN, CELL_ROAD, CELL_STEEP, CELL_WATER, CHUNKS_PER_SIDE, CHUNK_SIZE, ROAD_TYPES, SCALE_TREASURY, ZONING_BALANCE, cellAt, cellCorners, cellStatuses, createState, deserialize, creditMilestones, fundCity, generateTerrain, hashState, heightAt, replayFrom, step, submit, syncCells, type SimState } from "../packages/sim/src/index";
 import { CONSTRUCTION } from "../packages/client/src/render/config";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { MENU_SHIFT } from "./dock";
@@ -117,6 +117,7 @@ declare const document: { body: { dataset: Record<string, string | undefined> } 
 declare const navigator: { gpu?: { requestAdapter(): Promise<unknown> } };
 
 const VIEWPORT = { width: 1280, height: 800 };
+
 test.use({ viewport: VIEWPORT, storageState: HELD_DEMAND_STATE });
 // Several page loads, game months of growth at 4x and many redraws, on a
 // machine that may have no GPU. On software WebGPU it took 9 to 14.5
@@ -186,12 +187,16 @@ const BULLDOZED = { x: 4602.5, z: 4570 };
 /**
  * A new city on the seed, funded at `SCALE_TREASURY`: step 9 bulldozes a
  * street with towers on it, which at the eminent domain price (M4-09) costs
- * more than the starting grant. What the walkthrough's city and its replay
- * start from; funding is not a command, so not in the log.
+ * more than the starting grant. Credited with every milestone (M4-12), as
+ * the page's new city is under the test switch, so it zones densities 2 and
+ * 3. What the walkthrough's city and its replay start from; neither is a
+ * command, so neither is in the log.
  */
 function walkthroughStart(): SimState {
   const state = createState(SEED);
   fundCity(state, SCALE_TREASURY);
+  // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start.
+  creditMilestones(state);
   return state;
 }
 
@@ -1271,7 +1276,7 @@ for (const variant of [
       expect(fullLog.map((e) => e.type)).toEqual(saved.log.map((e) => e.type));
       for (const e of fullLog) expect(["fixture", "local"]).toContain(e.playerId);
       for (const type of ["ZoneCells", "BuildRoad", "BulldozeBuilding", "BulldozeRoad", "SetSpeed"]) expect(fullLog.map((e) => e.type)).toContain(type);
-      // The page held every bar, so the replay does too.
+      // The page held every bar, so the replay does too, and its new city was credited with every milestone (M4-12), as `walkthroughStart` credits its own.
       const v = WALKTHROUGH_DEMAND;
       expect(header.seed).toBe(SEED);
       const rebuilt = holdDemand({ residential: v, commercial: v, office: v, industrial: v }, () => replayFrom(walkthroughStart(), fullLog, header.tick));

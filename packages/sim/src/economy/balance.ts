@@ -164,7 +164,8 @@ function yearProblems(record: Record<string, unknown>, where: string, toYear: nu
   return [];
 }
 
-function priceProblems(value: unknown, where: string, toYear: number, keys: readonly string[] = PRICE_KEYS): string[] {
+/** Problems with `value` as a price: whole dollars, a source year no later than `toYear`, an index and a source. Progression's grants are checked with it too (M4-12). */
+export function priceProblems(value: unknown, where: string, toYear: number, keys: readonly string[] = PRICE_KEYS): string[] {
   if (!isRecord(value)) return [`${where} is missing`];
   const errors: string[] = [];
   if (!isWhole(value["amount"])) errors.push(`${where}.amount must be a whole number of dollars`);
@@ -398,6 +399,16 @@ export function resolveEconomy(data: unknown): Economy {
     creditLimit: { perResident: at(file.creditLimit.perResident), lastYearTaxMultiple: file.creditLimit.lastYearTaxMultiple },
   };
 }
+
+/** `price` in whole dollars of the year economy.json raises prices to, by its index: what a grant in progression.json is worth (M4-12). */
+export function priceNow(price: EconomyPrice): number {
+  const general = ECONOMY_BALANCE_FILE.generalEscalation;
+  const factor = price.index === "construction" ? ROAD_BALANCE.escalation.annualFactor : general.annualFactor;
+  return raise(price.amount, price.sourceYear, general.toYear, factor);
+}
+
+/** The year economy.json raises prices to. */
+export const PRICE_YEAR: number = (balance as EconomyBalanceFile).generalEscalation.toYear;
 
 /** The economy balance file as written. */
 export const ECONOMY_BALANCE_FILE = balance as EconomyBalanceFile;

@@ -26,7 +26,7 @@ import {
   landValueAtPoint,
   landValuesOfShapes,
   nextMonth,
-  replay,
+  replayFrom,
   serialize,
   step,
   type CellInfo,
@@ -44,6 +44,7 @@ import { waterDistanceAt } from "../src/landvalue/water";
 import { nextInt, seedRng } from "../src/rng";
 import { holdEach } from "./hold-each";
 import { submit } from "./seen-ends";
+import { credited } from "./credited";
 
 // M3-13: land value.
 
@@ -177,7 +178,7 @@ describe("land value inputs, each alone", () => {
   });
 
   it("falls with distance from water", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const t = terrainOf(SEED);
     const street = ROAD_TYPES.findIndex((r) => r.id === "street");
     const rng = seedRng(11);
@@ -198,7 +199,7 @@ describe("land value inputs, each alone", () => {
   });
 
   it("falls with distance from the centre, and a city with no centre takes nothing from it", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const street = ROAD_TYPES.findIndex((r) => r.id === "street");
     // In the dry square, far from water.
     expect(landValueAtPoint(state, 4400, 4700, street).centre).toBe(0);
@@ -215,7 +216,7 @@ describe("land value inputs, each alone", () => {
 
   it("is higher on an avenue than on a street, as the file says", () => {
     expect(LV.roadAccess["avenue"]).toBeGreaterThan(LV.roadAccess["street"] ?? 0);
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     road(state, 4600, "street", 24);
     road(state, 4900, "avenue", 24);
     const onStreet = landValueAt(state, ref(frontCell(state, 4300, 4600)));
@@ -228,7 +229,7 @@ describe("land value inputs, each alone", () => {
   });
 
   it("falls inside an industrial building's radius and not outside it", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     road(state, 4600, "street", 48);
     zoneSouth(state, "industrial", 1, 30, 8, 6);
     const near = ref(frontCell(state, 4200 + CELL * 32, 4600));
@@ -257,7 +258,7 @@ describe("land value inputs, each alone", () => {
 
 describe("a chunk's values at once", () => {
   it("are each cell's value as landValueAt gives it, on two road types beside a factory", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     road(state, 4600, "street", 48);
     road(state, 4700, "avenue", 48);
     zoneSouth(state, "industrial", 1, 30, 8, 6);
@@ -283,7 +284,7 @@ describe("a chunk's values at once", () => {
 
 describe("the city centre", () => {
   it("is the middle of the jobs, or of the homes while there are none", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     road(state, 4600, "street", 48);
     zoneNorth(state, "residential", 1, 0, 8, 3);
     zoneNorth(state, "office", 1, 30, 16, 3);
@@ -322,7 +323,7 @@ describe("the city centre", () => {
     expect(nextMonth(0)).toBe(31 * DAY);
     expect(nextMonth(31 * DAY - 1)).toBe(31 * DAY);
     expect(nextMonth(31 * DAY)).toBe(59 * DAY);
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     step(state);
     expect(state.centre).toEqual({ x: 0, z: 0, weight: 0, due: DAY });
     road(state, 4600, "street", 24);
@@ -344,7 +345,7 @@ describe("land value over time", () => {
   holdEach();
   /** A street with R1 on the north side and I3 to the south, grown for `days`. */
   function town(days: number): SimState {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     road(state, 4600, "street", 48);
     zoneNorth(state, "residential", 1, 0, 48, 3);
     zoneSouth(state, "industrial", 3, 0, 48, 6);
@@ -354,7 +355,7 @@ describe("land value over time", () => {
   }
 
   it("is lower beside a factory the grower builds, within the game day it comes", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     road(state, 4600, "street", 48);
     zoneNorth(state, "residential", 1, 0, 48, 3);
     const cells = [4, 12, 20, 28, 36, 44].map((p) => ref(frontCell(state, 4200 + CELL * p + CELL / 2, 4600)));
@@ -464,7 +465,7 @@ describe("land value over time", () => {
   });
 
   it("replays to the same values on the same ticks", () => {
-    const live = createState(SEED);
+    const live = credited(createState(SEED));
     road(live, 4600, "street", 48);
     zoneNorth(live, "residential", 1, 0, 48, 3);
     zoneSouth(live, "industrial", 3, 0, 48, 6);
@@ -476,7 +477,7 @@ describe("land value over time", () => {
     }
     expect(industrialCount(live)).toBeGreaterThan(0);
     for (const [tick, { hash, values }] of seen) {
-      const again = replay(SEED, live.log, tick);
+      const again = replayFrom(credited(createState(SEED)), live.log, tick);
       expect(hashState(again), `hash at ${tick}`).toBe(hash);
       expect(cells.map((c) => landValueAt(again, c)), `values at ${tick}`).toEqual(values);
     }

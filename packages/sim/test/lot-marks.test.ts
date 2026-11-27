@@ -24,6 +24,7 @@ import { addBuilding } from "../src/buildings/buildings";
 import { growOne } from "../src/buildings/grower";
 import { plainLotFits } from "../src/buildings/lots";
 import { nextFloat, seedRng } from "../src/rng";
+import { credited } from "./credited";
 
 // M2-15: the zoning overlay's marks on free zoned ground where no building
 // type fits, with the lot finder's reason.
@@ -45,7 +46,7 @@ function ok(state: SimState, type: string, payload: unknown): void {
 
 /** A street running east from (4200, 4600) for 24 cells. Its left strip is north of it. */
 function street(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   ok(state, "BuildRoad", { from: { x: 4200, z: 4600 }, to: { x: 4392, z: 4600 }, type: "street" });
   return state;
 }

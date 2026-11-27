@@ -997,7 +997,7 @@ for (const variant of [
       const fullLog = [...pagedLog, ...state.log];
       expect(fullLog.map((e) => e.type)).toEqual(saved.log.map((e) => e.type));
       for (const e of fullLog) expect(["fixture", "local"]).toContain(e.playerId);
-      // From a city funded as the walkthrough's cities are: funding is not a command (M4-09).
+      // From a city funded (M4-09) and credited (M4-12) as the walkthrough's cities are: neither is a command.
       expect(header.seed).toBe(SEED);
       const rebuilt = replayFrom(townStart(), fullLog, header.tick);
       const hash = hashState(rebuilt);

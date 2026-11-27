@@ -60,6 +60,9 @@ const NO_AUTOSAVE_FLAG = "noautosave";
 /** Flag in the worker's name, with `=` and a value, when a test holds the demand bars (M3-07). */
 const DEMAND_FLAG = "demand";
 
+/** Flag in the worker's name when a test has every new city credited with its milestones (M4-12). */
+const MILESTONES_FLAG = "milestones";
+
 /** What the page tells the worker in its name, before any message can reach it. */
 export interface WorkerStart {
   /** The city this tab last ran, if any. */
@@ -70,6 +73,8 @@ export interface WorkerStart {
   autosave: boolean;
   /** The value a test holds every demand bar at, from the test switch's `heldDemand`, or null for none (M3-07). */
   heldDemand: number | null;
+  /** Whether a new city starts with every milestone credited, without grants, from the test switch's `milestones` (M4-12). */
+  milestones: boolean;
 }
 
 /**
@@ -77,9 +82,13 @@ export interface WorkerStart {
  * and `+demand=` with the held value as they apply, then `:` and the city
  * this tab last ran, if any.
  */
-export function workerName(cityId: string | null, loadsFile = false, autosave = true, heldDemand: number | null = null): string {
+export function workerName(cityId: string | null, loadsFile = false, autosave = true, heldDemand: number | null = null, milestones = false): string {
   const prefix =
-    WORKER_NAME + (loadsFile ? `+${LOAD_FLAG}` : "") + (autosave ? "" : `+${NO_AUTOSAVE_FLAG}`) + (heldDemand === null ? "" : `+${DEMAND_FLAG}=${heldDemand}`);
+    WORKER_NAME +
+    (loadsFile ? `+${LOAD_FLAG}` : "") +
+    (autosave ? "" : `+${NO_AUTOSAVE_FLAG}`) +
+    (heldDemand === null ? "" : `+${DEMAND_FLAG}=${heldDemand}`) +
+    (milestones ? `+${MILESTONES_FLAG}` : "");
   return cityId ? `${prefix}:${cityId}` : prefix;
 }
 
@@ -88,13 +97,14 @@ export function startFromWorkerName(name: string): WorkerStart {
   const colon = name.indexOf(":");
   const prefix = colon < 0 ? name : name.slice(0, colon);
   const [base, ...flags] = prefix.split("+");
-  if (base !== WORKER_NAME) return { cityId: null, loadsFile: false, autosave: true, heldDemand: null };
+  if (base !== WORKER_NAME) return { cityId: null, loadsFile: false, autosave: true, heldDemand: null, milestones: false };
   const demand = flags.find((flag) => flag.startsWith(`${DEMAND_FLAG}=`));
   return {
     cityId: colon < 0 ? null : name.slice(colon + 1) || null,
     loadsFile: flags.includes(LOAD_FLAG),
     autosave: !flags.includes(NO_AUTOSAVE_FLAG),
     heldDemand: demand === undefined ? null : heldDemandValue(demand.slice(DEMAND_FLAG.length + 1)),
+    milestones: flags.includes(MILESTONES_FLAG),
   };
 }
 

@@ -81,7 +81,7 @@ for (const spec of options.sets) applySet(spec);
 // Only now import the sim and the cities, so the sim reads the changed files as it loads.
 const sim = await import("../../src/index");
 const { CITIES, Player, SEED } = await import("./cities");
-const { BUILDING_TYPES, DEMAND_BARS, SCALE_TREASURY, TIME_BALANCE, buildingIdLimit, buildingOnSlot, createState, fundCity, homeRoom, isAbandoned, isBuilding, isVacant, step, yearDays, ZONING_BALANCE } = sim;
+const { BUILDING_TYPES, DEMAND_BARS, SCALE_TREASURY, TIME_BALANCE, buildingIdLimit, buildingOnSlot, createState, creditMilestones, fundCity, homeRoom, isAbandoned, isBuilding, isVacant, step, yearDays, ZONING_BALANCE } = sim;
 type SimState = import("../../src/index").SimState;
 
 const city: City | undefined = CITIES.find((c) => c.name === options.city);
@@ -138,6 +138,8 @@ const pad = (value: string | number, width: number): string => String(value).pad
 const state = createState(SEED);
 // Funded as the scale cities are (M4-03), so each city builds what it built before roads cost money.
 fundCity(state, SCALE_TREASURY);
+// And credited with every milestone (M4-12), so a city zones densities 2 and 3 from its first year.
+creditMilestones(state);
 const player = new Player(state);
 city.setup(player);
 

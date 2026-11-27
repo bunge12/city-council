@@ -23,6 +23,7 @@ import {
 } from "../src/index";
 import { submit } from "./seen-ends";
 import { holdDemand, setBars, type HeldBars } from "./demand-helper";
+import { credited } from "./credited";
 
 // M3-07: the grower follows demand. A zone builds only while its bar is
 // above zero, mixed only while residential and commercial both are, at a
@@ -49,7 +50,7 @@ function ok(state: SimState, type: string, payload: unknown): void {
 
 /** A street running east from (4200, 4600) for `places` cells. */
 function street(places = 24, z = 4600): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   ok(state, "BuildRoad", { from: { x: 4200, z }, to: { x: 4200 + CELL * places, z }, type: "street" });
   return state;
 }
@@ -76,7 +77,7 @@ function runDays(state: SimState, days: number): void {
 
 /** Bars as `setBars` leaves them on a new city, for the quota tests. */
 function bars(held: HeldBars): DemandState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   state.demand = createDemand();
   setBars(state, held);
   return state.demand;

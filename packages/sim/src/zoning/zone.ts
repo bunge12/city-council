@@ -19,6 +19,8 @@
 // alone and never from how far a walk had got.
 
 import { noteFrontCells } from "../buildings/candidates";
+import { DENSITY_UNLOCKS } from "../progression/balance";
+import { lockNote } from "../progression/milestones";
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "./balance";
 import { noteCellsPainted } from "./cell-changes";
@@ -211,6 +213,19 @@ function gathered(count: number): Int32Array {
   return found.subarray(0, count).sort();
 }
 
+/**
+ * Why `state` refuses to paint `parsed`'s density, or null: a density whose
+ * milestone the city has not reached is locked (M4-12). Clearing and
+ * density 1 are never locked. A lock stops only new painting: cells zoned
+ * at a locked density already keep growing, so a city loaded from before
+ * the milestones loses nothing.
+ */
+function lockReason(state: SimState, parsed: Parsed): string | null {
+  if (parsed.zone === ZONE_NONE) return null;
+  const unlock = DENSITY_UNLOCKS[parsed.density];
+  return unlock === undefined ? null : lockNote(state, unlock);
+}
+
 const NOTHING = "no cell would change: nothing open lies under the rectangles, or it is zoned this way already";
 
 /** Why a ZoneCells payload is refused whatever the city holds, or null. Reads no cells. */
@@ -227,6 +242,8 @@ export function checkZoneCellsPayload(payload: unknown): string | null {
 export function planZoneCells(state: SimState, payload: unknown): ZonePlanResult {
   const parsed = parse(payload);
   if (typeof parsed === "string") return { ok: false, reason: parsed };
+  const locked = lockReason(state, parsed);
+  if (locked !== null) return { ok: false, reason: locked };
   const count = gather(state, parsed);
   if (count === 0) return { ok: false, reason: NOTHING };
   return { ok: true, plan: { zone: parsed.zone, density: parsed.density, cells: gathered(count).slice() } };
@@ -240,6 +257,8 @@ export function planZoneCells(state: SimState, payload: unknown): ZonePlanResult
 export function checkZoneCells(state: SimState, payload: unknown): string | null {
   const parsed = parse(payload);
   if (typeof parsed === "string") return parsed;
+  const locked = lockReason(state, parsed);
+  if (locked !== null) return locked;
   return gather(state, parsed) === 0 ? NOTHING : null;
 }
 
@@ -259,6 +278,8 @@ export function zoneCellsIfValid(
 ): string | null {
   const parsed = parse(payload);
   if (typeof parsed === "string") return parsed;
+  const locked = lockReason(state, parsed);
+  if (locked !== null) return locked;
   const count = gather(state, parsed);
   if (count === 0) return NOTHING;
   const slots = gathered(count);

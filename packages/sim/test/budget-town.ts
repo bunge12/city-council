@@ -17,6 +17,7 @@
 import { CONNECTION_BALANCE, NONE, TIME_BALANCE, ZONING_BALANCE, connectionEnd, createState, step, submit, type SimState } from "../src/index";
 import { FULL_DEMAND, holdDemand } from "./demand-helper";
 import { funded } from "./funds";
+import { credited } from "./credited";
 
 const CELL = ZONING_BALANCE.cellSize;
 const DAY = TIME_BALANCE.ticksPerDay;
@@ -62,7 +63,7 @@ function frameOf(state: SimState): Frame {
 
 /** Builds the budget town and grows it for `days` game days with every bar held at 100. */
 export function budgetTown(days = 40): { state: SimState; f: Frame } {
-  const state = funded(createState(2026));
+  const state = credited(funded(createState(2026)));
   const f = frameOf(state);
   const road = (from: [number, number], to: [number, number]) => ok(state, "BuildRoad", { from: at(f, ...from), to: at(f, ...to), type: "street" });
   const zone = (zoneId: string, density: number, from: [number, number], to: [number, number], width: number) =>

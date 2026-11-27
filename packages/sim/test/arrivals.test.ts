@@ -24,7 +24,7 @@ import {
   reachableRoom,
   readPop,
   recountTotals,
-  replay,
+  replayFrom,
   serialize,
   step,
   whyNoNewcomers,
@@ -37,6 +37,7 @@ import { nextInt, seedRng } from "../src/rng";
 import { drawnAt } from "../src/pops/arrivals";
 import { submit } from "./seen-ends";
 import { holdDemand, type HeldBars } from "./demand-helper";
+import { credited } from "./credited";
 
 // M3-08: pops move in. While the residential bar is above zero people
 // arrive each game day, spread over its ticks, and take free room in homes
@@ -120,7 +121,7 @@ function expectRecount(state: SimState): void {
 
 /** A city with an R1 street, both sides six deep, joined to the outside or not. */
 function r1Street(joined = true, places = 24): { state: SimState; s: Street } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const s = street(state, places, joined);
   zone(state, s, "residential", 1, 0, places, 6, 1);
   zone(state, s, "residential", 1, 0, places, 6, -1);
@@ -129,7 +130,7 @@ function r1Street(joined = true, places = 24): { state: SimState; s: Street } {
 
 /** A city with an empty R3 lot of 4 x 4 on a street joined to the outside. */
 function towerLot(): { state: SimState; s: Street } {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const s = street(state, 12);
   zone(state, s, "residential", 3, 4, 4, 4, 1);
   return { state, s };
@@ -321,7 +322,7 @@ describe("homes standing fill before more are built", () => {
   }
 
   it("holds homes back while unfilledHomesMax of them are still filling, fills several towers side by side, and builds again as they fill (M3-21)", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 48);
     zone(state, s, "residential", 3, 0, 24, 6, 1);
     zone(state, s, "residential", 3, 24, 24, 6, 1);
@@ -359,13 +360,13 @@ describe("arrivals and determinism", () => {
   }
 
   it("replays a recorded log to the same pops and the same state hash", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const s = street(state, 24);
     zone(state, s, "residential", 1, 0, 24, 6, 1);
     zone(state, s, "residential", 2, 0, 24, 6, -1);
     runDays(state, 15);
     expect(pops(state).length).toBeGreaterThan(10);
-    const again = replay(SEED, state.log, state.tick);
+    const again = replayFrom(credited(createState(SEED)), state.log, state.tick);
     expect(Array.from(again.pops.size)).toEqual(Array.from(state.pops.size));
     expect(Array.from(again.pops.home)).toEqual(Array.from(state.pops.home));
     expect(hashState(again)).toBe(hashState(state));

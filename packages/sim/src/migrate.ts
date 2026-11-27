@@ -5,6 +5,7 @@ import { STAT_TOTALS, emptyMoney, recountTotals, statsFor } from "./stats/stats"
 import { ECONOMY, ECONOMY_SLIDERS } from "./economy/balance";
 import { chargesAtDefaults } from "./economy/budget";
 import { DEMAND_BARS, DEMAND_PARTS, createDemand } from "./demand/demand";
+import { creditedFor } from "./progression/milestones";
 import { placeConnections } from "./roads/connections";
 import { NO_TIER, createRoadNetwork, isNode, isSegment, type RoadNetwork } from "./roads/network";
 import { terrainOf } from "./terrain/cache";
@@ -190,6 +191,11 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // marked before it, so an older city's pops carry no mark, and only
   // its expropriation records lower its neighbours' satisfaction.
   35: (old) => ({ ...old, version: 36, pops: popsWithDisplacedMarks(old["pops"]) }),
+  // Version 37 adds the milestones reached (M4-12). A city saved before them
+  // is credited with every milestone its highest population passed, without
+  // their grants, so a city zoned at densities 2 and 3 keeps painting them.
+  // Its starting grant it had from version 30.
+  36: (old) => ({ ...old, version: 37, milestones: creditedFor((old["stats"] as { highestPopulation: number }).highestPopulation) }),
 };
 
 /**
