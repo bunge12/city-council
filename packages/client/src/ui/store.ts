@@ -7,7 +7,7 @@ import { create } from "zustand";
 import type { AreaBudget, BuildingGround, BuildingInfo, LandValue } from "@city-council/sim";
 import type { StatRange } from "./stat-series";
 import { DEFAULT_PRESET } from "../render/config";
-import type { Occupants } from "./BuildingReadout";
+import type { Occupants, Stage } from "./BuildingReadout";
 import type { Preset, PresetSource } from "../render/presets";
 import { DEFAULT_SOUND } from "../sound/config";
 import type { SoundSettings } from "../sound/settings";
@@ -15,6 +15,7 @@ import { INITIAL_BLOCK_OVERLAY, type BlockOverlayState } from "../tools/block-ov
 import { INITIAL_BULLDOZE_TOOL, type BulldozePreview, type BulldozeToolState } from "../tools/bulldoze-tool";
 import { INITIAL_EDIT_TOOL, type EditPreview, type EditToolState } from "../tools/edit-tool";
 import { INITIAL_GRID_TOOL, type GridToolState } from "../tools/grid-tool";
+import { INITIAL_LANDMARK_TOOL, type LandmarkPreview, type LandmarkToolState } from "../tools/landmark-tool";
 import { INITIAL_ROAD_TOOL, type RoadPreview, type RoadToolState } from "../tools/road-tool";
 import { INITIAL_ROUTE_TOOL, type RouteToolState } from "../tools/route-tool";
 import type { Snap } from "../tools/snap";
@@ -22,7 +23,7 @@ import { INITIAL_ZONE_TOOL, type ZonePreview, type ZoneToolState } from "../tool
 import { toggledOverlay, type OverlayEntry, type OverlayId } from "./overlays";
 import { columnOrder, stacked, stackedForOverlay, stackedForTool, type PanelId, type WindowId } from "./windows";
 
-export interface UiState extends RoadToolState, GridToolState, EditToolState, BulldozeToolState, RouteToolState, BlockOverlayState, ZoneToolState {
+export interface UiState extends RoadToolState, GridToolState, EditToolState, BulldozeToolState, RouteToolState, BlockOverlayState, ZoneToolState, LandmarkToolState {
   debugOpen: boolean;
   logOpen: boolean;
   menuOpen: boolean;
@@ -86,6 +87,7 @@ export const useUi = create<UiState>(() => ({
   ...INITIAL_ROUTE_TOOL,
   ...INITIAL_BLOCK_OVERLAY,
   ...INITIAL_ZONE_TOOL,
+  ...INITIAL_LANDMARK_TOOL,
 }));
 
 /** Which flag in the store says each panel is open. */
@@ -298,6 +300,26 @@ export function setZoneHover(hover: ZoneHoverReadout | null): void {
 }
 
 /**
+ * What the landmark tool would do with the pointer where it is (M4-17): the
+ * pointer in CSS pixels over the canvas and the plan. Its own store, like
+ * the zone tool's readout.
+ */
+export interface LandmarkHoverReadout {
+  x: number;
+  y: number;
+  preview: LandmarkPreview;
+}
+
+export const useLandmarkHover = create<{ hover: LandmarkHoverReadout | null }>(() => ({ hover: null }));
+
+export function setLandmarkHover(hover: LandmarkHoverReadout | null): void {
+  const current = useLandmarkHover.getState().hover;
+  if (current === hover) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.preview === hover.preview) return;
+  useLandmarkHover.setState({ hover });
+}
+
+/**
  * The building under the pointer while no tool is on (issue M2-15): the
  * pointer in CSS pixels over the canvas and the building, or null when
  * there is none. Its own store, like the road readout's. The bulldozer's
@@ -311,6 +333,8 @@ export interface BuildingHover {
   occupants: Occupants;
   /** How its ground is zoned against what it was built under (M3-14), or null when not known. */
   ground: BuildingGround | null;
+  /** A landmark's stage (M4-17), or null for any other building. */
+  stage: Stage | null;
 }
 
 export const useBuildingHover = create<{ hover: BuildingHover | null }>(() => ({ hover: null }));
@@ -318,7 +342,7 @@ export const useBuildingHover = create<{ hover: BuildingHover | null }>(() => ({
 export function setBuildingHover(hover: BuildingHover | null): void {
   const current = useBuildingHover.getState().hover;
   if (current === hover) return;
-  if (current && hover && current.x === hover.x && current.y === hover.y && current.building === hover.building && current.occupants === hover.occupants && current.ground === hover.ground) return;
+  if (current && hover && current.x === hover.x && current.y === hover.y && current.building === hover.building && current.occupants === hover.occupants && current.ground === hover.ground && current.stage === hover.stage) return;
   useBuildingHover.setState({ hover });
 }
 

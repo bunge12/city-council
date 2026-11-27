@@ -172,7 +172,7 @@ export type { BuildingRow, BuildingState } from "./buildings/buildings";
 export { findLot, lotOptions } from "./buildings/lots";
 export { lotMarkAt, lotMarksInChunk } from "./buildings/lot-marks";
 export type { Lot, LotOptions, LotProblem, LotResult } from "./buildings/lots";
-export { GROWER_SYSTEM, cityPopulation, dayOf, extraChances, dayQuotas, dayWants, dueOnTick, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
+export { GROWER_SYSTEM, cityPopulation, dayOf, extraChances, dayQuotas, dayWants, dueOnTick, fullDemandRate, holdsHomes, homesHeld, freeFrontCells, growthOnTick, residentsFor, zoneBar } from "./buildings/grower";
 export { BUSINESS_OUTPUTS, CHARGE_ZONES, ECONOMY, ECONOMY_BALANCE_FILE, ECONOMY_SLIDERS, checkEconomyBalance, resolveEconomy } from "./economy/balance";
 export type { ChargeZone, DevelopmentCharge, Economy, EconomyBalanceFile, EconomyPrice, EconomyPriceRange, EconomyRate, EconomyShare, EconomySlider, LoanOffer, PriceIndex } from "./economy/balance";
 export {

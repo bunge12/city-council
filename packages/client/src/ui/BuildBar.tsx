@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { DENSITY_UNLOCKS, ROAD_TYPES, ZONING_BALANCE } from "@city-council/sim";
+import { DENSITY_UNLOCKS, LANDMARKS, ROAD_TYPES, ZONING_BALANCE, type Unlock } from "@city-council/sim";
 import { GUIDES } from "../tools/config";
 import { BULLDOZE_TARGETS } from "../tools/bulldoze-tool";
 import { DRAW_MODES, TOOL_ROAD_TYPES, type DrawMode } from "../tools/road-tool";
@@ -89,7 +89,7 @@ function MenuGroup({
  * button: it is Ctrl+Z or Cmd+Z.
  */
 export function BuildBar() {
-  const { roadTool, gridTool, editTool, bulldozeTool, zoneTool } =
+  const { roadTool, gridTool, editTool, bulldozeTool, zoneTool, landmarkTool } =
     useServices();
   const ready = useSim((s) => s !== null);
   const undoNote = useUi((s) => s.undoNote);
@@ -115,6 +115,11 @@ export function BuildBar() {
   const bulldozePending = useUi((s) => s.bulldozePending.length);
   const bulldozeNote = useUi((s) => s.bulldozeNote);
   const filters = useUi((s) => s.bulldozeFilters);
+  const landmarkPick = useUi((s) => s.landmarkPick);
+  const landmarkNote = useUi((s) => s.landmarkNote);
+  const landmarkPending = useUi((s) => s.landmarkPending.length);
+  const landmark = LANDMARKS.find((l) => l.id === landmarkPick);
+  const placing = tool === "landmark";
   const zoning = tool === "zone";
   // A density the city has not opened yet cannot stay picked: a new or loaded city goes back to density 1 (M4-12).
   const pickedLocked = useLockNote(DENSITY_UNLOCKS[zoneDensity]) !== null;
@@ -128,8 +133,10 @@ export function BuildBar() {
   const roadMenu = active || editing || gridding;
 
   const anyPending =
-    pending + gridPending + bulldozePending + editPending + zonePending > 0;
-  const shownNote = editing
+    pending + gridPending + bulldozePending + editPending + zonePending + landmarkPending > 0;
+  const shownNote = placing
+    ? landmarkNote
+    : editing
     ? editNote
     : bulldozing
       ? bulldozeNote
@@ -377,6 +384,19 @@ export function BuildBar() {
             Zone <kbd>K</kbd>
           </button>
         </div>
+        <div className="dock-slot">
+          {/* Greyed with the population that opens it until the milestone does (M4-12, M4-16). */}
+          <UnlockButton
+            unlock={landmark?.unlock as Unlock | undefined}
+            id="landmark-tool"
+            aria-pressed={placing}
+            disabled={!ready}
+            title={`${landmark?.name ?? "Landmark"} (H): point at a road to see the lot, its price and its upkeep, and click to build it on the side the pointer is`}
+            onClick={() => landmarkTool.toggle()}
+          >
+            {landmark?.name ?? "Landmark"} <kbd>H</kbd>
+          </UnlockButton>
+        </div>
       </div>
       {anyPending && (
         <p className="hint" id="build-pending" role="status">
@@ -404,6 +424,12 @@ export function BuildBar() {
               {" "}
               Applying{" "}
               {editPending === 1 ? "1 change" : `${editPending} changes`}…
+            </span>
+          )}
+          {landmarkPending > 0 && (
+            <span id="landmark-pending">
+              {" "}
+              Building {landmark?.name ?? "the landmark"}…
             </span>
           )}
           {zonePending > 0 && (

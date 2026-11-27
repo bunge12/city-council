@@ -34,7 +34,8 @@ const TOWN_STREETS: readonly (readonly [readonly [number, number], readonly [num
 export const NEW_STREET = { from: { x: 680, z: 4000 }, to: { x: 820, z: 4000 }, type: "street" } as const;
 
 let seq = 0;
-function send(state: SimState, type: string, payload: unknown): void {
+/** Sends a command as the fixture's player and steps until it has applied, or throws with why it was refused. */
+export function send(state: SimState, type: string, payload: unknown): void {
   const result = submit(state, { seq: ++seq, playerId: "fixture", type, payload });
   if (!result.ok) throw new Error(`fixture ${type} refused: ${result.reason}`);
   step(state);
@@ -43,7 +44,7 @@ function send(state: SimState, type: string, payload: unknown): void {
 }
 
 /** The town's streets, built by commands and paid for from the starting grant, and its sides zoned at density 1. */
-function zonedTown(): SimState {
+export function zonedTown(): SimState {
   const state = createState(SEED);
   for (const [a, b] of TOWN_STREETS) send(state, "BuildRoad", { from: { x: a[0], z: a[1] }, to: { x: b[0], z: b[1] }, type: "street" });
   zoneSides(state, 0, DENSITY_ONE_SIDES);

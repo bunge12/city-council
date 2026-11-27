@@ -33,8 +33,9 @@ function covers(c: Compensation): string {
  * The compensation's parts as lines: for occupied buildings their value,
  * the relocation payment with the people and jobs it covers, and the
  * premium; for vacant and abandoned ones their demolition; and the ones
- * the city has paid for already, at nothing. A part with no buildings is
- * left out.
+ * the city has paid for already, at nothing; and for the city's own
+ * landmarks, their demolition and the refund of a share of their price. A
+ * part with no buildings is left out.
  */
 export function compensationLines(c: Compensation): PriceLine[] {
   const lines: PriceLine[] = [];
@@ -50,6 +51,11 @@ export function compensationLines(c: Compensation): PriceLine[] {
     lines.push({ id: "demolition", label, amount: c.demolition });
   }
   if (c.paid > 0) lines.push({ id: "paid", label: `${counted(c.paid, "building", "buildings")} paid for already`, amount: 0 });
+  // The city's own landmarks (M4-13, M4-17): demolition only, less the refund share of their price, which can leave the total below zero.
+  if (c.cityOwned > 0) {
+    lines.push({ id: "cityDemolition", label: "City-owned: demolition only", amount: c.cityDemolition });
+    lines.push({ id: "cityRefund", label: "Refund", amount: c.refund, minus: true });
+  }
   return lines;
 }
 

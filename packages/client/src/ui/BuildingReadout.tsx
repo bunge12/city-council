@@ -1,4 +1,4 @@
-import { BUILDING_TYPES, ZONING_BALANCE, type BuildingGround, type BuildingInfo } from "@city-council/sim";
+import { BUILDING_TYPES, LANDMARKS, ZONING_BALANCE, type BuildingGround, type BuildingInfo } from "@city-council/sim";
 import { formatMoneyShort } from "./format";
 import { useBuildingHover } from "./store";
 
@@ -21,8 +21,19 @@ export interface Occupants {
   tax?: number;
 }
 
-/** The money line: what a building is worth and what it pays a year in tax, "Value $412K · Tax $3.1K a year" (M4-16). Tax is left out where not known. */
+/** A landmark's stage and how many it has (M4-17, protocol/landmark-stage.ts). */
+export interface Stage {
+  stage: number;
+  stages: number;
+}
+
+/**
+ * The money line: what a building is worth and what it pays a year in tax,
+ * "Value $412K · Tax $3.1K a year" (M4-16). Tax is left out where not known.
+ * A landmark pays no tax and is not for sale, so it gives its upkeep (M4-17).
+ */
 export function moneyLine(b: BuildingInfo, occupants?: Occupants): string {
+  if (b.landmark) return `Upkeep ${formatMoneyShort(LANDMARKS[b.type]?.upkeepPerYear ?? 0)} a year`;
   const value = `Value ${formatMoneyShort(b.value)}`;
   return occupants?.tax === undefined ? value : `${value} · Tax ${formatMoneyShort(occupants.tax)} a year`;
 }
@@ -63,7 +74,12 @@ function jobsPart(b: BuildingInfo, filled: number | undefined): string {
  * and why no newcomer would come. Without `occupants`, a home says its
  * room and a workplace its jobs.
  */
-export function buildingLines(b: BuildingInfo, occupants?: Occupants): { title: string; detail: string; state: string | null } {
+export function buildingLines(b: BuildingInfo, occupants?: Occupants, stage?: Stage | null): { title: string; detail: string; state: string | null } {
+  // A landmark has no zone, room or jobs (M4-13): its name, its stage and its lot (M4-17).
+  if (b.landmark) {
+    const parts = ["City-owned", ...(stage ? [`stage ${stage.stage} of ${stage.stages}`] : []), `${b.width} × ${b.depth} lot`];
+    return { title: LANDMARKS[b.type]?.name ?? "Landmark", detail: parts.join(" · "), state: null };
+  }
   const type = BUILDING_TYPES[b.type];
   const zone = ZONING_BALANCE.zones[b.zone - 1];
   const home = (type?.residents[1] ?? 0) > 0;
@@ -123,7 +139,7 @@ export function BuildingReadout() {
   if (!hover) return null;
   const b = hover.building;
   const o = hover.occupants;
-  const { title, detail, state } = buildingLines(b, o);
+  const { title, detail, state } = buildingLines(b, o, hover.stage);
   const ground = groundLine(hover.ground);
   return (
     <div
@@ -131,7 +147,10 @@ export function BuildingReadout() {
       id="building-readout"
       role="status"
       data-building={String(b.id)}
-      data-type={BUILDING_TYPES[b.type]?.id ?? ""}
+      data-type={b.landmark ? (LANDMARKS[b.type]?.id ?? "") : (BUILDING_TYPES[b.type]?.id ?? "")}
+      data-landmark={String(b.landmark)}
+      data-stage={hover.stage ? String(hover.stage.stage) : ""}
+      data-upkeep={b.landmark ? String(LANDMARKS[b.type]?.upkeepPerYear ?? 0) : ""}
       data-zone={String(b.zone)}
       data-density={String(b.density)}
       data-width={String(b.width)}

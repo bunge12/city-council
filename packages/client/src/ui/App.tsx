@@ -25,6 +25,7 @@ import { CityStatus, GameClock, SettingsMenu, TopBar } from "./TopBar";
 import { PANEL_ELEMENTS, escapeTarget, type PanelId } from "./windows";
 import { ZoneLegend } from "./ZoneLegend";
 import { ZoneReadout } from "./ZoneReadout";
+import { LandmarkReadout } from "./LandmarkReadout";
 import "./ui.css";
 
 /**
@@ -43,7 +44,7 @@ function refocus(id: PanelId): void {
 
 /** Turns key presses into shortcut actions. Speed keys send `SetSpeed`, like the buttons. */
 function useShortcuts(): void {
-  const { sendCommand, roadTool, gridTool, editTool, bulldozeTool, routeTool, zoneTool, undo } = useServices();
+  const { sendCommand, roadTool, gridTool, editTool, bulldozeTool, routeTool, zoneTool, landmarkTool, undo } = useServices();
   const speed = useSim((s) => s?.speed ?? null);
   const lastRunning = useRef<Speed>(1);
   const current = useRef<Speed | null>(null);
@@ -106,6 +107,9 @@ function useShortcuts(): void {
         case "zoneTool":
           zoneTool.toggle();
           return;
+        case "landmarkTool":
+          landmarkTool.toggle();
+          return;
         case "overlay":
           toggleOverlay(action.id);
           return;
@@ -130,7 +134,7 @@ function useShortcuts(): void {
             refocus(top);
             return;
           }
-          if (!routeTool.escape() && !editTool.escape() && !bulldozeTool.escape() && !gridTool.escape() && !zoneTool.escape()) roadTool.escape();
+          if (!routeTool.escape() && !editTool.escape() && !bulldozeTool.escape() && !gridTool.escape() && !zoneTool.escape() && !landmarkTool.escape()) roadTool.escape();
           return;
         }
         case "undo":
@@ -140,7 +144,7 @@ function useShortcuts(): void {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [sendCommand, roadTool, gridTool, editTool, bulldozeTool, routeTool, zoneTool, undo]);
+  }, [sendCommand, roadTool, gridTool, editTool, bulldozeTool, routeTool, zoneTool, landmarkTool, undo]);
 }
 
 function Shell() {
@@ -175,6 +179,7 @@ function Shell() {
       <EditReadout />
       <BulldozeTag />
       <ZoneReadout />
+      <LandmarkReadout />
       <BuildingReadout />
       <LandValueReadout />
       <BudgetReadout />
