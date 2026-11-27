@@ -205,7 +205,26 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // bump keeps a save with City Hall in it from an older build, which would
   // refuse the flag or read its type as a house.
   38: (old) => ({ ...old, version: 39 }),
+  // Version 40 moves the tax rates of a city still at the defaults before
+  // M4-19 onto the defaults M4-19 set, a rate at a time (#394). The rates
+  // live in state, and M4-19 priced the other city spending against the new
+  // ones: a city left at 1%, 2%, 1% and 1% would pay $4,700 a resident with
+  // about half the tax. A rate the player moved off its old default stays
+  // as they set it. The shape does not change; the bump marks which saves
+  // have been moved, so a save is moved once.
+  39: (old) => ({ ...old, version: 40, budget: budgetAtTunedRates(old["budget"]) }),
 };
+
+/** The four tax rates' defaults before M4-19, in `ECONOMY_SLIDERS` order, and what version 40 moves each to. Fixed here, so a later change of defaults moves no old save. */
+const RATES_BEFORE_M4_19 = [0.01, 0.02, 0.01, 0.01];
+const RATES_FROM_M4_19 = [0.0165, 0.036, 0.018, 0.018];
+
+/** `budget` with each tax rate still at its default before M4-19 moved to the one M4-19 set (version 40). */
+function budgetAtTunedRates(budget: unknown): unknown {
+  const b = budget as { taxRates: Float64Array };
+  const taxRates = Float64Array.from(b.taxRates, (rate, i) => (rate === RATES_BEFORE_M4_19[i] ? (RATES_FROM_M4_19[i] as number) : rate));
+  return { ...b, taxRates };
+}
 
 /**
  * Each bar's parts in version 35, the tax part's place fixed here so a later

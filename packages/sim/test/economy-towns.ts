@@ -7,10 +7,11 @@
 // streets on open ground. Cells are 8 m and a zoning strip 6 cells deep.
 //
 // - `compactTown`: a grid of 4 by 4 street blocks 96 m apart, houses on
-//   most blocks, shops, offices and a factory block on the rest.
-// - `culDeSacTown`: the same jobs on the same kind of blocks by the street
-//   in, and the homes along long dead-end streets off a spine instead, with
-//   nothing zoned on the spine, so each home has more road to keep.
+//   most blocks, shops and offices on the rest. No factory, whose
+//   pollution would lower the homes' land value and so their tax.
+// - `culDeSacTown`: the same jobs on a row of five blocks by the street in,
+//   and the homes along dead-end streets off an avenue instead, with
+//   nothing zoned on the avenue, so each home has more road to keep.
 // - `firstTown`: what a new city on its starting grant lays first: the
 //   street in and one quarter of 4 by 4 blocks of houses with shops and
 //   offices, at density 1, the only density a new city has.
@@ -94,13 +95,16 @@ export function compactTown(state: SimState): SimState {
 /** The first town a new city lays on its grant: the compact town. */
 export const firstTown = compactTown;
 
+/** The compact town's job blocks as one row of blocks. */
+const JOBS_ROW = ["ccooo"];
+
 /** How many cul-de-sacs the spread-out town has a side, how far apart they leave the spine and how long each is. */
 const CUL_DE_SACS = 3;
-const CUL_SPACING = 200;
-const CUL_LENGTH = 265;
+const CUL_SPACING = 360;
+const CUL_LENGTH = 275;
 
 /**
- * The cul-de-sac town on `state`: the compact town's job blocks on a grid of
+ * The cul-de-sac town on `state`: the compact town's job blocks on a row of
  * their own by the gate, an avenue running south from it as the spine, and
  * dead ends off both sides of the spine with houses on both sides of each.
  * Nothing is zoned along the spine. About as many people as the compact
@@ -109,10 +113,9 @@ const CUL_LENGTH = 265;
  */
 export function culDeSacTown(state: SimState): SimState {
   streetIn(state);
-  // The compact town's quarter with only its job blocks zoned.
-  const x0 = GATE.x - 2 * SPACING;
-  quarter(state, x0, GATE.z, QUARTER, "coi");
-  const top = GATE.z + 4 * SPACING;
+  // The compact town's job blocks, two of shops and three of offices, in a row of five by the gate.
+  quarter(state, GATE.x - 2 * SPACING, GATE.z, JOBS_ROW);
+  const top = GATE.z + SPACING;
   const spineEnd = top + CUL_SPACING * (CUL_DE_SACS + 1);
   send(state, "BuildRoad", { from: { x: GATE.x, z: top }, to: { x: GATE.x, z: spineEnd }, type: "avenue" });
   for (let k = 1; k <= CUL_DE_SACS; k++) {

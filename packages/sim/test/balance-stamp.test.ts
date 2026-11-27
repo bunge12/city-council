@@ -59,7 +59,7 @@ describe("the balance stamp", () => {
     // #426 moved it again: demand.json gained residentsPerUnfilledHome.
     // #388 moved it again: economy.json gained the landmarks, and progression.json the milestones City Hall grows at.
     // #394 moved it again: economy.json priced the other city spending and tuned the tax rates, and roads.json the upkeep shares.
-    expect(BALANCE_STAMP).toBe("5362f286f8dbd2a3");
+    expect(BALANCE_STAMP).toBe("eddd3d87fcd29798");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

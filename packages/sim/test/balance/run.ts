@@ -231,6 +231,9 @@ function taxPerCell(state: SimState): number[] {
   return tax.map((t, d) => ((cells[d] ?? 0) === 0 ? 0 : t / (cells[d] ?? 1)));
 }
 
+/** Fewer people than this at a year's end, and the figures per resident are not printed: they would divide a year's money by next to nobody. */
+const MIN_PEOPLE = 100;
+
 /** The ledger lines a game year moved, summed over its months as each closes. */
 const yearLedger = new Float64Array(LEDGER_LINES.length);
 const at = (line: string): number => yearLedger[LINE[line as keyof typeof LINE]] ?? 0;
@@ -248,9 +251,10 @@ for (let year = 1; year <= options.years; year++) {
   const flips: Record<string, number> = {};
   const signs: Record<string, number> = {};
   let days = 0;
+  let lastRead = -1;
   yearLedger.fill(0);
   // Year 1 counts the month a new city files before its first, the starting grant, too.
-  if (year === 1) yearLedger.set(createState(SEED).budget.lastMonth);
+  if (year === 1) yearLedger[LINE.grants] = ECONOMY.startingGrant;
   for (const bar of DEMAND_BARS) {
     sums[bar] = 0;
     flips[bar] = 0;
@@ -263,8 +267,11 @@ for (let year = 1; year <= options.years; year++) {
       // The year's last tick is the next year's first, whose month the next pass starts.
       if (state.tick < end) city.atMonth?.(player);
     }
-    // The bars move on a day's first tick; read them once it has run.
-    if (state.tick % DAY !== 1) continue;
+    // The bars move on a day's first tick; read them once it has run, once a day. A command the
+    // player sends at a month's start steps past that tick, so the day is read on the tick after.
+    const day = Math.floor(state.tick / DAY);
+    if (state.tick % DAY === 0 || day === lastRead) continue;
+    lastRead = day;
     days++;
     for (const bar of DEMAND_BARS) {
       const value = state.demand[bar].value;
@@ -330,8 +337,8 @@ for (let year = 1; year <= options.years; year++) {
       money(repay),
       money(other),
       money(tax - upkeep - repay - other),
-      money(tax / Math.max(1, people)),
-      money((upkeep + other) / Math.max(1, people)),
+      people < MIN_PEOPLE ? "-" : money(tax / people),
+      people < MIN_PEOPLE ? "-" : money((upkeep + other) / people),
       perCell.map((v) => money(v)).join("/"),
       base === 0 ? "-" : perCell.map((v) => Math.round(v / base)).join("/"),
       firstAt === undefined ? "none" : firstAt < 0 ? `${reached} given` : `${reached}, 1st d${Math.floor(firstAt / DAY)}`,
@@ -342,6 +349,6 @@ for (let year = 1; year <= options.years; year++) {
 }
 
 console.log("");
-console.log(`Money by game year${city.onGrant ? ", on the starting grant alone" : ", the funding the city was given taken off the treasury"}. Tax R to I, Charges and Grants are income; Build (construction, demolition and compensation), Roads and Bldgs (upkeep), Repay (loan repayments and interest) and Other (other city spending) are expenses. Net: tax less upkeep, repayments and other spending, so growth's one-off money is left out. Tax/res and Spend/res: tax, and upkeep with other spending, per resident at the year's end. Tax/cell: what private buildings pay a year a cell of lot by the density they were built under, today; Ratio: the same over density 1's. Milestone: how many are reached, and the day the first was.`);
+console.log(`Money by game year${city.onGrant ? ", on the starting grant alone" : ", the funding the city was given taken off the treasury"}. Tax R to I, Charges and Grants are income; Build (construction, demolition and compensation), Roads and Bldgs (upkeep), Repay (loan repayments and interest) and Other (other city spending) are expenses. Net: tax less upkeep, repayments and other spending, so growth's one-off money is left out. Tax/res and Spend/res: tax, and upkeep with other spending, per resident at the year's end, or - under ${MIN_PEOPLE} people. Tax/cell: what private buildings pay a year a cell of lot by the density they were built under, today; Ratio: the same over density 1's. Milestone: how many are reached, and the day the first was.`);
 console.log(MONEY.map(([name, width]) => pad(name, width)).join(" "));
 for (const line of moneyRows) console.log(line);

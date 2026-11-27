@@ -163,7 +163,9 @@ function growNewTown(player: Player): void {
   if (next < 0) return;
   const [col, row] = QUARTERS[next] as [number, number];
   const plan = planRoadGrid(state.roads, terrainOf(state.seed), gridPayload(col, row, QUARTER));
-  if (!plan.ok || state.budget.treasury < plan.plan.cost + NEW_TOWN_RESERVE) return;
+  // A quarter the ground refuses would be tried every month after: a change of the map or the grid rules did it.
+  if (!plan.ok) throw new Error(`the new town's quarter at block (${col}, ${row}) cannot be laid: ${plan.reason}`);
+  if (state.budget.treasury < plan.plan.cost + NEW_TOWN_RESERVE) return;
   player.send("BuildRoadGrid", gridPayload(col, row, QUARTER));
   zoneQuarter(player, col, row);
   const set = laid.get(state) ?? new Set<string>();

@@ -23,31 +23,31 @@
   },
   "taxRates": {
     "residential": {
-      "default": 0.017,
+      "default": 0.0165,
       "min": 0,
       "max": 0.05,
-      "source": "Placeholder. A yearly rate on property value. US effective property tax rates sit near one percent of home value; no single source was read. Tuned in M4-19: the game's taxes stand in for everything a real city takes in, transfers from higher governments and fees included, so its rates sit about 1.7 to 1.8 times what US cities levy, and the budget per resident comes out near Toronto's (otherSpending). At these defaults a compact density 1 town of houses with shops and offices nets about zero a year after its roads and its other spending, and the same people on cul-de-sacs lose money (test/economy-scenarios.test.ts). The top of the range is about three times the default, as before.",
+      "source": "Placeholder. A yearly rate on property value. US effective property tax rates sit near one percent of home value; no single source was read. Tuned in M4-19: the game's taxes stand in for everything a real city takes in, transfers from higher governments and fees included, so its rates sit about 1.65 to 1.8 times what US cities levy, and the budget per resident comes out near Toronto's (otherSpending). At these defaults a compact density 1 town of houses with shops and offices nets about zero a year after its roads and its other spending, and the same people on cul-de-sacs lose money (test/economy-scenarios.test.ts). The top of the range is about three times the default, as before.",
       "placeholder": true
     },
     "commercial": {
       "default": 0.036,
       "min": 0,
       "max": 0.1,
-      "source": "Placeholder. A rate on sales; a US city or county adds about two percent to the state sales tax, no single source read. Tuned in M4-19: the game's taxes stand in for everything a real city takes in, transfers from higher governments and fees included, so its rates sit about 1.7 to 1.8 times what US cities levy, and the budget per resident comes out near Toronto's (otherSpending). At these defaults a compact density 1 town of houses with shops and offices nets about zero a year after its roads and its other spending, and the same people on cul-de-sacs lose money (test/economy-scenarios.test.ts). The top of the range is about three times the default, as before.",
+      "source": "Placeholder. A rate on sales; a US city or county adds about two percent to the state sales tax, no single source read. Tuned in M4-19: the game's taxes stand in for everything a real city takes in, transfers from higher governments and fees included, so its rates sit about 1.65 to 1.8 times what US cities levy, and the budget per resident comes out near Toronto's (otherSpending). At these defaults a compact density 1 town of houses with shops and offices nets about zero a year after its roads and its other spending, and the same people on cul-de-sacs lose money (test/economy-scenarios.test.ts). The top of the range is about three times the default, as before.",
       "placeholder": true
     },
     "office": {
       "default": 0.018,
       "min": 0,
       "max": 0.05,
-      "source": "Placeholder. A rate on output, which no real city levies; set so an office pays about what a home of the same floor space does. Tuned in M4-19: the game's taxes stand in for everything a real city takes in, transfers from higher governments and fees included, so its rates sit about 1.7 to 1.8 times what US cities levy, and the budget per resident comes out near Toronto's (otherSpending). At these defaults a compact density 1 town of houses with shops and offices nets about zero a year after its roads and its other spending, and the same people on cul-de-sacs lose money (test/economy-scenarios.test.ts). The top of the range is about three times the default, as before.",
+      "source": "Placeholder. A rate on output, which no real city levies; set so an office pays about what a home of the same floor space does. Tuned in M4-19: the game's taxes stand in for everything a real city takes in, transfers from higher governments and fees included, so its rates sit about 1.65 to 1.8 times what US cities levy, and the budget per resident comes out near Toronto's (otherSpending). At these defaults a compact density 1 town of houses with shops and offices nets about zero a year after its roads and its other spending, and the same people on cul-de-sacs lose money (test/economy-scenarios.test.ts). The top of the range is about three times the default, as before.",
       "placeholder": true
     },
     "industrial": {
       "default": 0.018,
       "min": 0,
       "max": 0.05,
-      "source": "Placeholder. A rate on output, as office. Tuned in M4-19: the game's taxes stand in for everything a real city takes in, transfers from higher governments and fees included, so its rates sit about 1.7 to 1.8 times what US cities levy, and the budget per resident comes out near Toronto's (otherSpending). At these defaults a compact density 1 town of houses with shops and offices nets about zero a year after its roads and its other spending, and the same people on cul-de-sacs lose money (test/economy-scenarios.test.ts). The top of the range is about three times the default, as before.",
+      "source": "Placeholder. A rate on output, as office. Tuned in M4-19: the game's taxes stand in for everything a real city takes in, transfers from higher governments and fees included, so its rates sit about 1.65 to 1.8 times what US cities levy, and the budget per resident comes out near Toronto's (otherSpending). At these defaults a compact density 1 town of houses with shops and offices nets about zero a year after its roads and its other spending, and the same people on cul-de-sacs lose money (test/economy-scenarios.test.ts). The top of the range is about three times the default, as before.",
       "placeholder": true
     }
   },

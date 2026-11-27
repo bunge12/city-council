@@ -292,7 +292,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(39);
+    expect(SNAPSHOT_VERSION).toBe(40);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,
