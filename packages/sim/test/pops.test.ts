@@ -34,7 +34,7 @@ import {
 import { addBuilding, removeBuilding } from "../src/buildings/buildings";
 import { checkPopsBalance } from "../src/pops/balance";
 import { withValue } from "./with-value";
-import { POP_ARRAYS, addPop, addSplitPop, checkPops, createPops, rehomePop, removePop, setPopGraceDays, setPopHousehold, setPopProfile, setPopSatisfaction, setPopSize, setPopWork, type NewPop } from "../src/pops/pops";
+import { POP_ARRAYS, addPop, addSplitPop, checkPops, createPops, rehomePop, removePop, setPopGraceDays, setPopHousehold, setPopProfile, setPopSatisfaction, setPopSize, setPopWork, takeCheckedWork, type NewPop } from "../src/pops/pops";
 import { nextInt, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
 import { recountTotals } from "../src/stats/stats";
@@ -261,6 +261,18 @@ describe("pops in state", () => {
     setPopSatisfaction(state, id, 100);
     expect(readPop(state.pops, id)).toEqual({ id, home: tower, work: mall, size: 90, education: 2, wealth: 0, children: 1, satisfaction: 100, daysLow: 0, graceDays: 0, displaced: { by: 0, tick: 0, with: 0 } });
     expectConsistent(state);
+  });
+
+  it("gives a checked take the same state as setPopWork, its checks aside (issue #439)", () => {
+    const { state, tower, mall } = town();
+    const id = addPop(state, pop(tower, 50));
+    const other = cloneState(state);
+    setPopWork(state, id, mall);
+    takeCheckedWork(other, id, mall);
+    expect(jobsFilled(other, mall)).toBe(30);
+    expect(hashState(other)).toBe(hashState(state));
+    expect(other.stats.totals).toEqual(state.stats.totals);
+    expectConsistent(other);
   });
 
   it("lets a pop past a lowered size cap shrink and split, and refuses only growth past it (M3 review, #365)", () => {

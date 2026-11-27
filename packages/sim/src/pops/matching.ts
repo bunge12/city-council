@@ -53,7 +53,7 @@ import { NO_ROUTE_SECONDS, TRAVEL_ZONES, readableTravelTimes, travelTimesReady }
 import { dropOpeningNote } from "./opening-changes";
 import { openJobsFrom } from "./open-jobs";
 import { openJobsInAll, openingZones, openingsOf, refileOpening, zoneOfJob, type Openings } from "./openings";
-import { NO_WORK, POP_ALIVE, POP_LEVELS, addSplitPop, setPopSize, setPopWork, workersFor } from "./pops";
+import { NO_WORK, POP_ALIVE, POP_LEVELS, addSplitPop, setPopSize, takeCheckedWork, workersFor } from "./pops";
 import { popSlice } from "./sweep";
 import { popIndexOf } from "./where";
 
@@ -250,7 +250,8 @@ function takeJob(m: Matcher, id: number, work: number): void {
     // The rest keeps the household's score and its days low (M3-10), so a split never resets the time to leaving, and its grace (#361).
     addSplitPop(state, { home, size: size - part, education, wealth: p.wealth[id] ?? 0, children, satisfaction: p.satisfaction[id] ?? 0, daysLow: p.daysLow[id] ?? 0, graceDays: p.graceDays[id] ?? 0 }, size, id);
   }
-  setPopWork(state, id, work);
+  // `open` above is the check `setPopWork` would make again.
+  takeCheckedWork(state, id, work);
   refileOpening(state, openings, work, m.reach, m.chunks, m.filled);
   dropOpeningNote(p, work);
 }
