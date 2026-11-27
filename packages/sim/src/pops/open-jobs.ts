@@ -15,7 +15,7 @@
 // workers is in the pop index (where.ts), so this reads no pop rows.
 
 import { BUILDINGS_BALANCE, BUILDING_TYPES, EDUCATION_LEVELS } from "../buildings/balance";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_LANDMARK, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByEducation, jobsByKind } from "../buildings/jobs";
 import { DEMAND_BALANCE } from "../demand/balance";
 import { NETWORK_ROAD } from "../roads/network";
@@ -160,7 +160,8 @@ export function countZoneJobsWith(state: SimState, filled: ArrayLike<number>): Z
   const { flags, firstSeg, zone, type, width, depth } = b;
   const { segNetwork, segA } = net;
   const alive = BUILDING_ALIVE;
-  const abandoned = BUILDING_ABANDONED;
+  // An abandoned workplace offers no jobs, and a landmark, whose type is not a building type, none at all (M4-13).
+  const abandoned = BUILDING_ABANDONED | BUILDING_LANDMARK;
   const road = NETWORK_ROAD;
   const perCell = JOBS_PER_CELL;
   const n = flags.length;
