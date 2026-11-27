@@ -1050,20 +1050,24 @@ for (const variant of [
       expect(hall).toBeGreaterThanOrEqual(0);
       const corners = (await tp.evaluate((id) => window.cityCouncil.mirror.building(id)?.corners ?? null, hall)) ?? [];
       const mid = { x: ((corners[0] ?? 0) + (corners[2] ?? 0) + (corners[4] ?? 0) + (corners[6] ?? 0)) / 4, z: ((corners[1] ?? 0) + (corners[3] ?? 0) + (corners[5] ?? 0) + (corners[7] ?? 0)) / 4 };
-      // Its cells cannot be zoned: the zone tool finds nothing to paint on its lot.
+      // Its cells cannot be zoned: the zone tool's fill over its lot paints the strip either side of it, and none of the lot.
       await tp.keyboard.press("KeyK");
       await tp.locator("#zone-residential").click();
       await tp.locator("#zone-density-1").click();
       await tp.locator("#zone-mode-fill").click();
       await hover(tp, mid.x, mid.z);
-      await expect(tp.locator("#zone-readout")).not.toHaveAttribute("data-ok", "true");
+      await shot(tp, info, dir, "10-no-zoning-on-its-lot");
+      const zoned = (await log(tp)).length;
+      await clickAndApply(tp);
+      expect((await log(tp)).length, "the fill around the lot").toBe(zoned + 1);
+      expect((await log(tp)).at(-1)?.type).toBe("ZoneCells");
+      expect((await buildings(tp)).some((b) => b.id === hall), "City Hall, after the fill").toBe(true);
       const cellZone = await tp.evaluate(([x, z]) => {
         const m = window.cityCouncil.mirror;
         const c = m.cellAt(x, z);
         return c ? (m.state?.cells["zone"]?.[c.index] ?? -1) : -1;
       }, [mid.x, mid.z] as const);
-      expect(cellZone).toBeLessThanOrEqual(0);
-      await shot(tp, info, dir, "10-no-zoning-on-its-lot");
+      expect(cellZone, "the zone of the cell under City Hall's middle, or -1 for no cell").toBeLessThanOrEqual(0);
       await noTool(tp);
       // A game day on, its upkeep is on the budget's building upkeep line.
       await runTicks(tp, DAY, 10);
@@ -1093,14 +1097,12 @@ for (const variant of [
       expect(total).toBe(lines.slice(0, -1).reduce((n, l) => n + l.amount, 0));
       expect(Number(await tag.getAttribute("data-cost"))).toBe(total);
       await shot(tp, info, dir, "11-occupied-house-tag");
-      // Its pops, and their satisfaction before.
-      const moved = await tp.evaluate((id) => {
-        const p = window.cityCouncil.mirror.state?.pops;
-        const out: { pop: number; satisfaction: number }[] = [];
-        if (!p) return out;
-        for (let i = 0; i < (p["home"]?.length ?? 0); i++) if ((p["size"]?.[i] ?? 0) > 0 && p["home"]?.[i] === id) out.push({ pop: i, satisfaction: p["satisfaction"]?.[i] ?? 0 });
-        return out;
-      }, house);
+      // Its pops and their satisfaction, from the city as the menu downloads it: pop rows do not travel in deltas, so the page's copy of them is its last snapshot's (pops/delta.ts).
+      const popsOf = async (name: string) => deserialize(await download(tp, info, name)).state.pops;
+      const was = await popsOf("step-11-before");
+      const moved: { pop: number; satisfaction: number }[] = [];
+      for (let i = 0; i < was.home.length; i++) if ((was.size[i] ?? 0) > 0 && was.home[i] === house) moved.push({ pop: i, satisfaction: was.satisfaction[i] ?? 0 });
+      expect(await bulldozerOn(tp, [house]), "the bulldozer back on the house").toBe(house);
       expect(moved.length).toBeGreaterThan(0);
       const before = await treasury(tp);
       await clickAndApply(tp);
@@ -1110,10 +1112,8 @@ for (const variant of [
       await noTool(tp);
       // A game day on, each displaced pop carries the city's mark and is less satisfied.
       await runTicks(tp, DAY, 10);
-      const now = await tp.evaluate((pops) => {
-        const p = window.cityCouncil.mirror.state?.pops;
-        return pops.map((i) => ({ satisfaction: p?.["satisfaction"]?.[i] ?? 0, by: p?.["displacedBy"]?.[i] ?? 0 }));
-      }, moved.map((m) => m.pop));
+      const after = await popsOf("step-11-after");
+      const now = moved.map((m) => ({ satisfaction: after.satisfaction[m.pop] ?? 0, by: after.displacedBy[m.pop] ?? 0 }));
       for (const [k, m] of moved.entries()) {
         // DISPLACED_BY_CITY in pops.ts.
         expect(now[k]?.by, `pop ${m.pop}'s mark`).toBe(1);
@@ -1128,10 +1128,10 @@ for (const variant of [
       const demolition = vacantLines[0]?.amount ?? NaN;
       expect(demolition).toBeLessThan(total / 10);
       await shot(tp, info, dir, "11-vacant-building-tag");
-      const was = await treasury(tp);
+      const left = await treasury(tp);
       await clickAndApply(tp);
       expect(await logSpent(tp)).toBe(demolition);
-      expect(await treasury(tp)).toBe(was - demolition);
+      expect(await treasury(tp)).toBe(left - demolition);
       await noTool(tp);
       info.annotations.push({ type: "step 11", description: `house ${house}: ${lines.map((l) => `${l.line} ${formatMoneyShort(l.amount)}`).join(", ")}; satisfaction ${moved.map((m, k) => `${m.satisfaction} to ${now[k]?.satisfaction}`).join(", ")}; building ${vacant} demolition ${formatMoneyShort(demolition)}` });
     });
