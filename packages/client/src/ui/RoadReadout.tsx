@@ -26,7 +26,7 @@ const OFFSET = 18;
 /**
  * Next to the cursor while a road is being drawn: its type, length in metres
  * and in cells, cost, how much of it is bridge, and angle to the road it
- * starts from, or the reason the sim would refuse it, and the gap a parallel
+ * starts from, or the reason the sim would refuse it, and when the treasury cannot pay, the price with the sim's reason (M4-16), and the gap a parallel
  * offset holds, and the buildings it would clear with their residents. Before the first click it shows only the offset, when one
  * caught the cursor. The numbers are also on data attributes, in metres,
  * whole dollars and degrees, for tests.
@@ -52,14 +52,18 @@ export function RoadReadout() {
   const length = `${preview.length.toFixed(0)} m`;
   const angle = snap?.angle ?? null;
   const clears = preview.ok ? formatClears(preview.clears) : null;
+  // The treasury cannot pay (M4-16): the price stays, in the warning colour, with the sim's reason.
+  const reason = preview.ok ? preview.refusal : preview.reason;
   return (
     <div
-      className={preview.ok ? "road-readout" : "road-readout refused"}
+      className={reason === null ? "road-readout" : "road-readout refused"}
       id="road-readout"
       role="status"
       data-ok={String(preview.ok)}
       data-length={String(preview.length)}
       data-cost={String(preview.cost)}
+      data-price={String(preview.price)}
+      data-refusal={preview.refusal ?? ""}
       data-bridge={String(preview.bridgeLength)}
       data-type={preview.type.id}
       data-cells={String(preview.length / SNAP.cellSize)}
@@ -73,7 +77,7 @@ export function RoadReadout() {
     >
       <div className="what">
         {preview.type.name}, {length} · <span id="road-cells">{formatCells(preview.length)}</span>
-        {preview.ok && <> · <span id="road-cost">{formatMoneyShort(preview.cost)}</span></>}
+        {preview.ok && <> · <span id="road-cost">{formatMoneyShort(preview.price)}</span></>}
       </div>
       {angle !== null && (
         <div className="angle" id="road-angle">
@@ -96,7 +100,7 @@ export function RoadReadout() {
           {clears}
         </div>
       )}
-      {!preview.ok && <div className="reason" id="road-reason">{preview.reason}</div>}
+      {reason !== null && <div className="reason" id="road-reason">{reason}</div>}
     </div>
   );
 }

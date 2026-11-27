@@ -26,6 +26,7 @@ import {
   step,
   submit,
   unlockMilestone,
+  unlocksAt,
   type Command,
   type SimState,
 } from "../src/index";
@@ -213,6 +214,9 @@ describe("the density locks", () => {
     expect(submit(state, command("ZoneCells", r2))).toEqual({ ok: false, reason });
     expect(planZoneCells(state, r2)).toEqual({ ok: false, reason });
     expect(lockNote(state, "density2")).toBe(reason);
+    // What the locked button says under its name (M4-16): the milestone's population, grouped.
+    expect(unlocksAt(state, "density2")).toBe(`Unlocks at ${nth(MILESTONES, 0).population.toLocaleString("en-US")} residents`);
+    expect(unlocksAt(state, "density3")).toBe(`Unlocks at ${nth(MILESTONES, unlockMilestone("density3")).population.toLocaleString("en-US")} residents`);
     expect(lockNote(state, "density3")).toMatch(/^High density is locked until /);
     expect(lockNote(state, "cityHall")).toMatch(/^City Hall is locked until /);
     expect(milestoneLabel("density2")).toBe(`the ${nth(MILESTONES, 0).name} milestone, at ${nth(MILESTONES, 0).population.toLocaleString("en-US")} residents`);
@@ -223,6 +227,7 @@ describe("the density locks", () => {
     step(state);
     expect(lockNote(state, "density2")).toBeNull();
     expect(lockNote(state, "cityHall")).toBeNull();
+    expect(unlocksAt(state, "density2")).toBeNull();
     expect(send(state, command("ZoneCells", r2))).toBeNull();
     expect(state.log.at(-1)?.type).toBe("ZoneCells");
     // Density 3 waits for its own milestone.

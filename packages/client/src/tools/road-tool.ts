@@ -18,7 +18,11 @@
 //
 // The preview is checked with `planRoad`, the same function the sim
 // validates `BuildRoad` with, run against the mirror's read-only copy of the
-// roads. The sim still has the final say. Tool state lives in the UI store
+// roads, and priced with the sim's `roadPrice` on the copy: the road's cost
+// plus the compensation for the buildings it takes, and why the treasury
+// cannot pay it (M4-16). A road the treasury cannot pay is still sent, so
+// the sim refuses it and the page plays its "rejected" cue, as for any
+// command the sim turns down. The sim still has the final say. Tool state lives in the UI store
 // (ui/store.ts); nothing here writes sim state.
 //
 // A sent road stays on screen as an in-flight preview until the sim has
@@ -85,6 +89,14 @@ export interface RoadPreview {
   length: number;
   /** Build cost in whole dollars: the length times the type's price. Zero when refused. */
   cost: number;
+  /**
+   * What the command would charge in whole dollars: `cost` plus the
+   * compensation for the buildings it clears, from the sim's `roadPrice` on
+   * the mirror (M4-16). `cost` when nothing gave a way to price it, and zero when refused.
+   */
+  price: number;
+  /** Why the treasury cannot pay `price`, as the sim would refuse it, or null. Null when refused for another reason. */
+  refusal: string | null;
   /** Where the road would meet another road: a split, or an existing node it joins or passes. */
   junctions: BuildPoint[];
   /** The parts that would be bridges, bank to bank, each with its control point or null. */
@@ -111,6 +123,9 @@ export type RoadClears = (plan: RoadPlan) => BuildingsInTheWay;
 
 /** Finds the cells a planned road would open: the sim's `roadEffects` on the mirror. */
 export type RoadCells = (plan: RoadPlan) => Float64Array;
+
+/** Prices a planned road command: the sim's `roadPrice` on the mirror. The grid and upgrade tools use it too. */
+export type RoadPricer = (cost: number, clears: BuildingsInTheWay | null) => { price: number; refusal: string | null };
 
 /** A part of a previewed road between two of its stops. */
 export interface PreviewSpan {
@@ -153,6 +168,7 @@ export function previewRoad(
   level: string = "ground",
   clearsOf: RoadClears | null = null,
   cellsOf: RoadCells | null = null,
+  priceOf: RoadPricer | null = null,
 ): RoadPreview {
   const type = typeById(typeId);
   const payload = roadPayload(from, to, typeId, control, level);
@@ -164,7 +180,7 @@ export function previewRoad(
     const b = onGrid(to);
     const c = control ? onGrid(control) : null;
     const length = c ? curveLength(a.x, a.z, c.x, c.z, b.x, b.z) : Math.hypot(b.x - a.x, b.z - a.z);
-    return { from: a, to: b, control: c, type, ok: false, reason: result.reason, length, cost: 0, junctions: [], bridges: [], bridgeLength: 0, clears: null, newCells: null };
+    return { from: a, to: b, control: c, type, ok: false, reason: result.reason, length, cost: 0, price: 0, refusal: null, junctions: [], bridges: [], bridgeLength: 0, clears: null, newCells: null };
   }
   const { stops, length, cost, levels, bridgeLength } = result.plan;
   const first = stops[0];
@@ -181,6 +197,8 @@ export function previewRoad(
     const c = planned ? subControl(roadQuad(first, last, planned), a.t, b.t) : null;
     bridges.push({ from: { x: a.x, z: a.z }, to: { x: b.x, z: b.z }, control: c });
   });
+  const clears = clearsOf ? clearsOf(result.plan) : null;
+  const { price, refusal } = priceOf ? priceOf(cost, clears) : { price: cost, refusal: null };
   return {
     from: { x: first.x, z: first.z },
     to: { x: last.x, z: last.z },
@@ -190,10 +208,12 @@ export function previewRoad(
     reason: null,
     length,
     cost,
+    price,
+    refusal,
     junctions,
     bridges,
     bridgeLength,
-    clears: clearsOf ? clearsOf(result.plan) : null,
+    clears,
     newCells: cellsOf ? cellsOf(result.plan) : null,
   };
 }
@@ -279,10 +299,10 @@ export interface RoadToolHost {
   set(patch: Partial<RoadToolState>): void;
   /**
    * The mirror's roads and the map, its zoned cells for the snap, and a way
-   * to find the buildings a road would clear, or null before the first
-   * snapshot.
+   * to find the buildings a road would clear and to price it, or null
+   * before the first snapshot.
    */
-  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup; clears?: RoadClears; newCells?: RoadCells } | null;
+  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup; clears?: RoadClears; newCells?: RoadCells; price?: RoadPricer } | null;
   /** Sends `BuildRoad` and resolves once the sim has built it, or with why it did not. */
   send(payload: BuildRoadPayload): Promise<CommandResult>;
 }
@@ -431,7 +451,7 @@ export class RoadToolController {
     const world = this.host.world();
     if (s.tool !== "road" || !s.roadStart || !cursor || !world) return null;
     if (s.roadMode === "curved" && !s.roadControl) return null;
-    return previewRoad(world.net, world.terrain, s.roadStart, cursor, s.roadType, s.roadControl, s.roadLevel, world.clears ?? null, world.newCells ?? null);
+    return previewRoad(world.net, world.terrain, s.roadStart, cursor, s.roadType, s.roadControl, s.roadLevel, world.clears ?? null, world.newCells ?? null, world.price ?? null);
   }
 
   /**

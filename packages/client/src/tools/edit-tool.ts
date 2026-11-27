@@ -17,7 +17,10 @@
 // Both tools check what they show with `planBulldoze` and `planUpgrade`, the
 // functions the sim validates the commands with, run against the mirror's
 // read-only copy of the roads. So the price shown before the click is the
-// sim's, and a refusal shows the sim's reason and sends nothing. The sim
+// sim's, and a refusal shows the sim's reason and sends nothing. An upgrade
+// is priced with the buildings a wider road takes and checked against the
+// treasury with the sim's `roadPrice` (M4-16); one the treasury cannot pay
+// is still sent, so the sim refuses it and the "rejected" cue plays. The sim
 // still has the final say. Tool state lives in the UI store (ui/store.ts);
 // nothing here writes sim state.
 //
@@ -53,8 +56,10 @@ import {
   subQuad,
   segmentEnds,
   segmentTypeId,
+  type BuildingsInTheWay,
   type CommandResult,
   type SegmentEnds,
+  type UpgradePlan,
   type RoadNetwork,
   type RoadType,
   type Quad,
@@ -64,7 +69,13 @@ import {
 import { WHOLE, isWhole, joinSections, sectionKey } from "./edit-section";
 import { isRaised, liveRoadSegment, roadTypeOf, type RoadNet } from "../render/road-geometry";
 import type { PreviewLook, PreviewShape } from "../render/road-preview-geometry";
-import type { RoadToolState, ToolRoadType } from "./road-tool";
+import type { RoadPricer, RoadToolState, ToolRoadType } from "./road-tool";
+
+/** How the upgrade tool prices an upgrade on the mirror (M4-16): the buildings it takes, and the sim's `roadPrice`. */
+export interface EditMoney {
+  clears: (plan: UpgradePlan) => BuildingsInTheWay;
+  price: RoadPricer;
+}
 
 /** What an edit does: remove, change type, or reverse a one-way. */
 export type EditKind = "bulldoze" | "upgrade" | "reverse";
@@ -83,8 +94,21 @@ export interface EditPreview {
   reason: string | null;
   /** Plan length in metres. */
   length: number;
-  /** Price in whole dollars, from the balance file. Zero when refused. Not charged until M4. */
+  /** The plan's cost in whole dollars, from the balance file: for a bulldoze its demolition less its refund. Zero when refused. */
   cost: number;
+  /** A bulldoze's demolition and the refund it pays back, from its plan (M4-03), whose difference is `cost`. Zero for an upgrade or when refused. */
+  demolition: number;
+  refund: number;
+  /**
+   * What the command charges: `cost` plus the compensation for the buildings
+   * a wider road takes, from the sim's `roadPrice` on the mirror (M4-16).
+   * `cost` when nothing gave a way to price it, and zero when refused.
+   */
+  price: number;
+  /** Why the treasury cannot pay `price`, or null. */
+  refusal: string | null;
+  /** The buildings an upgrade would take, or null when not looked for. */
+  clears: BuildingsInTheWay | null;
   /** A segment in it is fixed, such as an outside connection's: it cannot be removed or changed. */
   fixed: boolean;
   /** The command that does it, with the segments' ends as the preview saw them. */
@@ -164,6 +188,7 @@ export function previewEdit(
   segments: readonly number[],
   typeId: string,
   seen?: readonly SeenSegment[],
+  money?: EditMoney,
 ): EditPreview {
   const command = editCommand(net, kind, segments, typeId, seen);
   const type = kind === "bulldoze" ? null : (ROAD_TYPES.find((t) => t.id === typeId) ?? null);
@@ -175,15 +200,25 @@ export function previewEdit(
     return typeof plan === "string" ? section : [plan.from, plan.to];
   });
   const base = { kind, segments: [...segments], sections, type, fixed, command };
+  const none = { length: 0, cost: 0, demolition: 0, refund: 0, price: 0, refusal: null, clears: null };
   if (fixed) {
     // The sim refuses this too, naming the segment by id. A player does not know ids.
     const reason = kind === "bulldoze" ? "This road is fixed and cannot be removed" : "This road is fixed and cannot be changed";
-    return { ...base, ok: false, reason, length: 0, cost: 0 };
+    return { ...base, ...none, ok: false, reason };
   }
-  const result =
-    kind === "bulldoze" ? planBulldoze(asNetwork(net), command.payload) : planUpgrade(asNetwork(net), terrain, command.payload);
-  if (!result.ok) return { ...base, ok: false, reason: result.reason, length: 0, cost: 0 };
-  return { ...base, ok: true, reason: null, length: result.plan.length, cost: result.plan.cost };
+  if (kind === "bulldoze") {
+    const result = planBulldoze(asNetwork(net), command.payload);
+    if (!result.ok) return { ...base, ...none, ok: false, reason: result.reason };
+    const { length, cost, demolition, refund } = result.plan;
+    // The bulldozer prices the buildings on the road itself, with the sim's `previewBulldozeRoad` (bulldoze-tool.ts).
+    return { ...base, ok: true, reason: null, length, cost, demolition, refund, price: cost, refusal: null, clears: null };
+  }
+  const result = planUpgrade(asNetwork(net), terrain, command.payload);
+  if (!result.ok) return { ...base, ...none, ok: false, reason: result.reason };
+  const { length, cost } = result.plan;
+  const clears = money ? money.clears(result.plan) : null;
+  const { price, refusal } = money ? money.price(cost, clears) : { price: cost, refusal: null };
+  return { ...base, ok: true, reason: null, length, cost, demolition: 0, refund: 0, price, refusal, clears };
 }
 
 /** An edit the tool has sent and the sim has not yet applied or refused. */
@@ -215,8 +250,8 @@ export type EditToolId = "upgrade";
 export interface EditToolHost {
   get(): RoadToolState & EditToolState;
   set(patch: Partial<RoadToolState & EditToolState>): void;
-  /** The mirror's roads and the map, or null before the first snapshot. */
-  world(): { net: RoadNet; terrain: Terrain } | null;
+  /** The mirror's roads and the map, and how to price an upgrade on it, or null before the first snapshot. */
+  world(): { net: RoadNet; terrain: Terrain; money?: EditMoney } | null;
   /** Sends a command and resolves once the sim has applied it, or with why it did not. */
   send(type: EditCommand["type"], payload: EditCommand["payload"]): Promise<CommandResult>;
 }
@@ -285,7 +320,7 @@ export class EditToolController {
       if (reverse) return reverse;
     }
     const seen = drag ? this.dragSeen : [seeSegment(world.net, seg, section)];
-    return previewEdit(world.net, world.terrain, tool, segments, this.upgradeType(), seen);
+    return previewEdit(world.net, world.terrain, tool, segments, this.upgradeType(), seen, world.money);
   }
 
   /** A key that changes whenever the drag's stretches do, for telling when its preview needs working out again. */
@@ -302,7 +337,7 @@ export class EditToolController {
     if (this.active() !== "upgrade" || !world || seg === NONE || !liveRoadSegment(world.net, seg)) return null;
     const type = roadTypeOf(world.net, seg);
     if (!type.oneWay) return null;
-    return previewEdit(world.net, world.terrain, "reverse", [seg], type.id);
+    return previewEdit(world.net, world.terrain, "reverse", [seg], type.id, undefined, world.money);
   }
 
   /** A left click with segment `seg` under the pointer, or NONE, and stretch `section` of it marked. */

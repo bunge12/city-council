@@ -377,7 +377,7 @@ const roadTool = new RoadToolController({
   set: (patch) => useUi.setState(patch),
   world: () =>
     mirror.state && shownTerrain
-      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.roadClears(plan), newCells: (plan) => mirror.roadCells(plan) }
+      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.roadClears(plan), newCells: (plan) => mirror.roadCells(plan), price: (cost, clears) => mirror.price(cost, clears) }
       : null,
   send: (payload) => sendCommand("BuildRoad", payload),
 });
@@ -387,7 +387,7 @@ const gridTool = new GridToolController({
   set: (patch) => useUi.setState(patch),
   world: () =>
     mirror.state && shownTerrain
-      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.gridClears(plan), newCells: (plan) => mirror.gridCells(plan) }
+      ? { net: mirror.state.roads, terrain: shownTerrain, cells: zonedCellLookup(mirror.state), clears: (plan) => mirror.gridClears(plan), newCells: (plan) => mirror.gridCells(plan), price: (cost, clears) => mirror.price(cost, clears) }
       : null,
   send: (payload) => sendCommand("BuildRoadGrid", payload),
 });
@@ -396,7 +396,10 @@ mirror.subscribe((update) => gridTool.mirrorUpdated(update, (id) => mirror.build
 const editTool = new EditToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
-  world: () => (mirror.state && shownTerrain ? { net: mirror.state.roads, terrain: shownTerrain } : null),
+  world: () =>
+    mirror.state && shownTerrain
+      ? { net: mirror.state.roads, terrain: shownTerrain, money: { clears: (plan) => mirror.upgradeClears(plan), price: (cost, clears) => mirror.price(cost, clears) } }
+      : null,
   send: (type, payload) => sendCommand(type, payload),
 });
 
@@ -1112,7 +1115,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     const end = cursor ? { x: snapToGrid(cursor.x), z: snapToGrid(cursor.z) } : null;
     const key =
       ui.tool === "road" && start && end
-        ? `${start.x},${start.z},${control ? `${control.x},${control.z}` : "-"},${end.x},${end.z},${ui.roadType},${ui.roadMode},${ui.roadLevel},${worldVersion}`
+        ? `${start.x},${start.z},${control ? `${control.x},${control.z}` : "-"},${end.x},${end.z},${ui.roadType},${ui.roadMode},${ui.roadLevel},${worldVersion},${mirror.state?.budget.treasury ?? 0}`
         : "";
     if (key !== previewKey) {
       previewKey = key;
@@ -1283,15 +1286,16 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   };
   let budgetFiguresSeen: unknown = null;
   // Who is in the building under the pointer (issue M3-17), looked up again when the copy changes, as people come and go every tick.
+  // With its yearly tax (M4-16), which moves with who works there and with the rates.
   let occupantsKey = "";
-  let occupants: Occupants = { people: 0, filled: 0, why: null };
+  let occupants: Occupants = { people: 0, filled: 0, why: null, tax: 0 };
   const occupantsOf = (id: number): Occupants => {
     const key = `${id},${mirrorVersion}`;
     if (key !== occupantsKey) {
       occupantsKey = key;
-      const next = { people: mirror.buildingPeople(id), filled: mirror.jobsFilled(id), why: mirror.whyNoNewcomers(id) };
+      const next = { people: mirror.buildingPeople(id), filled: mirror.jobsFilled(id), why: mirror.whyNoNewcomers(id), tax: mirror.buildingTax(id) };
       // The same object while nothing changed, so the readout is not drawn again every tick.
-      if (next.people !== occupants.people || next.filled !== occupants.filled || next.why !== occupants.why) occupants = next;
+      if (next.people !== occupants.people || next.filled !== occupants.filled || next.why !== occupants.why || next.tax !== occupants.tax) occupants = next;
     }
     return occupants;
   };

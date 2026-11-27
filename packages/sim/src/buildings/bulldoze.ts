@@ -320,9 +320,19 @@ export interface RoadPreview<P> {
   refusal: Refusal;
 }
 
+/**
+ * What a road command whose plan costs `cost` charges, when it clears
+ * `clears` (none for a grid), and why the treasury of `state` cannot pay
+ * it, or null. Every preview here prices with this, and so do the tools
+ * on a client's copy (M4-16), so the price shown is the price charged.
+ */
+export function roadPrice(state: SimState, cost: number, clears: Pick<BuildingsInTheWay, "compensation"> | null): { price: number; refusal: Refusal } {
+  const price = cost + (clears?.compensation.total ?? 0);
+  return { price, refusal: spendingRefusal(state, price) };
+}
+
 function priced<P extends { cost: number }>(state: SimState, plan: P, clears: BuildingsInTheWay): RoadPreview<P> {
-  const price = plan.cost + clears.compensation.total;
-  return { ok: true, plan, clears, price, refusal: spendingRefusal(state, price) };
+  return { ok: true, plan, clears, ...roadPrice(state, plan.cost, clears) };
 }
 
 /**
@@ -391,8 +401,9 @@ export function previewBuildRoadGrid(
   const result = planRoadGrid(state.roads, terrainOf(state.seed), payload);
   if (!result.ok) return result;
   const { problem, clears } = gridRehearsal(state, result.plan, people, filled);
-  const price = result.plan.cost;
-  const refusal = clears.ids.length > 0 ? gridClearsReason(clears.ids.length) : spendingRefusal(state, price);
+  // A grid never demolishes, so it is priced with no clears: one that would take a building is refused for that instead.
+  const { price, refusal: money } = roadPrice(state, result.plan.cost, null);
+  const refusal = clears.ids.length > 0 ? gridClearsReason(clears.ids.length) : money;
   return { ok: true, plan: result.plan, clears, price, refusal, problem };
 }
 

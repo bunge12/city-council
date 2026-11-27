@@ -38,7 +38,12 @@ import {
   terrainOf,
   roadEffects,
   roadIndexOf,
+  roadPrice,
+  upgradeClears,
+  buildingTaxPerYear,
   type BuildingGround,
+  type UpgradePlan,
+  type Refusal,
   type BuildingInfo,
   type BuildingsInTheWay,
   type RoadEffects,
@@ -562,6 +567,37 @@ export class SimMirror {
   }
 
   private readonly effects = new WeakMap<object, RoadEffects>();
+
+  /**
+   * The buildings an upgrade the sim has planned would clear, as `roadClears`
+   * finds them for a new road, for the upgrade tool's price (M4-16). Kept
+   * for each plan, like `roadClears`. Empty until the first snapshot.
+   */
+  upgradeClears(plan: UpgradePlan): BuildingsInTheWay {
+    let clears = this.upgrades.get(plan);
+    if (!clears) {
+      clears = this.current ? upgradeClears(this.current, plan, this.peopleIn, this.filledIn) : { ids: [], residents: 0, compensation: { ...NO_COMPENSATION } };
+      this.upgrades.set(plan, clears);
+    }
+    return clears;
+  }
+
+  private readonly upgrades = new WeakMap<object, BuildingsInTheWay>();
+
+  /**
+   * What a road command whose plan costs `cost` and clears `clears` would
+   * charge, and why the treasury cannot pay it, or null: the sim's
+   * `roadPrice` on the copy, the function the command is checked with
+   * (M4-16). With no snapshot yet, the plan's cost and no refusal.
+   */
+  price(cost: number, clears: BuildingsInTheWay | null): { price: number; refusal: Refusal } {
+    return this.current ? roadPrice(this.current, cost, clears) : { price: cost, refusal: null };
+  }
+
+  /** What building `id` pays a year in tax, the sim's `buildingTaxPerYear` with the jobs filled the copy counts (M4-16). 0 before the first snapshot. */
+  buildingTax(id: number): number {
+    return this.current ? buildingTaxPerYear(this.current, id, this.filledIn) : 0;
+  }
 
   /** The cells a road the sim has planned would open, as corners, eight numbers a cell. Empty until the first snapshot. */
   roadCells(plan: RoadPlan): Float64Array {

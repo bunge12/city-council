@@ -99,8 +99,13 @@ export interface BulldozePreview {
    * refused.
    */
   cost: number;
-  /** The compensation for the buildings that go, and its parts, as the plan priced it. Issue M4-16 shows the parts. */
+  /** The compensation for the buildings that go, and its parts, as the plan priced it. The tag shows the parts (M4-16). */
   compensation: Compensation;
+  /** For roads, their demolition and the refund it pays back, from the road's plan (M4-03). Zero for buildings. */
+  demolition: number;
+  refund: number;
+  /** Why the treasury cannot pay `cost`, as the sim would refuse it, or null. A click is still sent, so the sim's "rejected" cue plays. */
+  refusal: string | null;
   /**
    * A drag over more than `bulldozeMaxBuildings` buildings, sent as several
    * commands: pops the first moves can land in a building of the next, so
@@ -168,6 +173,9 @@ function roadPlan(world: BulldozeWorld, ids: readonly number[], seen: readonly u
     fixed: edit.fixed,
     cost: planned?.ok ? planned.price : edit.cost,
     compensation: clears.compensation,
+    demolition: edit.demolition,
+    refund: edit.refund,
+    refusal: planned?.ok ? planned.refusal : null,
     split: false,
     length: edit.length,
     segments: [...ids],
@@ -191,6 +199,7 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
   let cost = 0;
   const compensation: Compensation = { ...NO_COMPENSATION };
   let reason: string | null = null;
+  let refusal: string | null = null;
   for (let from = 0; from < buildings.length; from += most) {
     const payload = { buildings: buildings.slice(from, from + most) };
     commands.push({ type: "BulldozeBuilding", payload });
@@ -199,6 +208,7 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
       reason ??= result.reason;
       continue;
     }
+    refusal ??= result.refusal;
     for (const id of result.ids) cleared.push(id);
     residents += result.residents;
     cost += result.compensation.total;
@@ -214,6 +224,9 @@ function buildingPlan(world: BulldozeWorld, ids: readonly number[], seen: readon
     // Each command's plan, added up. Each part is charged what its own plan says when it applies.
     cost: ok ? cost : 0,
     compensation: ok ? compensation : { ...NO_COMPENSATION },
+    demolition: 0,
+    refund: 0,
+    refusal: ok ? refusal : null,
     split: commands.length > 1,
     length: 0,
     segments: [],

@@ -149,6 +149,19 @@ describe("business tax in the jobs town", () => {
     }
   });
 
+  it("reads the jobs filled from the caller when given, as a client's copy with no pop rows passes them (M4-16)", () => {
+    const ids = [...workplaces(state, "commercial"), ...workplaces(state, "office"), ...workplaces(state, "industrial")];
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      // The same counts the sim reads give the same tax.
+      expect(buildingTaxPerYear(state, id, (b) => jobsFilled(state, b))).toBe(buildingTaxPerYear(state, id));
+      expect(buildingTaxByLine(state, id, [0, 0, 0, 0], (b) => jobsFilled(state, b))).toEqual(buildingTaxByLine(state, id));
+      // Nobody at work: no business tax.
+      const idle = buildingTaxByLine(state, id, [0, 0, 0, 0], () => 0);
+      expect(idle[C] + idle[O] + idle[I]).toBe(0);
+    }
+  });
+
   it("files a day of sweeping on each business line as the sum of each workplace's daily shares", () => {
     const copy = replayFixture(fixture);
     const days = yearDays();

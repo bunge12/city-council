@@ -1,7 +1,7 @@
 // How components reach the page's services and the sim's state.
 
 import { createContext, useCallback, useContext, useSyncExternalStore } from "react";
-import { lockNote, type Unlock } from "@city-council/sim";
+import { lockNote, unlocksAt, type Unlock } from "@city-council/sim";
 import type { SimMirror } from "../protocol/mirror";
 import type { SaveStatus } from "../save/channel";
 import type { AppServices } from "./services";
@@ -37,6 +37,11 @@ export function useSim<T>(selector: (state: MirrorState) => T): T {
  */
 export function useLockNote(unlock: Unlock | undefined): string | null {
   return useSim((state) => (unlock === undefined || state === null ? null : lockNote(state, unlock)));
+}
+
+/** What a locked button says under its name, "Unlocks at 1,000 residents", or null once open or before the first snapshot (M4-16). */
+export function useUnlocksAt(unlock: Unlock | undefined): string | null {
+  return useSim((state) => (unlock === undefined || state === null ? null : unlocksAt(state, unlock)));
 }
 
 /** The people the copy's buildings hold room for (issue M3-15), or null before the first snapshot. */
