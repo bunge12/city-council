@@ -9,7 +9,10 @@ import {
   createDemand,
   createState,
   dayQuotas,
+  dayWants,
+  dueOnTick,
   extraChances,
+  fullDemandRate,
   deserialize,
   hashState,
   readBuilding,
@@ -35,6 +38,7 @@ const SEED = 2026;
 const CELL = ZONING_BALANCE.cellSize;
 const DAY = TIME_BALANCE.ticksPerDay;
 const RATES = DEMAND_BALANCE.buildingsPerDayAtFullDemand;
+const PER_100K = DEMAND_BALANCE.buildingsPerDayPer100kResidents;
 const zoneOf = (b: BuildingRow) => BUILDING_TYPES[b.type]?.zone;
 const typeOf = (b: BuildingRow) => BUILDING_TYPES[b.type]?.id;
 
@@ -117,6 +121,50 @@ describe("the day's quota for each zone", () => {
     expect(dayQuotas(bars({ residential: 60, commercial: 20 }))[mixed]).toBe(Math.floor((RATES["mixed"] ?? 0) * 0.2));
     expect(dayQuotas(bars({ residential: 60, commercial: 0 }))[mixed]).toBe(0);
     expect(dayQuotas(bars({ residential: -5, commercial: 90 }))[mixed]).toBe(0);
+  });
+
+  it("grows with the city: the larger of the flat rate and the rate per 100,000 residents (#442)", () => {
+    const all = (bar: number) => bars({ residential: bar, commercial: bar, office: bar, industrial: bar });
+    for (const id of ["commercial", "office", "industrial", "mixed"]) {
+      const flat = RATES[id] ?? 0;
+      const per = PER_100K[id] ?? 0;
+      expect(per, id).toBeGreaterThan(0);
+      // A town below the point where the figures meet builds at the flat rate.
+      const meet = (flat * 100_000) / per;
+      expect(fullDemandRate(id, 0), id).toBe(flat);
+      expect(fullDemandRate(id, Math.floor(meet / 2)), id).toBe(flat);
+      // A city of 250,000 builds at the rate its size gives, and the bar scales it as before.
+      const big = per * 2.5;
+      expect(big, id).toBeGreaterThan(flat);
+      expect(fullDemandRate(id, 250_000), id).toBe(big);
+      expect(dayWants(all(100), undefined, 250_000)[index(id)], id).toBeCloseTo(big, 12);
+      expect(dayQuotas(all(40), undefined, 250_000)[index(id)], id).toBe(Math.floor(big * 0.4));
+      expect(extraChances(all(40), undefined, 250_000)[index(id)], id).toBeCloseTo(big * 0.4 - Math.floor(big * 0.4), 12);
+    }
+    // Residential keeps its flat rate: arrivals and the homes hold follow the city's size already.
+    expect(PER_100K["residential"]).toBe(0);
+    expect(fullDemandRate("residential", 500_000)).toBe(RATES["residential"]);
+  });
+
+  it("reads the city's residents from state, so a big city's grower adds its scaled quota over a day (#442)", () => {
+    const state = credited(createState(SEED));
+    state.budget.chargeRates.fill(0);
+    setBars(state, { residential: -1, commercial: 40, office: -1, industrial: 40 });
+    state.stats.totals["population"] = 250_000;
+    const commercial = index("commercial");
+    const industrial = index("industrial");
+    let shops = 0;
+    let factories = 0;
+    // 62.5 x 0.4 is 25 whole buildings, so the day's last tick draws no chance of one more.
+    for (let t = 0; t < DAY; t++) {
+      state.tick = DAY + t;
+      const due = dueOnTick(state);
+      shops += due[commercial] ?? 0;
+      factories += due[industrial] ?? 0;
+    }
+    expect(shops).toBe(Math.floor((PER_100K["commercial"] ?? 0) * 2.5 * 0.4));
+    expect(factories).toBe(Math.floor((PER_100K["industrial"] ?? 0) * 2.5 * 0.4));
+    expect(shops).toBeGreaterThan(Math.ceil((RATES["commercial"] ?? 0) * 0.4));
   });
 
   it("keeps every zone together inside growthPerDayMax", () => {
