@@ -17,9 +17,10 @@ import type { AppServices } from "./services";
 import { shortcutFor, toggledSpeed } from "./shortcuts";
 import { LandValueLegend, LandValueReadout } from "./LandValue";
 import { BudgetLegend, BudgetReadout } from "./Budget";
+import { BudgetPanel } from "./BudgetPanel";
 import { StatsPanel } from "./StatsPanel";
 import { OverlayBar } from "./OverlayBar";
-import { closeOverlay, setPanel, toggleDebug, toggleLog, toggleOverlay, toggleStats, useUi } from "./store";
+import { closeOverlay, setPanel, toggleBudget, toggleDebug, toggleLog, toggleOverlay, toggleStats, useUi } from "./store";
 import { CityStatus, GameClock, SettingsMenu, TopBar } from "./TopBar";
 import { PANEL_ELEMENTS, escapeTarget, type PanelId } from "./windows";
 import { ZoneLegend } from "./ZoneLegend";
@@ -83,6 +84,9 @@ function useShortcuts(): void {
           return;
         case "toggleStats":
           toggleStats();
+          return;
+        case "toggleBudget":
+          toggleBudget();
           return;
         case "roadTool":
           roadTool.toggle();
@@ -159,6 +163,7 @@ function Shell() {
         <SettingsMenu />
         <CityMenu />
         <StatsPanel />
+        <BudgetPanel />
         <DebugPanel />
         <ActivityLog />
       </div>

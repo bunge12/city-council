@@ -54,6 +54,10 @@ import {
   type SystemTiming,
   checkBudget,
   checkMilestones,
+  creditLeft,
+  creditLimit,
+  loanRefusal,
+  spendingRefusal,
   checkDemand,
   copyBudget,
   copyDemand,
@@ -263,6 +267,26 @@ export class SimMirror {
     const zone = ZONING_BALANCE.zones.findIndex((z) => z.id === bar) + 1;
     const jobs = countZoneJobsWith(this.current, this.occupancy.filled);
     return workplacesHeldBy(jobs, zone) ? (jobs.open[zone] ?? 0) : null;
+  }
+
+  /**
+   * The credit limit of the copy and what is left of it to borrow, whole
+   * dollars, as the sim works them out (M4-11), for the budget panel
+   * (M4-15). Null before the first snapshot.
+   */
+  credit(): { limit: number; left: number } | null {
+    if (!this.current) return null;
+    return { limit: creditLimit(this.current), left: creditLeft(this.current) };
+  }
+
+  /** Why the sim would refuse a `TakeLoan` of `principal` over `termMonths` on the copy, or null when it would take it (M4-15). */
+  loanRefusal(principal: number, termMonths: number): string | null {
+    return this.current ? loanRefusal(this.current, principal, termMonths) : "No city is open";
+  }
+
+  /** Why the copy's treasury cannot pay `price` whole dollars, or null when it can: a `RepayLoan`'s check (M4-15). */
+  spendingRefusal(price: number): string | null {
+    return this.current ? spendingRefusal(this.current, price) : "No city is open";
   }
 
   /**
