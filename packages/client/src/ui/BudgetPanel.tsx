@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import {
   ECONOMY,
   debtOf,
@@ -32,9 +32,10 @@ import { toggleBudget, usePanelOrder, useUi } from "./store";
 
 // The budget panel (issue M4-15, PRD "M4 Economy"): where the money comes
 // from and where it goes, last month and this month so far, a year of it
-// on a graph, the tax and development charge sliders, and the loans. It
-// reads the mirror and sends commands. Every figure is the sim's: a ledger
-// line, the history, or one of the sim's own functions over the copy.
+// on a graph, the tax and development charge sliders, and the loans, each
+// on a tab of its own so the panel stays short. It reads the mirror and
+// sends commands. Every figure is the sim's: a ledger line, the history,
+// or one of the sim's own functions over the copy.
 
 /** A figure in short form, with its whole dollars on hover. Nothing is a dash, so a line that moved nothing reads as such. */
 function Money({ value, signed = false }: { value: number; signed?: boolean }) {
@@ -238,7 +239,6 @@ function MoneyGraph() {
   const shown = months[hover !== null && hover < n ? hover : n - 1];
   return (
     <section className="budget-section" aria-label="The last year">
-      <h3>The last year</h3>
       {n === 0 ? (
         <p className="hint">No month has closed yet.</p>
       ) : (
@@ -378,7 +378,6 @@ function TaxSliders() {
   if (!rates) return null;
   return (
     <section className="budget-section" aria-label="Tax rates">
-      <h3>Tax rates</h3>
       {TAX_SLIDERS.map((slider, i) => (
         <Slider
           key={slider.zone}
@@ -403,7 +402,6 @@ function ChargeSliders() {
   if (!rates) return null;
   return (
     <section className="budget-section" aria-label="Development charges">
-      <h3>Development charges</h3>
       {CHARGE_SLIDERS.map((slider, i) => (
         <Slider
           key={slider.zone}
@@ -502,7 +500,6 @@ function Loans() {
   const shownProblem = malformed ?? refusal ?? problem;
   return (
     <section className="budget-section" aria-label="Loans">
-      <h3>Loans</h3>
       <p id="budget-credit" data-limit={limit} data-owed={owed} data-left={left}>
         Owed <Money value={owed} /> of a credit limit of <Money value={limit} />, <Money value={left} /> left to borrow. {loans.length} of {ECONOMY.loans.maxOpen} loans open.
       </p>
@@ -562,7 +559,58 @@ function Loans() {
 
 // --- The panel -------------------------------------------------------------------
 
-function BudgetBody() {
+/** The panel's tabs, in order. Only the open one is drawn. */
+const TABS = [
+  { key: "budget", label: "Budget" },
+  { key: "charts", label: "Charts" },
+  { key: "loans", label: "Loans" },
+  { key: "taxes", label: "Taxes" },
+  { key: "charges", label: "Dev charges" },
+] as const;
+type BudgetTab = (typeof TABS)[number]["key"];
+
+const tabId = (tab: BudgetTab) => `budget-tab-${tab}`;
+const tabPanelId = (tab: BudgetTab) => `budget-tabpanel-${tab}`;
+
+/** The tab row, with the arrow keys, Home and End moving between tabs as a tab list's do. */
+function Tabs({ tab, setTab }: { tab: BudgetTab; setTab(tab: BudgetTab): void }) {
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const at = TABS.findIndex((t) => t.key === tab);
+    const to =
+      e.key === "ArrowRight" ? (at + 1) % TABS.length
+      : e.key === "ArrowLeft" ? (at - 1 + TABS.length) % TABS.length
+      : e.key === "Home" ? 0
+      : e.key === "End" ? TABS.length - 1
+      : null;
+    const next = to === null ? undefined : TABS[to];
+    if (!next) return;
+    // The arrows would otherwise pan the camera too.
+    e.preventDefault();
+    e.stopPropagation();
+    setTab(next.key);
+    document.getElementById(tabId(next.key))?.focus();
+  };
+  return (
+    <div className="budget-tabs" role="tablist" aria-label="Budget sections" onKeyDown={onKeyDown}>
+      {TABS.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          role="tab"
+          id={tabId(t.key)}
+          aria-selected={t.key === tab}
+          aria-controls={tabPanelId(t.key)}
+          tabIndex={t.key === tab ? 0 : -1}
+          onClick={() => setTab(t.key)}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function BudgetBody({ tab, setTab }: { tab: BudgetTab; setTab(tab: BudgetTab): void }) {
   const s = useSim((state) => state);
   // The columns' names follow the month, and the ledger the budget, which a delta replaces whole.
   useSim((state) => state?.budget);
@@ -574,27 +622,29 @@ function BudgetBody() {
           <h2>Budget</h2>
           <button type="button" className="stats-close" aria-label="Close the budget" onClick={toggleBudget}>×</button>
         </div>
+        <Tabs tab={tab} setTab={setTab} />
       </div>
       {s ? (
-        <>
-          <Ledger s={s} />
-          <MoneyGraph />
-          <Loans />
-          <TaxSliders />
-          <ChargeSliders />
-        </>
+        <div className="budget-tabpanel" role="tabpanel" id={tabPanelId(tab)} aria-labelledby={tabId(tab)}>
+          {tab === "budget" && <Ledger s={s} />}
+          {tab === "charts" && <MoneyGraph />}
+          {tab === "loans" && <Loans />}
+          {tab === "taxes" && <TaxSliders />}
+          {tab === "charges" && <ChargeSliders />}
+        </div>
       ) : null}
     </>
   );
 }
 
-/** The panel itself. Closed, it reads nothing and draws nothing. */
+/** The panel itself. Closed, it reads nothing and draws nothing, and opens again on the tab it was left on. */
 export function BudgetPanel() {
   const open = useUi((u) => u.budgetOpen);
   const order = usePanelOrder("budget");
+  const [tab, setTab] = useState<BudgetTab>("budget");
   return (
     <section id="budget-panel" className="panel stats-panel budget-panel" aria-label="Budget" hidden={!open} style={{ order }}>
-      {open && <BudgetBody />}
+      {open && <BudgetBody tab={tab} setTab={setTab} />}
     </section>
   );
 }

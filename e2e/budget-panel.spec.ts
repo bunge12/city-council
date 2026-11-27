@@ -55,6 +55,13 @@ function budget(page: Page) {
 /** Steps the held clock once, so a command the page just sent applies. */
 const stepOnce = (page: Page) => page.evaluate(() => window.cityCouncil.advance(1));
 
+/** Opens one of the panel's tabs and waits for its content. */
+async function openTab(page: Page, tab: "budget" | "charts" | "loans" | "taxes" | "charges"): Promise<void> {
+  await page.locator(`#budget-tab-${tab}`).click();
+  await expect(page.locator(`#budget-tab-${tab}`)).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(`#budget-tabpanel-${tab}`)).toBeVisible();
+}
+
 test("the budget panel shows the sim's ledger, moves a tax rate, and takes and repays a loan", async ({ page }, testInfo) => {
   const city = budgetCity();
   await openCity(page, city.bytes, { query: "webgl&heldclock", name: "Budget" });
@@ -70,6 +77,12 @@ test("the budget panel shows the sim's ledger, moves a tax rate, and takes and r
   await expect(panel).toBeHidden();
   await page.keyboard.press("KeyM");
   await expect(panel).toBeVisible();
+
+  // It opens on the budget tab, and only that tab's content is drawn.
+  await expect(panel.getByRole("tab")).toHaveText(["Budget", "Charts", "Loans", "Taxes", "Dev charges"]);
+  await expect(page.locator("#budget-tab-budget")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#budget-ledger")).toBeVisible();
+  for (const id of ["#budget-flow-graph", "#budget-credit", "#tax-residential", "#charge-residential"]) await expect(page.locator(id), id).toHaveCount(0);
 
   // Every line, last month and this month so far, is the sim's.
   const b = await budget(page);
@@ -93,12 +106,34 @@ test("the budget panel shows the sim's ledger, moves a tax rate, and takes and r
   expect(netLast).toBe(b.opening - city.lastMonthOpening);
   expect(netNow).toBe(b.treasury - b.opening);
   expect(Number(await page.locator("#budget-income").getAttribute("data-last")) - Number(await page.locator("#budget-expenses").getAttribute("data-last"))).toBe(netLast);
-  // The graph has a line for each closed month in the history.
-  await expect(page.locator("#budget-flow-graph")).toHaveAttribute("data-months", /^([1-9]|1[0-2])$/);
-  await expect(page.locator("#budget-month")).toContainText("income");
   await attach(page, testInfo, "budget-panel-income", panel);
 
+  // The graph has a line for each closed month in the history.
+  await openTab(page, "charts");
+  await expect(page.locator("#budget-ledger")).toHaveCount(0);
+  await expect(page.locator("#budget-flow-graph")).toHaveAttribute("data-months", /^([1-9]|1[0-2])$/);
+  await expect(page.locator("#budget-month")).toContainText("income");
+
+  // The arrow keys move between tabs, and the panel opens again on the one it was left on.
+  await page.locator("#budget-tab-charts").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator("#budget-tab-loans")).toBeFocused();
+  await expect(page.locator("#budget-tab-loans")).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator("#budget-tab-charts")).toHaveAttribute("aria-selected", "true");
+  await page.locator("#game-date").click();
+  await page.keyboard.press("KeyM");
+  await expect(panel).toBeHidden();
+  await page.keyboard.press("KeyM");
+  await expect(page.locator("#budget-flow-graph")).toBeVisible();
+
+  // The development charge sliders show their range from the balance file.
+  await openTab(page, "charges");
+  await expect(page.locator("#charge-residential")).toHaveAttribute("max", String(ECONOMY.developmentCharges.residential.max));
+  await attach(page, testInfo, "budget-panel-charges", panel);
+
   // The residential tax slider sends SetTaxRate, and the sim's rate follows.
+  await openTab(page, "taxes");
   const residential = page.locator("#tax-residential");
   await expect(residential).toHaveAttribute("min", String(ECONOMY.taxRates.residential.min));
   await expect(residential).toHaveAttribute("max", String(ECONOMY.taxRates.residential.max));
@@ -117,7 +152,10 @@ test("the budget panel shows the sim's ledger, moves a tax rate, and takes and r
   await expect.poll(async () => (await budget(page)).taxRates[1]).toBe(Math.round((ECONOMY.taxRates.commercial.default + 0.001) * 1000) / 1000);
   await expect(commercial).toHaveAttribute("data-value", String((await budget(page)).taxRates[1]));
 
+  await attach(page, testInfo, "budget-panel-taxes", panel);
+
   // A loan within the credit limit: the treasury rises by the principal and the loan is listed.
+  await openTab(page, "loans");
   const credit = page.locator("#budget-credit");
   await expect(credit).toHaveAttribute("data-left", String(city.creditLeft));
   const principal = Math.floor(city.creditLeft / 2 / 1000) * 1000;
@@ -132,20 +170,22 @@ test("the budget panel shows the sim's ledger, moves a tax rate, and takes and r
   await expect(loanRow).toHaveAttribute("data-balance", String(principal));
   expect((await budget(page)).treasury).toBe(before + principal);
   await expect(credit).toHaveAttribute("data-owed", String(principal));
+  await attach(page, testInfo, "budget-panel-loan", panel);
+  await openTab(page, "budget");
   await expect(page.locator('#budget-ledger tr[data-line="loansTaken"]')).toHaveAttribute("data-now", String(principal));
-  await page.locator("#budget-loans").scrollIntoViewIfNeeded();
-  await attach(page, testInfo, "budget-panel-loan", page.locator('section[aria-label="Loans"]'));
-  await page.locator("#budget-flow-graph").scrollIntoViewIfNeeded();
+  await openTab(page, "charts");
   await page.locator("#budget-flow-graph").hover();
-  await attach(page, testInfo, "budget-panel-graph", page.locator('section[aria-label="The last year"]'));
+  await attach(page, testInfo, "budget-panel-graph", panel);
 
   // Repaying it takes its balance out and closes it.
+  await openTab(page, "loans");
   const id = await loanRow.getAttribute("data-loan");
   await page.locator(`#repay-loan-${id}`).click();
   await stepOnce(page);
   await expect(page.locator("#budget-loans")).toHaveCount(0);
   expect((await budget(page)).loans).toEqual([]);
   expect((await budget(page)).treasury).toBe(before);
+  await openTab(page, "budget");
   await expect(page.locator('#budget-ledger tr[data-line="loanRepayments"]')).toHaveAttribute("data-now", String(principal + (b.month[LEDGER_LINES.indexOf("loanRepayments")] ?? 0)));
 
   // Escape closes it.
