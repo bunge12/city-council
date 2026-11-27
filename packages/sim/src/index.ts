@@ -252,7 +252,7 @@ export {
   type Loan,
   type TakeLoanPayload,
 } from "./economy/loans";
-export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
+export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, otherSpendingPerYear, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
 export { TAX_SYSTEM, buildingTaxByLine, buildingTaxPerYear, businessTaxOf, collectTax, residentialTaxOf, shopSalesScale, type BusinessTaxTerms, type JobsFilled, type JobsFilledIn, type TaxByLine } from "./economy/tax";
 export { areaBudget, blockBudget, blockBudgets, blockBudgetsWith, budgetAreasOfSlots, chunkBudget, type AreaBudget, type BlockBudgets } from "./economy/block-budget";
 export { LAND_VALUE_BALANCE, LAND_VALUE_MAX, checkLandValueBalance } from "./landvalue/balance";

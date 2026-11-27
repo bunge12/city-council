@@ -17,9 +17,12 @@ import {
   ZONE_CLEAR,
   buildingIdLimit,
   isBuilding,
+  isUnlocked,
+  planRoadGrid,
   seeBuilding,
   step,
   submit,
+  terrainOf,
   type BuildingSeen,
   type SimState,
 } from "../../src/index";
@@ -108,6 +111,68 @@ const LOW_RISE = BALANCED.map((line, row) =>
  */
 const MILL_TOWN = BALANCED.map((line, row) => (row < 12 ? line.replace(/[opO]/g, "r") : ".".repeat(line.length)));
 
+/**
+ * The new town's quarters: grids of 4 by 4 blocks, nearest the street in
+ * first. The street in meets the town's north edge at column 8, so the
+ * first quarter is columns 8 to 11 of the top four rows, and each later one
+ * touches one laid before it.
+ */
+const QUARTER = 4;
+const QUARTERS: readonly [number, number][] = (() => {
+  const all: [number, number][] = [];
+  for (let row = 0; row < 24; row += QUARTER) for (let col = 0; col < 24; col += QUARTER) all.push([col, row]);
+  // By distance from the first quarter's centre, ties by row and then column, so the order is fixed.
+  const d = ([col, row]: [number, number]) => (col - 8) * (col - 8) + row * row;
+  return all.sort((a, b) => d(a) - d(b) || a[1] - b[1] || a[0] - b[0]);
+})();
+
+/**
+ * The new town zones each quarter from the balanced town's map, at the
+ * highest density the city has opened: a 3 waits for density 3, then
+ * reads 2 if density 2 is open, and 1 if not.
+ */
+function zoneQuarter(player: Player, col: number, row: number): void {
+  const opened = isUnlocked(player.state, "density3") ? 3 : isUnlocked(player.state, "density2") ? 2 : 1;
+  const byLetter = new Map<string, [number, number][]>();
+  for (let r = row; r < row + QUARTER; r++) {
+    for (let c = col; c < col + QUARTER; c++) {
+      const letter = BALANCED[r]?.[c];
+      if (letter !== undefined) byLetter.set(letter, [...(byLetter.get(letter) ?? []), [c, r]]);
+    }
+  }
+  for (const [letter, [zone, density]] of Object.entries(LETTERS)) {
+    const blocks = byLetter.get(letter);
+    if (blocks) zoneBlocks(player, blocks, zone, Math.min(density, opened));
+  }
+}
+
+/** The quarters each new town has laid. */
+const laid = new WeakMap<SimState, Set<string>>();
+
+/** How much the new town keeps in hand when it lays a quarter, for the upkeep before tax comes in. */
+const NEW_TOWN_RESERVE = 2_000_000;
+
+/**
+ * Lays and zones the new town's next quarter if the treasury pays for it
+ * with the reserve left over. Run at the start of each month, so a quarter
+ * a month at most, as a player who spends what the city has would.
+ */
+function growNewTown(player: Player): void {
+  const state = player.state;
+  const next = QUARTERS.findIndex(([col, row]) => !laid.get(state)?.has(`${col},${row}`));
+  if (next < 0) return;
+  const [col, row] = QUARTERS[next] as [number, number];
+  const plan = planRoadGrid(state.roads, terrainOf(state.seed), gridPayload(col, row, QUARTER));
+  // A quarter the ground refuses would be tried every month after: a change of the map or the grid rules did it.
+  if (!plan.ok) throw new Error(`the new town's quarter at block (${col}, ${row}) cannot be laid: ${plan.reason}`);
+  if (state.budget.treasury < plan.plan.cost + NEW_TOWN_RESERVE) return;
+  player.send("BuildRoadGrid", gridPayload(col, row, QUARTER));
+  zoneQuarter(player, col, row);
+  const set = laid.get(state) ?? new Set<string>();
+  set.add(`${col},${row}`);
+  laid.set(state, set);
+}
+
 /** Homes and nothing else. */
 const HOMES_ONLY = BALANCED.map((line) => "r".repeat(line.length));
 
@@ -128,23 +193,24 @@ export class Player {
   }
 }
 
+/** The street in from the connection, which meets the town's north edge. */
+function buildStreetIn(player: Player): void {
+  player.send("BuildRoad", { from: STUB, to: { x: STUB.x, z: Z0 }, type: "street" });
+}
+
+/** A grid of `blocks` by `blocks` street blocks whose north-west block is (col, row). */
+function gridPayload(col: number, row: number, blocks: number) {
+  const x = X0 + col * SPACING;
+  const z = Z0 + row * SPACING;
+  const side = blocks * SPACING;
+  return { origin: { x, z }, along: { x: x + side, z }, across: { x, z: z + side }, depth: SPACING - 10, width: SPACING - 10, type: "street" };
+}
+
 /** The street in from the connection and the grids of street blocks. */
 function buildRoads(player: Player): void {
-  player.send("BuildRoad", { from: STUB, to: { x: STUB.x, z: Z0 }, type: "street" });
-  const side = GRID * SPACING;
+  buildStreetIn(player);
   for (let gz = 0; gz < GRIDS; gz++) {
-    for (let gx = 0; gx < GRIDS; gx++) {
-      const x = X0 + gx * side;
-      const z = Z0 + gz * side;
-      player.send("BuildRoadGrid", {
-        origin: { x, z },
-        along: { x: x + side, z },
-        across: { x, z: z + side },
-        depth: SPACING - 10,
-        width: SPACING - 10,
-        type: "street",
-      });
-    }
+    for (let gx = 0; gx < GRIDS; gx++) player.send("BuildRoadGrid", gridPayload(gx * GRID, gz * GRID, GRID));
   }
 }
 
@@ -200,11 +266,31 @@ export interface City {
   setup(player: Player): void;
   /** What the player does at the start of game year `year`, from 2, before that year runs. */
   atYear?(player: Player, year: number): void;
+  /** What the player does at the start of each game month after the first, once the month before has closed. */
+  atMonth?(player: Player): void;
   /** Ground zoned up whose share under density 3 buildings the table prints, as zone and density. */
   watch?: { zone: string; density: number };
+  /**
+   * Whether it starts as a new city does, on the starting grant alone with
+   * no milestones. The others are funded and credited with every milestone,
+   * as the scale cities are, so they build what they built before M4.
+   */
+  onGrant?: boolean;
 }
 
 export const CITIES: readonly City[] = [
+  {
+    name: "new-town",
+    about: "A new city on its starting grant: the street in and a first quarter of 4 by 4 blocks zoned from the balanced town's map at density 1, then a quarter more at the start of any month the treasury pays for it with $2M to spare, at the densities opened",
+    onGrant: true,
+    setup(player) {
+      buildStreetIn(player);
+      growNewTown(player);
+    },
+    atMonth(player) {
+      growNewTown(player);
+    },
+  },
   {
     name: "homes",
     about: "Homes only: the whole town zoned R1, no jobs anywhere",

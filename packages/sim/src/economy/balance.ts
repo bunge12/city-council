@@ -98,6 +98,7 @@ export interface EconomyBalanceFile {
   expropriationRecords: { max: number; source: string; placeholder?: boolean };
   loans: { maxOpen: number; offers: LoanOffer[]; source: string; placeholder?: boolean };
   creditLimit: { perResident: EconomyPrice; lastYearTaxMultiple: number; largerLoansMultiple: number; source: string; placeholder?: boolean };
+  otherSpending: { perResident: EconomyPrice; source: string; placeholder?: boolean; note?: string };
   landmarks: LandmarkFile[];
 }
 
@@ -163,6 +164,12 @@ export interface Economy {
   loans: { maxOpen: number; offers: readonly LoanOffer[] };
   /** The credit limit's weights (economy/loans.ts, M4-11): whole dollars a resident, a multiple of a year's tax income, and the multiple once `largerLoans` is open. */
   creditLimit: { perResident: number; lastYearTaxMultiple: number; largerLoansMultiple: number };
+  /**
+   * Whole 2026 dollars a year the city spends for each resident on what has
+   * no building yet, on the other spending line (M4-19). M8 and M9 replace
+   * it a service at a time.
+   */
+  otherSpendingPerResident: number;
   /** The landmarks, by their type (M4-13). */
   landmarks: readonly Landmark[];
 }
@@ -416,8 +423,15 @@ export function checkEconomyBalance(data: unknown): string[] {
       return out;
     }),
   );
+  errors.push(
+    ...blockProblems(data, "otherSpending", (o) => [
+      ...priceProblems(o["perResident"], "otherSpending.perResident", toYear),
+      ...sourceProblems(o, "otherSpending"),
+      ...unknownKeys(o, ["perResident", ...WORDS], "otherSpending"),
+    ]),
+  );
   errors.push(...landmarkProblems(data["landmarks"], toYear));
-  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "developmentChargeGrowth", "business", "value", "floorSpace", "eminentDomain", "expropriationRecords", "loans", "creditLimit", "landmarks"], "the file"));
+  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "developmentChargeGrowth", "business", "value", "floorSpace", "eminentDomain", "expropriationRecords", "loans", "creditLimit", "otherSpending", "landmarks"], "the file"));
   return errors;
 }
 
@@ -478,6 +492,7 @@ export function resolveEconomy(data: unknown): Economy {
       lastYearTaxMultiple: file.creditLimit.lastYearTaxMultiple,
       largerLoansMultiple: file.creditLimit.largerLoansMultiple,
     },
+    otherSpendingPerResident: at(file.otherSpending.perResident),
     landmarks: file.landmarks.map((l, index) => {
       const price = at(l.price);
       return {
