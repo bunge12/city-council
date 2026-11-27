@@ -18,6 +18,8 @@ declare const window: {
     renderStatus(): RenderStatus | null;
     saves: { status: { city: { name: string }; problem: string | null } | null };
     view: Promise<{ flush?: () => void }>;
+    mirror?: { state: { tick: number; seed: number } | null };
+    loading?: () => unknown;
   };
 };
 declare const document: {
@@ -38,9 +40,67 @@ export function withFlush(url: string): string {
   return `${path}?${["flush", ...rest].join("&")}`;
 }
 
-/** Waits until the page has drawn its first frame with terrain. */
+/** Errors and console errors each page has had since `watchErrors` was first called on it, the last few. */
+const pageErrors = new WeakMap<Page, string[]>();
+
+/** Starts keeping `page`'s uncaught errors and console errors, for `loadReport`. Calling it again does nothing. */
+function watchErrors(page: Page): void {
+  if (pageErrors.has(page)) return;
+  const kept: string[] = [];
+  pageErrors.set(page, kept);
+  const keep = (line: string) => {
+    kept.push(line.slice(0, 500));
+    if (kept.length > 10) kept.shift();
+  };
+  page.on("pageerror", (error) => keep(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") keep(`console: ${message.text()}`);
+  });
+  page.on("crash", () => keep("the page crashed"));
+}
+
+/**
+ * What the page says about its load: the body's data flags (the loading
+ * stages it passed, whether the worker reported on saves, whether the city
+ * is open in another tab, buildings pending), the save status, the mirror's
+ * tick and the errors it had. For a `ready` that timed out, so the CI log
+ * shows where the load stopped without the trace, which the artifact store
+ * may not let a session download (issues #432 and #447). A page whose main
+ * thread is stuck cannot answer, and says so after a few seconds.
+ */
+export async function loadReport(page: Page): Promise<string> {
+  const errors = pageErrors.get(page) ?? [];
+  const asked = page
+    .evaluate(() => {
+      const council = window.cityCouncil as typeof window.cityCouncil | undefined;
+      const status = council?.saves.status ?? null;
+      return {
+        flags: { ...document.body.dataset },
+        saves: status,
+        mirror: council?.mirror?.state ? { tick: council.mirror.state.tick, seed: council.mirror.state.seed } : null,
+        loading: council?.loading?.() ?? null,
+      };
+    })
+    .then((found) => JSON.stringify(found))
+    .catch((error: unknown) => `the page could not be asked (${error instanceof Error ? error.message : String(error)})`);
+  const stuck = new Promise<string>((resolve) => {
+    const timer = setTimeout(() => resolve("the page did not answer within 10 s, so its main thread is stuck"), 10_000);
+    void asked.finally(() => clearTimeout(timer));
+  });
+  const found = await Promise.race([asked, stuck]);
+  return `${found}; errors: ${errors.length > 0 ? errors.join(" | ") : "none"}`;
+}
+
+/** Waits until the page has drawn its first frame with terrain. A timeout says where the load stopped (`loadReport`). */
 export async function ready(page: Page, timeout = 60_000): Promise<void> {
-  await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout });
+  watchErrors(page);
+  try {
+    await page.waitForFunction(() => document.body.dataset["renderReady"] === "true", null, { timeout });
+  } catch (error) {
+    if (!(error instanceof Error) || error.name !== "TimeoutError") throw error;
+    error.message = `${error.message}\nThe page when the wait gave up: ${await loadReport(page)}`;
+    throw error;
+  }
 }
 
 /** Waits until the city has loaded: the sim's tick is on screen and the worker has reported on saves. */
@@ -69,6 +129,7 @@ export async function renderStatus(page: Page): Promise<RenderStatus> {
 
 /** Goes to `url` and waits until the page is `ready`, then returns its render status. */
 export async function openPage(page: Page, url = "./", timeout = 60_000): Promise<RenderStatus> {
+  watchErrors(page);
   await page.goto(withFlush(url));
   await ready(page, timeout);
   return renderStatus(page);
@@ -105,6 +166,7 @@ export async function openCity(page: Page, city: SimState | Uint8Array, options:
   const address = `e2e-fixture/${++served}/${encodeURIComponent(name)}.city`;
   await page.route(`**/${address}`, (route) => route.fulfill({ body: Buffer.from(bytes), contentType: "application/octet-stream" }), { times: 1 });
   const flags = query.replace(/^\/?\??/, "");
+  watchErrors(page);
   await page.goto(withFlush(`./?${flags ? `${flags}&` : ""}load=${encodeURIComponent(address)}`));
   await ready(page, timeout);
   // A file that could not be had opens the tab's usual city with a note, so check it was this one.
