@@ -263,6 +263,29 @@ export class ModelBuilder {
     this.close();
   }
 
+  /**
+   * A dome of `sides` sides around (x, z): radius `r` at height `y`, rising
+   * `rise` metres to a point, in `rings` bands that bend in towards the top
+   * as a quarter circle does. Each band is flat faced, so it reads as
+   * stylised as the rest. All `surface`.
+   */
+  dome(x: number, z: number, r: number, y: number, rise: number, sides: number, rings: number, surface: Surface): void {
+    const inside: Vec3 = [x, y, z];
+    this.open();
+    const at = (ring: number, k: number): Vec3 => {
+      const t = (ring / rings) * (Math.PI / 2);
+      const a = ((k + 0.5) / sides) * Math.PI * 2;
+      const rr = r * Math.cos(t);
+      return [x + Math.cos(a) * rr, y + rise * Math.sin(t), z + Math.sin(a) * rr];
+    };
+    for (let ring = 0; ring < rings - 1; ring++) {
+      for (let k = 0; k < sides; k++) this.face([at(ring, k), at(ring, k + 1), at(ring + 1, k + 1), at(ring + 1, k)], surface, inside);
+    }
+    const apex: Vec3 = [x, y + rise, z];
+    for (let k = 0; k < sides; k++) this.face([at(rings - 1, k), at(rings - 1, k + 1), apex], surface, inside);
+    this.close();
+  }
+
   private lid(x: number, z: number, y0: number, y1: number, ring: readonly Vec3[], sides: number, top: Surface): void {
     // A fan from the middle, so the lid is a convex set of triangles.
     for (let k = 0; k < sides; k++) {

@@ -61,7 +61,8 @@ import {
   type Node,
   type Object3D,
 } from "three/webgpu";
-import { BUILDING_TYPES, CHUNKS_PER_SIDE, CHUNK_SIZE, ZONING_BALANCE, type BuildingInfo } from "@city-council/sim";
+import { BUILDING_TYPES, CHUNKS_PER_SIDE, CHUNK_SIZE, LANDMARKS, ZONING_BALANCE, type BuildingInfo } from "@city-council/sim";
+import { landmarkTypeId } from "../theme/theme";
 import type { ZoomBand } from "../camera/zoom-band";
 import { SURFACE, simplify, type ModelArrays } from "../theme/model";
 import type { Theme } from "../theme/theme";
@@ -109,6 +110,12 @@ export interface BuildingSource {
   buildingsInChunk(chunk: number): BuildingInfo[];
   /** The chunk building `id`'s lot's centre is in, or -1 if there is no such building or lot. */
   buildingChunk(id: number): number;
+  /**
+   * The stage of a landmark of kind `type` placed on tick `builtAt`, and the
+   * tick it last grew on (M4-17, protocol/landmark-stage.ts). Without it a
+   * landmark is drawn at its first stage, going up from when it was placed.
+   */
+  landmarkLook?(type: number, builtAt: number): { stage: number; since: number };
 }
 
 /** What one form draws in the last frame: chunks, buildings and meshes, each mesh one draw call. */
@@ -770,9 +777,16 @@ function edgeDistance2(q: readonly number[], x: number, z: number): number {
   return best;
 }
 
-/** The flat form's colour for a building type: its zone's at its density, as the overlay draws them. */
-function flatColour(type: number): number {
-  const t = BUILDING_TYPES[type];
+/** The theme's key for a building's models and palette: its type's id, or for a landmark `landmark:` and its kind's id (M4-17). */
+function typeIdOf(info: Pick<BuildingInfo, "type" | "landmark">): string {
+  if (info.landmark) return landmarkTypeId(LANDMARKS[info.type]?.id ?? "");
+  return BUILDING_TYPES[info.type]?.id ?? "";
+}
+
+/** The flat form's colour for a building: its zone's at its density, as the overlay draws them, or the landmarks' own (M4-17). */
+function flatColour(info: Pick<BuildingInfo, "type" | "landmark">): number {
+  if (info.landmark) return BUILDINGS.landmarkFlat;
+  const t = BUILDING_TYPES[info.type];
   const shades = t ? CELLS.zones[t.zone] : undefined;
   return shades?.[(t?.density ?? 1) - 1] ?? CELLS.unzoned;
 }
@@ -972,10 +986,19 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     return mesh;
   }
 
-  function modelFor(info: BuildingInfo): Model {
-    const type = BUILDING_TYPES[info.type];
-    const typeId = type?.id ?? "";
-    const model = info.variant % theme.modelCount(typeId);
+  /**
+   * The model number a building draws and the tick it goes up from: its
+   * variant's model and the tick it was built, or for a landmark its
+   * stage's model and when it last grew (M4-17).
+   */
+  function lookOf(info: BuildingInfo): { model: number; builtAt: number } {
+    if (!info.landmark) return { model: info.variant % theme.modelCount(typeIdOf(info)), builtAt: info.builtAt };
+    const look = source.landmarkLook?.(info.type, info.builtAt) ?? { stage: 1, since: info.builtAt };
+    return { model: Math.max(0, Math.min(theme.modelCount(typeIdOf(info)) - 1, look.stage - 1)), builtAt: look.since };
+  }
+
+  function modelFor(info: BuildingInfo, model: number): Model {
+    const typeId = typeIdOf(info);
     const key = `${typeId}/${model}/${info.width}`;
     let m = models.get(key);
     if (m) return m;
@@ -1283,18 +1306,18 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
   }
 
   function placeInfo(info: BuildingInfo, place: Placement): { sx: number; sz: number } {
-    const typeId = BUILDING_TYPES[info.type]?.id ?? "";
+    const typeId = typeIdOf(info);
     return { sx: place.width / (info.width * CELL), sz: place.depth / (theme.modelDepth(typeId) * CELL) };
   }
 
   function add(info: BuildingInfo, place: Placement, sig: string, chunk: number): void {
-    const model = modelFor(info);
-    const typeId = BUILDING_TYPES[info.type]?.id ?? "";
-    const tint = tintFor(info.id, theme.palette(typeId));
+    const look = lookOf(info);
+    const model = modelFor(info, look.model);
+    const tint = tintFor(info.id, theme.palette(typeIdOf(info)));
     const corners = info.corners ? [...info.corners] : [];
     const lots = cornerChunks(corners);
     fileLot(info.id, lots);
-    const p: Placed = { id: info.id, model, slot: -1, chunk, sig, lotChunks: lots, corners, tint, look: lookFor(info.id), place, ...placeInfo(info, place), flat: flatColour(info.type), builtAt: info.builtAt, scaffold: -1, use: useOf(info) };
+    const p: Placed = { id: info.id, model, slot: -1, chunk, sig, lotChunks: lots, corners, tint, look: lookFor(info.id), place, ...placeInfo(info, place), flat: flatColour(info), builtAt: look.builtAt, scaffold: -1, use: useOf(info) };
     placed.set(info.id, p);
     if (underConstruction(p.builtAt, now)) young.add(p);
     chunkAt(chunk).ids.add(info.id);
@@ -1309,7 +1332,9 @@ export function createBuildingLayer(parent: Object3D, source: BuildingSource, th
     for (const info of infos) {
       if (!info.corners) continue;
       seen.add(info.id);
-      const sig = `${info.type}/${info.variant}/${info.width}/${info.depth}/${info.builtAt}`;
+      // A landmark's model and the tick it goes up from follow its stage, so a stage it grows is a new model (M4-17).
+      const look = info.landmark ? lookOf(info) : null;
+      const sig = look ? `landmark/${info.type}/${look.model}/${info.width}/${info.depth}/${look.builtAt}` : `${info.type}/${info.variant}/${info.width}/${info.depth}/${info.builtAt}`;
       const p = placed.get(info.id);
       const use = useOf(info);
       if (p && p.sig === sig && mode === "apply" && p.chunk === c && sameCorners(p.corners, info.corners)) {

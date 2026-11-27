@@ -15,6 +15,7 @@ import type { GridToolController } from "../tools/grid-tool";
 import type { RoadToolController } from "../tools/road-tool";
 import type { RouteToolController } from "../tools/route-tool";
 import type { ZoneToolController } from "../tools/zone-tool";
+import type { LandmarkToolController } from "../tools/landmark-tool";
 
 /** What a download wrote, for the page and Playwright. */
 export interface DownloadedCity {
@@ -52,6 +53,8 @@ export interface AppServices {
   bulldozeTool: BulldozeToolController;
   /** The zone tool's input handling. Its state is in the UI store too. */
   zoneTool: ZoneToolController;
+  /** The landmark tool's input handling (M4-17). Its state is in the UI store too. */
+  landmarkTool: LandmarkToolController;
   /** The debug panel's route tool. Its state is in the UI store too. */
   routeTool: RouteToolController;
   /** The debug panel's block overlay. Its state is in the UI store too. */

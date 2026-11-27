@@ -22,7 +22,8 @@
     "land-value-scale.spec.ts",
     "scale-cities-load.spec.ts",
     "scale-checkpoints.spec.ts",
-    "district-band.spec.ts"
+    "district-band.spec.ts",
+    "city-hall-scale.spec.ts"
   ],
   "evidence": [
     "block-strips.spec.ts",
@@ -60,6 +61,8 @@
     "cell-snap.spec.ts": 46,
     "cells-scale.spec.ts": 683,
     "city-file.spec.ts": 91,
+    "city-hall-scale.spec.ts": 150,
+    "city-hall.spec.ts": 60,
     "connections.spec.ts": 39,
     "construction-frame-time.spec.ts": 159,
     "construction.spec.ts": 22,

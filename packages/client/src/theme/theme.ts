@@ -8,6 +8,16 @@
 
 import type { ModelArrays } from "./model";
 
+/**
+ * The type id a theme files a landmark's models and palette under:
+ * `landmark:` and its id in the sim's economy.json (M4-17). A landmark's
+ * models are one a stage, so the stage picks the model, as a variant does
+ * for an ordinary building.
+ */
+export function landmarkTypeId(id: string): string {
+  return `landmark:${id}`;
+}
+
 /** The colours a building type's buildings are tinted from, as sRGB hex. */
 export interface Palette {
   wall: readonly number[];

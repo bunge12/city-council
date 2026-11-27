@@ -18,6 +18,7 @@ export type ShortcutAction =
   | { kind: "bulldozeTool" }
   | { kind: "upgradeTool" }
   | { kind: "zoneTool" }
+  | { kind: "landmarkTool" }
   | { kind: "zoneDepth"; by: number }
   | { kind: "overlay"; id: OverlayEntry["id"] }
   | { kind: "roadType"; type: ToolRoadType }
@@ -49,6 +50,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["Enter", "NumpadEnter"], label: "Enter", description: "build the grid drawn with the grid tool", action: { kind: "confirm" } },
   { codes: ["KeyV"], label: "V", description: "upgrade tool on or off", action: { kind: "upgradeTool" } },
   { codes: ["KeyK"], label: "K", description: "zone tool, with the zoning overlay, on or off", action: { kind: "zoneTool" } },
+  { codes: ["KeyH"], label: "H", description: "City Hall tool on or off, once City Hall is unlocked", action: { kind: "landmarkTool" } },
   ...OVERLAYS.map((o): Shortcut => ({ codes: [o.code], label: o.key, description: `${o.label.toLowerCase()} overlay on or off`, action: { kind: "overlay", id: o.id } })),
   { codes: ["BracketLeft"], label: "[", description: "zone tool: fill one cell shallower", action: { kind: "zoneDepth", by: -1 } },
   { codes: ["BracketRight"], label: "]", description: "zone tool: fill one cell deeper", action: { kind: "zoneDepth", by: 1 } },
@@ -85,6 +87,7 @@ export const CAMERA_KEYS: readonly { label: string; description: string }[] = [
   { label: "Click a road", description: "with the zone tool's fill: zone the strip on the side the pointer is" },
   { label: "Drag over cells", description: "with the zone tool's brush: zone the cells under the pointer" },
   { label: "Right-click while brushing", description: "with the zone tool: drop the brush stroke" },
+  { label: "Click beside a road", description: "with the City Hall tool: place City Hall on the side the pointer is" },
   { label: "Ctrl Z, Cmd Z", description: "undo your last road or zoning change" },
 ];
 

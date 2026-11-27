@@ -695,6 +695,12 @@ export const BUILDINGS = {
    * tallest tree's height (decor-meshes.ts), with some to spare.
    */
   treeClearance: 5,
+  /**
+   * The flat block a landmark is drawn as in the city band (M4-17), sRGB: a
+   * brick red that no zone's colour is near, so City Hall reads as
+   * civic when every building is a block of its zone's colour.
+   */
+  landmarkFlat: 0xc0583f,
 } as const;
 
 /**
@@ -760,6 +766,18 @@ export const ZONE_PREVIEW = {
   lift: 0.3,
   /** Each cell is drawn this share of its size, around its centre, so neighbouring cells stay apart. */
   inset: 0.9,
+} as const;
+
+/**
+ * The landmark tool's lot (M4-17): the cells it would take, drawn as the
+ * zone tool's are, green where the sim would build it and red where it
+ * would not or the treasury cannot pay. sRGB.
+ */
+export const LANDMARK_PREVIEW = {
+  ok: 0x4cc26a,
+  refused: 0xe0533d,
+  opacity: 0.75,
+  pendingOpacity: 0.5,
 } as const;
 
 /**

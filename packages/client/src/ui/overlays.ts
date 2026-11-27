@@ -2,7 +2,8 @@
 // overlay the dock and the keys offer, so M5 and M8 add theirs as entries.
 // Zoning is an overlay too, but it is not in the list: the zone tool turns
 // it on and off with itself, and so do the road and grid tools, so the
-// player sees the cells a road would bring beside the ones already there.
+// player sees the cells a road would bring beside the ones already there,
+// and the landmark tool, so the cells a lot would take show (M4-17).
 // Only one overlay shows at a time.
 
 import type { CellColouring } from "../render/cell-geometry";
@@ -46,7 +47,7 @@ export function colouringOf(overlay: OverlayId | null): CellColouring {
 }
 
 /** The tools that bring the zoning overlay with them. */
-const ZONING_TOOLS: readonly (string | null)[] = ["zone", "road", "grid"];
+const ZONING_TOOLS: readonly (string | null)[] = ["zone", "road", "grid", "landmark"];
 
 /** Whether tool `tool` brings the zoning overlay with it. */
 export function bringsZoning(tool: string | null): boolean {

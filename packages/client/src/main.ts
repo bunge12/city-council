@@ -52,7 +52,7 @@ import { connectionMarks } from "./render/connection-marks-geometry";
 import type { RoadNet } from "./render/road-geometry";
 import { createSnapMarkLayer } from "./render/snap-marks";
 import { cellColour } from "./render/cell-geometry";
-import { BUILDINGS, ROAD_CELLS, ZONE_PREVIEW } from "./render/config";
+import { BUILDINGS, LANDMARK_PREVIEW, ROAD_CELLS, ZONE_PREVIEW } from "./render/config";
 import { createZonePreviewLayer, type ZoneMark } from "./render/zone-preview";
 import { createBuildingMarkLayer } from "./render/building-marks";
 import { createGameClock } from "./render/construction";
@@ -68,11 +68,12 @@ import { RoadToolController, type RoadPreview } from "./tools/road-tool";
 import { RouteToolController, routeShapes } from "./tools/route-tool";
 import type { Snap } from "./tools/snap";
 import { ZoneToolController, type ZoneHover, type ZonePreview } from "./tools/zone-tool";
+import { LandmarkToolController, type LandmarkHover, type LandmarkPreview } from "./tools/landmark-tool";
 import { mountUi } from "./ui/App";
 import { offsetCells } from "./ui/RoadReadout";
 import type { AppServices, DownloadedCity } from "./ui/services";
-import type { Occupants } from "./ui/BuildingReadout";
-import { setBlockLabels, setBudgetHover, setBuildingHover, setBulldozeHover, setEditHover, setLandValueHover, setPanel, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
+import type { Occupants, Stage } from "./ui/BuildingReadout";
+import { setBlockLabels, setBudgetHover, setBuildingHover, setBulldozeHover, setEditHover, setLandValueHover, setLandmarkHover, setPanel, setRoadHover, setViewReadout, setZoneHover, useGraphics, useSound, useUi, type BlockLabel } from "./ui/store";
 import { colouringOf, overlayAfterTool } from "./ui/overlays";
 import { createLoadingScreen } from "./ui/loading-screen";
 import type { LoadStageTime } from "./ui/loading";
@@ -428,6 +429,14 @@ const zoneTool = new ZoneToolController({
   send: (payload) => sendCommand("ZoneCells", payload),
   strokeId: () => mirror.upcomingSeq,
 });
+const landmarkTool = new LandmarkToolController({
+  get: () => useUi.getState(),
+  set: (patch) => useUi.setState(patch),
+  city: () => mirror.state,
+  version: () => cityVersion,
+  plan: (payload) => mirror.planLandmark(payload),
+  send: (payload) => sendCommand("PlaceLandmark", payload),
+});
 // However the zone tool is left, by its button or by picking another tool, it drops its stroke.
 useUi.subscribe((now, before) => {
   if (now.tool !== before.tool) zoneTool.toolChanged(now.tool, before.tool);
@@ -508,6 +517,7 @@ const services: AppServices = {
   editTool,
   bulldozeTool,
   zoneTool,
+  landmarkTool,
   routeTool,
   blockOverlay,
   setPreset: choosePresetInSettings,
@@ -729,7 +739,7 @@ const viewReady = createView(canvas, wantsWebGL(location.search), { ...viewOptio
   });
   // Buildings come from the mirror alone too: a snapshot draws them all,
   // nearest the camera first, and a delta the chunks it changed.
-  view.setBuildingSource({ buildingsInChunk: (chunk) => mirror.buildingsInChunk(chunk), buildingChunk: (id) => mirror.buildingChunk(id) });
+  view.setBuildingSource({ buildingsInChunk: (chunk) => mirror.buildingsInChunk(chunk), buildingChunk: (id) => mirror.buildingChunk(id), landmarkLook: (type, builtAt) => mirror.landmarkLook(type, builtAt) });
   const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
   const buildingReadout = () => {
     const b = view.buildingStats();
@@ -996,6 +1006,21 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       zoneTool.click({ ground: hit, segment: pointer ? segmentAt(pointer) : -1 });
       return;
     }
+    if (landmarkTool.active()) {
+      const pointer = controls.pointer();
+      landmarkTool.click({ ground: hit, segment: pointer ? segmentAt(pointer) : -1 }, mirror.state?.budget.treasury ?? 0);
+      return;
+    }
+    // With no tool on, a click on a landmark opens the budget panel (M4-17): City Hall is where the budget lives.
+    if (useUi.getState().tool === null) {
+      const pointer = controls.pointer();
+      const id = pointer ? buildingAtPointer(pointer) : -1;
+      const picked = id >= 0 ? mirror.building(id) : hit ? mirror.buildingAt(hit.x, hit.z) : null;
+      if (picked?.landmark) {
+        setPanel("budget", true);
+        return;
+      }
+    }
     // The grid tool draws its first side with a drag; a click fixes how far the grid reaches, where it was clicked.
     if (gridTool.active()) {
       gridTool.hover(snapAt(hit), controls.altHeld());
@@ -1083,6 +1108,12 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   const marks = createSnapMarkLayer(view.scene, () => hooks.terrain);
   const connectionLayer = createConnectionMarkLayer(view.scene, () => hooks.terrain);
   const zoneLayer = createZonePreviewLayer(view.scene, () => hooks.terrain);
+  // The landmark tool's lot, green or red, and a lot sent and not yet built (M4-17).
+  const landmarkLayer = createZonePreviewLayer(view.scene, () => hooks.terrain, { name: "landmark", opacity: LANDMARK_PREVIEW.opacity, pendingOpacity: LANDMARK_PREVIEW.pendingOpacity });
+  const landmarkMarks = (p: LandmarkPreview, look: "live" | "pending"): ZoneMark[] => {
+    const colour = look === "pending" || (p.ok && p.refusal === null) ? LANDMARK_PREVIEW.ok : LANDMARK_PREVIEW.refused;
+    return p.cells.map((c) => ({ corners: c.corners, colour }));
+  };
   // The cells a road or grid would open, over the zoning overlay the road tools bring.
   const roadCellLayer = createZonePreviewLayer(view.scene, () => hooks.terrain, { name: "road cells", opacity: ROAD_CELLS.opacity, pendingOpacity: ROAD_CELLS.pendingOpacity });
   const roadCellMarks = (previews: readonly { newCells: Float64Array | null }[]): ZoneMark[] => {
@@ -1273,6 +1304,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
   let hoverKey = "";
   let hoverBuilding: BuildingInfo | null = null;
   let hoverGround: BuildingGround | null = null;
+  let hoverStage: Stage | null = null;
   const buildingUnder = (cursor: { x: number; z: number } | null): BuildingInfo | null => {
     const key = useUi.getState().tool === null && cursor ? `${cursor.x.toFixed(1)},${cursor.z.toFixed(1)},${worldVersion}` : "";
     if (key !== hoverKey) {
@@ -1280,6 +1312,8 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       hoverBuilding = key === "" || !cursor ? null : mirror.buildingAt(cursor.x, cursor.z);
       // Whether it stands as a permitted existing use, and what its ground would rebuild as (M3-14).
       hoverGround = hoverBuilding ? mirror.buildingGround(hoverBuilding.id) : null;
+      // A landmark's stage, from the milestones reached (M4-17). A milestone that grows it counts as a change to it.
+      hoverStage = hoverBuilding?.landmark ? mirror.landmarkLook(hoverBuilding.type, hoverBuilding.builtAt) : null;
     }
     return hoverBuilding;
   };
@@ -1445,6 +1479,17 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
       `${zoneShown ? zonePreviewId : "-"}|${zonePendingNow.map((p) => p.id).join(",")}`,
     );
     document.body.dataset["zonePreview"] = zoneNow ? (zoneNow.ok ? String(zoneNow.cells.length) : "0") : "";
+    // The landmark tool: a lot sent, then the one under the pointer.
+    const landmarkHover: LandmarkHover = { ground: cursor, segment: landmarkTool.active() && pointerNow ? segmentAt(pointerNow) : -1 };
+    const landmarkNow = landmarkTool.active() ? landmarkTool.preview(landmarkHover, mirror.state?.budget.treasury ?? 0) : null;
+    const landmarkSent = useUi.getState().landmarkPending;
+    landmarkLayer.show(
+      () => (landmarkNow ? landmarkMarks(landmarkNow, "live") : []),
+      () => landmarkSent.flatMap((p) => landmarkMarks(p.preview, "pending")),
+      `${previewId(landmarkNow)}|${landmarkSent.map((p) => p.id).join(",")}`,
+    );
+    document.body.dataset["landmarkPreview"] = landmarkNow ? (landmarkNow.ok && landmarkNow.refusal === null ? "ok" : "refused") : "";
+    setLandmarkHover(landmarkNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, preview: landmarkNow } : null);
     // The road and grid tools: the cells the roads in flight would open, then those of the road drawn.
     const opening = [...(live?.ok ? [live] : []), ...(gridNow?.ok ? [gridNow] : [])];
     const openingSent = [...useUi.getState().roadPending.map((p) => p.preview), ...useUi.getState().gridPending.map((p) => p.preview)];
@@ -1473,7 +1518,7 @@ function startCamera(view: View, canvas: HTMLCanvasElement, terrain: Terrain): C
     setBudgetHover(budgetNow && pointerNow ? { x: pointerNow.x, y: pointerNow.y, area: budgetNow.area, budget: budgetNow.budget } : null);
     document.body.dataset["budgetHover"] = budgetNow ? String(budgetNow.budget.net) : "";
     const under = land || budgetNow ? null : buildingUnder(cursor);
-    setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under, occupants: occupantsOf(under.id), ground: hoverGround } : null);
+    setBuildingHover(under && pointerNow ? { x: pointerNow.x, y: pointerNow.y, building: under, occupants: occupantsOf(under.id), ground: hoverGround, stage: hoverStage } : null);
     document.body.dataset["buildingHover"] = under ? String(under.id) : "";
     document.body.dataset["buildingsToClear"] = String((liveClears?.clears?.ids.length ?? 0) + (gridClearsNow?.clears?.ids.length ?? 0));
     buildingMarks.show(
