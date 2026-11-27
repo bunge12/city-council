@@ -187,7 +187,8 @@ export interface MoneyMonth {
 }
 
 /**
- * The last `months` closed months of the money history, oldest first. Each
+ * The last `months` closed months of the money history, oldest first, from
+ * the city's first month on. Each
  * sample is taken on a month's first tick and holds the month just closed:
  * its income and expenses, and the treasury the new month opened with,
  * which is the closed month's last.
@@ -200,6 +201,7 @@ export function moneyMonths(stats: Pick<StatsState, "money" | "next">, tick: num
   // The newest sample was taken at the start of the month in progress, so it holds the month before.
   const newest = newestMonth(tick) - 1;
   const n = income.length;
-  return income.map((value, k) => ({ month: newest - (n - 1 - k), income: value, expenses: expenses[k] ?? 0, treasury: treasury[k] ?? 0 }));
+  // The month before the first holds only the starting grant, which would flatten every month after it: the graph starts with play.
+  return income.map((value, k) => ({ month: newest - (n - 1 - k), income: value, expenses: expenses[k] ?? 0, treasury: treasury[k] ?? 0 })).filter((m) => m.month >= 0);
 }
 

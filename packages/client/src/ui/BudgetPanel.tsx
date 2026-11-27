@@ -307,17 +307,34 @@ function Slider({
   const ref = useRef<HTMLInputElement>(null);
   const sendRef = useRef(send);
   sendRef.current = send;
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  /** Commands sent and not yet settled, and whether the thumb has moved since the last one was sent. */
+  const pending = useRef(0);
+  const dragging = useRef(false);
   const noteId = useId();
-  // The sim's value came back: the draft is done.
-  useEffect(() => setDraft(null), [value]);
+  // The draft gives way to the sim's value once nothing is in flight or in hand, so another player's change shows too.
+  useEffect(() => {
+    if (pending.current === 0 && !dragging.current) setDraft(null);
+  }, [value]);
   useEffect(() => {
     const input = ref.current;
     if (!input) return;
     const onChange = () => {
-      void sendRef.current(Number(input.value)).then((result) => {
-        setProblem(result.ok ? null : (result.reason ?? "Refused"));
-        if (!result.ok) setDraft(null);
-      });
+      dragging.current = false;
+      const sent = Number(input.value);
+      pending.current += 1;
+      const settle = (ok: boolean, reason?: string) => {
+        pending.current -= 1;
+        setProblem(ok ? null : (reason ?? "Refused"));
+        if (pending.current > 0 || dragging.current) return;
+        // Refused, or applied with its delta already in: show the sim's value.
+        if (!ok || Math.abs(valueRef.current - sent) < 1e-9) setDraft(null);
+      };
+      sendRef.current(sent).then(
+        (result) => settle(result.ok, result.ok ? undefined : result.reason),
+        () => settle(false, "The command was not sent"),
+      );
     };
     input.addEventListener("change", onChange);
     return () => input.removeEventListener("change", onChange);
@@ -340,7 +357,10 @@ function Slider({
         data-value={value}
         aria-describedby={noteId}
         aria-valuetext={format(shown)}
-        onChange={(e) => setDraft(Number(e.target.value))}
+        onChange={(e) => {
+          dragging.current = true;
+          setDraft(Number(e.target.value));
+        }}
       />
       <div className="budget-ends" aria-hidden="true">
         <span>{format(min)}</span>
@@ -408,6 +428,20 @@ function LoanRow({ loan }: { loan: Loan }) {
   const { sendCommand, mirror } = useServices();
   const refusal = useSim((s) => (s ? mirror.spendingRefusal(loan.balance) : null));
   const [problem, setProblem] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const repay = () => {
+    setSending(true);
+    sendCommand("RepayLoan", { loan: loan.id }).then(
+      (r) => {
+        setSending(false);
+        setProblem(r.ok ? null : (r.reason ?? "Refused"));
+      },
+      () => {
+        setSending(false);
+        setProblem("The command was not sent");
+      },
+    );
+  };
   return (
     <tr data-loan={loan.id} data-balance={loan.balance} data-repayment={loan.repayment} data-months-left={loan.monthsLeft}>
       <th scope="row">Loan {loan.id + 1}</th>
@@ -418,9 +452,9 @@ function LoanRow({ loan }: { loan: Loan }) {
         <button
           type="button"
           id={`repay-loan-${loan.id}`}
-          disabled={refusal !== null}
+          disabled={refusal !== null || sending}
           title={refusal ?? `Pay off the ${formatMoneyFull(loan.balance)} still owed`}
-          onClick={() => void sendCommand("RepayLoan", { loan: loan.id }).then((r) => setProblem(r.ok ? null : (r.reason ?? "Refused")))}
+          onClick={repay}
         >
           Repay
         </button>
@@ -439,6 +473,8 @@ function Loans() {
   const [amount, setAmount] = useState("");
   const [term, setTerm] = useState(offers[0]?.termMonths ?? 0);
   const [problem, setProblem] = useState<string | null>(null);
+  /** A loan is on its way: the button waits, so a double click takes one loan, not two. */
+  const [sending, setSending] = useState(false);
   const principal = Number(amount);
   const valid = amount.trim() !== "" && Number.isSafeInteger(principal) && principal >= 1;
   const refusal = useSim((s) => (s && valid ? mirror.loanRefusal(principal, term) : null));
@@ -448,12 +484,22 @@ function Loans() {
   const offer = offers.find((o) => o.termMonths === term);
   const repayment = valid && offer ? monthlyRepayment(principal, offer.annualRate, offer.termMonths) : null;
   const take = () => {
-    if (!valid) return;
-    void sendCommand("TakeLoan", { principal, termMonths: term }).then((r) => {
-      setProblem(r.ok ? null : (r.reason ?? "Refused"));
-      if (r.ok) setAmount("");
-    });
+    if (!valid || sending) return;
+    setSending(true);
+    sendCommand("TakeLoan", { principal, termMonths: term }).then(
+      (r) => {
+        setSending(false);
+        setProblem(r.ok ? null : (r.reason ?? "Refused"));
+        if (r.ok) setAmount("");
+      },
+      () => {
+        setSending(false);
+        setProblem("The command was not sent");
+      },
+    );
   };
+  const malformed = amount.trim() !== "" && !valid ? "Borrow whole dollars, at least $1" : null;
+  const shownProblem = malformed ?? refusal ?? problem;
   return (
     <section className="budget-section" aria-label="Loans">
       <h3>Loans</h3>
@@ -487,11 +533,18 @@ function Loans() {
       >
         <label>
           Borrow $
-          <input id="loan-amount" type="number" min={1} step={1} inputMode="numeric" placeholder="whole dollars" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <input id="loan-amount" type="number" min={1} step={1} inputMode="numeric" placeholder="whole dollars" value={amount} onChange={(e) => {
+              setAmount(e.target.value);
+              setProblem(null);
+            }}
+          />
         </label>
         <label>
           over
-          <select id="loan-term" value={term} onChange={(e) => setTerm(Number(e.target.value))}>
+          <select id="loan-term" value={term} onChange={(e) => {
+              setTerm(Number(e.target.value));
+              setProblem(null);
+            }}>
             {offers.map((o) => (
               <option key={o.termMonths} value={o.termMonths}>
                 {o.termMonths / 12} years at {formatRate(o.annualRate)}
@@ -499,10 +552,10 @@ function Loans() {
             ))}
           </select>
         </label>
-        <button type="submit" id="take-loan" disabled={!valid || refusal !== null}>Take loan</button>
+        <button type="submit" id="take-loan" disabled={!valid || refusal !== null || sending}>Take loan</button>
       </form>
       {repayment !== null && refusal === null && <p className="hint">Repays {formatMoneyShort(repayment)} a month, from the month after this one.</p>}
-      {(refusal ?? problem) && <p className="hint bad" id="loan-refusal">{refusal ?? problem}</p>}
+      {shownProblem && <p className="hint bad" id="loan-refusal">{shownProblem}</p>}
     </section>
   );
 }

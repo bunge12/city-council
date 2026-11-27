@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { ECONOMY, LEDGER_LINES, formatMoneyShort } from "../packages/sim/src/index";
+import { formatRate } from "../packages/client/src/ui/budget-table";
 import { openCity } from "./helpers";
 import { budgetCity } from "./money-fixtures";
 
@@ -93,7 +94,7 @@ test("the budget panel shows the sim's ledger, moves a tax rate, and takes and r
   expect(netNow).toBe(b.treasury - b.opening);
   expect(Number(await page.locator("#budget-income").getAttribute("data-last")) - Number(await page.locator("#budget-expenses").getAttribute("data-last"))).toBe(netLast);
   // The graph has a line for each closed month in the history.
-  await expect(page.locator("#budget-flow-graph")).toHaveAttribute("data-months", /^([2-9]|1[0-2])$/);
+  await expect(page.locator("#budget-flow-graph")).toHaveAttribute("data-months", /^([1-9]|1[0-2])$/);
   await expect(page.locator("#budget-month")).toContainText("income");
   await attach(page, testInfo, "budget-panel-income", panel);
 
@@ -107,6 +108,14 @@ test("the budget panel shows the sim's ledger, moves a tax rate, and takes and r
   await expect.poll(async () => (await budget(page)).taxRates[0]).toBe(0.02);
   await expect(residential).toHaveAttribute("data-value", "0.02");
   await expect(panel.locator('label[for="tax-residential"] output')).toHaveText("2%");
+  // The keyboard moves a slider a step at a time, and each step is one command.
+  const commercial = page.locator("#tax-commercial");
+  await commercial.focus();
+  await commercial.press("ArrowRight");
+  await expect(panel.locator('label[for="tax-commercial"] output')).toHaveText(formatRate(ECONOMY.taxRates.commercial.default + 0.001));
+  await stepOnce(page);
+  await expect.poll(async () => (await budget(page)).taxRates[1]).toBe(Math.round((ECONOMY.taxRates.commercial.default + 0.001) * 1000) / 1000);
+  await expect(commercial).toHaveAttribute("data-value", String((await budget(page)).taxRates[1]));
 
   // A loan within the credit limit: the treasury rises by the principal and the loan is listed.
   const credit = page.locator("#budget-credit");

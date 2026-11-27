@@ -126,12 +126,14 @@ describe("the graph's months", () => {
     expect(monthLabel(got[0]?.month ?? 0)).toBe("Mar, Year 1");
   });
 
-  it("labels the month before the first, whose sample holds the starting grant", () => {
+  it("leaves out the month before the first, whose sample holds only the starting grant", () => {
     expect(monthLabel(-1)).toBe(`Dec, Year ${TIME_BALANCE.firstYear - 1}`);
     const state = createState(3);
-    step(state);
+    while (state.tick <= 31 * TIME_BALANCE.ticksPerDay) step(state);
     const got = moneyMonths(state.stats, state.tick);
-    expect(got).toEqual([{ month: -1, income: ECONOMY.startingGrant, expenses: 0, treasury: ECONOMY.startingGrant }]);
+    expect(got.map((m) => monthLabel(m.month))).toEqual([`Jan, Year ${TIME_BALANCE.firstYear}`]);
+    expect(got[0]?.treasury).toBe(state.budget.opening);
+    expect(ECONOMY.startingGrant).toBeGreaterThan(0);
   });
 
   it("is empty with no history", () => {
