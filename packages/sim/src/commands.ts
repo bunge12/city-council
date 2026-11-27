@@ -11,6 +11,7 @@ import {
 import { moveMoney } from "./economy/budget";
 import { chargePayload, setDevelopmentCharge } from "./economy/charges";
 import { setTaxRate, taxRatePayload } from "./economy/tax-rates";
+import { checkRepayLoan, checkTakeLoan, repayLoan, takeLoan, takeLoanPayload } from "./economy/loans";
 import { keepBuildings } from "./buildings/upkeep";
 import { LOG_PAGE_SIZE, logLength, recordEntry } from "./log";
 import { buildRoad } from "./roads/build";
@@ -361,6 +362,32 @@ const SetTaxRate: CommandDef = {
   },
 };
 
+/**
+ * Borrows `payload.principal` whole dollars over `payload.termMonths`, one
+ * of the terms economy.json offers, at that term's rate (M4-11,
+ * economy/loans.ts). The principal goes on the loans line. Refused with
+ * every slot taken or past the credit limit. No undo record: the player
+ * pays it back with `RepayLoan`.
+ */
+const TakeLoan: CommandDef = {
+  validate: (state, command) => checkTakeLoan(state, command.payload),
+  apply: (state, command) => {
+    const result = takeLoanPayload(command.payload);
+    if (typeof result !== "string") takeLoan(state, result);
+  },
+};
+
+/**
+ * Pays off loan `payload.loan`, named by its id, early: its balance on the
+ * repayment line, and the loan closed (M4-11, economy/loans.ts). Refused
+ * when the treasury cannot cover the balance (economy/spend.ts). No undo
+ * record.
+ */
+const RepayLoan: CommandDef = {
+  validate: (state, command) => checkRepayLoan(state, command.payload),
+  apply: (state, command) => repayLoan(state, command.payload),
+};
+
 /** Every command type the sim accepts, by name. */
 export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   NoOp,
@@ -374,6 +401,8 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   BulldozeBuilding,
   SetDevelopmentCharge,
   SetTaxRate,
+  TakeLoan,
+  RepayLoan,
 });
 
 /** Checks a command against the current state without changing anything. */

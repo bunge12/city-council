@@ -96,7 +96,7 @@ export interface EconomyBalanceFile {
   };
   expropriationRecords: { max: number; source: string; placeholder?: boolean };
   loans: { maxOpen: number; offers: LoanOffer[]; source: string; placeholder?: boolean };
-  creditLimit: { perResident: EconomyPrice; lastYearTaxMultiple: number; source: string; placeholder?: boolean };
+  creditLimit: { perResident: EconomyPrice; lastYearTaxMultiple: number; largerLoansMultiple: number; source: string; placeholder?: boolean };
 }
 
 /** A development charge in 2026 dollars per square metre of floor space added. */
@@ -128,7 +128,8 @@ export interface Economy {
   /** The most expropriation records state keeps (economy/compensation.ts, M4-09). */
   expropriationsMax: number;
   loans: { maxOpen: number; offers: readonly LoanOffer[] };
-  creditLimit: { perResident: number; lastYearTaxMultiple: number };
+  /** The credit limit's weights (economy/loans.ts, M4-11): whole dollars a resident, a multiple of a year's tax income, and the multiple once `largerLoans` is open. */
+  creditLimit: { perResident: number; lastYearTaxMultiple: number; largerLoansMultiple: number };
 }
 
 const WORDS = ["source", "sourceUrl", "note", "placeholder"] as const;
@@ -336,7 +337,9 @@ export function checkEconomyBalance(data: unknown): string[] {
       const out = priceProblems(c["perResident"], "creditLimit.perResident", toYear);
       const m = c["lastYearTaxMultiple"];
       if (!(typeof m === "number" && Number.isFinite(m) && m >= 0)) out.push("creditLimit.lastYearTaxMultiple must be a number of at least 0");
-      out.push(...sourceProblems(c, "creditLimit"), ...unknownKeys(c, ["perResident", "lastYearTaxMultiple", ...WORDS], "creditLimit"));
+      const larger = c["largerLoansMultiple"];
+      if (!(typeof larger === "number" && Number.isFinite(larger) && larger >= 1)) out.push("creditLimit.largerLoansMultiple must be a number of at least 1");
+      out.push(...sourceProblems(c, "creditLimit"), ...unknownKeys(c, ["perResident", "lastYearTaxMultiple", "largerLoansMultiple", ...WORDS], "creditLimit"));
       return out;
     }),
   );
@@ -396,7 +399,11 @@ export function resolveEconomy(data: unknown): Economy {
     },
     expropriationsMax: file.expropriationRecords.max,
     loans: { maxOpen: file.loans.maxOpen, offers: file.loans.offers.map((o) => ({ ...o })) },
-    creditLimit: { perResident: at(file.creditLimit.perResident), lastYearTaxMultiple: file.creditLimit.lastYearTaxMultiple },
+    creditLimit: {
+      perResident: at(file.creditLimit.perResident),
+      lastYearTaxMultiple: file.creditLimit.lastYearTaxMultiple,
+      largerLoansMultiple: file.creditLimit.largerLoansMultiple,
+    },
   };
 }
 

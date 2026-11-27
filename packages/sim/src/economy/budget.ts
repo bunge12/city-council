@@ -20,6 +20,7 @@
 import { isMonthStart, yearDays } from "../calendar";
 import type { SimState } from "../state";
 import { CHARGE_ZONES, ECONOMY, ECONOMY_SLIDERS } from "./balance";
+import { chargeLoans, checkLoans } from "./loans";
 
 /**
  * The ledger's lines, in the order state holds them: income first, then
@@ -88,6 +89,14 @@ export interface BudgetState {
    * `SetDevelopmentCharge`.
    */
   chargeRates: Float64Array;
+  /**
+   * The open loans, oldest first, `LOAN_STRIDE` numbers each in
+   * `LOAN_FIELDS` order (economy/loans.ts, M4-11). Replaced when a loan is
+   * taken or closed; a close writes the balances in place.
+   */
+  loans: Float64Array;
+  /** The id the next loan taken gets: how many the city has taken. */
+  nextLoan: number;
 }
 
 /**
@@ -104,7 +113,7 @@ export function createBudget(): BudgetState {
 
 /**
  * A budget holding `treasury` with nothing on any line, the tax rates and
- * development charges at their defaults: what the
+ * development charges at their defaults and no loans: what the
  * version 30 migration gives a city saved before the treasury, with the
  * starting grant as its opening balance, by way of version 33's.
  */
@@ -116,7 +125,13 @@ export function emptyBudget(treasury: number): BudgetState {
     lastMonth: new Float64Array(LEDGER_LINES.length),
     taxRates: Float64Array.from(ECONOMY_SLIDERS, (slider) => ECONOMY.taxRates[slider].default),
     ...chargesAtDefaults(),
+    ...noLoans(),
   };
+}
+
+/** The version 38 fields (M4-11): no loans open, and none taken. */
+export function noLoans(): Pick<BudgetState, "loans" | "nextLoan"> {
+  return { loans: new Float64Array(0), nextLoan: 0 };
 }
 
 /** The version 33 field (M4-08): the development charges at their defaults. */
@@ -212,9 +227,13 @@ export function dailyShare(yearly: number, day: number): number {
  * calls it once, right after it advances the tick, so the close comes
  * before the buildings, commands and systems of the new tick, paused steps
  * on it included, and before the statistics sample the month it filed.
+ * Each loan charges its repayment first, on the month that closes
+ * (economy/loans.ts, M4-11).
  */
 export function closeMonthOn(state: SimState): void {
-  if (isMonthStart(state.tick)) closeMonth(state.budget);
+  if (!isMonthStart(state.tick)) return;
+  chargeLoans(state);
+  closeMonth(state.budget);
 }
 
 /** The name the timer hook reports for the monthly close. */
@@ -231,6 +250,8 @@ export function copyBudget(budget: BudgetState): BudgetState {
     lastMonth: budget.lastMonth.slice(),
     taxRates: budget.taxRates.slice(),
     chargeRates: budget.chargeRates.slice(),
+    loans: budget.loans.slice(),
+    nextLoan: budget.nextLoan,
   };
 }
 
@@ -242,7 +263,9 @@ export function sameBudget(a: BudgetState, b: BudgetState): boolean {
     sameArray(a.month, b.month) &&
     sameArray(a.lastMonth, b.lastMonth) &&
     sameArray(a.taxRates, b.taxRates) &&
-    sameArray(a.chargeRates, b.chargeRates)
+    sameArray(a.chargeRates, b.chargeRates) &&
+    sameArray(a.loans, b.loans) &&
+    a.nextLoan === b.nextLoan
   );
 }
 
@@ -256,7 +279,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const BUDGET_KEYS = ["treasury", "opening", "month", "lastMonth", "taxRates", "chargeRates"];
+const BUDGET_KEYS = ["treasury", "opening", "month", "lastMonth", "taxRates", "chargeRates", "loans", "nextLoan"];
 
 /** Whether `ledger` is one whole dollar amount per line. A line may be below zero, where refunds took more off it than it held. */
 function isLedger(ledger: unknown): boolean {
@@ -270,13 +293,14 @@ function isLedger(ledger: unknown): boolean {
  * loading a save and checking a delta: whole dollars everywhere, the
  * treasury equal to the opening balance plus the month's income less its
  * expenses, one amount per ledger line, a tax rate of at least 0 per
- * slider, and a development charge of whole dollars per zone.
+ * slider, a development charge of whole dollars per zone, and well-formed
+ * loans (economy/loans.ts).
  */
 export function checkBudget(value: unknown): string | null {
   if (!isRecord(value)) return "it is not an object";
   const keys = Object.keys(value);
   if (keys.length !== BUDGET_KEYS.length || BUDGET_KEYS.some((key, i) => keys[i] !== key)) return "it has missing or unknown fields";
-  const { treasury, opening, month, lastMonth, taxRates, chargeRates } = value;
+  const { treasury, opening, month, lastMonth, taxRates, chargeRates, loans, nextLoan } = value;
   if (!Number.isSafeInteger(treasury) || !Number.isSafeInteger(opening)) return "its treasury is not whole dollars";
   if (!isLedger(month) || !isLedger(lastMonth)) return `its ledger is not ${LEDGER_LINES.length} whole dollar amounts a month in a Float64Array`;
   if ((opening as number) + incomeOf(month as Float64Array) - expensesOf(month as Float64Array) !== treasury) return "its treasury is not its opening balance plus the month's income less its expenses";
@@ -285,5 +309,5 @@ export function checkBudget(value: unknown): string | null {
   for (const rate of taxRates) if (!(Number.isFinite(rate) && rate >= 0)) return "its tax rates are not fractions of at least 0";
   if (!(chargeRates instanceof Float64Array) || chargeRates.length !== CHARGE_ZONES.length) return `its development charges are not ${CHARGE_ZONES.length} numbers in a Float64Array`;
   for (const rate of chargeRates) if (!(Number.isSafeInteger(rate) && rate >= 0)) return "its development charges are not whole dollars of at least 0";
-  return null;
+  return checkLoans(loans, nextLoan);
 }

@@ -1021,7 +1021,8 @@ Once per game month the sim records a sample of each total. The history is a fix
 
 What the player sees:
 
-- **City status, bottom left.** Population with an arrow for its recent trend, over the demand bars (#332). The treasury joins the top bar's right side, beside Stats, in M4, and the approval rating in M8.
+- **City status, bottom left.** Population with an arrow for its recent trend, over the demand bars (#332). The approval rating joins it in M8.
+- **Money, bottom right.** The treasury sits first in the time card, before the date and the speed buttons (M4-14). It is in short form ($3.2B, $480M), in the warning colour below zero, and "-" before a city is open. Its tooltip gives the balance in full and the month so far from the ledger: income, expenses and the net. It moves when a command spends and once a day with taxes and upkeep, as the treasury does, never every tick. The activity log names the money each command moved beside it, and "+" for one that paid in. A command that took money plays the "money spent" cue once, however many segments it built. A milestone reached in play plays "milestone reached" and shows a short notice over the time card with its name, its grant and what it unlocked. The notice stays three game days, so a paused city keeps it until it is closed. A milestone the city already had when it was opened, or one credited without its grant, makes neither. One reached while the client's deltas went missing is announced when the snapshot that catches it up arrives.
 - **Statistics panel.** A graph of population over time, with the breakdowns above. Each later module adds its own lines, such as income and spending in M4, average commute in M5, mode share in M6 and satisfaction in M8.
 
 Milestones read the highest population the city has reached, so a city that shrinks does not lose what it has unlocked.
@@ -1197,7 +1198,7 @@ A budget overlay shows net income per block, tax minus the upkeep of the roads a
 
 One thing to watch is the early game. A new city is all density 1, so it must be able to break even before density 2 unlocks. The starting grant covers the first roads, and density 2 unlocks at a low population.
 
-**Borrowing.** The city can take loans. Each loan has a principal, an interest rate and a term, and repays monthly. The credit limit grows with population and with the last year's tax income, so a large city can borrow for a subway line and a small one cannot. Two or three loans can be open at once.
+**Borrowing.** The city can take loans. Each loan has a principal, an interest rate and a term, and repays monthly. The credit limit grows with population and with the last year's tax income, so a large city can borrow for a subway line and a small one cannot. Two or three loans can be open at once. A loan is taken on one of the terms the balance file offers, at that term's rate, and its principal goes on the loans line. From the close after the month it was taken, each monthly close charges a fixed repayment, the interest on the interest line and the rest on the repayment line. The repayment is worked out by repeated multiplication, rounded down to whole dollars, a month's interest is the floor of the balance times the monthly rate, and the last payment takes what remains, so the balance ends at exactly zero on every host. A repayment is charged even when the treasury cannot cover it, since a debt does not wait, and spending stays blocked until the treasury recovers. A loan can be paid off early from the treasury. The credit limit bounds what the open loans owe together: dollars per resident plus a multiple of the tax income of the last twelve months in the history, doubled once a population milestone opens larger loans (M4-11).
 
 #### Eminent domain
 

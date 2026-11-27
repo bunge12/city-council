@@ -20,7 +20,7 @@ interface CueRecord {
 }
 declare const window: {
   cityCouncil: {
-    mirror: { state: { log: { type: string }[]; cells: { zone: ArrayLike<number> } } | null };
+    mirror: { state: { log: { type: string }[]; logSpent: number[]; cells: { zone: ArrayLike<number> } } | null };
     sendCommand(type: string, payload?: unknown): Promise<{ ok: boolean; reason?: string }>;
     sound: { cues(): CueRecord[]; clear(): void; unlocked(): boolean };
     camera: Promise<{
@@ -72,6 +72,15 @@ async function logLength(page: Page): Promise<number> {
   return page.evaluate(() => window.cityCouncil.mirror.state?.log.length ?? 0);
 }
 
+/**
+ * The cues the newest command makes: its own, then "money" when it took
+ * money from the treasury (M4-14), as its log entry's amount says.
+ */
+async function heardFor(page: Page, cue: string): Promise<string[]> {
+  const spent = await page.evaluate(() => window.cityCouncil.mirror.state?.logSpent.at(-1) ?? 0);
+  return spent > 0 ? [cue, "money"] : [cue];
+}
+
 async function cues(page: Page): Promise<CueRecord[]> {
   return page.evaluate(() => window.cityCouncil.sound.cues());
 }
@@ -113,7 +122,10 @@ test("each tool makes its cue when the sim answers, and a zero interface volume 
   await click(page, 4480, 4600);
   await expect.poll(() => logLength(page)).toBe(start + 1);
   await page.keyboard.press("KeyR");
-  await expect.poll(async () => (await cues(page)).map((c) => c.cue)).toEqual(["road"]);
+  const heard = await heardFor(page, "road");
+  // A street costs money.
+  expect(heard).toEqual(["road", "money"]);
+  await expect.poll(async () => (await cues(page)).map((c) => c.cue)).toEqual(heard);
 
   // A zone, painted with the tool's defaults along the north side of the east piece.
   await page.keyboard.press("KeyK");
@@ -122,7 +134,10 @@ test("each tool makes its cue when the sim answers, and a zero interface volume 
   await click(page, 4415, 4596);
   await expect.poll(() => logLength(page)).toBe(start + 2);
   await page.keyboard.press("KeyK");
-  await expect.poll(async () => (await cues(page)).map((c) => c.cue)).toEqual(["road", "zone"]);
+  // Zoning is free.
+  heard.push(...(await heardFor(page, "zone")));
+  expect(heard.at(-1)).toBe("zone");
+  await expect.poll(async () => (await cues(page)).map((c) => c.cue)).toEqual(heard);
 
   // A bulldoze of the east piece. Shift takes the whole piece.
   await page.keyboard.press("KeyB");
@@ -131,26 +146,22 @@ test("each tool makes its cue when the sim answers, and a zero interface volume 
   await page.keyboard.up("Shift");
   await expect.poll(() => logLength(page)).toBe(start + 3);
   await page.keyboard.press("KeyB");
-  await expect.poll(async () => (await cues(page)).map((c) => c.cue)).toEqual(["road", "zone", "bulldoze"]);
+  heard.push(...(await heardFor(page, "bulldoze")));
+  await expect.poll(async () => (await cues(page)).map((c) => c.cue)).toEqual(heard);
 
   // An undo.
   await page.keyboard.press("Control+KeyZ");
   await expect.poll(() => logLength(page)).toBe(start + 4);
-  await expect.poll(async () => (await cues(page)).map((c) => c.cue)).toEqual(["road", "zone", "bulldoze", "undo"]);
+  heard.push(...(await heardFor(page, "undo")));
+  await expect.poll(async () => (await cues(page)).map((c) => c.cue)).toEqual(heard);
 
   // A command the sim refuses: a road with no points. It sounds like a refusal, not a road.
   const refused = await page.evaluate(() => window.cityCouncil.sendCommand("BuildRoad", {}));
   expect(refused.ok).toBe(false);
   expect(await logLength(page)).toBe(start + 4);
-  const heard = await cues(page);
-  expect(heard).toEqual([
-    { cue: "road", outcome: "played" },
-    { cue: "zone", outcome: "played" },
-    { cue: "bulldoze", outcome: "played" },
-    { cue: "undo", outcome: "played" },
-    { cue: "reject", outcome: "played" },
-  ]);
-  keepEvidence("cues-before-reload.json", heard);
+  const played = await cues(page);
+  expect(played).toEqual([...heard, "reject"].map((cue) => ({ cue, outcome: "played" })));
+  keepEvidence("cues-before-reload.json", played);
 
   // The sound settings, in the settings menu under the top bar's Settings button.
   await openSettings(page);

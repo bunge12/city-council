@@ -103,6 +103,7 @@ export function milestoneLabel(unlock: Unlock): string {
 /** What `unlock` opens, as a player reads it: "Medium density", "City Hall". */
 export function unlockName(unlock: Unlock): string {
   if (unlock === "cityHall") return "City Hall";
+  if (unlock === "largerLoans") return "The larger credit limit";
   const level = Number(Object.keys(DENSITY_UNLOCKS).find((l) => DENSITY_UNLOCKS[Number(l)] === unlock));
   const name = ZONING_BALANCE.densities.find((d) => d.level === level)?.name ?? `Level ${level}`;
   return `${name} density`;

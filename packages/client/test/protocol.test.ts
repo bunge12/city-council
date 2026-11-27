@@ -6,6 +6,7 @@ import {
   CHUNK_SIZE,
   CHARGE_ZONES,
   ECONOMY,
+  loansOf,
   ECONOMY_SLIDERS,
   LINE,
   MILESTONES,
@@ -332,6 +333,32 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     const deltas = received.slice(before).filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
     expect(deltas.filter((d) => d.budget !== undefined)).toHaveLength(1);
     expect(mirror.state?.budget.chargeRates[office]).toBe(ECONOMY.developmentCharges.office.max);
+    expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
+  });
+
+  it("sends a loan the player takes in the next delta, with the budget (M4-11)", async () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    const state = createBareState(7);
+    // Room to borrow, through the population the credit limit weighs.
+    state.stats.totals["population"] = 5_000;
+    const host = new SimHost(state, hostEnd, () => now);
+    const mirror = new SimMirror(client, "p1");
+    const pump = () => {
+      now += PUMP_INTERVAL_MS;
+      host.pump();
+    };
+    pump();
+    const before = received.length;
+    const termMonths = ECONOMY.loans.offers[0]?.termMonths;
+    await mirror.sendCommand("TakeLoan", { principal: 2_000_000, termMonths });
+    for (let i = 0; i < 50 && mirror.state?.budget.loans.length === 0; i++) pump();
+    const deltas = received.slice(before).filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    expect(deltas.filter((d) => d.budget !== undefined).length).toBeGreaterThanOrEqual(1);
+    expect(mirror.state && loansOf(mirror.state.budget)).toEqual(loansOf(state.budget));
+    expect(mirror.state && loansOf(mirror.state.budget)[0]).toMatchObject({ id: 0, principal: 2_000_000, balance: 2_000_000, termMonths });
     expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
   });
 
@@ -702,6 +729,33 @@ describe("road deltas", () => {
     expect(deltas.every((d) => d.type === "delta" && (d.roads === undefined) === !("roads" in d))).toBe(true);
   });
 
+  it("settles an applied command with the money it took, as the log beside it holds, and a refused one with its reason (M4-14)", async () => {
+    const { mirror, tick } = roadSetup();
+    await mirror.sendCommand("SetSpeed", { speed: 1 });
+    tick();
+    const treasury = mirror.state?.budget.treasury ?? 0;
+    const built = mirror.sendCommandSpending("BuildRoad", road([4200, 4500], [4600, 4500]));
+    tick();
+    const result = await built;
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spent).toBeGreaterThan(0);
+    expect(mirror.state?.logSpent.at(-1)).toBe(result.spent);
+    expect(mirror.state?.log.at(-1)?.type).toBe("BuildRoad");
+    // Nothing else moved money in the tick, so the treasury fell by exactly what it spent.
+    expect(mirror.state?.budget.treasury).toBe(treasury - result.spent);
+    // A NoOp moves nothing.
+    const noop = mirror.sendCommandSpending("NoOp");
+    tick();
+    expect(await noop).toEqual({ ok: true, spent: 0 });
+    const refused = mirror.sendCommandSpending("BuildRoad", {});
+    // sendCommandSettled keeps the sim's own result, with no amount.
+    const plain = mirror.sendCommandSettled("NoOp");
+    tick();
+    expect((await refused).ok).toBe(false);
+    expect(await plain).toEqual({ ok: true });
+  });
+
   it("tells listeners which chunks and rows changed", async () => {
     const { mirror, updates, tick } = roadSetup();
     const chunk = (x: number, z: number) => Math.floor(z / CHUNK_SIZE) * CHUNKS_PER_SIDE + Math.floor(x / CHUNK_SIZE);
@@ -914,7 +968,7 @@ describe("road deltas", () => {
     it("settles a command whose delta went missing from the snapshot that follows", async () => {
       const { mirror, join, tick, setDrop } = roadSetup();
       const other = join("p2");
-      const built = mirror.sendCommandSettled("BuildRoad", road([4200, 4600], [4500, 4600]));
+      const built = mirror.sendCommandSpending("BuildRoad", road([4200, 4600], [4500, 4600]));
       const dropped = other.sendCommandSettled("BuildRoad", road([4200, 4600], [4500, 4600]));
       // The first player's mirror loses the delta, then the next one does not line up and it asks for a snapshot.
       let lost = false;
@@ -927,7 +981,10 @@ describe("road deltas", () => {
       await expect(dropped).resolves.toMatchObject({ ok: false });
       void mirror.sendCommand("NoOp");
       tick();
-      await expect(built).resolves.toEqual({ ok: true });
+      // Settled from the snapshot, with the money its log entry says it spent (M4-14).
+      const result = await built;
+      expect(result).toEqual({ ok: true, spent: mirror.state?.logSpent[0] });
+      expect(result.ok && result.spent).toBeGreaterThan(0);
       expect(mirror.state?.log.map((e) => e.type)).toEqual(["BuildRoad", "NoOp"]);
     });
   });
@@ -1015,8 +1072,8 @@ describe("snapshot transfer", () => {
     const statBuffers = Object.values(state.stats.history).map((value) => value.buffer);
     // One money series each, the treasury and the month's income, expenses and tax income (M4-02).
     const moneyBuffers = Object.values(state.stats.money).map((value) => value.buffer);
-    // The ledger's two months, the tax rates and the development charges (M4-08).
-    const budgetBuffers = [state.budget.month.buffer, state.budget.lastMonth.buffer, state.budget.taxRates.buffer, state.budget.chargeRates.buffer];
+    // The ledger's two months, the tax rates, the development charges (M4-08) and the loans (M4-11).
+    const budgetBuffers = [state.budget.month.buffer, state.budget.lastMonth.buffer, state.budget.taxRates.buffer, state.budget.chargeRates.buffer, state.budget.loans.buffer];
     expect(typedArrayBuffers(state)).toEqual([
       state.rng.buffer,
       ...roadBuffers,

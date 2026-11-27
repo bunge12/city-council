@@ -58,6 +58,8 @@ interface MirrorState {
   tick: number;
   speed: number;
   log: LogEntry[];
+  /** Whole dollars each log entry's command took from the treasury (M4-03). */
+  logSpent: number[];
   buildings: Arrays;
   cells: Arrays;
   demand: Record<Bar, { value: number; parts: Record<string, number> }>;
@@ -927,7 +929,7 @@ for (const variant of [
       info.annotations.push({ type: "step 12", description: `last year: ${YEAR_COUNTS.map((w) => `${w} ${s.lastYear[w]}`).join(", ")}` });
     });
 
-    await test.step("13. place a road, paint a zone, bulldoze and try something the sim rejects: each makes its sound; with the interface volume at zero they stop", async () => {
+    await test.step("13. place a road, paint a zone, bulldoze and try something the sim rejects: each makes its sound, and money spent follows a command that cost money; with the interface volume at zero they stop", async () => {
       const cues = () => page.evaluate(() => window.cityCouncil.sound.cues().map((c) => ({ cue: c.cue, outcome: c.outcome })));
       await page.evaluate(() => window.cityCouncil.sound.clear());
       await look(page, (XM + X1) / 2, (UPPER + SHORE) / 2, 300);
@@ -948,7 +950,13 @@ for (const variant of [
       await noTool(page);
       // A command the sim refuses: a road with no points.
       expect((await page.evaluate(() => window.cityCouncil.sendCommand("BuildRoad", {}))).ok).toBe(false);
-      await expect.poll(async () => (await cues()).map((c) => c.cue)).toEqual(["road", "zone", "bulldoze", "reject"]);
+      // Each command's cue, then "money" for one that took money from the treasury (M4-14): the road does, zoning never.
+      const spent = await page.evaluate((from) => window.cityCouncil.mirror.state?.logSpent.slice(from) ?? [], start);
+      expect(spent).toHaveLength(3);
+      expect(spent[0]).toBeGreaterThan(0);
+      expect(spent[1]).toBe(0);
+      const heard = ["road", "zone", "bulldoze"].flatMap((cue, i) => ((spent[i] ?? 0) > 0 ? [cue, "money"] : [cue]));
+      await expect.poll(async () => (await cues()).map((c) => c.cue)).toEqual([...heard, "reject"]);
       expect((await cues()).every((c) => c.outcome === "played")).toBe(true);
       await openSettings(page);
       await page.locator("#sound-interface").fill("0");
