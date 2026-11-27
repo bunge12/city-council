@@ -6,6 +6,7 @@ import {
   CHUNK_SIZE,
   CHARGE_ZONES,
   ECONOMY,
+  loansOf,
   ECONOMY_SLIDERS,
   LINE,
   MILESTONES,
@@ -332,6 +333,32 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     const deltas = received.slice(before).filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
     expect(deltas.filter((d) => d.budget !== undefined)).toHaveLength(1);
     expect(mirror.state?.budget.chargeRates[office]).toBe(ECONOMY.developmentCharges.office.max);
+    expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
+  });
+
+  it("sends a loan the player takes in the next delta, with the budget (M4-11)", async () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    const state = createBareState(7);
+    // Room to borrow, through the population the credit limit weighs.
+    state.stats.totals["population"] = 5_000;
+    const host = new SimHost(state, hostEnd, () => now);
+    const mirror = new SimMirror(client, "p1");
+    const pump = () => {
+      now += PUMP_INTERVAL_MS;
+      host.pump();
+    };
+    pump();
+    const before = received.length;
+    const termMonths = ECONOMY.loans.offers[0]?.termMonths;
+    await mirror.sendCommand("TakeLoan", { principal: 2_000_000, termMonths });
+    for (let i = 0; i < 50 && mirror.state?.budget.loans.length === 0; i++) pump();
+    const deltas = received.slice(before).filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    expect(deltas.filter((d) => d.budget !== undefined).length).toBeGreaterThanOrEqual(1);
+    expect(mirror.state && loansOf(mirror.state.budget)).toEqual(loansOf(state.budget));
+    expect(mirror.state && loansOf(mirror.state.budget)[0]).toMatchObject({ id: 0, principal: 2_000_000, balance: 2_000_000, termMonths });
     expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
   });
 
@@ -1015,8 +1042,8 @@ describe("snapshot transfer", () => {
     const statBuffers = Object.values(state.stats.history).map((value) => value.buffer);
     // One money series each, the treasury and the month's income, expenses and tax income (M4-02).
     const moneyBuffers = Object.values(state.stats.money).map((value) => value.buffer);
-    // The ledger's two months, the tax rates and the development charges (M4-08).
-    const budgetBuffers = [state.budget.month.buffer, state.budget.lastMonth.buffer, state.budget.taxRates.buffer, state.budget.chargeRates.buffer];
+    // The ledger's two months, the tax rates, the development charges (M4-08) and the loans (M4-11).
+    const budgetBuffers = [state.budget.month.buffer, state.budget.lastMonth.buffer, state.budget.taxRates.buffer, state.budget.chargeRates.buffer, state.budget.loans.buffer];
     expect(typedArrayBuffers(state)).toEqual([
       state.rng.buffer,
       ...roadBuffers,

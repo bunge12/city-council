@@ -18,7 +18,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 30;
+export const PROTOCOL_VERSION = 31;
 
 // ---- Client to sim ----
 
@@ -174,8 +174,8 @@ export interface DeltaMessage {
   /**
    * The treasury, the ledger and the tax rates, a copy, when any changed
    * since the last delta (M4-02, protocol version 24); with the development
-   * charges since protocol version 27 (M4-08).
-   * Left out otherwise.
+   * charges since protocol version 27 (M4-08), and with the open loans since
+   * protocol version 31 (M4-11). Left out otherwise.
    */
   budget?: BudgetState;
   /**
