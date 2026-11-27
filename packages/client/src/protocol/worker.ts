@@ -49,11 +49,20 @@ async function start(): Promise<void> {
   let storeError: string | undefined;
   let city: OpenedCity;
   const opening = (seed: number, saved: boolean): void => saveTransport.send({ channel: SAVES_CHANNEL, type: "opening", seed, saved, requestId: null });
+  // Each step before the save is decoded, so an e2e load that stalls says where (#450).
+  const reading = (step: string): void => saveTransport.send({ channel: SAVES_CHANNEL, type: "reading", step, requestId: null });
+  reading("worker started");
   try {
     store = await CityStore.open();
-    city = loadFile
-      ? await openLoadedFile(store, await loadFile, Date.now(), undefined, asked.cityId, opening)
-      : await openLatestCity(store, undefined, asked.cityId, opening);
+    reading("store opened");
+    if (loadFile) {
+      const file = await loadFile;
+      reading(`file received, ${file.bytes ? `${file.bytes.byteLength} bytes` : "no bytes"}`);
+      city = await openLoadedFile(store, file, Date.now(), undefined, asked.cityId, opening);
+    } else {
+      city = await openLatestCity(store, undefined, asked.cityId, opening);
+    }
+    reading(`opened from ${city.from}`);
   } catch (error) {
     storeError = `saved cities could not be opened (${error instanceof Error ? error.message : String(error)})`;
     city = newCityFallback(`Saved cities could not be opened, so a new city was started. ${storeError}.`, undefined, opening);
@@ -65,6 +74,7 @@ async function start(): Promise<void> {
   // One tab per city: without the lock this worker hosts nothing, and the
   // page offers a different city. The sim transport then stays unanswered.
   const mine = await claimCity(city.id, navigator.locks);
+  reading(mine ? "lock held" : "lock held by another tab");
   // The host prepares the derived data too; done here first, each part is
   // named to the page as it starts, for the loading screen (#327), and the
   // host's own call then finds it all built.

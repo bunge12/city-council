@@ -123,10 +123,18 @@ function painted(): Promise<void> {
 const testSwitch = readTestSwitch(localStore());
 // Under the test switch only, the worker may hold every demand bar at one
 // value, so any zoning grows without a working economy (M3-07).
+/**
+ * The steps of reading a saved city, the page's and the worker's, by
+ * `performance.now()`, for the report a stalled e2e load prints (#450).
+ * The loading screen's stages start only once the save is read.
+ */
+const readSteps: { step: string; at: number }[] = [];
+const readStep = (step: string): void => void readSteps.push({ step, at: Math.round(performance.now()) });
 const worker = createWorkerTransport(tabCity(), load.address !== null, testSwitch.autosave, testSwitch.heldDemand, testSwitch.milestones);
 if (load.address !== null) {
   // The worker waits for this message before it opens any city, so one is sent whatever happens.
   const address = load.address;
+  readStep("fetching the file");
   void fetchCityFile(address, location.href)
     .catch((error: unknown): LoadFileMessage => ({
       channel: SAVES_CHANNEL,
@@ -135,7 +143,11 @@ if (load.address !== null) {
       bytes: null,
       error: `It could not be fetched: ${error instanceof Error ? error.message : String(error)}.`,
     }))
-    .then((file) => worker.saves.send(file, file.bytes ? [file.bytes] : []));
+    .then((file) => {
+      readStep(file.bytes ? `file fetched, ${file.bytes.byteLength} bytes` : `file not fetched: ${file.error}`);
+      worker.saves.send(file, file.bytes ? [file.bytes] : []);
+      readStep("file sent to the worker");
+    });
 }
 const mirror = new SimMirror(worker.sim, LOCAL_PLAYER_ID);
 // A worker that throws sends no city, so nothing would take the screen down.
@@ -207,6 +219,8 @@ saves.onOpening((seed, saved) => {
   });
 });
 saves.onLoading((stage) => loading.advance(stage));
+saves.onReading((step) => readStep(`worker: ${step}`));
+saves.onOpening((seed, saved) => readStep(`worker: opening seed ${seed}${saved ? ", saved" : ", new"}`));
 
 /** Saves now and resolves with the worker's status after the write. */
 function saveNow(): Promise<SaveStatus> {
@@ -1684,6 +1698,8 @@ declare global {
       renderStatus: () => RenderStatus | null;
       /** When each stage of the loading screen began and when it came down, by `performance.now()` (issue #327). */
       loading: () => { stages: LoadStageTime[]; doneAt: number | null };
+      /** The steps of reading a saved city before the loading screen's stages, by `performance.now()` (#450). */
+      readSteps: () => { step: string; at: number }[];
       /** Stops the worker's clock stepping the sim. Commands then wait for `advance`. */
       holdClock: () => Promise<number>;
       /** Runs that many steps and resolves with the tick once their delta is in `mirror`. */
@@ -1715,6 +1731,7 @@ window.cityCouncil = {
   camera: cameraReady,
   renderStatus: () => status,
   loading: () => loading.report(),
+  readSteps: () => readSteps.slice(),
   holdClock: () => simClock.hold(),
   advance: (steps) => simClock.advance(steps).then((tick) => untilMirrorAt(tick)),
   releaseClock: () => simClock.release(),
