@@ -312,10 +312,69 @@
   gap: 10px;
 }
 
+/* The treasury's tooltip opens above the card, outside its box (M4-14). */
+.panel.game-clock {
+  overflow: visible;
+}
+
 .game-clock .game-date {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* The treasury, first in the time card (M4-14). In the warning colour below zero. */
+.game-clock .treasury {
+  position: relative;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+  padding-right: 10px;
+  border-right: 1px solid var(--line);
+}
+
+.game-clock .treasury.overdrawn {
+  color: var(--bad-ink);
+}
+
+/* The time card sits at the right edge, so its tip opens above and to the left. */
+.game-clock .treasury .tip {
+  left: auto;
+  right: 0;
+}
+
+/* A milestone reached (M4-14): over the time card, until it goes by itself or is closed. */
+.milestone-notice {
+  position: absolute;
+  right: 8px;
+  bottom: calc(var(--clock-room) + 8px);
+  width: min(320px, calc(100vw - 16px));
+  padding-right: 32px;
+  border-left: 4px solid var(--accent);
+}
+
+.milestone-notice .milestone + .milestone {
+  margin-top: 6px;
+}
+
+.milestone-notice h2 {
+  margin: 0 0 2px;
+  font-size: 14px;
+}
+
+.milestone-notice p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.milestone-notice .close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 0;
+  padding: 0 6px;
+  line-height: 1.4;
 }
 
 .game-clock .speeds {

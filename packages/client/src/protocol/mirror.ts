@@ -135,6 +135,13 @@ export type MirrorUpdate =
 type Listener = (update: MirrorUpdate) => void;
 
 /**
+ * What became of a command once the sim settled it: applied, with the whole
+ * dollars it took from the treasury (below zero for one that paid in, as
+ * `SimState.logSpent` holds them, M4-03), or refused with the reason.
+ */
+export type SettledResult = { ok: true; spent: number } | { ok: false; reason: string };
+
+/**
  * The client's read-only copy of sim state. It requests a snapshot when
  * created, applies deltas as they arrive and asks for a fresh snapshot if a
  * delta does not line up. Commands go out through `sendCommand`; state only
@@ -152,7 +159,7 @@ export class SimMirror {
   /** Commands sent and not yet answered, by seq: the host's answer, queued or refused. */
   private readonly answers = new Map<number, (result: CommandResult) => void>();
   /** Commands sent and not yet applied or refused, by seq. */
-  private readonly outcomes = new Map<number, (result: CommandResult) => void>();
+  private readonly outcomes = new Map<number, (result: SettledResult) => void>();
   /** Seqs of commands the host has queued and not yet applied or dropped. */
   private readonly queued = new Set<number>();
   private readonly listeners = new Set<Listener>();
@@ -289,13 +296,22 @@ export class SimMirror {
    * at the step (issue 94). Either way the reason comes here.
    */
   sendCommandSettled(type: string, payload: unknown = {}): Promise<CommandResult> {
+    return this.send(type, payload).outcome.then((result) => (result.ok ? { ok: true } : result));
+  }
+
+  /**
+   * `sendCommandSettled`, with the whole dollars the command took from the
+   * treasury once applied, as its log entry's `logSpent` holds them (M4-14).
+   * For the money cue.
+   */
+  sendCommandSpending(type: string, payload: unknown = {}): Promise<SettledResult> {
     return this.send(type, payload).outcome;
   }
 
-  private send(type: string, payload: unknown): { answer: Promise<CommandResult>; outcome: Promise<CommandResult> } {
+  private send(type: string, payload: unknown): { answer: Promise<CommandResult>; outcome: Promise<SettledResult> } {
     const seq = this.nextSeq++;
     const answer = new Promise<CommandResult>((resolve) => this.answers.set(seq, resolve));
-    const outcome = new Promise<CommandResult>((resolve) => this.outcomes.set(seq, resolve));
+    const outcome = new Promise<SettledResult>((resolve) => this.outcomes.set(seq, resolve));
     this.transport.send({
       v: PROTOCOL_VERSION,
       type: "command",
@@ -726,7 +742,9 @@ export class SimMirror {
     }
     this.hostStats = { timings: delta.timings };
     // The copy now holds what these commands did, so their senders can look.
-    for (const entry of delta.log) if (entry.playerId === this.playerId) this.settle(entry.seq, { ok: true });
+    delta.log.forEach((entry, i) => {
+      if (entry.playerId === this.playerId) this.settle(entry.seq, { ok: true, spent: delta.logSpent[i] ?? 0 });
+    });
     this.settleDropped(delta);
     const buildingIds = delta.buildings ? [...delta.buildings.ids] : [];
     const peopleIds = delta.people ? [...delta.people.ids] : [];
@@ -769,7 +787,7 @@ export class SimMirror {
     }
   }
 
-  private settle(seq: number, result: CommandResult): void {
+  private settle(seq: number, result: SettledResult): void {
     const resolve = this.outcomes.get(seq);
     if (!resolve) return;
     this.outcomes.delete(seq);
@@ -786,14 +804,16 @@ export class SimMirror {
    */
   private settleFromSnapshot(state: SimState): void {
     if (this.queued.size === 0) return;
-    const applied = new Set<number>();
+    /** Each applied seq of this player's, with what its command spent. */
+    const applied = new Map<number, number>();
     state.log.forEach((entry, i) => {
       // Entries the copy already had may carry this player's seqs from before a reload.
-      if (state.logOffset + i >= this.logFrom && entry.playerId === this.playerId) applied.add(entry.seq);
+      if (state.logOffset + i >= this.logFrom && entry.playerId === this.playerId) applied.set(entry.seq, state.logSpent[i] ?? 0);
     });
     const pending = new Set(state.pending.filter((c) => c.playerId === this.playerId).map((c) => c.seq));
     for (const seq of [...this.queued]) {
-      if (applied.has(seq)) this.settle(seq, { ok: true });
+      const spent = applied.get(seq);
+      if (spent !== undefined) this.settle(seq, { ok: true, spent });
       else if (!pending.has(seq)) this.settle(seq, { ok: false, reason: "This change was not made" });
     }
   }

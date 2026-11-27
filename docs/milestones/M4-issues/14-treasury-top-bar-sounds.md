@@ -1,4 +1,4 @@
-# M4-14: Treasury in the top bar, money in the log, and money sounds
+# M4-14: Treasury in the bottom right, money in the log, and money sounds
 
 Milestone: M4 Economy. Spec: [M4.md](../M4.md). Depends on: 03, 12.
 
@@ -8,7 +8,7 @@ The player always sees how much money the city has, hears when it is spent, and 
 
 ## Scope
 
-- The treasury on the top bar's right side, beside Stats, in short form ($3.2B, $480M). Below zero it shows in the warning colour. Before a city is open it shows "-", like the date
+- The treasury in the same card as the time controls, in the bottom right corner, in short form ($3.2B, $480M). Below zero it shows in the warning colour. Before a city is open it shows "-", like the date
 - Its tooltip gives this month's income and expenses so far and the net, from the mirror's ledger
 - The activity log names the amount on each entry that moved money: "local built a street, $1.4M"
 - The "money spent" interface sound on a command that charged the treasury, and the "milestone reached" sound on a milestone, through the sound engine from M3-02. The test hook M3-02 added records both
@@ -31,5 +31,7 @@ The player always sees how much money the city has, hears when it is spent, and 
 ## Notes
 
 The money sound plays once per command, not once per segment of a grid.
+
+Originally placed in the top bar, beside Stats. Moved to the time card before work started, as the issue says.
 
 A treasury that flickers every tick is noise. It moves once a day with taxes and upkeep and at each command, which is what issue 02 proposes.

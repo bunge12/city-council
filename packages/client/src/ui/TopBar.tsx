@@ -3,6 +3,7 @@ import { cellColour } from "../render/cell-geometry";
 import { PRESETS } from "../render/config";
 import { isPreset, presetLabel } from "../render/presets";
 import { formatGameDate } from "./format";
+import { formatTreasury, formatTreasuryTitle } from "./money-figures";
 import { useRoom, useSaveStatus, useServices, useSim } from "./hooks";
 import { tipParts, useTip, useTipState } from "./Tip";
 import { BAR_NAMES, formatDemandTitle, formatPopulationTitle, populationTrend, trendArrow } from "./top-figures";
@@ -184,13 +185,38 @@ export function CityStatus() {
 
 const SPEED_LABELS: Record<Speed, string> = { 0: "Pause", 1: "1x", 2: "2x", 4: "4x" };
 
-/** The game date and the speed buttons, in the bottom right corner (issue #332). */
+/**
+ * The city's money in short form, in the warning colour below zero, with
+ * the month so far in the tooltip (M4-14). It moves when a command spends
+ * and once a day with taxes and upkeep, as the sim's treasury does. The
+ * whole dollars are on a data attribute, for tests.
+ */
+function Treasury() {
+  const treasury = useSim((s) => s?.budget.treasury ?? null);
+  const title = useSim((s) => formatTreasuryTitle(s?.budget ?? null));
+  const { props, tip } = useTip(title);
+  return (
+    <span
+      className={treasury !== null && treasury < 0 ? "treasury overdrawn" : "treasury"}
+      id="treasury"
+      aria-label="Treasury"
+      data-treasury={treasury ?? ""}
+      {...props}
+    >
+      {formatTreasury(treasury)}
+      {tip}
+    </span>
+  );
+}
+
+/** The treasury, the game date and the speed buttons, in the bottom right corner (issues #332, M4-14). */
 export function GameClock() {
   const { sendCommand } = useServices();
   const date = useSim((s) => (s ? formatGameDate(gameDate(s.tick)) : "-"));
   const speed = useSim((s) => s?.speed ?? null);
   return (
-    <section className="panel game-clock" id="game-clock" aria-label="Time">
+    <section className="panel game-clock" id="game-clock" aria-label="Money and time">
+      <Treasury />
       <span className="game-date" id="game-date" aria-label="Game date">{date}</span>
       <div className="speeds" role="group" aria-label="Game speed">
         {SPEEDS.map((s) => (

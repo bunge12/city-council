@@ -8,12 +8,13 @@ import { ECONOMY, PRICE_YEAR, priceNow, priceProblems, type EconomyPrice } from 
 
 /**
  * Every unlock the sim knows: a thing a player cannot use until a milestone
- * opens it. M4 registers the two higher densities and City Hall (M4-12);
+ * opens it. M4 registers the two higher densities and City Hall (M4-12), and the
+ * larger credit limit (M4-11);
  * each later module adds its own ids here and names the milestone that
  * opens each in progression.json. The order is not the shape of a save:
  * state keeps the milestones reached, and what is open is derived from them.
  */
-export const UNLOCKS = ["density2", "density3", "cityHall"] as const;
+export const UNLOCKS = ["density2", "density3", "cityHall", "largerLoans"] as const;
 export type Unlock = (typeof UNLOCKS)[number];
 
 /** The unlock that lets the zone tool paint each density above 1, by level. */

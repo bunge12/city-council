@@ -234,6 +234,23 @@ export {
 export type { LandmarkPlan, LandmarkPlanResult, PlaceLandmarkPayload } from "./buildings/landmarks";
 export type { Landmark } from "./economy/balance";
 export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
+export {
+  LOAN_FIELDS,
+  LOAN_STRIDE,
+  checkLoans,
+  creditLeft,
+  creditLimit,
+  debtOf,
+  lastYearTaxIncome,
+  loanAt,
+  loanCount,
+  loanRefusal,
+  loansOf,
+  monthInterest,
+  monthlyRepayment,
+  type Loan,
+  type TakeLoanPayload,
+} from "./economy/loans";
 export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
 export { TAX_SYSTEM, buildingTaxByLine, buildingTaxPerYear, businessTaxOf, collectTax, residentialTaxOf, shopSalesScale, type BusinessTaxTerms, type JobsFilled, type TaxByLine } from "./economy/tax";
 export { areaBudget, blockBudget, blockBudgets, blockBudgetsWith, budgetAreasOfSlots, chunkBudget, type AreaBudget, type BlockBudgets } from "./economy/block-budget";

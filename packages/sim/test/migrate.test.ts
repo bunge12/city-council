@@ -12,6 +12,7 @@ import { WAITING_PART, demandPull } from "../src/demand/pull";
 import { withoutWaiting } from "./before-waiting";
 import { withoutCharges } from "./before-charges";
 import { withoutMilestones } from "./before-milestones";
+import { withoutLoans } from "./before-loans";
 import { credited } from "./credited";
 import { creditedFor } from "../src/progression/milestones";
 import { MONEY_SERIES, STAT_TOTALS, createStats, emptyMoney, recountTotals, sampleCount, statsFor } from "../src/stats/stats";
@@ -106,6 +107,8 @@ function older(state: SimState, version: number, ...drop: (keyof SimState)[]): {
   else if (version < 36) kept = withoutDisplacedMarks(kept);
   // Before version 37 no city had milestones (M4-12).
   else if (version < 37) kept = withoutMilestones(kept);
+  // Before version 38 no city had loans (M4-11).
+  else if (version < 38) kept = withoutLoans(kept);
   if (version < 31) {
     kept["undo"] = state.undo.map((record) => {
       const { spent, ...rest } = record;
@@ -289,7 +292,7 @@ describe("migrateState", () => {
       pending: [],
     };
     const state = migrateState(v1);
-    expect(SNAPSHOT_VERSION).toBe(38);
+    expect(SNAPSHOT_VERSION).toBe(39);
     const fresh = createState(5);
     expect(state).toEqual({
       ...v1,

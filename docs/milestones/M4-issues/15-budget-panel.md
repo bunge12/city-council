@@ -8,7 +8,7 @@ The player can see where the money comes from and where it goes, and change it. 
 
 ## Scope
 
-- A budget panel, opened from the treasury in the top bar and by a shortcut, and from City Hall once issue 17 lands
+- A budget panel, opened from the treasury in the time card and by a shortcut, and from City Hall once issue 17 lands
 - Income and expenses by line for last month and this month so far, with totals and the net. Development charges sit on their own lines, one per zone, apart from recurring tax, as the PRD asks
 - Four tax sliders and five development charge sliders, each sending `SetTaxRate` or `SetDevelopmentCharge` and showing the range from the balance file. Each slider says what it does to its zone in one line
 - A loans section: open loans with their balance, repayment and months left, the credit limit, a form to take a loan within it and a button to repay one

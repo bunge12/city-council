@@ -55,8 +55,9 @@ describe("the balance stamp", () => {
     // #382 moved it again: demand.json gained a tax weight on each bar, and pops.json the tax weight on satisfaction by wealth.
     // #385 moved it again: pops.json gained the satisfaction hit from displacement.
     // #387 moved it again: progression.json, the population milestones, joined the stamp.
+    // #386 moved it again: economy.json gained the larger credit limit's multiple, and progression.json the milestone that opens it.
     // #388 moved it again: economy.json gained the landmarks, and progression.json the milestones City Hall grows at.
-    expect(BALANCE_STAMP).toBe("3c100d84562c5f6b");
+    expect(BALANCE_STAMP).toBe("ef73020ab7dc88ad");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {
