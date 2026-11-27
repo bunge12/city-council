@@ -12,6 +12,7 @@ import { moveMoney } from "./economy/budget";
 import { chargePayload, setDevelopmentCharge } from "./economy/charges";
 import { setTaxRate, taxRatePayload } from "./economy/tax-rates";
 import { keepBuildings } from "./buildings/upkeep";
+import { placeLandmark, planPlaceLandmark } from "./buildings/landmarks";
 import { LOG_PAGE_SIZE, logLength, recordEntry } from "./log";
 import { buildRoad } from "./roads/build";
 import { gridProblemReason, planRoadGrid } from "./roads/grid";
@@ -361,6 +362,27 @@ const SetTaxRate: CommandDef = {
   },
 };
 
+/**
+ * Places a landmark, `payload.landmark` an id from economy.json, on the lot
+ * that starts at the cell `payload.segment`, `payload.side` and
+ * `payload.place` name and runs toward the segment's node B, or toward
+ * node A with `payload.dir` 1 (M4-13, buildings/landmarks.ts). Refused
+ * before its unlock, while one of the kind stands, off a road, where a
+ * cell of its lot is not free, and when the treasury cannot pay its price,
+ * which goes on the construction line. Its cells leave the zoning. No undo
+ * record: like a building, it is cleared with the bulldozer.
+ */
+const PlaceLandmark: CommandDef = {
+  validate: (state, command) => {
+    const result = planPlaceLandmark(state, command.payload);
+    return result.ok ? result.plan.refusal : result.reason;
+  },
+  apply: (state, command) => {
+    const result = planPlaceLandmark(state, command.payload);
+    if (result.ok && result.plan.refusal === null) placeLandmark(state, result.plan);
+  },
+};
+
 /** Every command type the sim accepts, by name. */
 export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   NoOp,
@@ -374,6 +396,7 @@ export const COMMANDS: Readonly<Record<string, CommandDef>> = Object.freeze({
   BulldozeBuilding,
   SetDevelopmentCharge,
   SetTaxRate,
+  PlaceLandmark,
 });
 
 /** Checks a command against the current state without changing anything. */
@@ -429,11 +452,11 @@ function copyPayload(payload: unknown): unknown {
  * Commands that read which cells are open, and so would walk the whole of a
  * change of roads still settling in one go, far past the tick budget (M2
  * review, #147): painting zoning reads the open cells, and clearing a
- * building reads its lot's columns. An `Undo` whose record puts roads back
+ * building or placing a landmark reads its lot's columns. An `Undo` whose record puts roads back
  * reads what ground they would take, and waits too; any other undo does
  * not.
  */
-const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding"]);
+const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding", "PlaceLandmark"]);
 
 /**
  * Commands that wait behind their sender's waiting command, so they keep
@@ -446,7 +469,7 @@ const CELL_READERS: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuildin
  * at most `cellCommandsPerTick` a tick, and not road commands piled up
  * behind them, which would all apply in one step (M2 review, #147).
  */
-const WAIT_BEHIND: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding", "Undo"]);
+const WAIT_BEHIND: ReadonlySet<string> = new Set(["ZoneCells", "BulldozeBuilding", "PlaceLandmark", "Undo"]);
 
 /**
  * Whether the step holds `command` until the cells settle on

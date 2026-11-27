@@ -38,6 +38,8 @@ import { BUILDING_TYPES } from "./balance";
 import { noteAddedColumns } from "./candidates";
 import { noteBuildingChanged, noteBuildingsChanged } from "./changes";
 import { ZONING_BALANCE } from "../zoning/balance";
+import { DENSITY_NONE, ZONE_NONE } from "../zoning/cells";
+import { ECONOMY } from "../economy/balance";
 import { displaceBuildingPops } from "../pops/pops";
 import { noteOpening } from "../pops/opening-changes";
 import { countBuilding, countBuildings } from "../stats/stats";
@@ -56,14 +58,23 @@ export const BUILDING_ABANDONED = 4;
  * building on that visit (redevelop.ts, M3-14).
  */
 export const BUILDING_UNZONED = 8;
+/**
+ * Set in `flags`, beside `BUILDING_ALIVE`, for a landmark (M4-13): a
+ * city-owned building the player places, whose `type` is its place in
+ * `ECONOMY.landmarks` and not in `BUILDING_TYPES`. It has no zone or
+ * density, no room and no jobs, and is never vacant or abandoned. See
+ * landmarks.ts.
+ */
+export const BUILDING_LANDMARK = 16;
 
-/** Every value `flags` may hold: free, in use, vacant, abandoned, and abandoned on ground zoned for something else. */
+/** Every value `flags` may hold: free, in use, vacant, abandoned, abandoned on ground zoned for something else, and a landmark. */
 export const BUILDING_FLAG_VALUES: readonly number[] = [
   0,
   BUILDING_ALIVE,
   BUILDING_ALIVE | BUILDING_VACANT,
   BUILDING_ALIVE | BUILDING_ABANDONED,
   BUILDING_ALIVE | BUILDING_ABANDONED | BUILDING_UNZONED,
+  BUILDING_ALIVE | BUILDING_LANDMARK,
 ];
 
 /** Every building. Plain typed arrays only (CLAUDE.md rule 7). */
@@ -237,6 +248,11 @@ export function isAbandoned(b: Pick<BuildingState, "flags">, id: number): boolea
   return ((b.flags[id] ?? 0) & BUILDING_ABANDONED) !== 0;
 }
 
+/** Whether building `id` is a landmark (M4-13). False for a free id. */
+export function isLandmark(b: Pick<BuildingState, "flags">, id: number): boolean {
+  return ((b.flags[id] ?? 0) & BUILDING_LANDMARK) !== 0;
+}
+
 /** The people building `id` holds room for: its `residents`, or none while it is abandoned (M3-24) or for a free id. */
 export function homeRoom(b: Pick<BuildingState, "flags" | "residents">, id: number): number {
   const flags = b.flags[id] ?? 0;
@@ -283,6 +299,8 @@ export interface BuildingRow extends NewBuilding {
   statusSince: number;
   /** Whether the city has paid to clear it (M4-09). */
   paid: number;
+  /** Whether it is a landmark, whose `type` is its place in `ECONOMY.landmarks` (M4-13). */
+  landmark: boolean;
 }
 
 /** The row of building `id`. Throws if there is no such building. */
@@ -311,6 +329,7 @@ export function readBuilding(b: BuildingState, id: number): BuildingRow {
     abandoned: isAbandoned(b, id),
     statusSince: b.statusSince[id] ?? 0,
     paid: b.paid[id] ?? 0,
+    landmark: isLandmark(b, id),
   };
 }
 
@@ -340,15 +359,7 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   const problem = lotProblem(state, shape, type.zoneNumber, type.density);
   if (problem) throw new RangeError(`no ${type.id} can stand there: ${problem}`);
   const b = state.buildings;
-  let id: number;
-  if (b.free.length > 0) {
-    id = b.free[b.free.length - 1] ?? 0;
-    b.free = resized(b.free, b.free.length - 1);
-  } else {
-    id = b.flags.length;
-    const arrays = b as unknown as Record<BuildingKey, AnyTypedArray>;
-    for (const key of BUILDING_ARRAYS) arrays[key] = resized(arrays[key], id + 1);
-  }
+  const id = takeId(b);
   b.flags[id] = BUILDING_ALIVE;
   b.firstSeg[id] = spec.firstSeg;
   b.firstSide[id] = spec.firstSide;
@@ -375,6 +386,75 @@ export function addBuilding(state: SimState, spec: NewBuilding): number {
   fileBuilding(state, id);
   noteLotFronts(state, shape.first, spec.width);
   if (shape.back) noteLotFronts(state, shape.back.first, spec.width);
+  return id;
+}
+
+/** The id a new row goes in: the last free id, or a new one past the end with every array grown for it. */
+function takeId(b: BuildingState): number {
+  if (b.free.length > 0) {
+    const id = b.free[b.free.length - 1] ?? 0;
+    b.free = resized(b.free, b.free.length - 1);
+    return id;
+  }
+  const id = b.flags.length;
+  const arrays = b as unknown as Record<BuildingKey, AnyTypedArray>;
+  for (const key of BUILDING_ARRAYS) arrays[key] = resized(arrays[key], id + 1);
+  return id;
+}
+
+/** Where a landmark's lot starts and which way it runs, as a building row names a lot on one strip. */
+export interface LandmarkLot {
+  firstSeg: number;
+  firstSide: number;
+  firstPlace: number;
+  dir: number;
+}
+
+/**
+ * Adds landmark `landmark`, its place in `ECONOMY.landmarks`, on the lot
+ * that starts at `lot` and is the landmark's width and depth, on the
+ * current tick, and returns its id. Internal: `PlaceLandmark`
+ * (landmarks.ts) calls it once its plan passed, with the lot's cells
+ * already unzoned. Throws if any cell of the lot is not open, unzoned and
+ * free. It is not counted in the running totals and offers no room or
+ * jobs, so nothing that looks for either finds it. Not undoable.
+ */
+export function addLandmarkRow(state: SimState, landmark: number, lot: LandmarkLot): number {
+  const kind = ECONOMY.landmarks[landmark];
+  if (!kind) throw new RangeError(`no landmark ${landmark}`);
+  const spec: NewBuilding = { ...lot, width: kind.width, depth: kind.depth, backSeg: 0, backSide: 0, backPlace: 0, backDir: 0, backDepth: 0, type: landmark, residents: 0, variant: 0 };
+  if (!isSegment(state.roads, spec.firstSeg) || spec.firstPlace < 0 || spec.firstPlace >= placesAlong(state.roads, spec.firstSeg)) {
+    throw new RangeError(`segment ${spec.firstSeg} has no place ${spec.firstPlace}`);
+  }
+  if ((spec.firstSide !== CELL_LEFT && spec.firstSide !== CELL_RIGHT) || (spec.dir !== 0 && spec.dir !== 1)) throw new RangeError("bad side or direction");
+  const shape = lotShapeOf(spec);
+  const problem = lotProblem(state, shape, ZONE_NONE, DENSITY_NONE);
+  if (problem) throw new RangeError(`no ${kind.name} can stand there: ${problem}`);
+  const b = state.buildings;
+  const id = takeId(b);
+  b.flags[id] = BUILDING_ALIVE | BUILDING_LANDMARK;
+  b.firstSeg[id] = spec.firstSeg;
+  b.firstSide[id] = spec.firstSide;
+  b.firstPlace[id] = spec.firstPlace;
+  b.dir[id] = spec.dir;
+  b.width[id] = spec.width;
+  b.depth[id] = spec.depth;
+  b.backSeg[id] = 0;
+  b.backSide[id] = 0;
+  b.backPlace[id] = 0;
+  b.backDir[id] = 0;
+  b.backDepth[id] = 0;
+  b.zone[id] = ZONE_NONE;
+  b.density[id] = DENSITY_NONE;
+  b.type[id] = landmark;
+  b.residents[id] = 0;
+  b.variant[id] = 0;
+  b.builtAt[id] = state.tick;
+  b.statusSince[id] = state.tick;
+  b.paid[id] = 0;
+  noteBuildingChanged(b, id);
+  fileBuilding(state, id);
+  noteLotFronts(state, shape.first, spec.width);
   return id;
 }
 
@@ -441,7 +521,7 @@ export function removeBuildings(state: SimState, ids: readonly number[], byOwner
   // only one needs looking at again there: a bulldoze is mostly homes.
   const p = state.pops;
   for (const id of ids) {
-    if ((OFFERS_JOBS[b.type[id] as number] as number) === 1) noteOpening(p, id);
+    if (!isLandmark(b, id) && (OFFERS_JOBS[b.type[id] as number] as number) === 1) noteOpening(p, id);
     clearRow(b, id);
   }
   const free = resized(b.free, b.free.length + ids.length);
@@ -512,6 +592,11 @@ export function checkBuildings(value: unknown, net: RoadNetwork, tick: number): 
       if (BUILDING_ARRAYS.some((key) => b[key][id] !== 0)) return `free id ${id} has a row`;
       continue;
     }
+    if ((flags & BUILDING_LANDMARK) !== 0) {
+      const problem = landmarkRowProblem(b, id, segs, net, tick);
+      if (problem) return problem;
+      continue;
+    }
     const type = BUILDING_TYPES[b.type[id] ?? 0];
     if (!type) return `building ${id} has an unknown type`;
     if (b.zone[id] !== type.zoneNumber || b.density[id] !== type.density) return `building ${id} does not have its type's zone and density`;
@@ -542,5 +627,29 @@ export function checkBuildings(value: unknown, net: RoadNetwork, tick: number): 
     if ((b.residents[id] ?? 0) < 0) return `building ${id} has fewer than no residents`;
     if ((b.paid[id] ?? 0) > 1) return `building ${id} is neither paid for nor not`;
   }
+  return null;
+}
+
+/**
+ * Why landmark row `id` is malformed, or null: a known landmark of its
+ * kind's lot on one strip, with no zone, density, room or variant, built on a tick of the city's past and so ever since, at a
+ * cell its segment has, and the only one of its kind.
+ */
+function landmarkRowProblem(b: BuildingState, id: number, segs: number, net: RoadNetwork, tick: number): string | null {
+  const type = b.type[id] ?? 0;
+  const kind = ECONOMY.landmarks[type];
+  if (!kind) return `building ${id} is a landmark of an unknown kind`;
+  for (let other = 0; other < id; other++) if (isLandmark(b, other) && b.type[other] === type) return `buildings ${other} and ${id} are both a ${kind.name}`;
+  if (b.width[id] !== kind.width || b.depth[id] !== kind.depth) return `building ${id}'s lot is not a ${kind.name}'s`;
+  if (b.zone[id] !== ZONE_NONE || b.density[id] !== DENSITY_NONE || b.residents[id] !== 0 || b.variant[id] !== 0) return `landmark ${id} has a zone, density, room or variant`;
+  if (b.backSeg[id] !== 0 || b.backSide[id] !== 0 || b.backPlace[id] !== 0 || b.backDir[id] !== 0 || b.backDepth[id] !== 0) return `landmark ${id} has a back lot`;
+  const seg = b.firstSeg[id] ?? 0;
+  if (seg >= segs || !isSegment(net, seg)) return `building ${id} is on a segment that is not there`;
+  const place = b.firstPlace[id] ?? 0;
+  if (place < 0 || place >= placesAlong(net, seg)) return `building ${id} starts at a place its segment does not have`;
+  if ((b.firstSide[id] ?? 0) > CELL_RIGHT || (b.dir[id] ?? 0) > 1) return `building ${id} has a bad side or direction`;
+  const built = b.builtAt[id] ?? 0;
+  if (!Number.isSafeInteger(built) || built < 0 || built > tick || b.statusSince[id] !== built) return `building ${id} was built on a bad tick`;
+  if ((b.paid[id] ?? 0) > 1) return `building ${id} is neither paid for nor not`;
   return null;
 }

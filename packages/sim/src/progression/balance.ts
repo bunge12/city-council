@@ -4,7 +4,7 @@
 
 import balance from "../../balance/progression.json" with { type: "json" };
 import { isRecord, unknownKeys } from "../balance-fields";
-import { PRICE_YEAR, priceNow, priceProblems, type EconomyPrice } from "../economy/balance";
+import { ECONOMY, PRICE_YEAR, priceNow, priceProblems, type EconomyPrice } from "../economy/balance";
 
 /**
  * Every unlock the sim knows: a thing a player cannot use until a milestone
@@ -25,6 +25,8 @@ export interface MilestoneFile {
   name: string;
   grant: EconomyPrice;
   unlocks: string[];
+  /** The landmarks (economy.json) that grow a stage at this milestone (M4-13). Left out for none. */
+  grows?: string[];
 }
 
 /** One milestone, its grant in whole dollars of today. */
@@ -37,9 +39,11 @@ export interface Milestone {
   grant: number;
   /** What it opens. */
   unlocks: readonly Unlock[];
+  /** The ids of the landmarks that grow a stage at it (M4-13). */
+  grows: readonly string[];
 }
 
-const MILESTONE_KEYS = ["population", "name", "grant", "unlocks"];
+const MILESTONE_KEYS = ["population", "name", "grant", "unlocks", "grows"];
 
 /**
  * Every problem with a progression balance file, or none: milestones in
@@ -73,9 +77,24 @@ export function checkProgressionBalance(data: unknown): string[] {
         else opened.set(id as string, i);
       }
     }
+    const grows = entry["grows"];
+    if (grows !== undefined) {
+      if (!Array.isArray(grows)) errors.push(`${at}.grows must be a list`);
+      else {
+        for (const id of grows) {
+          const landmark = ECONOMY.landmarks.find((l) => l.id === id);
+          if (!landmark) errors.push(`${at}.grows names ${JSON.stringify(id)}, which is not a landmark in economy.json`);
+          else if (!opened.has(landmark.unlock) || opened.get(landmark.unlock) === i) errors.push(`${at}.grows names ${id}, which no milestone before it unlocks`);
+        }
+        if (new Set(grows).size !== grows.length) errors.push(`${at}.grows names a landmark twice`);
+      }
+    }
     errors.push(...unknownKeys(entry, MILESTONE_KEYS, at));
   });
   for (const id of UNLOCKS) if (!opened.has(id)) errors.push(`no milestone opens ${id}`);
+  for (const landmark of ECONOMY.landmarks) {
+    if (!(UNLOCKS as readonly string[]).includes(landmark.unlock)) errors.push(`landmark ${landmark.id} in economy.json is opened by ${JSON.stringify(landmark.unlock)}, which is not one of ${UNLOCKS.join(", ")}`);
+  }
   return errors;
 }
 
@@ -84,7 +103,13 @@ export function resolveProgression(data: unknown): readonly Milestone[] {
   const errors = checkProgressionBalance(data);
   if (errors.length > 0) throw new TypeError(`balance/progression.json: ${errors.join("; ")}`);
   return (data as { milestones: MilestoneFile[] }).milestones.map((m) =>
-    Object.freeze({ population: m.population, name: m.name, grant: priceNow(m.grant), unlocks: Object.freeze([...m.unlocks] as Unlock[]) }),
+    Object.freeze({
+      population: m.population,
+      name: m.name,
+      grant: priceNow(m.grant),
+      unlocks: Object.freeze([...m.unlocks] as Unlock[]),
+      grows: Object.freeze([...(m.grows ?? [])]),
+    }),
   );
 }
 

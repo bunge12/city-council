@@ -1,5 +1,5 @@
 {
-  "_about": "Population milestones (PRD, \"Progression\" under \"Land value and progression\"; M4-12). A milestone is reached the first time the city's population reaches its `population`, and is never lost when the population falls. Reaching one pays its `grant` once, on the grants line, and opens its `unlocks`. The milestones are in rising order of population, up to the 500,000 ceiling. A grant is a price as economy.json writes one: whole dollars of its `sourceYear`, raised to 2026 by the `index` named there. Each unlock id is one the sim's registry knows (progression/unlocks.ts) and is opened by exactly one milestone: `density2` and `density3` let the zone tool paint those densities, `cityHall` lets the player place City Hall (M4-13). Each later module adds its own. Density 2 comes early, so a new city of houses can break even before it, and density 3 in the middle of the curve (PRD). Every number here is a starting value that M4-19 tunes.",
+  "_about": "Population milestones (PRD, \"Progression\" under \"Land value and progression\"; M4-12). A milestone is reached the first time the city's population reaches its `population`, and is never lost when the population falls. Reaching one pays its `grant` once, on the grants line, and opens its `unlocks`. The milestones are in rising order of population, up to the 500,000 ceiling. A grant is a price as economy.json writes one: whole dollars of its `sourceYear`, raised to 2026 by the `index` named there. Each unlock id is one the sim's registry knows (progression/unlocks.ts) and is opened by exactly one milestone: `density2` and `density3` let the zone tool paint those densities, `cityHall` lets the player place City Hall (M4-13). Each later module adds its own. `grows`, where given, names the landmarks (economy.json) that grow a stage at that milestone: a landmark stands at stage 1 plus the number of its growing milestones the city has reached, whenever it was placed, and each growing milestone comes after the one that unlocks it. City Hall grows at three, so it has four stages (PRD, \"Landmarks\"). Density 2 comes early, so a new city of houses can break even before it, and density 3 in the middle of the curve (PRD). Every number here is a starting value that M4-19 tunes.",
   "milestones": [
     {
       "population": 1000,
@@ -11,7 +11,8 @@
       "population": 2500,
       "name": "Town",
       "grant": { "amount": 8000000, "sourceYear": 2026, "index": "general", "source": "Placeholder. Grants rise with each milestone, a little less than the population does. M4-19 tunes them.", "placeholder": true },
-      "unlocks": []
+      "unlocks": [],
+      "grows": ["cityHall"]
     },
     {
       "population": 5000,
@@ -29,7 +30,8 @@
       "population": 25000,
       "name": "City",
       "grant": { "amount": 40000000, "sourceYear": 2026, "index": "general", "source": "Placeholder, as Town's.", "placeholder": true },
-      "unlocks": ["density3"]
+      "unlocks": ["density3"],
+      "grows": ["cityHall"]
     },
     {
       "population": 50000,
@@ -41,7 +43,8 @@
       "population": 100000,
       "name": "Large city",
       "grant": { "amount": 100000000, "sourceYear": 2026, "index": "general", "source": "Placeholder, as Town's.", "placeholder": true },
-      "unlocks": []
+      "unlocks": [],
+      "grows": ["cityHall"]
     },
     {
       "population": 200000,

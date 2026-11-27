@@ -33,6 +33,7 @@ function row(typeId: string, over: Partial<BuildingInfo> = {}): BuildingInfo {
     chunk: 0,
     vacant: false,
     abandoned: false,
+    landmark: false,
     ...over,
   };
 }

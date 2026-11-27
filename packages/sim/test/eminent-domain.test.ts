@@ -182,11 +182,14 @@ describe("the price of clearing a building", () => {
       relocation: residents * D.relocationPerResident,
       premium: Math.floor(value * D.premium),
       demolition: 0,
+      cityDemolition: 0,
+      refund: 0,
       residents,
       jobs: 0,
       occupied: 1,
       empty: 0,
       paid: 0,
+      cityOwned: 0,
     });
   });
 

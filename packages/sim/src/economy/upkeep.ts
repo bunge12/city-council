@@ -27,6 +27,7 @@ import { LEVEL_BRIDGE, NETWORK_ROAD, SEG_ALIVE, SEG_FIXED, observeNetwork, segme
 import type { SimState } from "../state";
 import type { System } from "../step";
 import { dailyShare, moveMoney } from "./budget";
+import { landmarkUpkeepPerYear } from "../buildings/landmarks";
 
 /**
  * What segment `seg` costs a year to keep, in whole dollars: its build cost,
@@ -101,12 +102,13 @@ export function markRoadUpkeepStale(net: RoadNetwork): void {
 }
 
 /**
- * What the city's own buildings cost a year to keep, in whole dollars. The
- * city owns none yet: City Hall (M4-13) adds its upkeep here, reading it
- * from the city's state, and services add theirs when they arrive.
+ * What the city's own buildings cost a year to keep, in whole dollars: the
+ * landmarks standing (M4-13), each its upkeep share of its price. Services
+ * add theirs when they arrive (M8). One pass over the buildings' flags, on
+ * a day's first tick.
  */
-export function buildingUpkeepPerYear(): number {
-  return 0;
+export function buildingUpkeepPerYear(state: Pick<SimState, "buildings">): number {
+  return landmarkUpkeepPerYear(state.buildings);
 }
 
 /**
@@ -121,7 +123,7 @@ export function chargeUpkeep(state: SimState): void {
   const day = Math.floor(state.tick / perDay) % yearDays();
   const roads = dailyShare(roadUpkeepPerYear(state.roads), day);
   if (roads !== 0) moveMoney(state, "roadUpkeep", roads);
-  const buildings = dailyShare(buildingUpkeepPerYear(), day);
+  const buildings = dailyShare(buildingUpkeepPerYear(state), day);
   if (buildings !== 0) moveMoney(state, "buildingUpkeep", buildings);
 }
 

@@ -165,7 +165,7 @@ export {
 } from "./demand/demand";
 export { WAITING_PART, demandPull } from "./demand/pull";
 export { nodeReachesOutside, prepareOutside, segmentReachesOutside, segmentsReachingOutside } from "./roads/outside";
-export { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_FLAG_VALUES, BUILDING_UNZONED, BUILDING_VACANT, buildingCount, buildingIdLimit, homeRoom, isAbandoned, isBuilding, isVacant, readBuilding } from "./buildings/buildings";
+export { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_FLAG_VALUES, BUILDING_LANDMARK, BUILDING_UNZONED, BUILDING_VACANT, buildingCount, buildingIdLimit, homeRoom, isAbandoned, isBuilding, isLandmark, isVacant, readBuilding } from "./buildings/buildings";
 export { VACANCY, VACANCY_SYSTEM, abandonedWaiting, buildingEmpty, checkVacancy, mayComeBack } from "./buildings/vacancy";
 export { REDEVELOP, REDEVELOP_SYSTEM, checkRedevelopment, planRedevelopment, type RedevelopmentPlan } from "./buildings/redevelop";
 export type { BuildingRow, BuildingState } from "./buildings/buildings";
@@ -220,6 +220,19 @@ export {
   sameMilestones,
   unlockName,
 } from "./progression/milestones";
+export {
+  LANDMARKS,
+  findLandmark,
+  landmarkClearing,
+  landmarkIds,
+  landmarkKind,
+  landmarkStage,
+  landmarkStages,
+  landmarkUpkeepPerYear,
+  planPlaceLandmark,
+} from "./buildings/landmarks";
+export type { LandmarkPlan, LandmarkPlanResult, PlaceLandmarkPayload } from "./buildings/landmarks";
+export type { Landmark } from "./economy/balance";
 export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
 export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
 export { TAX_SYSTEM, buildingTaxByLine, buildingTaxPerYear, businessTaxOf, collectTax, residentialTaxOf, shopSalesScale, type BusinessTaxTerms, type JobsFilled, type TaxByLine } from "./economy/tax";

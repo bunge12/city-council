@@ -79,6 +79,7 @@ import {
   type SegmentRow,
 } from "./roads/network";
 import { NETWORKS_ALL, roadIndexOf, segmentsInBox } from "./roads/spatial";
+import { landmarkSlots } from "./buildings/landmarks";
 
 /** What one applied road command needs to be taken back. Plain data. */
 export interface UndoRecord {
@@ -449,12 +450,14 @@ function backRoom(more: number): void {
  */
 function gatherPainted(state: SimState, record: UndoRecord): string | null {
   // The cells laid out for the roads as they are, which can replace `state.cells`.
-  laidOutCells(state);
+  const index = laidOutCells(state);
   const cells = state.cells;
   const painted = record.painted ?? { zone: ZONE_NONE, density: DENSITY_NONE };
   const zones = record.zones;
   const depth = ZONING_BALANCE.zoneDepthCells;
   backCount = 0;
+  // A landmark's cells are out of the zoning while it stands, so an undo passes over them as a stroke does (M4-13).
+  const landmark = landmarkSlots(state, index);
   for (const journal of readJournals(zones)) {
     if (!journalFits(state.roads, journal)) return ROAD_GONE;
     const start = cells.offset[journal.seg] ?? 0;
@@ -477,6 +480,7 @@ function gatherPainted(state: SimState, record: UndoRecord): string | null {
           const zone = zones[at + 1] ?? 0;
           if (zone === ZONE_UNTOUCHED) continue;
           const slot = start + localIndex(side, place, d);
+          if (landmark.has(slot)) continue;
           if (cells.zone[slot] !== painted.zone || cells.density[slot] !== painted.density) return REZONED;
           backSlots[backCount] = slot;
           backValues[backCount * 2] = zone;

@@ -48,7 +48,7 @@
 
 import { TIME_BALANCE, yearDays } from "../calendar";
 import { BUILDING_TYPES, type BuildingType } from "../buildings/balance";
-import { BUILDING_ABANDONED, BUILDING_ALIVE } from "../buildings/buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_LANDMARK } from "../buildings/buildings";
 import { lotJobs } from "../buildings/jobs";
 import { DEMAND_BALANCE } from "../demand/balance";
 import { spendingPower } from "../demand/demand";
@@ -141,9 +141,9 @@ export function businessTaxOf(type: Pick<BuildingType, "zone">, filled: JobsFill
   return out;
 }
 
-/** Whether building `flags` may pay: standing and not abandoned. Who lives or works in it is the sweep's question. */
+/** Whether building `flags` may pay: standing, not abandoned and not a landmark, which the city owns (M4-13). Who lives or works in it is the sweep's question. */
 export function mayPay(flags: number): boolean {
-  return (flags & BUILDING_ALIVE) !== 0 && (flags & BUILDING_ABANDONED) === 0;
+  return (flags & BUILDING_ALIVE) !== 0 && (flags & (BUILDING_ABANDONED | BUILDING_LANDMARK)) === 0;
 }
 
 const NO_JOBS: JobsFilled = { commercial: 0, office: 0, industrial: 0 };

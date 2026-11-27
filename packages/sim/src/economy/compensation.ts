@@ -6,7 +6,8 @@
 // for each resident and each job filled that the clearing displaces, plus
 // a premium on the value. A building nobody lives or works in, vacant,
 // abandoned or just built, costs its demolition only: its floor space at
-// the demolition price. Empty cells are free.
+// the demolition price. Empty cells are free. A landmark, the city's own,
+// costs its demolition less the refund share of its price (M4-13).
 //
 // Who counts as displaced is read from the pops as the plan sees them: the
 // people living in the building and the jobs filled there. The sim reads
@@ -39,7 +40,8 @@
 // (rule 6).
 
 import { BUILDING_TYPES } from "../buildings/balance";
-import { isBuilding, type BuildingState } from "../buildings/buildings";
+import { isBuilding, isLandmark, type BuildingState } from "../buildings/buildings";
+import { landmarkClearing } from "../buildings/landmarks";
 import { noteBuildingChanged } from "../buildings/changes";
 import { lotJobs } from "../buildings/jobs";
 import { lotCentres } from "../buildings/where";
@@ -51,7 +53,12 @@ import { floorSpaceOf, propertyValues } from "./value";
 
 /** What clearing some buildings costs, and its parts. Whole dollars. */
 export interface Compensation {
-  /** What the command charges on the compensation line: `value + relocation + premium + demolition`. */
+  /**
+   * What the command charges: `value + relocation + premium + demolition +
+   * cityDemolition - refund`. The city's own buildings' part,
+   * `cityDemolition - refund`, goes on the demolition line, as a road's
+   * does, and the rest on the compensation line (`chargeCompensation`).
+   */
   total: number;
   /** The value of the occupied buildings. */
   value: number;
@@ -61,6 +68,10 @@ export interface Compensation {
   premium: number;
   /** The demolition of the buildings nobody lives or works in. */
   demolition: number;
+  /** The demolition of the city's own buildings, its landmarks (M4-13). */
+  cityDemolition: number;
+  /** The refund share of the city's own buildings' price, which comes off the total (M4-13). */
+  refund: number;
   /** The people living in the occupied buildings, who are displaced. */
   residents: number;
   /** The jobs filled in them, whose workers lose their job. */
@@ -71,10 +82,12 @@ export interface Compensation {
   empty: number;
   /** How many the city has paid for already, which cost nothing. */
   paid: number;
+  /** How many are the city's own, its landmarks, priced at demolition less the refund (M4-13). */
+  cityOwned: number;
 }
 
 /** Clearing nothing: free. */
-export const NO_COMPENSATION: Readonly<Compensation> = Object.freeze({ total: 0, value: 0, relocation: 0, premium: 0, demolition: 0, residents: 0, jobs: 0, occupied: 0, empty: 0, paid: 0 });
+export const NO_COMPENSATION: Readonly<Compensation> = Object.freeze({ total: 0, value: 0, relocation: 0, premium: 0, demolition: 0, cityDemolition: 0, refund: 0, residents: 0, jobs: 0, occupied: 0, empty: 0, paid: 0, cityOwned: 0 });
 
 /** Counts by building id: the people living there, or the jobs filled there. */
 export type CountIn = (id: number) => number;
@@ -106,6 +119,13 @@ export function compensationFor(state: SimState, ids: readonly number[], people:
       out.paid++;
       continue;
     }
+    if (isLandmark(b, id)) {
+      const clearing = landmarkClearing(b, id);
+      out.cityDemolition += clearing.demolition;
+      out.refund += clearing.refund;
+      out.cityOwned++;
+      continue;
+    }
     const residents = people(id);
     const jobs = filled(id);
     if (residents > 0 || jobs > 0) {
@@ -121,7 +141,7 @@ export function compensationFor(state: SimState, ids: readonly number[], people:
       out.empty++;
     }
   }
-  out.total = out.value + out.relocation + out.premium + out.demolition;
+  out.total = out.value + out.relocation + out.premium + out.demolition + out.cityDemolition - out.refund;
   return out;
 }
 
@@ -148,13 +168,17 @@ export function expropriationTicks(): number {
 /**
  * Charges `compensation`, the price of clearing buildings `ids` that
  * `compensationFor` gave with the same `people` and `filled`, on the
- * compensation line, records each occupied one for `playerId`, and marks
+ * compensation line, and a landmark's demolition less its refund on the
+ * demolition line (M4-13), records each occupied one for `playerId`, and marks
  * every one paid for. One already paid for is passed over, as
  * `compensationFor` priced it. Called before the buildings go, while their
  * pops and lots are still there.
  */
 export function chargeCompensation(state: SimState, playerId: string, ids: readonly number[], compensation: Compensation, people: CountIn, filled: CountIn): void {
-  if (compensation.total !== 0) moveMoney(state, "compensation", compensation.total);
+  // The city's own buildings are not expropriated: theirs is a demolition, less its refund, as a road's is (M4-13).
+  const owned = compensation.cityDemolition - compensation.refund;
+  if (compensation.total - owned !== 0) moveMoney(state, "compensation", compensation.total - owned);
+  if (owned !== 0) moveMoney(state, "demolition", owned);
   const b = state.buildings;
   const sorted = [...ids].sort((p, q) => p - q);
   const added: Expropriation[] = [];

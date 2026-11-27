@@ -1,0 +1,116 @@
+{
+  "description": "City Hall on seed 2026 (M4-13). p1 builds a street from the first outside connection's stub and zones R1 along both sides, then places City Hall over part of the zoned north strip, which unzones its cells. Houses grow around it for six game days. p2 bulldozes it, paid the refund less its demolition, and p1 places it again further along. Twelve game days, every bar held at 60, the city funded and credited with every milestone.",
+  "seed": 2026,
+  "untilTick": 1206,
+  "log": [
+    {
+      "tick": 0,
+      "seq": 4,
+      "playerId": "p1",
+      "type": "BuildRoad",
+      "payload": {
+        "from": {
+          "x": 200,
+          "z": 3608
+        },
+        "to": {
+          "x": 520,
+          "z": 3608
+        },
+        "type": "street"
+      }
+    },
+    {
+      "tick": 1,
+      "seq": 6,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3579
+            },
+            "to": {
+              "x": 438,
+              "z": 3579
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 2,
+      "seq": 7,
+      "playerId": "p1",
+      "type": "ZoneCells",
+      "payload": {
+        "zone": "residential",
+        "density": 1,
+        "rects": [
+          {
+            "from": {
+              "x": 202,
+              "z": 3637
+            },
+            "to": {
+              "x": 294,
+              "z": 3637
+            },
+            "width": 44
+          }
+        ]
+      }
+    },
+    {
+      "tick": 3,
+      "seq": 8,
+      "playerId": "p1",
+      "type": "PlaceLandmark",
+      "payload": {
+        "landmark": "cityHall",
+        "segment": 2,
+        "side": 1,
+        "place": 2
+      }
+    },
+    {
+      "tick": 604,
+      "seq": 9,
+      "playerId": "p2",
+      "type": "BulldozeBuilding",
+      "payload": {
+        "buildings": [
+          {
+            "id": 0,
+            "segment": 2,
+            "side": 1,
+            "place": 2,
+            "builtAt": 3
+          }
+        ]
+      }
+    },
+    {
+      "tick": 605,
+      "seq": 10,
+      "playerId": "p1",
+      "type": "PlaceLandmark",
+      "payload": {
+        "landmark": "cityHall",
+        "segment": 2,
+        "side": 1,
+        "place": 20
+      }
+    }
+  ],
+  "balance": "3c100d84562c5f6b",
+  "hash": "0b6b32af5bcb8df3",
+  "heldDemand": 60,
+  "treasury": 1000000000000,
+  "credited": true
+}

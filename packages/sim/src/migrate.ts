@@ -196,6 +196,12 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // their grants, so a city zoned at densities 2 and 3 keeps painting them.
   // Its starting grant it had from version 30.
   36: (old) => ({ ...old, version: 37, milestones: creditedFor((old["stats"] as { highestPopulation: number }).highestPopulation) }),
+  // Version 38 lets a building row be a landmark (M4-13): BUILDING_LANDMARK
+  // in its flags, and its type a place in the landmarks rather than the
+  // building types. No city had one before it, so nothing else changes. The
+  // bump keeps a save with City Hall in it from an older build, which would
+  // refuse the flag or read its type as a house.
+  37: (old) => ({ ...old, version: 38 }),
 };
 
 /**

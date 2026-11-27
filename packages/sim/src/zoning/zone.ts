@@ -19,6 +19,7 @@
 // alone and never from how far a walk had got.
 
 import { noteFrontCells } from "../buildings/candidates";
+import { landmarkSlots } from "../buildings/landmarks";
 import { DENSITY_UNLOCKS } from "../progression/balance";
 import { lockNote } from "../progression/milestones";
 import type { SimState } from "../state";
@@ -142,7 +143,7 @@ let boxes = new Float64Array(4 * 64);
 
 /**
  * Finds every cell the command would change: the open cells with their centre inside a rectangle
- * whose zone or density is not already the one asked for. The cells under
+ * whose zone or density is not already the one asked for, and that no landmark stands on. The cells under
  * all the rectangles are read in one pass, so a cell under two is looked at
  * once and listed once (issue #204: a pass per rectangle read the buckets
  * where two meet twice).
@@ -176,12 +177,16 @@ function gather(state: SimState, parsed: Parsed): number {
     boxes[4 * r + 3] = (dz < 0 ? fz : fz + dz) + padZ;
   }
   let n = 0;
+  // A landmark's cells are out of the zoning while it stands (M4-13).
+  const landmark = landmarkSlots(state);
   forOpenCellsInBoxes(
     index,
     cells,
     boxes,
     count,
-    (slot) => cells.zone[slot] === zone && cells.density[slot] === density,
+    landmark.size === 0
+      ? (slot) => cells.zone[slot] === zone && cells.density[slot] === density
+      : (slot) => (cells.zone[slot] === zone && cells.density[slot] === density) || landmark.has(slot),
     (slot, x, z, hits, hitCount) => {
       for (let k = 0; k < hitCount; k++) {
         const at = (hits[k] ?? 0) * RECT_FLOATS;

@@ -10,7 +10,8 @@ import { resized, type AnyTypedArray } from "../roads/network";
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { BUILDING_TYPES } from "./balance";
-import { BUILDING_ALIVE, BUILDING_ARRAYS, BUILDING_FLAG_VALUES, type BuildingKey, type BuildingState } from "./buildings";
+import { BUILDING_ALIVE, BUILDING_ARRAYS, BUILDING_FLAG_VALUES, BUILDING_LANDMARK, type BuildingKey, type BuildingState } from "./buildings";
+import { ECONOMY } from "../economy/balance";
 import { drainBuildingChanges, recordBuildingChangesOf } from "./changes";
 import { NO_BUILDING, filedChunk, fileBuilding, hasBuildingIndex, unfileBuilding } from "./where";
 
@@ -64,8 +65,9 @@ function deltaProblem(b: BuildingState, delta: BuildingDelta): string | null {
   for (let id = b.flags.length; id < limit; id++) if (!listed.has(id)) return "new building ids have no rows";
   for (let i = 0; i < ids.length; i++) {
     if ((rows.flags[i] ?? 0) === 0) continue;
-    const type = BUILDING_TYPES[rows.type[i] ?? 0];
     const flags = rows.flags[i] ?? 0;
+    // A landmark's type is its place in the landmarks, not in the building types (M4-13).
+    const type = (flags & BUILDING_LANDMARK) !== 0 ? ECONOMY.landmarks[rows.type[i] ?? 0] : BUILDING_TYPES[rows.type[i] ?? 0];
     if ((flags & BUILDING_ALIVE) === 0 || !BUILDING_FLAG_VALUES.includes(flags)) return `building ${ids[i]} has unknown flags`;
     if (!type) return `building ${ids[i]} has an unknown type`;
     if ((rows.zone[i] ?? 0) > ZONING_BALANCE.zones.length) return `building ${ids[i]} has an unknown zone`;
