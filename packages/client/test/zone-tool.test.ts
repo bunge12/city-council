@@ -236,6 +236,24 @@ describe("the controller", () => {
     return { state, tool, sent, get: () => store, answer: (r: CommandResult) => answer(r) };
   }
 
+  it("will not pick a density the city has not opened, and drops a locked one it had picked (M4-12)", () => {
+    const locked = createState(SEED);
+    const { tool, get } = setup(locked);
+    expect(tool.densityLock(1)).toBeNull();
+    expect(tool.densityLock(2)).toMatch(/^Medium density is locked until the .+ milestone, at [\d,]+ residents$/);
+    expect(tool.densityLock(3)).toMatch(/^High density is locked until /);
+    tool.pickDensity(2);
+    tool.pickDensity(3);
+    expect(get().zoneDensity).toBe(1);
+    // A density picked on a city that had opened it goes back to 1 on one that has not.
+    const open = setup();
+    open.tool.pickDensity(3);
+    expect(open.get().zoneDensity).toBe(3);
+    open.state.milestones = new Int32Array(0);
+    open.tool.dropLockedDensity();
+    expect(open.get().zoneDensity).toBe(1);
+  });
+
   it("opens and closes with its button", () => {
     const { tool, get } = setup();
     tool.toggle();

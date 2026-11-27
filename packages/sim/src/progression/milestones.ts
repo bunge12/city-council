@@ -14,7 +14,8 @@
 
 import { moveMoney } from "../economy/budget";
 import type { SimState } from "../state";
-import { MILESTONES, unlockMilestone, type Unlock } from "./balance";
+import { ZONING_BALANCE } from "../zoning/balance";
+import { DENSITY_UNLOCKS, MILESTONES, unlockMilestone, type Unlock } from "./balance";
 
 /**
  * The tick an entry of `SimState.milestones` holds for a milestone credited
@@ -97,6 +98,24 @@ export function creditedFor(highestPopulation: number): Int32Array {
 export function milestoneLabel(unlock: Unlock): string {
   const m = MILESTONES[unlockMilestone(unlock)] as (typeof MILESTONES)[number];
   return `the ${m.name} milestone, at ${groupThousands(m.population)} residents`;
+}
+
+/** What `unlock` opens, as a player reads it: "Medium density", "City Hall". */
+export function unlockName(unlock: Unlock): string {
+  if (unlock === "cityHall") return "City Hall";
+  const level = Number(Object.keys(DENSITY_UNLOCKS).find((l) => DENSITY_UNLOCKS[Number(l)] === unlock));
+  const name = ZONING_BALANCE.densities.find((d) => d.level === level)?.name ?? `Level ${level}`;
+  return `${name} density`;
+}
+
+/**
+ * Why `unlock` cannot be used yet, as a player reads it, or null once
+ * `state` has opened it: "Medium density is locked until the Village
+ * milestone, at 1,000 residents". The refusal of a locked command and a
+ * locked button's tooltip both say this, so they read the same.
+ */
+export function lockNote(state: Pick<SimState, "milestones">, unlock: Unlock): string | null {
+  return isUnlocked(state, unlock) ? null : `${unlockName(unlock)} is locked until ${milestoneLabel(unlock)}`;
 }
 
 /** `n` with commas between each three digits, the same on every host (no locale). */

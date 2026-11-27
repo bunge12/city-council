@@ -213,10 +213,12 @@ export {
   checkMilestones,
   creditMilestones,
   isUnlocked,
+  lockNote,
   milestoneLabel,
   milestonesAt,
   milestonesReached,
   sameMilestones,
+  unlockName,
 } from "./progression/milestones";
 export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
 export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";

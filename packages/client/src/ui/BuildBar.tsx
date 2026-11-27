@@ -1,11 +1,12 @@
-import type { ReactNode } from "react";
-import { ROAD_TYPES, ZONING_BALANCE } from "@city-council/sim";
+import { useEffect, type ReactNode } from "react";
+import { DENSITY_UNLOCKS, ROAD_TYPES, ZONING_BALANCE } from "@city-council/sim";
 import { GUIDES } from "../tools/config";
 import { BULLDOZE_TARGETS } from "../tools/bulldoze-tool";
 import { DRAW_MODES, TOOL_ROAD_TYPES, type DrawMode } from "../tools/road-tool";
 import { ZONE_DEPTHS, ZONE_MODES, type ZoneMode } from "../tools/zone-tool";
 import { GridPanel } from "./GridPanel";
-import { useServices, useSim } from "./hooks";
+import { useLockNote, useServices, useSim } from "./hooks";
+import { UnlockButton } from "./UnlockButton";
 import { useUi } from "./store";
 
 const TYPE_KEYS: Record<string, string> = {
@@ -115,6 +116,11 @@ export function BuildBar() {
   const bulldozeNote = useUi((s) => s.bulldozeNote);
   const filters = useUi((s) => s.bulldozeFilters);
   const zoning = tool === "zone";
+  // A density the city has not opened yet cannot stay picked: a new or loaded city goes back to density 1 (M4-12).
+  const pickedLocked = useLockNote(DENSITY_UNLOCKS[zoneDensity]) !== null;
+  useEffect(() => {
+    if (pickedLocked) zoneTool.dropLockedDensity();
+  }, [pickedLocked, zoneTool]);
   const bulldozing = tool === "bulldoze";
   const active = tool === "road";
   const gridding = tool === "grid";
@@ -313,16 +319,16 @@ export function BuildBar() {
               {!zoneErase && (
                 <MenuGroup label="Density" id="zone-densities">
                   {ZONING_BALANCE.densities.map((d) => (
-                    <button
+                    <UnlockButton
                       key={d.level}
-                      type="button"
+                      unlock={DENSITY_UNLOCKS[d.level]}
                       id={`zone-density-${d.level}`}
                       aria-pressed={zoneDensity === d.level}
                       title={`${d.name} density`}
                       onClick={() => zoneTool.pickDensity(d.level)}
                     >
                       {d.level} {d.name}
-                    </button>
+                    </UnlockButton>
                   ))}
                 </MenuGroup>
               )}

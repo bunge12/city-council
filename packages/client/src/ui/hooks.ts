@@ -1,6 +1,7 @@
 // How components reach the page's services and the sim's state.
 
 import { createContext, useCallback, useContext, useSyncExternalStore } from "react";
+import { lockNote, type Unlock } from "@city-council/sim";
 import type { SimMirror } from "../protocol/mirror";
 import type { SaveStatus } from "../save/channel";
 import type { AppServices } from "./services";
@@ -26,6 +27,16 @@ export function useSim<T>(selector: (state: MirrorState) => T): T {
   const { mirror } = useServices();
   const subscribe = useCallback((listener: () => void) => mirror.subscribe(listener), [mirror]);
   return useSyncExternalStore(subscribe, () => selector(mirror.state));
+}
+
+/**
+ * Why `unlock` cannot be used yet, "Medium density is locked until the
+ * Village milestone, at 1,000 residents", or null once the city has opened
+ * it (M4-12). Null before the first snapshot. For any button a milestone
+ * opens: grey it and show this on hover while it is not null.
+ */
+export function useLockNote(unlock: Unlock | undefined): string | null {
+  return useSim((state) => (unlock === undefined || state === null ? null : lockNote(state, unlock)));
 }
 
 /** The people the copy's buildings hold room for (issue M3-15), or null before the first snapshot. */

@@ -20,7 +20,7 @@
 
 import { noteFrontCells } from "../buildings/candidates";
 import { DENSITY_UNLOCKS } from "../progression/balance";
-import { isUnlocked, milestoneLabel } from "../progression/milestones";
+import { lockNote } from "../progression/milestones";
 import type { SimState } from "../state";
 import { ZONING_BALANCE } from "./balance";
 import { noteCellsPainted } from "./cell-changes";
@@ -223,9 +223,7 @@ function gathered(count: number): Int32Array {
 function lockReason(state: SimState, parsed: Parsed): string | null {
   if (parsed.zone === ZONE_NONE) return null;
   const unlock = DENSITY_UNLOCKS[parsed.density];
-  if (unlock === undefined || isUnlocked(state, unlock)) return null;
-  const name = ZONING_BALANCE.densities.find((d) => d.level === parsed.density)?.name ?? "";
-  return `density ${parsed.density}${name ? ` (${name})` : ""} is locked until ${milestoneLabel(unlock)}`;
+  return unlock === undefined ? null : lockNote(state, unlock);
 }
 
 const NOTHING = "no cell would change: nothing open lies under the rectangles, or it is zoned this way already";

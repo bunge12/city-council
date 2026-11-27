@@ -16,6 +16,7 @@ import {
   deserialize,
   hashState,
   isUnlocked,
+  lockNote,
   milestoneLabel,
   milestonesAt,
   migrateState,
@@ -207,16 +208,21 @@ describe("reaching a milestone", () => {
 describe("the density locks", () => {
   it("refuses density 2 before its milestone, naming it, and paints it after", () => {
     const state = street();
-    const reason = `density 2 (Medium) is locked until the ${nth(MILESTONES, 0).name} milestone, at ${nth(MILESTONES, 0).population.toLocaleString("en-US")} residents`;
+    const reason = `Medium density is locked until the ${nth(MILESTONES, 0).name} milestone, at ${nth(MILESTONES, 0).population.toLocaleString("en-US")} residents`;
     const r2 = { zone: "residential", density: 2, rects: SOUTH };
     expect(submit(state, command("ZoneCells", r2))).toEqual({ ok: false, reason });
     expect(planZoneCells(state, r2)).toEqual({ ok: false, reason });
+    expect(lockNote(state, "density2")).toBe(reason);
+    expect(lockNote(state, "density3")).toMatch(/^High density is locked until /);
+    expect(lockNote(state, "cityHall")).toMatch(/^City Hall is locked until /);
     expect(milestoneLabel("density2")).toBe(`the ${nth(MILESTONES, 0).name} milestone, at ${nth(MILESTONES, 0).population.toLocaleString("en-US")} residents`);
     // Density 1 and clearing are never locked.
     expect(send(state, command("ZoneCells", { zone: "commercial", density: 1, rects: NORTH }))).toBeNull();
     expect(send(state, command("ZoneCells", { zone: "none", rects: NORTH }))).toBeNull();
     peak(state, nth(MILESTONES, 0).population);
     step(state);
+    expect(lockNote(state, "density2")).toBeNull();
+    expect(lockNote(state, "cityHall")).toBeNull();
     expect(send(state, command("ZoneCells", r2))).toBeNull();
     expect(state.log.at(-1)?.type).toBe("ZoneCells");
     // Density 3 waits for its own milestone.
