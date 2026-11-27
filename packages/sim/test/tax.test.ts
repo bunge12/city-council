@@ -128,6 +128,9 @@ describe("a building's yearly tax", () => {
     // A vacant home shows what it would pay; the sweep asks who lives there.
     b.flags[id] = BUILDING_ALIVE | BUILDING_VACANT;
     expect(buildingTaxPerYear(state, id)).toBe(yearly);
+    // With who lives there given, as the hover readout passes it (M4-16), an empty home pays none, as the sweep charges it.
+    expect(buildingTaxPerYear(state, id, undefined, () => 0)).toBe(0);
+    expect(buildingTaxPerYear(state, id, undefined, () => 2)).toBe(yearly);
     b.flags[id] = BUILDING_ALIVE | BUILDING_ABANDONED;
     expect(buildingTaxPerYear(state, id)).toBe(0);
     b.flags[id] = 0;

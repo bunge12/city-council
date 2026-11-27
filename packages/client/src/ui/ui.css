@@ -71,6 +71,13 @@
   background: #f4f6f8;
 }
 
+/* Under a locked button's name, the population that opens it (M4-16). */
+#ui button[data-locked="true"] .unlocks-at {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
 #ui button:focus-visible,
 #ui label.button:focus-within,
 #ui input:focus-visible {
@@ -1018,7 +1025,8 @@ kbd {
 .road-readout .offset,
 .road-readout .bridge,
 .road-readout .junctions,
-.building-readout .detail {
+.building-readout .detail,
+.building-readout .money {
   color: var(--ink-soft);
 }
 
@@ -1124,6 +1132,41 @@ kbd {
 .bulldoze-tag .detail,
 .bulldoze-tag .price {
   color: var(--ink-soft);
+}
+
+/* The price part by part, then the total (M4-16): labels left, amounts right-aligned in figures of one width. */
+.bulldoze-tag .price-lines {
+  border-collapse: collapse;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bulldoze-tag .price-lines th {
+  font-weight: normal;
+  text-align: left;
+  padding: 0 12px 0 0;
+}
+
+.bulldoze-tag .price-lines td {
+  text-align: right;
+  padding: 0;
+}
+
+.bulldoze-tag .price-lines tr.line-total th,
+.bulldoze-tag .price-lines tr.line-total td {
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* A price the treasury cannot pay is in the warning colour, like a treasury below zero (M4-16). */
+.road-readout.refused .price-lines tr.price th,
+.road-readout.refused .price-lines tr.price td,
+.road-readout.refused #road-cost,
+.road-readout.refused #edit-cost,
+.grid-summary.refused #grid-cost {
+  color: var(--bad-ink);
+  font-weight: 600;
 }
 
 .bulldoze-tag .no-undo {

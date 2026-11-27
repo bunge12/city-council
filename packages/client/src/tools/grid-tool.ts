@@ -56,7 +56,7 @@ import type { SnapMark } from "../render/snap-marks-geometry";
 import { GRID_TOOL, SNAP } from "./config";
 import { cellCornerSource, cellEdgeSource, type CellLookup } from "./cell-snap";
 import { SNAP_SOURCES, angleSource, nodeSource, segmentSource, snapPoint, startSource, type Snap, type SnapSource } from "./snap";
-import type { RoadToolState } from "./road-tool";
+import type { RoadPricer, RoadToolState } from "./road-tool";
 
 /**
  * Where the grid tool is: drawing the first side, setting how far the grid
@@ -79,8 +79,15 @@ export interface GridPreview {
   cuts: readonly BuildPoint[];
   /** Plan length of every street, metres. */
   length: number;
-  /** Whole dollars. Not charged until M4. */
+  /** Whole dollars the grid costs to build. Zero when refused. */
   cost: number;
+  /**
+   * What `BuildRoadGrid` would charge, from the sim's `roadPrice` on the
+   * mirror (M4-16): `cost`, since a grid never demolishes. Zero when refused.
+   */
+  price: number;
+  /** Why the treasury cannot pay `price`, as the sim would refuse it, or null. A grid it refuses is still sent, so the sim's "rejected" cue plays. */
+  refusal: string | null;
   /**
    * The buildings the grid would clear and their residents, from the sim's
    * `gridClears` on the mirror (issue M2-15). Null while the rectangle is
@@ -287,7 +294,7 @@ export function previewGrid(
   const type = typeById(payload.type);
   const result = planRoadGrid(asNetwork(net), terrain, payload);
   if (!result.ok) {
-    return { payload, type, ok: false, reason: result.reason, streets: [], junctions: [], cuts: [], length: 0, cost: 0, clears: null, newCells: null };
+    return { payload, type, ok: false, reason: result.reason, streets: [], junctions: [], cuts: [], length: 0, cost: 0, price: 0, refusal: null, clears: null, newCells: null };
   }
   const { streets, length, cost } = result.plan;
   const junctions: BuildPoint[] = [];
@@ -332,6 +339,9 @@ export function previewGrid(
     cuts,
     length,
     cost: ok ? cost : 0,
+    // Priced by the controller against the treasury as it is now (`GridToolController.preview`).
+    price: ok ? cost : 0,
+    refusal: null,
     clears,
     newCells: ok && cellsOf ? cellsOf(result.plan) : null,
   };
@@ -392,7 +402,7 @@ export interface GridToolHost {
    * to find the buildings a grid would clear and the cells it would open,
    * or null before the first snapshot.
    */
-  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup; clears?: GridClears; newCells?: GridCells } | null;
+  world(): { net: RoadNet; terrain: Terrain; cells?: CellLookup; clears?: GridClears; newCells?: GridCells; price?: RoadPricer } | null;
   /** Sends `BuildRoadGrid` and resolves once the sim has built it, or with why it did not. */
   send(payload: BuildRoadGridPayload): Promise<CommandResult>;
 }
@@ -412,6 +422,9 @@ export class GridToolController {
   /** The last preview worked out, and what it was worked out for. */
   private cacheKey = "";
   private cached: GridPreview | null = null;
+  /** `cached` priced against the treasury, kept while neither changes, so the panel gets the same object. */
+  private priced: GridPreview | null = null;
+  private pricedFrom: GridPreview | null = null;
   private version = 0;
   /** Counts mirror updates that carried buildings, so the buildings in the way are found again. */
   private buildingsVersion = 0;
@@ -648,7 +661,15 @@ export class GridToolController {
       this.cacheKey = key;
       this.cached = previewGrid(world.net, world.terrain, payload, settled ? (world.clears ?? null) : null, settled ? (world.newCells ?? null) : null);
     }
-    return this.cached;
+    // The treasury moves every day, so the price is checked against it on each call, outside the cache (M4-16).
+    const cached = this.cached;
+    if (!cached?.ok || !world.price) return cached;
+    const money = world.price(cached.cost, null);
+    if (this.priced === null || this.pricedFrom !== cached || this.priced.price !== money.price || this.priced.refusal !== money.refusal) {
+      this.priced = { ...cached, ...money };
+      this.pricedFrom = cached;
+    }
+    return this.priced;
   }
 
   /**

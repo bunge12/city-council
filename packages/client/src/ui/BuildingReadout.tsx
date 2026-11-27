@@ -1,4 +1,5 @@
 import { BUILDING_TYPES, ZONING_BALANCE, type BuildingGround, type BuildingInfo } from "@city-council/sim";
+import { formatMoneyShort } from "./format";
 import { useBuildingHover } from "./store";
 
 /** Offset of the readout from the pointer, CSS pixels. */
@@ -16,6 +17,14 @@ export interface Occupants {
   people: number;
   filled?: number;
   why?: NoNewcomers;
+  /** What it pays a year in tax, the sim's `buildingTaxPerYear` on the mirror (M4-16). Left out where not known. */
+  tax?: number;
+}
+
+/** The money line: what a building is worth and what it pays a year in tax, "Value $412K · Tax $3.1K a year" (M4-16). Tax is left out where not known. */
+export function moneyLine(b: BuildingInfo, occupants?: Occupants): string {
+  const value = `Value ${formatMoneyShort(b.value)}`;
+  return occupants?.tax === undefined ? value : `${value} · Tax ${formatMoneyShort(occupants.tax)} a year`;
 }
 
 /** What the state line says a reason for an empty home is. */
@@ -104,8 +113,9 @@ export function groundLine(ground: BuildingGround | null): string | null {
  * Next to the cursor over a building while no tool is on (issue M2-15): its
  * type, zone and density, lot size in cells, who is in it and, when it is
  * not in ordinary use, its state (issue M3-17). When its ground is zoned
- * for something else, or zoned up, a line says so (M3-14). The bulldozer
- * shows the same (issue 116). The numbers are on data attributes too, for
+ * for something else, or zoned up, a line says so (M3-14). Then what it is
+ * worth and its yearly tax (M4-16). The bulldozer shows the same but the
+ * money line, since its tag prices the building (issue 116). The numbers are on data attributes too, for
  * tests.
  */
 export function BuildingReadout() {
@@ -133,6 +143,8 @@ export function BuildingReadout() {
       data-filled={String(o.filled ?? 0)}
       data-use={useName(b)}
       data-why={o.why ?? ""}
+      data-value={String(b.value)}
+      data-tax={o.tax === undefined ? "" : String(o.tax)}
       style={{ left: hover.x + OFFSET, top: hover.y + OFFSET }}
     >
       <div className="what">{title}</div>
@@ -143,6 +155,9 @@ export function BuildingReadout() {
         </div>
       )}
       {ground ? <div className="detail ground">{ground}</div> : null}
+      <div className="money" id="building-money">
+        {moneyLine(b, o)}
+      </div>
     </div>
   );
 }

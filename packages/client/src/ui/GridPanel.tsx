@@ -73,13 +73,15 @@ export function GridPanel() {
       <CellsField id="grid-width" label="Width" value={width} onCommit={(v) => gridTool.setBlock("width", v)} onEnter={() => gridTool.confirm()} onEscape={() => gridTool.escape()} />
       {preview && (
         <span
-          className={preview.ok ? "grid-summary" : "grid-summary refused"}
+          className={preview.ok && preview.refusal === null ? "grid-summary" : "grid-summary refused"}
           id="grid-summary"
           role="status"
           data-ok={String(preview.ok)}
           data-streets={String(preview.streets.length)}
           data-length={String(preview.length)}
           data-cost={String(preview.cost)}
+          data-price={String(preview.price)}
+          data-refusal={preview.refusal ?? ""}
           data-junctions={String(junctions)}
           data-cuts={String(cuts)}
           data-clears={preview.clears ? String(preview.clears.ids.length) : ""}
@@ -88,13 +90,20 @@ export function GridPanel() {
           {preview.ok ? (
             <>
               {preview.streets.length === 1 ? "1 street" : `${preview.streets.length} streets`}, {preview.length.toFixed(0)} m ·{" "}
-              <span id="grid-cost">{formatMoneyShort(preview.cost)}</span>
+              <span id="grid-cost">{formatMoneyShort(preview.price)}</span>
               {junctions > 0 && <> · {junctions === 1 ? "1 junction" : `${junctions} junctions`}</>}
               {cuts > 0 && <> · {cuts === 1 ? "1 street end cut" : `${cuts} street ends cut`} by water or slope</>}
               {clears !== null && (
                 <>
                   {" "}
                   · <span id="grid-clears">{clears}</span>
+                </>
+              )}
+              {/* The treasury cannot pay (M4-16): the price stays, in the warning colour, with the sim's reason. */}
+              {preview.refusal !== null && (
+                <>
+                  {" "}
+                  · <span id="grid-reason">{preview.refusal}</span>
                 </>
               )}
             </>

@@ -21,6 +21,7 @@ import {
   previewUpgradeRoad,
   readLogSpent,
   replayFrom,
+  roadPrice,
   serialize,
   step,
   type Command,
@@ -281,6 +282,19 @@ describe("the overdraft", () => {
     fundCity(state, 1_000_000);
     const fine = previewBuildRoad(state, road([4200, 4700], [4500, 4700]).payload);
     expect(fine.ok && fine.refusal).toBeNull();
+  });
+
+  it("prices a plan for the tools with `roadPrice`, the function the previews use, cost and compensation together (M4-16)", () => {
+    const { state } = broke(0);
+    const built = previewBuildRoad(state, road([4200, 4700], [4500, 4700]).payload);
+    if (!built.ok) throw new Error(built.reason);
+    expect(roadPrice(state, built.plan.cost, built.clears)).toEqual({ price: built.price, refusal: built.refusal });
+    expect(roadPrice(state, built.plan.cost, null)).toEqual({ price: built.plan.cost, refusal: built.refusal });
+    // Compensation is part of the price the treasury is checked against.
+    const clears = { ...built.clears, compensation: { ...built.clears.compensation, total: 1000 } };
+    fundCity(state, built.plan.cost + 999 - ECONOMY.overdraft);
+    expect(roadPrice(state, built.plan.cost, clears)).toEqual({ price: built.plan.cost + 1000, refusal: costsReason(built.plan.cost + 1000, built.plan.cost + 999) });
+    expect(roadPrice(state, built.plan.cost, null).refusal).toBeNull();
   });
 });
 

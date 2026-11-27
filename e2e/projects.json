@@ -84,6 +84,7 @@
     "population.spec.ts": 160,
     "presets-forest.spec.ts": 112,
     "presets.spec.ts": 80,
+    "prices.spec.ts": 45,
     "render.spec.ts": 23,
     "replay.spec.ts": 67,
     "road-tool.spec.ts": 40,

@@ -119,6 +119,17 @@ export function lockNote(state: Pick<SimState, "milestones">, unlock: Unlock): s
   return isUnlocked(state, unlock) ? null : `${unlockName(unlock)} is locked until ${milestoneLabel(unlock)}`;
 }
 
+/**
+ * What a locked button says under its name, or null once `state` has
+ * opened `unlock`: "Unlocks at 1,000 residents", the population of the
+ * milestone it waits for (M4-16). The tooltip gives the rest (`lockNote`).
+ */
+export function unlocksAt(state: Pick<SimState, "milestones">, unlock: Unlock): string | null {
+  if (isUnlocked(state, unlock)) return null;
+  const m = MILESTONES[unlockMilestone(unlock)] as (typeof MILESTONES)[number];
+  return `Unlocks at ${groupThousands(m.population)} residents`;
+}
+
 /** `n` with commas between each three digits, the same on every host (no locale). */
 function groupThousands(n: number): string {
   const digits = String(n);

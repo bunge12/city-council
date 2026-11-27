@@ -204,7 +204,8 @@ test("the bulldozer: its own tool, a price tag on what it picks, clicks and drag
     await expect(tag).toHaveAttribute("data-ok", "true");
     await expect(tag.locator(".what")).toHaveText("Bulldoze this road");
     // The road's demolition less its refund, plus the houses on it at their eminent domain price (M4-09).
-    await expect(tag.locator(".price")).toHaveText(/^192 m · \$[\d.]+M$/);
+    await expect(tag.locator("tr.line-road th")).toHaveText("Road demolition, 192 m");
+    await expect(page.locator("#bulldoze-cost")).toHaveText(/^\$[\d.]+M$/);
     await expect(page.locator("#bulldoze-clears")).toHaveText(`Takes ${houses} buildings, ${houses * 2} residents`);
     await expect(tag).toHaveAttribute("data-buildings", String(houses));
     await attach(page, testInfo, "a road's price tag, and the houses it takes marked");
