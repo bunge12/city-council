@@ -120,7 +120,8 @@ export interface HostStats {
  * `cellChunks` too, and look up where each of `buildingIds` is and was:
  * a building that came in such a delta changed no cell, so its chunk may
  * be in neither list. `buildingIds` names every building the delta
- * carried a row for, ascending, whether or not anything asked.
+ * carried a row for, ascending, whether or not anything asked, and every
+ * landmark a milestone in the delta grew, whose row stays as it was (M4-17).
  * `peopleIds` names every building whose people or jobs filled the delta
  * changed, ascending (M3-05), and `statTotals` the city totals it changed,
  * in the sim's `STAT_TOTALS` order. `statSamples` is how many monthly

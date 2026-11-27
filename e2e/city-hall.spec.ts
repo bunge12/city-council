@@ -108,6 +108,20 @@ async function runUntilMilestones(page: Page, count: number, days: number, steps
   })).toMatchObject({ ok: true });
 }
 
+/**
+ * Runs `ticks` ticks at 1x and pauses again: a paused step applies commands
+ * but moves no tick (the sim's step.ts), so the construction would never
+ * finish. Every figure the spec reads after it is read while paused.
+ */
+async function runTicks(page: Page, ticks: number): Promise<void> {
+  await page.evaluate(async (ticks) => {
+    void window.cityCouncil.sendCommand("SetSpeed", { speed: 1 });
+    await window.cityCouncil.advance(ticks);
+    void window.cityCouncil.sendCommand("SetSpeed", { speed: 0 });
+    await window.cityCouncil.advance(1);
+  }, ticks);
+}
+
 /** The middle of a lot's corners. */
 function middle(c: ArrayLike<number>): { x: number; z: number } {
   return { x: ((c[0] ?? 0) + (c[2] ?? 0) + (c[4] ?? 0) + (c[6] ?? 0)) / 4, z: ((c[1] ?? 0) + (c[3] ?? 0) + (c[5] ?? 0) + (c[7] ?? 0)) / 4 };
@@ -187,7 +201,7 @@ test("City Hall unlocks at the first milestone, the tool places it for the price
   expect(await zoned()).toBe(0);
 
   // Let the construction finish, so the model is drawn whole.
-  await page.evaluate((s) => window.cityCouncil.advance(s), CONSTRUCTION.ticks + 1);
+  await runTicks(page, CONSTRUCTION.ticks + 1);
   await settleThroughFrames(page);
   const roof = (await page.evaluate(async (id) => (await window.cityCouncil.view).buildingTop(id)?.y ?? null, hall)) ?? 0;
 
@@ -260,13 +274,14 @@ for (const backend of ["webgl", "default"] as const) {
     await attach(page, testInfo, `stage 2 going up ${backend}`);
 
     // Once it is up, the model is the next stage's: taller, and the readout says so.
-    await page.evaluate((s) => window.cityCouncil.advance(s), CONSTRUCTION.ticks + 1);
+    await runTicks(page, CONSTRUCTION.ticks + 1);
     await settleThroughFrames(page);
     await expect.poll(height).toBeGreaterThan(first + 5);
     // The readout names the building on the ground under the pointer.
     await hover(page, mid.x, mid.z);
     await expect(page.locator("#building-readout")).toHaveAttribute("data-stage", "2");
-    await page.mouse.move(5, 400);
+    // Off the map, onto the top bar, so no readout covers it.
+    await page.mouse.move(640, 20);
     await frames(page);
     await attach(page, testInfo, `stage 2 ${backend}`);
   });

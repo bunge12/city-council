@@ -414,6 +414,11 @@ const bulldozeTool = new BulldozeToolController({
 /** Counts every snapshot and delta, so the zone tool knows when what it worked out from the copy is stale. */
 let cityVersion = 0;
 mirror.subscribe(() => cityVersion++);
+/** Counts only the updates that changed roads, cells or buildings, which a landmark's lot follows from (M4-17). The treasury is keyed apart. */
+let lotVersion = 0;
+mirror.subscribe((u) => {
+  if (u.kind === "snapshot" || u.roadNodes.length > 0 || u.roadSegs.length > 0 || u.cellChunks.length > 0 || u.buildingIds.length > 0) lotVersion++;
+});
 // What the tools and the zoning overlay need is built after each snapshot, in a task of its own, so opening a tool never waits for it (issue #163).
 mirror.subscribe((update) => {
   if (update.kind === "snapshot") setTimeout(() => mirror.prepareTools(), 0);
@@ -433,7 +438,7 @@ const landmarkTool = new LandmarkToolController({
   get: () => useUi.getState(),
   set: (patch) => useUi.setState(patch),
   city: () => mirror.state,
-  version: () => cityVersion,
+  version: () => lotVersion,
   plan: (payload) => mirror.planLandmark(payload),
   send: (payload) => sendCommand("PlaceLandmark", payload),
 });
