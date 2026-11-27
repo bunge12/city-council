@@ -1214,6 +1214,10 @@ for (const variant of [
       const before = await snapshot(page);
       expect(before.budget.loans.length).toBeGreaterThan(0);
       saved = { hash: before.city.hash, tick: before.city.tick, log: await log(page) };
+      await budgetTab(page, "charts");
+      const graphed = await page.locator("#budget-flow-graph").getAttribute("data-months");
+      expect(Number(graphed), "months the budget's graph draws").toBeGreaterThan(3);
+      await closeBudget(page);
       await saveAndReload(page);
       const after = await snapshot(page);
       expect(after.city.hash).toBe(before.city.hash);
@@ -1230,7 +1234,7 @@ for (const variant of [
       await budgetTab(page, "loans");
       await expect(page.locator("#budget-loans tr[data-loan]")).toHaveCount(1);
       await budgetTab(page, "charts");
-      await expect(page.locator("#budget-flow-graph")).toHaveAttribute("data-months", String(before.money["treasury"]?.length ?? 0));
+      await expect(page.locator("#budget-flow-graph")).toHaveAttribute("data-months", graphed ?? "");
       await shot(page, info, dir, "14-after-reload-budget", page.locator("#budget-panel"));
       await closeBudget(page);
       // The milestone town: its milestone and City Hall.
