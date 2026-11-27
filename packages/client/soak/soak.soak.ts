@@ -50,6 +50,14 @@
 // Since M3-20 pops arrive, find work, leave and turn over all hour, on a
 // city that starts with 200,000 of them, and the report counts each.
 //
+// Since M4-20 the city has money in it, as the close-out's scale cities do
+// (`furnishEconomy`): a treasury of its own size, tax rates off their
+// defaults, City Hall and a loan. Every road and zoning command is charged,
+// the tax sweep, upkeep and the loan's repayments move the treasury all
+// hour, and the bulldozing pays compensation. The report gives the money
+// the closes filed, and the hour must never reach the overdraft, where the
+// sim would refuse the soak's commands.
+//
 // At the end a replay of the hour's log onto the city as it began must give
 // the same state hash as the live city. Its buildings and pops were placed
 // by the generator, not by commands, so a replay from the seed gives only
@@ -80,7 +88,13 @@ import {
   SEG_ALIVE,
   TICK_MS,
   ZONING_BALANCE,
+  CHARGE_LINES,
+  ECONOMY,
+  LINE,
+  TAX_LINES,
   budgetFigure,
+  furnishEconomy,
+  gameDate,
   buildScaleCity,
   buildingCount,
   deserialize,
@@ -306,6 +320,8 @@ interface SoakRun {
     /** The most buildings standing at a sample, past those the hour began with. */
     grown: number;
   };
+  /** The treasury as the hour began, at its lowest sample and at the end, and what the months that closed in the hour filed (M4-20). */
+  money: Money;
   /** Pops at the start and end of the hour, and who arrived, left, was born and died in it. */
   people: {
     start: { population: number; pops: number; buildings: number };
@@ -318,6 +334,29 @@ interface SoakRun {
     departures: number;
   };
 }
+
+/** The money of the soak's hour (M4-20): whole dollars. */
+interface Money {
+  loan: number;
+  start: number;
+  lowest: number;
+  end: number;
+  /** Months that closed in the hour, and the lines they filed together. */
+  closes: number;
+  tax: number;
+  charges: number;
+  construction: number;
+  compensation: number;
+  upkeep: number;
+  otherSpending: number;
+  repayments: number;
+}
+
+/** A game month's place in time, rising month on month. */
+const monthKey = (tick: number): number => {
+  const d = gameDate(tick);
+  return d.year * 12 + d.month;
+};
 
 /** Runs a full GC first when node was started with --expose-gc. */
 function heapUsed(): number {
@@ -348,6 +387,7 @@ async function soakHour(): Promise<SoakRun> {
   // starts on a settled city, as a player's would be. Generated before the
   // bars are held, so it is the city the bench and the e2e tests open.
   const scale = generateScaleCity(200_000, buildScaleCity());
+  const economy = furnishEconomy(scale.state, 200_000);
   holdDemandBars(100);
   const startTick = scale.state.tick;
   /** The city as the hour begins, which the replay at the end starts from. */
@@ -355,6 +395,8 @@ async function soakHour(): Promise<SoakRun> {
   const startPeople = { population: scale.totals.population, pops: scale.totals.pops, buildings: scale.totals.buildings };
   const host = new SimHost(scale.state, transport, clock);
   const startLogLength = host.fullLog.length;
+  const money: Money = { loan: economy.loan, start: scale.state.budget.treasury, lowest: scale.state.budget.treasury, end: 0, closes: 0, tax: 0, charges: 0, construction: 0, compensation: 0, upkeep: 0, otherSpending: 0, repayments: 0 };
+  let moneyMonth = monthKey(scale.state.tick);
   // The page asks for a snapshot as it starts; wait until it has one.
   let ready = false;
   for (let k = 0; k < 1000 && !ready; k++) {
@@ -585,6 +627,21 @@ async function soakHour(): Promise<SoakRun> {
     }
     if (host.tick % SAMPLE_EVERY === 0 && heap.at(-1)?.tick !== host.tick) {
       heap.push({ tick: host.tick, mb: mb(memoryUsage().heapUsed) });
+      const budget = scale.state.budget;
+      money.lowest = Math.min(money.lowest, budget.treasury);
+      if (monthKey(host.tick) !== moneyMonth) {
+        moneyMonth = monthKey(host.tick);
+        const l = budget.lastMonth;
+        const at = (line: keyof typeof LINE): number => l[LINE[line]] ?? 0;
+        money.closes++;
+        money.tax += TAX_LINES.reduce((n, line) => n + at(line), 0);
+        money.charges += CHARGE_LINES.reduce((n, line) => n + at(line), 0);
+        money.construction += at("construction");
+        money.compensation += at("compensation");
+        money.upkeep += at("roadUpkeep") + at("buildingUpkeep");
+        money.otherSpending += at("otherSpending");
+        money.repayments += at("loanRepayments") + at("interest");
+      }
       const sample = await ask<{ room: number; counted: number; buildings: number } | null>({ q: "room" });
       if (sample) {
         if (sample.room !== sample.counted) roomMismatches++;
@@ -669,8 +726,11 @@ async function soakHour(): Promise<SoakRun> {
       ...counts,
     };
   })();
+  money.end = live.state.budget.treasury;
+  money.lowest = Math.min(money.lowest, money.end);
   const report = {
     seed: live.state.seed,
+    money,
     people,
     startSegments: scale.counts.segments,
     endSegments: (() => {
@@ -773,6 +833,7 @@ async function soakHour(): Promise<SoakRun> {
       applied: Object.fromEntries(Object.entries(byCommand).map(([type, c]) => [type, c.applied])),
       grown: report.grower.mostBuildings - startPeople.buildings,
     },
+    money,
     people,
   };
 }
@@ -807,6 +868,21 @@ describe("soak: one hour of game time at 4x", () => {
     expect(p.births, "births").toBeGreaterThan(0);
     expect(p.deaths, "deaths").toBeGreaterThan(0);
     expect(p.workersEmployed, "workers in a job at the end").toBeGreaterThan(0);
+  });
+
+  test("money moves all hour, and the city never reaches its overdraft", () => {
+    const m = run.money;
+    expect(m.closes, "months that closed in the hour").toBeGreaterThan(10);
+    expect(m.tax, "tax").toBeGreaterThan(0);
+    expect(m.charges, "development charges").toBeGreaterThan(0);
+    expect(m.construction, "roads paid for").toBeGreaterThan(0);
+    expect(m.compensation, "compensation for the buildings cleared").toBeGreaterThan(0);
+    expect(m.upkeep, "upkeep").toBeGreaterThan(0);
+    expect(m.otherSpending, "the other city spending").toBeGreaterThan(0);
+    expect(m.repayments, "the loan's repayments").toBeGreaterThan(0);
+    // Above zero at every sample: the sim refuses no command for money, so the soak measures the work it sends.
+    expect(m.lowest, "the lowest treasury sampled").toBeGreaterThan(0);
+    expect(m.lowest).toBeGreaterThan(-ECONOMY.overdraft);
   });
 
   test(`every source inside the ${BUDGET_MS} ms tick budget`, () => {

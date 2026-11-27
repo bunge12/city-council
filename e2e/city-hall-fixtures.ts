@@ -13,7 +13,7 @@
 // Stepping is the same on every host (CLAUDE.md rule 3), so the page reaches
 // each milestone at the tick Node did.
 
-import { CHUNKS_PER_SIDE, CHUNK_SIZE, LANDMARKS, MILESTONES, TIME_BALANCE, buildingInfo, creditMilestones, deserialize, findLandmark, fundCity, landmarkStage, placesAlong, planPlaceLandmark, serialize, step, type SimState } from "../packages/sim/src/index";
+import { LANDMARKS, MILESTONES, TIME_BALANCE, creditMilestones, deserialize, findLandmark, fundCity, landmarkStage, placeCityHallNear, planPlaceLandmark, serialize, step, type SimState } from "../packages/sim/src/index";
 import { isSegment } from "../packages/sim/src/roads/network";
 import { finishConstruction, zoneSides } from "./building-fixtures";
 import { send, zonedTown } from "./money-fixtures";
@@ -109,34 +109,7 @@ export function withCityHall(bytes: Uint8Array): { bytes: Uint8Array; hall: numb
   const state = deserialize(bytes).state;
   creditMilestones(state, 1);
   fundCity(state, Math.max(state.budget.treasury, FUNDS));
-  const net = state.roads;
-  // Segments by the distance of their first node from the middle of the map.
-  const centre = (CHUNKS_PER_SIDE * CHUNK_SIZE) / 2;
-  const segs: { seg: number; d: number }[] = [];
-  for (let seg = 0; seg < net.segFlags.length; seg++) {
-    if (!isSegment(net, seg)) continue;
-    const a = net.segA[seg] ?? 0;
-    segs.push({ seg, d: Math.hypot((net.nodeX[a] ?? 0) - centre, (net.nodeZ[a] ?? 0) - centre) });
-  }
-  segs.sort((p, q) => p.d - q.d);
-  for (const { seg } of segs) {
-    for (const side of [0, 1]) {
-      for (let place = 0; place < placesAlong(net, seg); place++) {
-        const payload = { landmark: CITY_HALL.id, segment: seg, side, place };
-        const plan = planPlaceLandmark(state, payload);
-        if (!plan.ok || plan.plan.refusal) continue;
-        send(state, "PlaceLandmark", payload);
-        const hall = findLandmark(state.buildings, CITY_HALL.index);
-        const info = buildingInfo(state, hall);
-        const c = info?.corners ?? [];
-        finishConstruction(state);
-        return {
-          bytes: serialize(state),
-          hall,
-          middle: { x: ((c[0] ?? 0) + (c[2] ?? 0) + (c[4] ?? 0) + (c[6] ?? 0)) / 4, z: ((c[1] ?? 0) + (c[3] ?? 0) + (c[5] ?? 0) + (c[7] ?? 0)) / 4 },
-        };
-      }
-    }
-  }
-  throw new Error("no free lot for City Hall along any road");
+  const { hall, at } = placeCityHallNear(state);
+  finishConstruction(state);
+  return { bytes: serialize(state), hall, middle: at };
 }
