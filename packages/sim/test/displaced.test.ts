@@ -37,6 +37,7 @@ import { holdDemand } from "./demand-helper";
 import { submit } from "./seen-ends";
 import { withValue } from "./with-value";
 import popsJson from "../balance/pops.json" with { type: "json" };
+import { credited } from "./credited";
 
 // M3-12: displaced pops. A pop whose home is removed joins a queue in state
 // and is placed in another home, near its job if it has one, up to a cap a
@@ -149,7 +150,7 @@ function workingTown(): SimState {
 
 /** The streets and zoning of `workingTown`, grown 20 days under whatever bars the caller holds. */
 function growTown(): { state: SimState; s: Street } {
-  const state = funded(createState(SEED));
+  const state = credited(funded(createState(SEED)));
   const s = street(state, 30);
   zone(state, s, "commercial", 3, 0, 4, 4, 1);
   zone(state, s, "commercial", 3, 0, 4, 4, -1);
@@ -354,7 +355,7 @@ describe("displaced pops", () => {
       return state;
     });
     expect(state.log.filter((e) => e.type === "BulldozeBuilding").length).toBe(40);
-    const replayed = held(() => replayFrom(funded(createState(SEED)), state.log, state.tick));
+    const replayed = held(() => replayFrom(credited(funded(createState(SEED))), state.log, state.tick));
     expect(hashState(replayed)).toBe(hashState(state));
   });
 

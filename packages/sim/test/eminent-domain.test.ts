@@ -51,6 +51,7 @@ import { enqueue } from "../src/commands";
 import { isSegment } from "../src/roads/network";
 import { cloneState } from "../src/state";
 import { holdDemand } from "./demand-helper";
+import { credited } from "./credited";
 import { funded } from "./funds";
 import { expectReplay, type ReplayFixture } from "./replay-helper";
 import { submit, withEnds } from "./seen-ends";
@@ -118,7 +119,7 @@ function zone(state: SimState, s: Street, zoneId: string, density: number, p0: n
  * costs more than the starting grant. Built once; each test takes a copy.
  */
 function grownTown(): { state: SimState; s: Street } {
-  const state = funded(createState(SEED));
+  const state = credited(funded(createState(SEED)));
   const s = street(state, 40);
   zone(state, s, "residential", 1, 0, 12, 6, 1);
   zone(state, s, "residential", 3, 14, 20, 6, 1);

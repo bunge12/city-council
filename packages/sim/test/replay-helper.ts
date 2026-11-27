@@ -1,7 +1,7 @@
 // Vitest helper for replay fixtures. A fixture is a seed, a command log and
 // the tick to replay to, plus the state hash that replay must produce.
 import { expect } from "vitest";
-import { BALANCE_STAMP, createState, fundCity, hashState, replayFrom, type LogEntry, type SimState } from "../src/index";
+import { BALANCE_STAMP, createState, creditMilestones, fundCity, hashState, replayFrom, type LogEntry, type SimState } from "../src/index";
 import { holdDemand } from "./demand-helper";
 
 export interface ReplayFixture {
@@ -27,12 +27,20 @@ export interface ReplayFixture {
    * the same way.
    */
   treasury?: number;
+  /**
+   * When true, the city starts with every milestone credited, without
+   * grants, as `creditMilestones` credits them (M4-12), so a fixture that
+   * zones densities 2 and 3 on a new city still paints them. The browser's
+   * replay check credits it the same way.
+   */
+  credited?: boolean;
 }
 
-/** A new city on `fixture`'s seed, funded if the fixture says so: what its log replays onto. */
+/** A new city on `fixture`'s seed, funded and credited if the fixture says so: what its log replays onto. */
 export function fixtureStart(fixture: ReplayFixture): SimState {
   const state = createState(fixture.seed);
   if (fixture.treasury !== undefined) fundCity(state, fixture.treasury);
+  if (fixture.credited === true) creditMilestones(state);
   return state;
 }
 

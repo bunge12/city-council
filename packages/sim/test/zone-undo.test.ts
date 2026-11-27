@@ -30,6 +30,7 @@ import { checkUndoHistory, heldIds, tookReason } from "../src/undo";
 import { cellsSettled, syncCells } from "../src/zoning/cell-index";
 import { ZONE_UNTOUCHED, anchorHash, journalCells, journalLostZones, readJournals } from "../src/zoning/zone-undo";
 import { Fnv64 } from "../src/hash";
+import { credited } from "./credited";
 
 // Issue 111: undo for zoning, and for roads that carried buildings.
 
@@ -75,7 +76,7 @@ function refusal(state: SimState, c: Command): string {
 
 /** A street running east from (4200, 4600) for 24 cells, its north strip from z 4595 back, its south strip from z 4605 on. */
 function street(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   ok(state, road([4200, 4600], [4392, 4600]));
   return state;
 }

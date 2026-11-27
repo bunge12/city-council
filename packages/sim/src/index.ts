@@ -206,6 +206,20 @@ export {
   type BudgetState,
   type LedgerLine,
 } from "./economy/budget";
+export { DENSITY_UNLOCKS, MILESTONES, UNLOCKS, checkProgressionBalance, unlockMilestone, type Milestone, type Unlock } from "./progression/balance";
+export {
+  CREDITED,
+  PROGRESSION,
+  checkMilestones,
+  creditMilestones,
+  isUnlocked,
+  lockNote,
+  milestoneLabel,
+  milestonesAt,
+  milestonesReached,
+  sameMilestones,
+  unlockName,
+} from "./progression/milestones";
 export { available, costsReason, formatMoneyFull, formatMoneyShort, spendingRefusal } from "./economy/spend";
 export { UPKEEP_SYSTEM, buildingUpkeepPerYear, chargeUpkeep, recountRoadUpkeep, roadUpkeepPerYear, segmentUpkeepPerYear } from "./economy/upkeep";
 export { TAX_SYSTEM, buildingTaxByLine, buildingTaxPerYear, businessTaxOf, collectTax, residentialTaxOf, shopSalesScale, type BusinessTaxTerms, type JobsFilled, type TaxByLine } from "./economy/tax";

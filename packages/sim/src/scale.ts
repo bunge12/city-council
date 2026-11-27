@@ -7,7 +7,8 @@
 // Each command goes through `submit` and `step`, so the city comes with its
 // log and replays from its seed, onto a city funded as `createScaleState`
 // funds it: roads cost money from M4, far more than a starting grant pays
-// for (M4-03). Refused commands (steep ground, water,
+// for (M4-03), and credited with every milestone, since it zones densities
+// 2 and 3 from the start (M4-12). Refused commands (steep ground, water,
 // a curve too tight where the terrain cuts a grid) are skipped. Everything
 // is laid out from fixed numbers, so every run builds the same city.
 
@@ -28,6 +29,7 @@ import { isStraight, segmentQuad } from "./roads/curve";
 import { LEVEL_BRIDGE, NONE, isNode, isSegment, nextSegmentAt, nodeIdLimit, otherEnd, segmentCount, segmentIdLimit, type RoadNetwork } from "./roads/network";
 import { createState, type SimState } from "./state";
 import { fundCity } from "./economy/budget";
+import { creditMilestones } from "./progression/milestones";
 import { step } from "./step";
 import { terrainOf } from "./terrain/cache";
 import { isWaterAt, mapSize, type Terrain } from "./terrain/terrain";
@@ -49,10 +51,15 @@ export const SCALE_PLAYER = "scale";
  */
 export const SCALE_TREASURY = 1_000_000_000_000;
 
-/** A new city on `seed` funded as the scale city is, at `SCALE_TREASURY`: what a replay of a scale city's log starts from. */
+/**
+ * A new city on `seed` funded as the scale city is, at `SCALE_TREASURY`, and
+ * credited with every milestone without its grant (M4-12): what a replay of
+ * a scale city's log starts from.
+ */
 export function createScaleState(seed = SCALE_SEED): SimState {
   const state = createState(seed);
   fundCity(state, SCALE_TREASURY);
+  creditMilestones(state);
   return state;
 }
 

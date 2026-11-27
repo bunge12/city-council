@@ -27,6 +27,13 @@ import {
   segmentEnds,
   segmentTypeId,
 } from "@city-council/sim";
+import { creditMilestones, type SimState as Credited } from "@city-council/sim";
+
+/** `state` with every milestone credited (M4-12), so the test zones densities 2 and 3 as it did before the locks. */
+function credited<S extends Credited>(state: S): S {
+  creditMilestones(state);
+  return state;
+}
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
 import { SimMirror, type MirrorUpdate } from "../src/protocol/mirror";
 import { memoryTransportPair } from "../src/protocol/transport";
@@ -53,7 +60,7 @@ function setup() {
       }),
   };
   let now = 0;
-  const host = new SimHost(createBareState(2026), hostEnd, () => now);
+  const host = new SimHost(credited(createBareState(2026)), hostEnd, () => now);
   const mirror = new SimMirror(filtered, "p1");
   const updates: MirrorUpdate[] = [];
   mirror.subscribe((u) => updates.push(u));

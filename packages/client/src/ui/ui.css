@@ -60,6 +60,14 @@
   opacity: 0.55;
 }
 
+/* A button a milestone has not opened yet (ui/UnlockButton.tsx): greyed, with its reason on hover. */
+#ui button[data-locked="true"],
+#ui button[data-locked="true"]:hover {
+  cursor: not-allowed;
+  opacity: 0.55;
+  background: #f4f6f8;
+}
+
 #ui button:focus-visible,
 #ui label.button:focus-within,
 #ui input:focus-visible {

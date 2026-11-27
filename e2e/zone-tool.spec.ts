@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { ROAD_TYPES, ZONING_BALANCE, createState, generateTerrain, heightAt, type SimState } from "../packages/sim/src/index";
+import { ROAD_TYPES, ZONING_BALANCE, MILESTONES, createState, unlockMilestone, creditMilestones, generateTerrain, heightAt, type SimState } from "../packages/sim/src/index";
 import { SEED, buildRoads, groundAt } from "./road-fixtures";
 import { frames, openCity } from "./helpers";
 
@@ -21,7 +21,7 @@ interface CellInfo {
 declare const window: {
   cityCouncil: {
     mirror: {
-      state: { log: { type: string; playerId: string; tick: number }[]; cells: { zone: ArrayLike<number>; density: ArrayLike<number> } } | null;
+      state: { log: { type: string; playerId: string; tick: number; payload?: unknown }[]; cells: { zone: ArrayLike<number>; density: ArrayLike<number> } } | null;
       cellAt(x: number, z: number): CellInfo | null;
     };
     camera: Promise<{
@@ -31,6 +31,7 @@ declare const window: {
   };
 };
 declare const document: { body: { dataset: Record<string, string | undefined> } };
+declare function getComputedStyle(element: unknown): { opacity: string };
 
 test.use({ viewport: { width: 1280, height: 800 } });
 test.setTimeout(120_000);
@@ -48,8 +49,10 @@ const X0 = 4200;
 const X1 = 4392;
 const MID_X = 4300;
 
-function twoStreets(): SimState {
+function twoStreets(credit = true): SimState {
   const state = createState(SEED);
+  // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start, unless a test asks for one that has reached none.
+  if (credit) creditMilestones(state);
   buildRoads(state, [
     [[X0, SOUTH_Z], [X1, SOUTH_Z], "street"],
     [[X0, NORTH_Z], [X1, NORTH_Z], "street"],
@@ -191,6 +194,48 @@ test("fill paints a strip two cells deep, a repeat sends nothing, and erase clea
   await expect.poll(() => page.evaluate(() => document.body.dataset["zoningOverlay"])).toBe("false");
 });
 
+test("densities 2 and 3 are greyed on a city that has reached no milestone, say on hover which milestone opens each, and cannot be picked (M4-12)", async ({ page }, testInfo) => {
+  await openCity(page, twoStreets(false), { name: "Zone" });
+  await look(page, MID_X, SOUTH_Z - 30, 280);
+  await page.locator("#view").focus();
+  await page.keyboard.press("KeyK");
+  await page.waitForFunction(() => document.body.dataset["cellsPending"] === "0", null, { timeout: 60_000 });
+  const label = (index: number) => {
+    const m = MILESTONES[index];
+    if (!m) throw new Error(`no milestone ${index}`);
+    return `the ${m.name} milestone, at ${m.population.toLocaleString("en-US")} residents`;
+  };
+  const low = page.locator("#zone-density-1");
+  const medium = page.locator("#zone-density-2");
+  const high = page.locator("#zone-density-3");
+  // Density 1 is open; 2 and 3 are greyed, each with its milestone on hover.
+  await expect(low).not.toHaveAttribute("data-locked", "true");
+  await expect(low).toHaveAttribute("aria-pressed", "true");
+  await expect(medium).toHaveAttribute("data-locked", "true");
+  await expect(medium).toHaveAttribute("aria-disabled", "true");
+  await expect(medium).toHaveAttribute("title", `Medium density is locked until ${label(unlockMilestone("density2"))}`);
+  await expect(high).toHaveAttribute("data-locked", "true");
+  await expect(high).toHaveAttribute("title", `High density is locked until ${label(unlockMilestone("density3"))}`);
+  expect(await medium.evaluate((el) => Number(getComputedStyle(el).opacity))).toBeLessThan(1);
+  // A click on a locked density picks nothing: density 1 stays picked.
+  await medium.click({ force: true });
+  await high.click({ force: true });
+  await expect(medium).toHaveAttribute("aria-pressed", "false");
+  await expect(high).toHaveAttribute("aria-pressed", "false");
+  await expect(low).toHaveAttribute("aria-pressed", "true");
+  await medium.hover();
+  await frames(page);
+  await attach(page, testInfo, "densities 2 and 3 greyed before their milestones");
+  // And density 1 paints as ever.
+  await click(page, MID_X, SOUTH_Z - HALF / 2);
+  await expect.poll(() => zoneLog(page).then((l) => l.length)).toBe(1);
+  const painted = await page.evaluate(() => window.cityCouncil.mirror.state?.log.find((e) => e.type === "ZoneCells")?.payload);
+  expect(painted).toMatchObject({ density: 1 });
+  await page.mouse.move(10, 10);
+  await frames(page);
+  await attach(page, testInfo, "density 1 painted on the same city");
+});
+
 test("a brush drag across two streets paints cells on both, and Escape drops a stroke", async ({ page }, testInfo) => {
   await openCity(page, twoStreets(), { name: "Zone" });
   await look(page, MID_X, SOUTH_Z - 30, 280);
@@ -242,6 +287,8 @@ test("a brush drag across two streets paints cells on both, and Escape drops a s
 /** The south street, and a street north from the north one's line that stops 12 m short of it, through its north strip with no junction. */
 function cutStrip(): SimState {
   const state = createState(SEED);
+  // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start.
+  creditMilestones(state);
   buildRoads(state, [
     [[X0, SOUTH_Z], [X1, SOUTH_Z], "street"],
     [[MID_X, SOUTH_Z - 12], [MID_X, NORTH_Z + 20], "street"],

@@ -44,6 +44,7 @@ import { holdEach } from "./hold-each";
 import fixtureJson from "./fixtures/replay/through-lots.json";
 import { expectReplay, replayFixture, type ReplayFixture } from "./replay-helper";
 import { submit, withEnds } from "./seen-ends";
+import { credited } from "./credited";
 import { withValue } from "./with-value";
 
 // M2-14: through-lots for large commercial and industrial buildings.
@@ -145,7 +146,7 @@ function buildingAt(state: SimState, x: number, z: number): number {
 
 describe("the lot finder", () => {
   it("joins two C3 strips twelve cells apart into one lot holding both", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 12 * CELL);
     zoneBlock(state, south, "commercial");
     const result = findLot(state, northCell(state, 4300));
@@ -169,7 +170,7 @@ describe("the lot finder", () => {
   });
 
   it("gives no through-lot when the strips are C3 and I3", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 12 * CELL);
     zoneBlock(state, south, "commercial", 3, "industrial");
     const options = lotOptions(state, northCell(state, 4300));
@@ -184,7 +185,7 @@ describe("the lot finder", () => {
 
   it("gives no through-lot at density 2, nor for housing or offices", () => {
     for (const [zone, density] of [["commercial", 2], ["industrial", 2], ["residential", 3], ["office", 3], ["mixed", 3]] as const) {
-      const state = createState(SEED);
+      const state = credited(createState(SEED));
       const south = block(state, 12 * CELL);
       zoneBlock(state, south, zone, density);
       const options = lotOptions(state, northCell(state, 4300));
@@ -193,7 +194,7 @@ describe("the lot finder", () => {
   });
 
   it("joins I3 strips into a heavy plant", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 12 * CELL);
     zoneBlock(state, south, "industrial");
     const result = findLot(state, northCell(state, 4300));
@@ -207,7 +208,7 @@ describe("the lot finder", () => {
       [3, true],
       [CELL, false],
     ] as const) {
-      const state = createState(SEED);
+      const state = credited(createState(SEED));
       const south = block(state, 12 * CELL + sliver);
       zoneBlock(state, south, "commercial");
       const result = findLot(state, northCell(state, 4300));
@@ -216,7 +217,7 @@ describe("the lot finder", () => {
   });
 
   it("joins strips closer than two zoning depths, the back one cut short by the front one's cells", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 10 * CELL);
     zoneBlock(state, south, "commercial");
     const result = findLot(state, northCell(state, 4300));
@@ -227,7 +228,7 @@ describe("the lot finder", () => {
   });
 
   it("needs a block: two parallel streets with open ends give no through-lot", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = NORTH + 2 * HALF + 12 * CELL;
     ok(state, road([WEST, NORTH], [EAST, NORTH]));
     ok(state, road([WEST, south], [EAST, south]));
@@ -237,7 +238,7 @@ describe("the lot finder", () => {
   });
 
   it("joins only strips that are free to their backs", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 12 * CELL);
     zoneBlock(state, south, "commercial");
     // A shop on the back strip's middle, two cells deep: the columns behind
@@ -261,7 +262,7 @@ describe("the grower", () => {
   // Low enough that each zone builds one a day.
   holdEach({ commercial: 5, industrial: 5 });
   it("puts one building across both strips of a C3 block", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 12 * CELL);
     zoneBlock(state, south, "commercial");
     grow(state, 1);
@@ -278,7 +279,7 @@ describe("the grower", () => {
   });
 
   it("grows no through-lot on a C3 strip backing onto I3", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 12 * CELL);
     zoneBlock(state, south, "commercial", 3, "industrial");
     grow(state, 8);
@@ -297,7 +298,7 @@ describe("set-aside cells that grow through-lots (#426)", () => {
   const elsewhere = () => road([WEST, NORTH + 350], [EAST, NORTH + 350]);
 
   it("tries C3 runs too short for any lot once, and a change of roads elsewhere brings none back", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, road([WEST, NORTH], [EAST, NORTH]));
     // Five runs of two cells, six deep: no C3 building is under three cells wide, and a through-lot needs six.
     for (let i = 0; i < 5; i++) {
@@ -332,7 +333,7 @@ describe("set-aside cells that grow through-lots (#426)", () => {
    * street's strip.
    */
   function openEnded(): { state: SimState; south: number } {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const edge = NORTH + 9;
     const south = edge + 8 * CELL + HALF;
     ok(state, road([WEST, south], [EAST, south]));
@@ -378,7 +379,7 @@ describe("set-aside cells that grow through-lots (#426)", () => {
    * no back lot of its own zone, every block test passing.
    */
   function officeBehind(): { state: SimState; south: number } {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const edge = NORTH + 9;
     const south = edge + 8 * CELL + HALF;
     ok(state, road([WEST, south], [EAST, south]));
@@ -490,7 +491,7 @@ describe("set-aside cells that grow through-lots (#426)", () => {
 describe("a through-lot and its roads", () => {
   /** A block with a through-lot built on it from x 4300. */
   function withMall(): { state: SimState; south: number; id: number } {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 12 * CELL);
     zoneBlock(state, south, "commercial");
     const result = findLot(state, northCell(state, 4300));
@@ -564,7 +565,7 @@ describe("a through-lot and its roads", () => {
 
 describe("the grid tool's default block", () => {
   it("is two strips deep, and takes a through-lot with no gap between them", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     // Two blocks of the default size, 12 cells deep and 24 wide between road edges.
     const depth = 2 * DEPTH * CELL;
     const width = 24 * CELL;
@@ -602,7 +603,7 @@ describe("the grid tool's default block", () => {
 
 describe("rows and balance", () => {
   it("refuses a building whose back fields do not fit its type", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 12 * CELL);
     zoneBlock(state, south, "commercial");
     const result = findLot(state, northCell(state, 4300));
@@ -643,7 +644,7 @@ describe("rows and balance", () => {
 describe("a client's copy", () => {
   holdEach();
   it("files a through-lot on both strips from its row, and draws it with the same corners", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     const south = block(state, 12 * CELL);
     zoneBlock(state, south, "commercial");
     const copy = deserialize(serialize(state)).state;
@@ -688,7 +689,7 @@ describe("a client's copy", () => {
  * with its zoning but not its buildings. Ten game days.
  */
 function playSession(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   let n = 0;
   const send = (type: string, payload: unknown, playerId = "p1") => {
     expect(submit(state, { seq: ++n, playerId, type, payload }), `${type} ${JSON.stringify(payload)}`).toEqual({ ok: true });
@@ -764,7 +765,7 @@ describe("replay fixture through-lots", () => {
 
   /** Replays the fixture with its bars held, saving and loading the city at `at` and stepping on from the copy. */
   function replaySavedAt(at: number): SimState {
-    let state = createState(fixture.seed);
+    let state = credited(createState(fixture.seed));
     let next = 0;
     holdDemand(HELD, () => {
       while (state.tick < fixture.untilTick) {

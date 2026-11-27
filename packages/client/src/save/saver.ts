@@ -3,7 +3,7 @@
 // so the snapshot is taken there and written straight to IndexedDB without
 // a trip through the page.
 
-import { createState, serialize, type SnapshotSteps } from "@city-council/sim";
+import { createState, creditMilestones, serialize, type SnapshotSteps } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, type LocalSave, type PendingSave, type SimHost } from "../protocol/host";
 import {
   SAVES_CHANNEL,
@@ -42,6 +42,8 @@ export interface SaverOptions {
   wallClock: () => number;
   /** Makes the id of an imported city. */
   makeId?: () => string;
+  /** Whether a new city starts with every milestone credited, under the test switch's `milestones` (M4-12). */
+  creditNewCities?: boolean;
 }
 
 function message(error: unknown): string {
@@ -182,7 +184,9 @@ export class Saver {
         this.reply({ channel: SAVES_CHANNEL, type: "switched", requestId, result: { ok: false, error } });
       let bytes: Uint8Array;
       try {
-        bytes = serialize(createState(seed), []);
+        const state = createState(seed);
+        if (this.options.creditNewCities === true) creditMilestones(state);
+        bytes = serialize(state, []);
       } catch (error) {
         refuse(`Could not start a new city: ${message(error)}.`);
         return;

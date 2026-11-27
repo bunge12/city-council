@@ -33,6 +33,7 @@ import {
   CELL_OPEN,
   CELL_ROAD,
   CELL_TAKEN,
+  DENSITY_UNLOCKS,
   NONE,
   NO_BUILDING,
   ZONE_CLEAR,
@@ -41,6 +42,7 @@ import {
   cellAt,
   cellCorners,
   cellsInBox,
+  lockNote,
   placesAlong,
   planZoneCells,
   type CommandResult,
@@ -574,8 +576,26 @@ export class ZoneToolController {
     if (ZONING_BALANCE.zones.some((z) => z.id === id)) this.host.set({ zonePick: id, zoneErase: false, zoneNote: null });
   }
 
+  /**
+   * Why density `level` cannot be painted yet, or null: the milestone that
+   * opens it (M4-12), read from the copy. Null before the first snapshot,
+   * when nothing can be painted anyway.
+   */
+  densityLock(level: number): string | null {
+    const unlock = DENSITY_UNLOCKS[level];
+    const city = this.host.city();
+    return unlock === undefined || city === null ? null : lockNote(city, unlock);
+  }
+
+  /** Picks density `level`, unless it is still locked. */
   pickDensity(level: number): void {
-    if (ZONING_BALANCE.densities.some((d) => d.level === level)) this.host.set({ zoneDensity: level, zoneErase: false, zoneNote: null });
+    if (!ZONING_BALANCE.densities.some((d) => d.level === level) || this.densityLock(level) !== null) return;
+    this.host.set({ zoneDensity: level, zoneErase: false, zoneNote: null });
+  }
+
+  /** Goes back to density 1 when the density picked is locked: a new or loaded city that has not reached its milestone. */
+  dropLockedDensity(): void {
+    if (this.densityLock(this.host.get().zoneDensity) !== null) this.host.set({ zoneDensity: 1 });
   }
 
   /** Erase on or off. */

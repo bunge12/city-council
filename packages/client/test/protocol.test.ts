@@ -8,6 +8,7 @@ import {
   ECONOMY,
   ECONOMY_SLIDERS,
   LINE,
+  MILESTONES,
   LOG_LIVE_LIMIT,
   MAX_PENDING_COMMANDS,
   PROTOCOL_VERSION,
@@ -206,7 +207,7 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
   it("reports per-system timings from the host", () => {
     const { mirror, run } = setup();
     run(100);
-    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "upkeep", "tax", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "redevelop", "grower", "budget"]);
+    expect(mirror.stats.timings.map((t) => t.system)).toEqual(["buildings", "commands", "cells", "travel", "stats", "upkeep", "tax", "demand", "pops", "displaced", "arrivals", "turnover", "jobs", "satisfaction", "vacancy", "landValue", "redevelop", "grower", "progression", "budget"]);
     expect(mirror.stats.timings[0]?.ms).toBeGreaterThanOrEqual(0);
   });
 
@@ -331,6 +332,30 @@ describe("SimMirror and SimHost over an in-memory transport", () => {
     const deltas = received.slice(before).filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
     expect(deltas.filter((d) => d.budget !== undefined)).toHaveLength(1);
     expect(mirror.state?.budget.chargeRates[office]).toBe(ECONOMY.developmentCharges.office.max);
+    expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
+  });
+
+  it("sends the milestones reached in the next delta once one is reached, and only then (M4-12)", () => {
+    const { client, host: hostEnd } = memoryTransportPair();
+    const received: FromSimMessage[] = [];
+    client.onMessage((m) => received.push(m));
+    let now = 0;
+    const state = createBareState(7);
+    const host = new SimHost(state, hostEnd, () => now);
+    const mirror = new SimMirror(client, "p1");
+    const pump = () => {
+      now += PUMP_INTERVAL_MS;
+      host.pump();
+    };
+    for (let i = 0; i < 5; i++) pump();
+    const deltas = () => received.filter((m): m is Extract<FromSimMessage, { type: "delta" }> => m.type === "delta");
+    expect(deltas().every((d) => d.milestones === undefined)).toBe(true);
+    const before = deltas().length;
+    state.stats.highestPopulation = (MILESTONES[0]?.population ?? 0) + 1;
+    for (let i = 0; i < 20 && mirror.state?.milestones.length !== 1; i++) pump();
+    expect(mirror.state?.milestones.length).toBe(1);
+    for (let i = 0; i < 10; i++) pump();
+    expect(deltas().slice(before).filter((d) => d.milestones !== undefined)).toHaveLength(1);
     expect(mirror.state && hashMirrored(mirror.state)).toBe(hashMirrored(state));
   });
 
@@ -1002,6 +1027,8 @@ describe("snapshot transfer", () => {
       ...statBuffers,
       ...moneyBuffers,
       ...budgetBuffers,
+      // The milestones reached (M4-12).
+      state.milestones.buffer,
     ]);
     expect(moneyBuffers).toHaveLength(4);
     // Twenty-one building arrays, the mark of a building paid for (M4-09) among them.

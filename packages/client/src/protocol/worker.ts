@@ -1,7 +1,7 @@
 // Web Worker entry. Opens the saved city, hosts it, drives it from the
 // worker's clock and saves it on an interval and when the page asks. City
 // file downloads and imports go through the saver too.
-import { prepareDerived } from "@city-council/sim";
+import { creditMilestones, prepareDerived } from "@city-council/sim";
 import { AUTOSAVE_INTERVAL_MS } from "../save/config";
 import { SAVES_CHANNEL, isSaveMessage, parseLoadFile, type FromSaver, type LoadFileMessage } from "../save/channel";
 import { newCityFallback, openLatestCity, openLoadedFile, type OpenedCity } from "../save/load";
@@ -59,6 +59,9 @@ async function start(): Promise<void> {
     city = newCityFallback(`Saved cities could not be opened, so a new city was started. ${storeError}.`, undefined, opening);
   }
 
+  // A test can have a new city start with every milestone credited (M4-12), so it zones densities 2 and 3 at once.
+  if (asked.milestones && city.from === "new city") creditMilestones(city.state);
+
   // One tab per city: without the lock this worker hosts nothing, and the
   // page offers a different city. The sim transport then stays unanswered.
   const mine = await claimCity(city.id, navigator.locks);
@@ -73,6 +76,7 @@ async function start(): Promise<void> {
     host,
     elsewhere: { seed: city.state.seed, tick: city.state.tick },
     transport: saveTransport,
+    creditNewCities: asked.milestones,
     city: { id: city.id, name: city.name },
     logPagesStored: city.logPagesStored,
     loadedFrom: city.from,

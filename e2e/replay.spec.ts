@@ -15,12 +15,14 @@ interface Fixture {
   heldDemand?: number;
   /** The treasury the city starts with, as the Node replay funds it (M4-03). */
   treasury?: number;
+  /** Whether the city starts with every milestone credited, as the Node replay credits it (M4-12). */
+  credited?: boolean;
 }
 
 // The hook packages/client/src/main.ts puts on the page. The tooling
 // tsconfig has no DOM types, so the part used here is declared.
 declare const window: {
-  cityCouncil: { replayCheck(seed: number, log: unknown[], untilTick: number, heldDemand: number | null, treasury: number | null): { hash: string; logLength: number } };
+  cityCouncil: { replayCheck(seed: number, log: unknown[], untilTick: number, heldDemand: number | null, treasury: number | null, credited: boolean): { hash: string; logLength: number } };
 };
 
 const dir = new URL("../packages/sim/test/fixtures/replay/", import.meta.url);
@@ -38,8 +40,8 @@ for (const { name, fixture } of fixtures) {
     await page.goto("/");
     await page.waitForFunction(() => "cityCouncil" in globalThis);
     const result = await page.evaluate(
-      ([seed, log, untilTick, held, treasury]) => window.cityCouncil.replayCheck(seed, log, untilTick, held, treasury),
-      [fixture.seed, fixture.log, fixture.untilTick, fixture.heldDemand ?? null, fixture.treasury ?? null] as const,
+      ([seed, log, untilTick, held, treasury, credited]) => window.cityCouncil.replayCheck(seed, log, untilTick, held, treasury, credited),
+      [fixture.seed, fixture.log, fixture.untilTick, fixture.heldDemand ?? null, fixture.treasury ?? null, fixture.credited ?? false] as const,
     );
     expect(result.logLength).toBe(fixture.log.length);
     expect(result.hash).toBe(fixture.hash);

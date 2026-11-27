@@ -15,6 +15,7 @@ import { keepBuildings } from "./buildings/upkeep";
 import { VACANCY } from "./buildings/vacancy";
 import { REDEVELOP } from "./buildings/redevelop";
 import { LAND_VALUE } from "./landvalue/land-value";
+import { PROGRESSION } from "./progression/milestones";
 import { applyPending, type DroppedCommand } from "./commands";
 import { catchUpDerived } from "./derived";
 import type { SimState } from "./state";
@@ -56,8 +57,11 @@ export interface System {
  * slice, so a building marked unzoned on today's visit is cleared on it,
  * it reads the month's centre, and the grower builds on the ground it
  * clears. The pops of a home it replaces find homes on the next tick.
+ * Progression comes last (M4-12), after every system that moves people,
+ * so a milestone the day's arrivals pass is reached, and its grant paid,
+ * on the tick they arrive.
  */
-export const SYSTEMS: readonly System[] = [STATS, UPKEEP, TAX, DEMAND, POPS, DISPLACED, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, REDEVELOP, GROWER];
+export const SYSTEMS: readonly System[] = [STATS, UPKEEP, TAX, DEMAND, POPS, DISPLACED, ARRIVALS, TURNOVER, JOBS, SATISFACTION, VACANCY, LAND_VALUE, REDEVELOP, GROWER, PROGRESSION];
 
 /** Name the timer hook reports for applying queued commands. */
 export const COMMANDS_SYSTEM = "commands";

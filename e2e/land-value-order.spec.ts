@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { CONNECTION_BALANCE, DEMAND_BALANCE, NONE, TIME_BALANCE, ZONING_BALANCE, cellAt, connectionEnd, createState, generateTerrain, heightAt, landValueAt, step, submit, type Command, type SimState } from "../packages/sim/src/index";
+import { CONNECTION_BALANCE, DEMAND_BALANCE, NONE, TIME_BALANCE, ZONING_BALANCE, cellAt, connectionEnd, createState, creditMilestones, generateTerrain, heightAt, landValueAt, step, submit, type Command, type SimState } from "../packages/sim/src/index";
 import { HELD_DEMAND_STATE } from "./browser-state";
 import { frames, openCity, settle } from "./helpers";
 import { holdDemand } from "../packages/sim/test/demand-helper";
@@ -77,6 +77,8 @@ function segmentsAlong(state: SimState, x0: number, z0: number, x1: number, z1: 
 function buildCity(): City {
   seq = 0;
   const state = createState(SEED);
+  // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start.
+  creditMilestones(state);
   const r = state.roads;
   const edge = state.connections[0] ?? NONE;
   const inner = connectionEnd(r, edge);

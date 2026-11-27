@@ -45,6 +45,7 @@ import { nextInt, seedRng } from "../src/rng";
 import { cloneState } from "../src/state";
 import { nextColumn, syncCells } from "../src/zoning/cell-index";
 import { fromLocal, localIndex } from "../src/zoning/cells";
+import { credited } from "./credited";
 
 // M2-09: buildings in state, building types and the lot finder.
 
@@ -71,7 +72,7 @@ const road = (from: [number, number], to: [number, number], extra: Record<string
 
 /** A street running east from (4200, 4600) for 24 cells. Its left strip is north of it, from z 4595 back to 4547. */
 function street(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   ok(state, road([4200, 4600], [4392, 4600]));
   return state;
 }
@@ -360,7 +361,7 @@ describe("the lot finder", () => {
   });
 
   it("runs a lot across two streets drawn end to end in a straight line", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, road([4200, 4600], [4296, 4600]));
     ok(state, road([4296, 4600], [4392, 4600]));
     zoneNorth(state, "residential", 3, 9, 6, 6);
@@ -370,7 +371,7 @@ describe("the lot finder", () => {
   });
 
   it("stops a strip where the road turns a corner", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, road([4200, 4600], [4296, 4600]));
     ok(state, road([4296, 4600], [4296, 4700]));
     const index = syncCells(state);
@@ -380,7 +381,7 @@ describe("the lot finder", () => {
   });
 
   it("fits lots wider than one cell along a curve", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, road([4150, 4700], [4450, 4700], { control: { x: 4300, z: 4550 } }));
     // Zone every open cell of the strip on the outside of the bend R3.
     const statuses = cellStatuses(state);

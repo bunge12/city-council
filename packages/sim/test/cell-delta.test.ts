@@ -23,6 +23,7 @@ import {
 } from "../src/index";
 import { submit } from "./seen-ends";
 import { cloneState } from "../src/state";
+import { credited } from "./credited";
 
 // M2-05: cell deltas, without a host. A copy takes the road rows and the
 // cells of several steps at once and must end where the sim is.
@@ -40,7 +41,7 @@ const zone = (zoneId: string, from: [number, number], to: [number, number], widt
 
 /** A sim that records, and a copy of it as a client would hold after a snapshot. */
 function pair() {
-  const sim = createBareState(SEED);
+  const sim = credited(createBareState(SEED));
   recordRoadChanges(sim.roads);
   recordCellChanges(sim);
   const copy = cloneState(sim);
@@ -83,7 +84,7 @@ const zoned = (state: SimState) => state.cells.zone.reduce((n, z) => n + (z === 
 
 describe("cell deltas", () => {
   it("records nothing until asked, and nothing when no cell changed", () => {
-    const quiet = createBareState(SEED);
+    const quiet = credited(createBareState(SEED));
     expect(submit(quiet, road([4150, 4500], [4650, 4500]))).toEqual({ ok: true });
     step(quiet);
     expect(drainCellDelta(quiet)).toBeNull();

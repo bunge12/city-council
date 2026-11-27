@@ -2,6 +2,7 @@
   "description": "Redevelopment on seed 2026 (M3-14). p1 builds a street from the first outside connection's stub and zones R1 six deep along its north side, p2 along its south side. Every bar is held at 40, so houses grow and people move in. On day 20 both rezone their side R3. Over the next hundred game days owners rebuild, a few at a time: each tower takes in the houses beside it whose ground was zoned up too, and their people move into the towers. 120 game days.",
   "seed": 2026,
   "untilTick": 12000,
+  "credited": true,
   "heldDemand": 40,
   "log": [
     {
@@ -114,6 +115,6 @@
       }
     }
   ],
-  "balance": "9482560d6e35dfd3",
-  "hash": "c6be8fa226039cbf"
+  "balance": "d2ef571fc59b78b4",
+  "hash": "7c5fd5521760863f"
 }

@@ -36,6 +36,7 @@ import { buildingValue, buildingValues, landValueAtPoint } from "../src/landvalu
 import { holdDemand } from "./demand-helper";
 import { submit } from "./seen-ends";
 import { withValue } from "./with-value";
+import { credited } from "./credited";
 
 // M3-25: land value orders the lots and shapes who moves in.
 //
@@ -89,7 +90,7 @@ interface Layout {
 function layout(): Layout {
   // Each city numbers its commands from 1, so two built alike log alike.
   seq = 0;
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   const r = state.roads;
   const edge = state.connections[0] ?? NONE;
   const inner = connectionEnd(r, edge);

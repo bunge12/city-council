@@ -50,6 +50,7 @@ import { buildingIndexSets, lotStands, segmentBuildings } from "../src/buildings
 import { nextInt, seedRng } from "../src/rng";
 import { isSegment, segmentIdLimit } from "../src/roads/network";
 import { cellsSettled, cellsWalked, syncCells } from "../src/zoning/cell-index";
+import { credited } from "./credited";
 
 // M2-11: roads, rezoning and buildings.
 
@@ -78,7 +79,7 @@ const road = (from: [number, number], to: [number, number], type = "street") =>
 
 /** A street running east from (4200, 4600) for 24 cells, its north strip from z 4595 back, its south strip from z 4605 on. */
 function street(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   ok(state, road([4200, 4600], [4392, 4600]));
   return state;
 }
@@ -335,7 +336,7 @@ describe("an upgrade", () => {
   });
 
   it("keeps them when a one-way is reversed, their rows renumbered from the new node A", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, road([4200, 4600], [4392, 4600], "oneWay"));
     zone(state, "residential", 1, 0, 24, 4, "both");
     const ids = fill(state);
@@ -475,7 +476,7 @@ describe("a big change of roads", () => {
    * big a change to settle in it. Not a grid, which never demolishes (M4-09).
    */
   function roadsOverHouses(): { state: SimState; payloads: unknown[] } {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     for (const z of [4500, 4600, 4700, 4800]) ok(state, road([4150, z], [4650, z]));
     const rects = [];
     for (const x of [4152, 4402]) for (const z of [4550, 4750]) rects.push({ from: { x, z }, to: { x: x + 246, z }, width: 200 });
@@ -539,7 +540,7 @@ describe("the building index across changes of roads", () => {
   // Random zones of every kind, grown to 40 buildings: hold every bar up (M3-07).
   holdEach();
   it("kept current agrees with one built afresh, through random roads, bulldozes, undos, upgrades and growth", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     for (const z of [4500, 4600, 4700]) ok(state, road([4150, z], [4650, z]));
     for (const x of [4200, 4400, 4600]) ok(state, road([x, 4450], [x, 4750]));
     // A stroke waits for the streets' cells to settle (M2 review, #147).
@@ -590,7 +591,7 @@ describe("the building index across changes of roads", () => {
  * south side was C1; a city with no residents now wants no shops.
  */
 function playSession(): SimState {
-  const state = createState(SEED);
+  const state = credited(createState(SEED));
   let n = 0;
   const send = (type: string, payload: unknown, playerId = "p1") => {
     expect(submit(state, { seq: ++n, playerId, type, payload }), type).toEqual({ ok: true });
@@ -679,7 +680,7 @@ describe("replay fixture roads-and-buildings", () => {
 
   /** Replays the fixture, saving and loading the city at `at` and stepping on from the copy. */
   function replaySavedAt(at: number): SimState {
-    let state = createState(fixture.seed);
+    let state = credited(createState(fixture.seed));
     let next = 0;
     while (state.tick < fixture.untilTick) {
       if (state.tick === at && state.log.length === next) {
@@ -724,7 +725,7 @@ describe("a client's copy", () => {
   }
 
   it("keeps its building index right through a reverse, a split and a bulldoze", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, road([4200, 4600], [4304, 4600], "oneWay"));
     ok(state, road([4304, 4600], [4392, 4600], "oneWay"));
     zone(state, "residential", 1, 0, 24, 4, "both");
@@ -802,7 +803,7 @@ describe("undo of a bulldoze over ground built on since (M2 review, #147)", () =
 
 describe("undo of a narrowing over ground built on since (M2 review, #147)", () => {
   it("is refused when the road's wider cells would take back ground a tower now stands on", () => {
-    const state = createState(SEED);
+    const state = credited(createState(SEED));
     ok(state, road([4200, 4600], [4392, 4600], "avenue"));
     // p2's street 108 m north: the avenue's deepest cells overlap its sixth row, and win it, being older.
     ok(state, command("BuildRoad", { from: { x: 4200, z: 4492 }, to: { x: 4392, z: 4492 }, type: "street" }, "p2"));

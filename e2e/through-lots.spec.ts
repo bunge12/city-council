@@ -5,7 +5,7 @@ import {
   buildingCount,
   buildingInfo,
   cellAt,
-  createState,
+  createState, creditMilestones,
   findLot,
   serialize,
   step,
@@ -65,6 +65,8 @@ function buildAt(state: SimState, x: number, z: number, variant: number): boolea
 
 function throughLotCity(): Fixture {
   const state = createState(SEED);
+  // Densities 2 and 3 are locked until their milestones (M4-12); this city zones them from the start.
+  creditMilestones(state);
   buildRoads(state, [
     ...STREETS.map((z) => [[WEST, z], [EAST, z], "street"] as [[number, number], [number, number], string]),
     [[WEST, STREETS[0] as number], [WEST, STREETS[2] as number], "street"],
