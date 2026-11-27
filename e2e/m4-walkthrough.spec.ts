@@ -83,8 +83,9 @@ import {
 // prices City Hall costs more than the starting grant and the Village grant
 // together (M4.md), so the new city cannot reach it. Step 13 runs on the
 // budget overlay's town, which isolates a compact block and a long
-// cul-de-sac (issue M4-18). Step 14 reloads the new city's page and the
-// milestone town's. Steps 2, 7 and 9 read sounds from the sound engine's
+// cul-de-sac (issue M4-18), and runs before steps 9 to 12, so no more than
+// two pages draw at once: in software WebGPU a third did not finish loading
+// in a minute. Step 14 reloads the new city's page and the milestone town's. Steps 2, 7 and 9 read sounds from the sound engine's
 // test hook (M3-02): a headless browser plays nothing. Screenshots of each
 // step land in walkthrough-screenshots/m4-<backend>/ and are attached to
 // the report.
@@ -179,6 +180,12 @@ test.use({ viewport: VIEWPORT });
 test.setTimeout(1_560_000);
 
 const SCREENSHOTS = "walkthrough-screenshots";
+/**
+ * How long a page opened beside the new city's may take to draw: in
+ * software WebGPU two pages share the runner's CPU. It stops a hang and
+ * holds no speed.
+ */
+const SECOND_PAGE_TIMEOUT = 240_000;
 const terrain = generateTerrain(SEED);
 const DAY = TIME_BALANCE.ticksPerDay;
 /** The longest game month, in ticks, and a little over: a wait for a month's close gives up past it. */
@@ -485,8 +492,8 @@ async function saveAndReload(page: Page): Promise<void> {
 }
 
 /** Opens a city in `page` and checks it drew on the backend the variant asks for. */
-async function openOn(page: Page, info: TestInfo, city: Uint8Array, variant: { name: string; query: string }, name: string): Promise<void> {
-  await openCity(page, city, { query: variant.query, name });
+async function openOn(page: Page, info: TestInfo, city: Uint8Array, variant: { name: string; query: string }, name: string, timeout?: number): Promise<void> {
+  await openCity(page, city, { query: variant.query, name, ...(timeout ? { timeout } : {}) });
   const hasWebGpu = await page.evaluate(async () => Boolean(await navigator.gpu?.requestAdapter()));
   // CI starts Chromium with a software WebGPU adapter (playwright.config.ts).
   if (variant.name === "webgpu" && process.env["CI"]) expect(hasWebGpu, "CI must have a WebGPU adapter").toBe(true);
@@ -830,7 +837,7 @@ for (const variant of [
       // The same town in a second browser, at the default charge, to compare with.
       const copy = await download(page, info, "step-6");
       const other = await otherPage(browser, info);
-      await openOn(other.page, info, copy, variant, "M4 walkthrough, default charge");
+      await openOn(other.page, info, copy, variant, "M4 walkthrough, default charge", SECOND_PAGE_TIMEOUT);
       expect(await tickOf(other.page)).toBe(await tickOf(page));
       const top = ECONOMY.developmentCharges.commercial.max;
       await budgetTab(page, "charges");
@@ -985,13 +992,44 @@ for (const variant of [
       info.annotations.push({ type: "step 8", description: `loan ${formatMoneyShort(principal)} repaying ${formatMoneyShort(repayment)} a month; credit limit ${formatMoneyShort(limit)} at ${population} residents, ${formatMoneyShort(grownLimit)} at ${grown}` });
     });
 
+    await test.step("13. turn on the budget overlay: a compact block of density 2 shows a net income above zero, and a long cul-de-sac of houses shows one below it", async () => {
+      const ot = budgetOverlayTown();
+      const third = await otherPage(browser, info);
+      const op = third.page;
+      await openOn(op, info, ot.bytes, variant, "M4 walkthrough, budget town", SECOND_PAGE_TIMEOUT);
+      const { spots } = ot;
+      await look(op, (spots.compact.x + spots.large.x) / 2, (spots.compact.z + spots.large.z) / 2, 300);
+      await settleBuilt(op);
+      await op.keyboard.press("KeyN");
+      await expect(op.locator("#overlay-budget")).toHaveAttribute("aria-pressed", "true");
+      await expect(op.locator("#budget-legend")).toBeVisible();
+      await op.waitForFunction(() => document.body.dataset["cellsPending"] === "0" && document.body.dataset["budgetMs"] !== undefined, null, { timeout: 60_000 });
+      await away(op);
+      await shot(op, info, dir, "13-budget-overlay");
+      await hover(op, spots.compact.x, spots.compact.z);
+      const compact = await budgetReadout(op);
+      expect(compact.kind).toBe("block");
+      expect(compact.area).toBe(ot.compactArea);
+      expect({ tax: compact.tax, upkeep: compact.upkeep, net: compact.net }).toEqual(ot.figures.get(compact.area));
+      expect(compact.net).toBeGreaterThan(0);
+      await shot(op, info, dir, "13-compact-block-above-zero");
+      await hover(op, spots.large.x, spots.large.z);
+      const large = await budgetReadout(op);
+      expect(large.kind).toBe("block");
+      expect({ tax: large.tax, upkeep: large.upkeep, net: large.net }).toEqual(ot.figures.get(large.area));
+      expect(large.net).toBeLessThan(0);
+      await shot(op, info, dir, "13-cul-de-sac-below-zero");
+      await third.context.close();
+      info.annotations.push({ type: "step 13", description: `compact block net ${formatMoneyShort(compact.net)} a year, the cul-de-sac's block ${formatMoneyShort(large.net)}` });
+    });
+
     // Steps 9 to 12 and half of 14: the milestone town, in a context of its own.
     const town = milestoneTown();
     const second = await otherPage(browser, info);
     const tp = second.page;
 
     await test.step("9. grow the city past the first milestone: a grant is paid, the milestone reached sound plays, and City Hall and density 2 unlock; before that the zone tool shows density 2 locked, with the population that unlocks it", async () => {
-      await openOn(tp, info, town.bytes, variant, "M4 walkthrough, Village eve");
+      await openOn(tp, info, town.bytes, variant, "M4 walkthrough, Village eve", SECOND_PAGE_TIMEOUT);
       expect((await mirror(tp)).milestones.length).toBe(0);
       // Locked, with the population that unlocks it.
       await tp.keyboard.press("KeyK");
@@ -1174,37 +1212,6 @@ for (const variant of [
       await settleBuilt(tp);
       await shot(tp, info, dir, "12-street-stretch-cleared");
       info.annotations.push({ type: "step 12", description: `${taken} buildings: ${lines.map((l) => `${l.line} ${formatMoneyShort(l.amount)}`).join(", ")}` });
-    });
-
-    await test.step("13. turn on the budget overlay: a compact block of density 2 shows a net income above zero, and a long cul-de-sac of houses shows one below it", async () => {
-      const ot = budgetOverlayTown();
-      const third = await otherPage(browser, info);
-      const op = third.page;
-      await openOn(op, info, ot.bytes, variant, "M4 walkthrough, budget town");
-      const { spots } = ot;
-      await look(op, (spots.compact.x + spots.large.x) / 2, (spots.compact.z + spots.large.z) / 2, 300);
-      await settleBuilt(op);
-      await op.keyboard.press("KeyN");
-      await expect(op.locator("#overlay-budget")).toHaveAttribute("aria-pressed", "true");
-      await expect(op.locator("#budget-legend")).toBeVisible();
-      await op.waitForFunction(() => document.body.dataset["cellsPending"] === "0" && document.body.dataset["budgetMs"] !== undefined, null, { timeout: 60_000 });
-      await away(op);
-      await shot(op, info, dir, "13-budget-overlay");
-      await hover(op, spots.compact.x, spots.compact.z);
-      const compact = await budgetReadout(op);
-      expect(compact.kind).toBe("block");
-      expect(compact.area).toBe(ot.compactArea);
-      expect({ tax: compact.tax, upkeep: compact.upkeep, net: compact.net }).toEqual(ot.figures.get(compact.area));
-      expect(compact.net).toBeGreaterThan(0);
-      await shot(op, info, dir, "13-compact-block-above-zero");
-      await hover(op, spots.large.x, spots.large.z);
-      const large = await budgetReadout(op);
-      expect(large.kind).toBe("block");
-      expect({ tax: large.tax, upkeep: large.upkeep, net: large.net }).toEqual(ot.figures.get(large.area));
-      expect(large.net).toBeLessThan(0);
-      await shot(op, info, dir, "13-cul-de-sac-below-zero");
-      await third.context.close();
-      info.annotations.push({ type: "step 13", description: `compact block net ${formatMoneyShort(compact.net)} a year, the cul-de-sac's block ${formatMoneyShort(large.net)}` });
     });
 
     let saved = { hash: "", tick: 0, log: [] as LogEntry[] };
