@@ -46,7 +46,8 @@ import { ZONING_BALANCE } from "../zoning/balance";
 import { CELL_OPEN, cellSlotIn, columnStatus, nextColumn, nextColumnInto, syncCells, type CellIndex, type Column } from "../zoning/cell-index";
 import { CELL_RIGHT, ZONE_NONE, fromLocal, localIndex, type CellRef, type CellState } from "../zoning/cells";
 import { blockIndexOf, blockOnSide } from "../roads/blocks";
-import { NONE } from "../roads/network";
+import { NONE, type RoadNetwork } from "../roads/network";
+import { ROAD_TYPES } from "../roads/balance";
 import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { lotCorners, openCellsNear } from "../zoning/cell-index";
 import { BUILDINGS_BALANCE, WIDEST_LOT, typesFor, type BuildingType } from "./balance";
@@ -339,14 +340,91 @@ export function findLot(state: SimState, ref: CellRef): LotResult {
 }
 
 /**
+ * How far any cell of a segment can lie outside the box of its ends and its
+ * control point, which holds its curve: cells stand beside the road, out
+ * from its line by half its width and the zoning depth, so the widest
+ * road's whole width and the zoning depth with two cells to spare is more
+ * than enough. A geometric bound, not a balance number.
+ */
+export const CELL_SLACK = Math.max(...ROAD_TYPES.map((t) => t.width)) + (ZONING_BALANCE.zoneDepthCells + 2) * ZONING_BALANCE.cellSize;
+
+/** Widens `reads`'s box to take in the box from (x0, z0) to (x1, z1). */
+export function readBox(reads: LotReads, x0: number, z0: number, x1: number, z1: number): void {
+  if (x0 < reads.x0) reads.x0 = x0;
+  if (z0 < reads.z0) reads.z0 = z0;
+  if (x1 > reads.x1) reads.x1 = x1;
+  if (z1 > reads.z1) reads.z1 = z1;
+}
+
+/** Widens `reads`'s box to take in every cell of segment `seg` of `net`: its ends and control point, out to `CELL_SLACK`. */
+export function readSegmentBox(reads: LotReads, net: RoadNetwork, seg: number): void {
+  const a = net.segA[seg] ?? NONE;
+  const b = net.segB[seg] ?? NONE;
+  const ax = net.nodeX[a] ?? 0;
+  const az = net.nodeZ[a] ?? 0;
+  const bx = net.nodeX[b] ?? 0;
+  const bz = net.nodeZ[b] ?? 0;
+  const cx = net.segCX[seg] ?? 0;
+  const cz = net.segCZ[seg] ?? 0;
+  readBox(reads, Math.min(ax, bx, cx) - CELL_SLACK, Math.min(az, bz, cz) - CELL_SLACK, Math.max(ax, bx, cx) + CELL_SLACK, Math.max(az, bz, cz) + CELL_SLACK);
+}
+
+/** Empties `reads`, for a new try. */
+export function clearReads(reads: LotReads): void {
+  reads.across = false;
+  reads.blocks = false;
+  reads.sides.length = 0;
+  reads.x0 = Infinity;
+  reads.z0 = Infinity;
+  reads.x1 = -Infinity;
+  reads.z1 = -Infinity;
+}
+
+/**
+ * What lot searches read beyond the strip they walked, for the grower's
+ * set-aside cells (lot-order.ts, #426). `lotOptions` sets each flag it
+ * comes to and clears nothing, so one object can gather a grower's try at
+ * both ends of a frontage and at the cell. A search that sets neither flag
+ * read only its own strip's columns.
+ */
+export interface LotReads {
+  /** It looked across the block for the back lot of a through-lot: the cells near the back of the strip. */
+  across: boolean;
+  /**
+   * A box round all it read across the block, in metres: the ground round
+   * each point it looked for cells near, and every segment whose cells it
+   * read, out to `CELL_SLACK`. Empty, with x0 above x1, until it looks.
+   */
+  x0: number;
+  z0: number;
+  x1: number;
+  z1: number;
+  /**
+   * A block test turned a back lot away: the strips faced different blocks,
+   * or none. A change of roads anywhere round a block can change that, by
+   * closing it or joining it to the next. With this clear, every block test
+   * passed, so a search with other blocks finds no more than this one did.
+   */
+  blocks: boolean;
+  /**
+   * Each side of a road whose block a test read, as the half-edge
+   * `2 * segment`, plus 1 for the left side (roads/blocks.ts), repeats and
+   * all. While none of them faces anything new, every block test answers
+   * as it did.
+   */
+  sides: number[];
+}
+
+/**
  * Every building type that fits at the cell `ref` names, each on the
  * largest lot holding the cell that it takes, or why none does. `findLot`
  * takes the largest of these; the grower draws among them (grower.ts).
  * Settles cells as `findLot` does, with the same caution for systems.
  * Given `free`, a cell under a building it says yes to counts as free, so
- * redevelopment can fit a lot over the buildings it would replace.
+ * redevelopment can fit a lot over the buildings it would replace. Given
+ * `reads`, it notes there what it read beyond its strip (`LotReads`).
  */
-export function lotOptions(state: SimState, ref: CellRef, explain = true, free?: (id: number) => boolean): LotOptions {
+export function lotOptions(state: SimState, ref: CellRef, explain = true, free?: (id: number) => boolean, reads?: LotReads): LotOptions {
   const index = syncCells(state);
   const cells = state.cells;
   const slot = cellSlotIn(index, cells, ref.segment, ref.side, ref.place, ref.depth);
@@ -424,7 +502,17 @@ export function lotOptions(state: SimState, ref: CellRef, explain = true, free?:
    */
   const gap2 = ZONING_BALANCE.throughLotMaxGap * ZONING_BALANCE.throughLotMaxGap;
   const blocks = blockIndexOf(state.roads);
-  const blockOf = (col: Column) => blockOnSide(blocks, col.seg, col.side === CELL_RIGHT);
+  const blockOf = (col: Column) => {
+    const h = 2 * col.seg + (col.side === CELL_RIGHT ? 0 : 1);
+    // Most reads repeat the last: the columns of one lot face one side of one road.
+    if (reads && reads.sides[reads.sides.length - 1] !== h) reads.sides.push(h);
+    return blockOnSide(blocks, col.seg, col.side === CELL_RIGHT);
+  };
+  /** Notes in `reads` that a block test turned a back lot away, and returns `value`. */
+  const turnedAway = <T>(value: T): T => {
+    if (reads) reads.blocks = true;
+    return value;
+  };
   /** The one block every column of `cols` faces, or NONE. */
   const sameBlock = (cols: readonly Column[]): number => {
     const block = blockOf(cols[0] as Column);
@@ -445,12 +533,16 @@ export function lotOptions(state: SimState, ref: CellRef, explain = true, free?:
     if (known) return known;
     const out: { col: Column; depth: number; near: number }[] = [];
     partners.set(s, out);
+    if (reads) reads.across = true;
     const first = (strip[s] as { col: Column }).col;
     const corners = lotCorners(index, first, 1, depth);
+    if (!corners) return out;
     const block = blockOf(first);
-    if (!corners || block === NONE) return out;
+    if (block === NONE) return turnedAway(out);
     const nx = corners[2] ?? 0;
     const nz = corners[3] ?? 0;
+    const gap = ZONING_BALANCE.throughLotMaxGap;
+    if (reads) readBox(reads, nx - gap, nz - gap, nx + gap, nz + gap);
     const tried = new Set<string>();
     // The lot behind's first column has its back corner within the gap of
     // this column's near back corner, and that corner is its back cell's.
@@ -458,12 +550,16 @@ export function lotOptions(state: SimState, ref: CellRef, explain = true, free?:
       const seg = Math.floor(key / CELL_KEY_STRIDE);
       const { side, place } = fromLocal(key - seg * CELL_KEY_STRIDE);
       if (seg === first.seg && side === first.side) continue;
+      if (reads) readSegmentBox(reads, state.roads, seg);
       for (let dir = 0; dir < 2; dir++) {
         const col: Column = { seg, side, place, dir };
         const name = `${seg}/${side}/${place}/${dir}`;
         if (tried.has(name)) continue;
         tried.add(name);
-        if (blockOf(col) !== block) continue;
+        if (blockOf(col) !== block) {
+          turnedAway(null);
+          continue;
+        }
         const d = freeDepth(col);
         if (d === 0) continue;
         const back = lotCorners(index, col, 1, d);
@@ -475,6 +571,18 @@ export function lotOptions(state: SimState, ref: CellRef, explain = true, free?:
     return out;
   };
 
+  /** `lotColumns` for a lot behind, noting in `reads` each segment its walk reads, as far as it gets. */
+  const backColumns = (col: Column, w: number): Column[] | null => {
+    if (reads) {
+      let c: Column | null = col;
+      for (let i = 0; c && i < w; i++) {
+        readSegmentBox(reads, state.roads, c.seg);
+        c = i + 1 < w ? nextColumn(index, c) : null;
+      }
+    }
+    return lotColumns(index, col, w);
+  };
+
   /** The lot behind `w` columns from strip column `s`, each free `depth` deep: as the header says, or null. */
   const lotBehind = (s: number, w: number, depth: number): { first: Column; depth: number } | null => {
     const first = (strip[s] as { col: Column }).col;
@@ -484,16 +592,20 @@ export function lotOptions(state: SimState, ref: CellRef, explain = true, free?:
     const corners = lotCorners(index, first, w, depth);
     if (!cols || !corners) return null;
     const block = sameBlock(cols);
-    if (block === NONE) return null;
+    if (block === NONE) return turnedAway(null);
     const fx = corners[4] ?? 0;
     const fz = corners[5] ?? 0;
     let best: { first: Column; depth: number; worst: number } | null = null;
     for (const { col, depth: d, near } of options) {
-      const backCols = lotColumns(index, col, w);
+      const backCols = backColumns(col, w);
       const back = lotCorners(index, col, w, d);
       if (!backCols || !back) continue;
       const far = squared((back[4] ?? 0) - fx, (back[5] ?? 0) - fz);
-      if (far > gap2 || !backCols.every((c) => freeDepth(c) === d) || sameBlock(backCols) !== block) continue;
+      if (far > gap2 || !backCols.every((c) => freeDepth(c) === d)) continue;
+      if (sameBlock(backCols) !== block) {
+        turnedAway(null);
+        continue;
+      }
       const worst = Math.max(near, far);
       if (!best || worst < best.worst) best = { first: col, depth: d, worst };
     }

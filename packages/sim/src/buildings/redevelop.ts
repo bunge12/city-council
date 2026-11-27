@@ -49,7 +49,7 @@
 // roads is settling, since the cells cannot be read.
 //
 // A home is not replaced while the grower holds new homes back (M3-21,
-// grower.ts, `holdsHomes`): with `unfilledHomesMax` homes newcomers can
+// grower.ts, `holdsHomes`): with `unfilledHomesAllowed` homes newcomers can
 // reach still filling, an owner who draws to rebuild waits and counts
 // nothing, as a new home on open ground would wait. The owner draws first,
 // so the homes are counted only on a tick an owner would rebuild. Without the hold a district
@@ -70,7 +70,7 @@ import { cellsSettled, syncCells } from "../zoning/cell-index";
 import { segmentOfSlot } from "../zoning/cells";
 import { BUILDING_TYPES, type BuildingType } from "./balance";
 import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_LANDMARK, BUILDING_UNZONED, addBuilding, removeBuildings } from "./buildings";
-import { holdsHomes, residentsFor, zoneBar } from "./grower";
+import { cityPopulation, holdsHomes, residentsFor, zoneBar } from "./grower";
 import { reachableRoom, type ReachableRoom } from "../pops/room";
 import { lotOptions, type Lot } from "./lots";
 import { NO_BUILDING, buildingSlots, lotColumns, lotShapeCorners, lotShapeOf, lotSlots, segmentBuildings, zonedUpTo } from "./where";
@@ -236,7 +236,7 @@ export function checkRedevelopment(state: SimState): void {
     // Asked only of an owner who would rebuild, so the pass over the buildings is not paid on the many days nobody draws.
     if ((b.residents[id] ?? 0) > 0) {
       room ??= reachableRoom(state);
-      if (holdsHomes(room)) continue;
+      if (holdsHomes(room, cityPopulation(state))) continue;
     }
     const plan = planRedevelopment(state, id, density);
     // Every building it replaces counts toward the day's cap, so a tower that takes in eight houses counts eight.

@@ -32,14 +32,34 @@
 // loaded from a save, which has none set aside, would part from one that
 // never stopped. A try at a cell reads its own strip, out to the ends of the
 // free run it lies on (lots.ts, `freeFrontage`), and for a through-lot the
-// strip across the block. So zoning painted, a building added and a
-// building removed each bring back the cells on the runs their columns
-// touch (`bringBackNear`), and zoning or a removal also the set-aside cells
-// that grow through-lots within a try's reach of it. A change of roads does the same from the cells
-// whose status it changed, at any depth, from the ends of each segment it
-// laid out again, whose own cells come back new, and from each building it
-// filed again; and it brings back every set-aside cell that grows
-// through-lots, since it can join two blocks (`bringBackThrough`).
+// strip across the block and which block each strip faces. So zoning
+// painted, a building added and a building removed each bring back the
+// cells on the runs their columns touch (`bringBackNear`), and zoning or a
+// removal also the set-aside cells whose try looked across the block, where
+// its segment meets the box round what the try read there. A change of
+// roads does the same from the cells whose status it changed, at any depth,
+// from the ends of each segment it laid out again, whose own cells come
+// back new, and from each building it filed again.
+//
+// What a try read is noted when the cell is set aside (#426, lots.ts,
+// `LotReads`), not guessed from its zone. On a strip too short for a
+// through-lot the finder never looks across the block, so such a cell comes
+// back only for its own run, as a plain cell does. One that looked across
+// notes a box round all it read there, the ground near the back of its
+// strip and each segment whose cells it read out to `CELL_SLACK`, and only
+// a change on a segment that meets it brings the cell back
+// (`bringBackThroughNear`). A try whose every block test passed finds
+// nothing with other blocks either. A try a block test turned a
+// through-lot away from, most often because its strip faces no block,
+// waits on the sides of roads whose blocks it read: a change of roads can
+// close a block or join two anywhere round them, far from any cell it
+// changed, so it comes back once one of those sides faces something new,
+// its face walked again by the block index (`bringBackBlocked`,
+// roads/blocks.ts). Until #426 every set-aside cell of a zone and density
+// that grows through-lots, C3 and I3, came back on every change of roads
+// anywhere in the city, and on zoning within 1.2 km. In a soak city of
+// 470,000 there were 300 to 450 of them, and the grower spent 10 to 22 ms
+// a tick trying them all again a few ticks after each road command.
 
 import { ROAD_TYPES } from "../roads/balance";
 import type { SimState } from "../state";
@@ -52,8 +72,8 @@ import { CELL_KEY_STRIDE } from "../zoning/cell-changes";
 import { frontCellCornersIn, nextColumnInto, type CellIndex, type Column } from "../zoning/cell-index";
 import type { RoadNetwork } from "../roads/network";
 import { ZONING_BALANCE } from "../zoning/balance";
-import { WIDEST_LOT } from "./balance";
-import { FRONTAGE_REACH } from "./lots";
+import { CELL_SLACK, FRONTAGE_REACH, type LotReads } from "./lots";
+import { blockWalks, faceWalkedSince, type BlockIndex } from "../roads/blocks";
 
 /** The side of a square the order keeps candidates in, in metres. */
 const TILE = 256;
@@ -90,9 +110,33 @@ interface SegColumns {
   zone: Uint8Array;
   /** 1 while set aside. */
   aside: Uint8Array;
+  /** The order's `setAsideCount` when it was last set aside. */
+  stamp: Int32Array;
   s: Int16Array;
   x: Float64Array;
   z: Float64Array;
+}
+
+/** A set-aside cell whose try looked across the block: the box round what it read there (lots.ts, `LotReads`), which a change inside brings it back for. */
+interface ThroughWait {
+  key: number;
+  /** Its column's `stamp` when it was set aside. */
+  stamp: number;
+  x0: number;
+  z0: number;
+  x1: number;
+  z1: number;
+}
+
+/** A set-aside cell whose try a block test turned a through-lot away from: the sides of roads whose blocks it read, which bring it back when one faces something new (#426). */
+interface BlockWait {
+  key: number;
+  /** Its column's `stamp` when it was set aside, so a wait left from before it last came back is known. */
+  stamp: number;
+  /** The block index's `blockWalks` when it was set aside. */
+  walks: number;
+  /** Each side of a road whose block its try read, once, as `LotReads.sides` has them. */
+  sides: Int32Array;
 }
 
 export interface LotOrder {
@@ -108,8 +152,13 @@ export interface LotOrder {
   cw: number;
   /** Candidates set aside now. */
   asideCount: number;
-  /** Keys set aside whose zone and density grow through-lots (M2-14), which read the strip across the block. A key may be listed after it came back; its flag says. */
-  asideThrough: number[];
+  /** Set-aside cells whose try looked across the block for a through-lot (M2-14, #426), with the box round what it read there. One may be listed after it came back; its stamp says. */
+  asideThrough: ThroughWait[];
+  /** Set-aside cells whose try a block test turned a through-lot away from, and what each waits on (#426). One may be listed after it came back; its stamp says. */
+  asideBlocks: BlockWait[];
+  /** The block index the waits in `asideBlocks` read, and its `blockWalks` when they were last looked at. */
+  blockIndex: BlockIndex | null;
+  blockWalks: number;
   /** Cells tried and set aside, ever: for tests that count the grower's tries. */
   setAsideCount: number;
   /**
@@ -123,7 +172,7 @@ export interface LotOrder {
 }
 
 export function createLotOrder(): LotOrder {
-  return { tiles: Array.from({ length: ZONES + 1 }, () => new Map<number, Tile>()), segs: [], epoch: 0, cx: 0, cz: 0, cw: 0, asideCount: 0, asideThrough: [], setAsideCount: 0, waiting: [] };
+  return { tiles: Array.from({ length: ZONES + 1 }, () => new Map<number, Tile>()), segs: [], epoch: 0, cx: 0, cz: 0, cw: 0, asideCount: 0, asideThrough: [], asideBlocks: [], blockIndex: null, blockWalks: 0, setAsideCount: 0, waiting: [] };
 }
 
 /** Makes room in the order for a segment with `columns` columns, dropping whatever it held. Its candidates must be taken out first. */
@@ -138,6 +187,7 @@ export function resetSegment(order: LotOrder, seg: number, columns: number): voi
     pos: new Int32Array(columns),
     zone: new Uint8Array(columns),
     aside: new Uint8Array(columns),
+    stamp: new Int32Array(columns),
     s: new Int16Array(columns),
     x: new Float64Array(columns),
     z: new Float64Array(columns),
@@ -271,17 +321,50 @@ export function removeCandidate(order: LotOrder, seg: number, col: number): void
 
 /**
  * Sets the candidate at column `col` of `seg` aside, as the header says: it
- * leaves the order until its ground changes. `through` says whether its
- * zone and density grow through-lots.
+ * leaves the order until its ground changes. `reads` is what its try read
+ * beyond its strip (lots.ts), and `blocks` the block index it read them in.
  */
-export function setAside(order: LotOrder, seg: number, col: number, through: boolean): void {
+export function setAside(order: LotOrder, seg: number, col: number, reads: Readonly<LotReads>, blocks: BlockIndex): void {
   const cols = order.segs[seg];
   if (!cols || (cols.zone[col] ?? 0) === 0 || cols.aside[col] === 1) return;
   unfile(order, seg, col);
   cols.aside[col] = 1;
   order.asideCount++;
-  if (through) order.asideThrough.push(seg * CELL_KEY_STRIDE + col);
   order.setAsideCount++;
+  cols.stamp[col] = order.setAsideCount;
+  const key = seg * CELL_KEY_STRIDE + col;
+  // A city that grows and builds no roads would keep the waits of cells that came back since: let go of them once they outnumber the rest.
+  if (order.asideThrough.length > 2 * order.asideCount + 64) order.asideThrough = order.asideThrough.filter((w) => waitStands(order, w));
+  if (order.asideBlocks.length > 2 * order.asideCount + 64) order.asideBlocks = order.asideBlocks.filter((w) => waitStands(order, w));
+  if (reads.across && reads.x0 <= reads.x1) order.asideThrough.push({ key, stamp: order.setAsideCount, x0: reads.x0, z0: reads.z0, x1: reads.x1, z1: reads.z1 });
+  if (!reads.blocks) return;
+  // Waits read in another index, as after a load into new roads, can tell nothing: they come back.
+  if (order.blockIndex !== blocks) {
+    bringBackAllBlocked(order);
+    order.blockIndex = blocks;
+    order.blockWalks = blockWalks(blocks);
+  }
+  const sides = Int32Array.from(reads.sides).sort();
+  let n = 0;
+  for (let i = 0; i < sides.length; i++) if (i === 0 || sides[i] !== sides[n - 1]) sides[n++] = sides[i] ?? 0;
+  order.asideBlocks.push({ key, stamp: order.setAsideCount, walks: blockWalks(blocks), sides: sides.subarray(0, n) });
+}
+
+/** Whether `wait`'s cell is still set aside under it, and not back since. */
+function waitStands(order: LotOrder, wait: { key: number; stamp: number }): boolean {
+  const seg = Math.floor(wait.key / CELL_KEY_STRIDE);
+  const col = wait.key - seg * CELL_KEY_STRIDE;
+  const cols = order.segs[seg];
+  return !!cols && cols.aside[col] === 1 && cols.stamp[col] === wait.stamp;
+}
+
+/** Brings back every cell in `asideBlocks`. */
+function bringBackAllBlocked(order: LotOrder): void {
+  for (const wait of order.asideBlocks) {
+    const seg = Math.floor(wait.key / CELL_KEY_STRIDE);
+    bringBack(order, seg, wait.key - seg * CELL_KEY_STRIDE);
+  }
+  order.asideBlocks = [];
 }
 
 /** Puts a set-aside candidate back in the order. */
@@ -300,27 +383,16 @@ const walkCol: Column = { seg: 0, side: 0, place: 0, dir: 0 };
 const WALK_REACH = FRONTAGE_REACH + 2;
 
 /**
- * How far from a change a set-aside cell that grows through-lots may be and
- * still read it: a try looks at the strip across the block behind each end
- * of its free run, which may be `FRONTAGE_REACH` columns away, and a
- * through-lot is up to `WIDEST_LOT` columns wide and both strips deep.
- */
-const THROUGH_REACH = (WALK_REACH + 2 * WIDEST_LOT) * ZONING_BALANCE.cellSize;
-
-/** How far a segment's front cells may lie from its curve: a road's half width and a cell, with room to spare. */
-const SEGMENT_SLACK = 64;
-
-/**
  * Brings back the set-aside candidates a change at each column of `keys`
  * could let a lot fit at (header): the column itself, and from it each way
  * along the strip, on while the columns are candidates, as far as a try's
  * walk to an end of its frontage reaches. A walk stops at another column of
  * `keys`, whose own walk reaches further that way. So a building added
  * stops the walks at its own columns and brings back the runs beside it,
- * and ground zoned or freed brings back the run it joins. Cells where a
- * through-lot can grow read the strip across the block too: unless only
- * buildings were added, which cannot make a lot fit, those within
- * `THROUGH_REACH` of a change come back as well.
+ * and ground zoned or freed brings back the run it joins. Cells whose try
+ * looked across the block read the strip there too: unless only buildings
+ * were added, which cannot make a lot fit, those whose box round what they
+ * read there meets a change come back as well (`bringBackThroughNear`).
  */
 export function bringBackNear(order: LotOrder, index: CellIndex, net: RoadNetwork, keys: readonly number[], added: boolean): void {
   if (order.asideCount === 0 || keys.length === 0) return;
@@ -345,57 +417,103 @@ export function bringBackNear(order: LotOrder, index: CellIndex, net: RoadNetwor
   }
 }
 
+/** The side of a square of `changedTiles`, in metres: under a try's box across a block, about 200 m, so a box covers a few and a change beside it few more. */
+const CHANGE_TILE = 64;
+const CHANGE_SIDE = Math.ceil(mapSize(TERRAIN_BALANCE) / CHANGE_TILE);
+/** Scratch for `bringBackThroughNear`: the squares a change touched, marked with `changedMark`. Not state. */
+const changedTiles = new Int32Array(CHANGE_SIDE * CHANGE_SIDE);
+let changedMark = 0;
+
+/** The square of `changedTiles` a coordinate falls in, held to the map. */
+const changeTile = (v: number): number => Math.min(CHANGE_SIDE - 1, Math.max(0, Math.floor(v / CHANGE_TILE)));
+
 /**
- * Brings back the set-aside cells that grow through-lots within
- * `THROUGH_REACH` of the box round the segments of the columns `keys` name.
- * A segment is a curve inside the box of its ends and its control point,
- * and its cells lie within `SEGMENT_SLACK` of the curve, so the box costs
- * a look per segment rather than a cell's corners per column.
+ * Brings back the set-aside cells whose try looked across the block, where
+ * the box round what it read there (`ThroughWait`) meets a segment of a
+ * column of `keys`, out to `CELL_SLACK` (lots.ts), which holds every cell of
+ * it at any depth. A change of cells is noted under its own segment, so a
+ * box it misses read none of the cells it changed. The segments are marked
+ * on a grid of squares and each box looks at the squares it covers, so
+ * changes far apart cost no more than changes together.
  */
 function bringBackThroughNear(order: LotOrder, net: RoadNetwork, keys: ReadonlySet<number>): void {
-  let x0 = Infinity;
-  let z0 = Infinity;
-  let x1 = -Infinity;
-  let z1 = -Infinity;
-  const take = (x: number, z: number) => {
-    x0 = Math.min(x0, x);
-    x1 = Math.max(x1, x);
-    z0 = Math.min(z0, z);
-    z1 = Math.max(z1, z);
-  };
-  const seen = new Set<number>();
+  changedMark++;
+  if (changedMark === 0x7fffffff) {
+    changedTiles.fill(0);
+    changedMark = 1;
+  }
+  const mark = changedMark;
+  let last = -1;
   for (const key of keys) {
     const seg = Math.floor(key / CELL_KEY_STRIDE);
-    if (seen.has(seg)) continue;
-    seen.add(seg);
+    if (seg === last) continue;
+    last = seg;
     const a = net.segA[seg] ?? -1;
     const b = net.segB[seg] ?? -1;
-    take(net.nodeX[a] ?? 0, net.nodeZ[a] ?? 0);
-    take(net.nodeX[b] ?? 0, net.nodeZ[b] ?? 0);
-    take(net.segCX[seg] ?? 0, net.segCZ[seg] ?? 0);
+    const ax = net.nodeX[a] ?? 0;
+    const az = net.nodeZ[a] ?? 0;
+    const bx = net.nodeX[b] ?? 0;
+    const bz = net.nodeZ[b] ?? 0;
+    const cx = net.segCX[seg] ?? 0;
+    const cz = net.segCZ[seg] ?? 0;
+    const tx0 = changeTile(Math.min(ax, bx, cx) - CELL_SLACK);
+    const tx1 = changeTile(Math.max(ax, bx, cx) + CELL_SLACK);
+    const tz0 = changeTile(Math.min(az, bz, cz) - CELL_SLACK);
+    const tz1 = changeTile(Math.max(az, bz, cz) + CELL_SLACK);
+    for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) changedTiles[tz * CHANGE_SIDE + tx] = mark;
   }
-  const reach = THROUGH_REACH + SEGMENT_SLACK;
-  const kept: number[] = [];
-  for (const key of order.asideThrough) {
-    const seg = Math.floor(key / CELL_KEY_STRIDE);
-    const col = key - seg * CELL_KEY_STRIDE;
+  const kept: ThroughWait[] = [];
+  for (const wait of order.asideThrough) {
+    const seg = Math.floor(wait.key / CELL_KEY_STRIDE);
+    const col = wait.key - seg * CELL_KEY_STRIDE;
     const cols = order.segs[seg];
-    if (!cols || cols.aside[col] !== 1) continue;
-    const x = cols.x[col] ?? 0;
-    const z = cols.z[col] ?? 0;
-    if (x >= x0 - reach && x <= x1 + reach && z >= z0 - reach && z <= z1 + reach) bringBack(order, seg, col);
-    else kept.push(key);
+    // Back since, and maybe set aside again with a wait of its own.
+    if (!cols || cols.aside[col] !== 1 || cols.stamp[col] !== wait.stamp) continue;
+    let hit = false;
+    const tx0 = changeTile(wait.x0);
+    const tx1 = changeTile(wait.x1);
+    const tz1 = changeTile(wait.z1);
+    for (let tz = changeTile(wait.z0); tz <= tz1 && !hit; tz++) for (let tx = tx0; tx <= tx1 && !hit; tx++) hit = changedTiles[tz * CHANGE_SIDE + tx] === mark;
+    if (hit) bringBack(order, seg, col);
+    else kept.push(wait);
   }
   order.asideThrough = kept;
 }
 
-/** Brings back every set-aside candidate whose zone and density grow through-lots: a change of roads can join two blocks anywhere along them. */
-export function bringBackThrough(order: LotOrder): void {
-  for (const key of order.asideThrough) {
-    const seg = Math.floor(key / CELL_KEY_STRIDE);
-    bringBack(order, seg, key - seg * CELL_KEY_STRIDE);
+/**
+ * Brings back each set-aside cell whose try a block test turned a
+ * through-lot away from, if a side of a road whose block it read faces
+ * something new: its face was walked again since (roads/blocks.ts). A
+ * change of roads can close a block or join two anywhere round them, far
+ * from any cell it changed, so only the faces tell. One whose sides all
+ * face what they faced would read the same blocks again and fail again.
+ * A look at the index's count of walks when nothing was walked since the
+ * last call.
+ */
+export function bringBackBlocked(order: LotOrder, blocks: BlockIndex): void {
+  if (order.asideBlocks.length === 0) return;
+  if (order.blockIndex !== blocks) {
+    bringBackAllBlocked(order);
+    order.blockIndex = blocks;
+    order.blockWalks = blockWalks(blocks);
+    return;
   }
-  order.asideThrough.length = 0;
+  const walks = blockWalks(blocks);
+  if (walks === order.blockWalks) return;
+  order.blockWalks = walks;
+  const kept: BlockWait[] = [];
+  for (const wait of order.asideBlocks) {
+    const seg = Math.floor(wait.key / CELL_KEY_STRIDE);
+    const col = wait.key - seg * CELL_KEY_STRIDE;
+    const cols = order.segs[seg];
+    // Back since, and maybe set aside again with a wait of its own.
+    if (!cols || cols.aside[col] !== 1 || cols.stamp[col] !== wait.stamp) continue;
+    let walked = false;
+    for (let i = 0; i < wait.sides.length && !walked; i++) walked = faceWalkedSince(blocks, wait.sides[i] ?? 0, wait.walks);
+    if (walked) bringBack(order, seg, col);
+    else kept.push(wait);
+  }
+  order.asideBlocks = kept;
 }
 
 /** The centre's points at distance `d`. */

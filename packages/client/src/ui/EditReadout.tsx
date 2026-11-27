@@ -1,5 +1,5 @@
 import type { EditPreview } from "../tools/edit-tool";
-import { formatMoneyShort } from "./format";
+import { formatClears, formatMoneyShort } from "./format";
 import { useEditHover } from "./store";
 
 /** Offset of the readout from the pointer, CSS pixels. */
@@ -20,17 +20,21 @@ export function editTitle(preview: EditPreview): string {
 
 /**
  * Next to the cursor while the bulldoze or upgrade tool is over a road:
- * what the click would do, its length and price, or the reason the sim
- * would refuse it. The numbers are on data attributes too, in metres and
+ * what the click would do, its length and price with the buildings a
+ * wider road takes, or the reason the sim would refuse it. When the
+ * treasury cannot pay, the price stays, in the warning colour, with the
+ * sim's reason (M4-16). The numbers are on data attributes too, in metres and
  * whole dollars, for tests.
  */
 export function EditReadout() {
   const hover = useEditHover((s) => s.hover);
   if (!hover) return null;
   const { preview } = hover;
+  const reason = preview.ok ? preview.refusal : preview.reason;
+  const clears = preview.ok ? formatClears(preview.clears, "Takes") : null;
   return (
     <div
-      className={preview.ok ? "road-readout edit-readout" : "road-readout edit-readout refused"}
+      className={reason === null ? "road-readout edit-readout" : "road-readout edit-readout refused"}
       id="edit-readout"
       role="status"
       data-kind={preview.kind}
@@ -39,19 +43,27 @@ export function EditReadout() {
       data-segments={preview.segments.join(",")}
       data-length={String(preview.length)}
       data-cost={String(preview.cost)}
+      data-price={String(preview.price)}
+      data-refusal={preview.refusal ?? ""}
+      data-clears={String(preview.clears?.ids.length ?? 0)}
       style={{ left: hover.x + OFFSET, top: hover.y + OFFSET }}
     >
       <div className="what">
         {editTitle(preview)}
         {preview.ok && (
           <>
-            , {preview.length.toFixed(0)} m · <span id="edit-cost">{preview.cost === 0 ? "free" : formatMoneyShort(preview.cost)}</span>
+            , {preview.length.toFixed(0)} m · <span id="edit-cost">{preview.price === 0 ? "free" : formatMoneyShort(preview.price)}</span>
           </>
         )}
       </div>
-      {!preview.ok && (
+      {clears !== null && (
+        <div className="clears" id="edit-clears">
+          {clears}
+        </div>
+      )}
+      {reason !== null && (
         <div className="reason" id="edit-reason">
-          {preview.reason}
+          {reason}
         </div>
       )}
     </div>

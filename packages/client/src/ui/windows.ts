@@ -6,7 +6,7 @@
 // with the tools that bring it. Pure, so the order is checked without a page.
 
 /** The panels that open from a button, and the tool on the dock. */
-export type PanelId = "settings" | "city" | "stats" | "log" | "debug";
+export type PanelId = "settings" | "city" | "stats" | "budget" | "log" | "debug";
 export type WindowId = PanelId | "tool" | "overlay";
 
 /** The element each panel is, by id, for focus and the buttons that control it. */
@@ -14,6 +14,7 @@ export const PANEL_ELEMENTS: Record<PanelId, string> = {
   settings: "settings-menu",
   city: "city-menu",
   stats: "stats-panel",
+  budget: "budget-panel",
   log: "activity-log",
   debug: "debug-panel",
 };

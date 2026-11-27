@@ -194,7 +194,8 @@ test("upgrades a street to an avenue and sees it widen, then bulldozes it, with 
   const tag = page.locator("#bulldoze-tag");
   await expect(tag).toHaveAttribute("data-kind", "road");
   await expect(tag.locator(".what")).toHaveText("Bulldoze this road");
-  await expect(tag.locator(".price")).toHaveText(/^100 m · \$[\d.]+K$/);
+  await expect(tag.locator("tr.line-road th")).toHaveText("Road demolition, 100 m");
+  await expect(page.locator("#bulldoze-cost")).toHaveText(/^\$[\d.]+K$/);
   await attach(page, testInfo, "4 bulldoze preview marks the avenue");
   await click(page, 4300, MAIN_Z);
   await expect.poll(async () => (await segment(page, seg)).alive).toBe(false);
@@ -227,7 +228,7 @@ test("a drag across four segments bulldozes them in one log entry", async ({ pag
   const tag = page.locator("#bulldoze-tag");
   await expect(tag).toHaveAttribute("data-ids", segs.join(","));
   await expect(tag.locator(".what")).toHaveText("Bulldoze 4 road segments");
-  await expect(tag.locator(".price")).toHaveText(/^400 m/);
+  await expect(tag.locator("tr.line-road th")).toHaveText("Road demolition, 400 m");
   await attach(page, testInfo, "6 a drag marks four segments");
   await page.mouse.up();
   await expect.poll(async () => (await logEntries(page)).length).toBe(start + 1);
@@ -353,17 +354,18 @@ test("bulldozes and upgrades a stretch of a road, the whole road with Shift, and
   await hover(page, 4300, MAIN_Z);
   const tag = page.locator("#bulldoze-tag");
   await expect(tag.locator(".what")).toHaveText("Bulldoze this stretch of road");
-  await expect(tag.locator(".price")).toHaveText(/^20 m · \$[\d.]+K?$/);
+  await expect(tag.locator("tr.line-road th")).toHaveText("Road demolition, 20 m");
+  await expect(page.locator("#bulldoze-cost")).toHaveText(/^\$[\d.]+K?$/);
   await attach(page, testInfo, "14 the bulldozer marks a stretch around the pointer");
   // Shift marks the whole segment, as before.
   await page.keyboard.down("Shift");
   await frames(page);
   await expect(tag.locator(".what")).toHaveText("Bulldoze this road");
-  await expect(tag.locator(".price")).toHaveText(/^100 m · /);
+  await expect(tag.locator("tr.line-road th")).toHaveText("Road demolition, 100 m");
   await attach(page, testInfo, "15 Shift marks the whole segment");
   await page.keyboard.up("Shift");
   await frames(page);
-  await expect(tag.locator(".price")).toHaveText(/^20 m · /);
+  await expect(tag.locator("tr.line-road th")).toHaveText("Road demolition, 20 m");
 
   await click(page, 4300, MAIN_Z);
   await expect.poll(async () => (await alongMain(page)).length).toBe(5);

@@ -8,6 +8,9 @@ import {
   BLOCK_MIN_AREA,
   blockById,
   blockIndexOf,
+  blockOnSide,
+  blockWalks,
+  faceWalkedSince,
   buildBlockIndex,
   existingBlockIndex,
   listBlocks,
@@ -396,6 +399,30 @@ describe("blocks kept current", () => {
     expect(blockIndexOf(state.roads)).toBe(index);
     expect(applied).toBeGreaterThan(150);
     expect(most).toBeGreaterThan(5);
+  });
+
+  it("leave every side of a road whose face was not walked again facing the block it faced (#426)", () => {
+    const state = funded(createState(SEED));
+    const index = blockIndexOf(state.roads);
+    let kept = 0;
+    let walked = 0;
+    for (let round = 0; round < 6; round++) {
+      const walks = blockWalks(index);
+      const sides = 2 * segmentIdLimit(state.roads);
+      const before = Array.from({ length: sides }, (_, h) => blockOnSide(index, h >> 1, (h & 1) === 0));
+      commandChurn(state, 200 + round, 25);
+      for (let h = 0; h < sides; h++) {
+        if (faceWalkedSince(index, h, walks)) {
+          walked++;
+          continue;
+        }
+        kept++;
+        expect(blockOnSide(index, h >> 1, (h & 1) === 0), `side ${h} in round ${round}`).toBe(before[h]);
+      }
+    }
+    // The rounds leave some sides alone and walk others again. The city is small, so most changes reach its outer face.
+    expect(kept).toBeGreaterThan(100);
+    expect(walked).toBeGreaterThan(0);
   });
 
   it("equal a fresh rebuild on a random network after adds, removals and restyles", () => {

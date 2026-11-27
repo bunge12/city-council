@@ -148,6 +148,9 @@ export function mayPay(flags: number): boolean {
 
 const NO_JOBS: JobsFilled = { commercial: 0, office: 0, industrial: 0 };
 
+/** The jobs filled in building `id`: the sim's pop index, or the counts a client's copy keeps (M3-05). */
+export type JobsFilledIn = (id: number) => number;
+
 /**
  * What building `id` pays a year, by line, in whole dollars, at the city's
  * rates and the land value at its lot today: residential tax while people
@@ -155,20 +158,25 @@ const NO_JOBS: JobsFilled = { commercial: 0, office: 0, industrial: 0 };
  * a free id or an abandoned building. For the hover readout and the budget
  * overlay (M4-18). The residential place does not ask whether anyone lives
  * there today, so a vacant home shows what it would pay: the sweep asks.
+ * `jobsFilled` gives the jobs filled; a client's copy holds no pop rows, so
+ * it passes the counts its mirror keeps (M4-16). Given `livedIn`, the people
+ * living in each building, a home nobody lives in pays no residential tax,
+ * as the sweep charges it: the hover readout passes it, so a vacant home
+ * does not read as income the city gets.
  */
-export function buildingTaxByLine(state: SimState, id: number, out: TaxByLine = [0, 0, 0, 0]): TaxByLine {
+export function buildingTaxByLine(state: SimState, id: number, out: TaxByLine = [0, 0, 0, 0], jobsFilled?: JobsFilledIn, livedIn?: JobsFilledIn): TaxByLine {
   out.fill(0);
   const b = state.buildings;
   if (!mayPay(b.flags[id] ?? 0)) return out;
   const type = BUILDING_TYPES[b.type[id] ?? 0];
   if (!type) return out;
   const rates = state.budget.taxRates;
-  const filled = popIndexOf(state).filled[id] ?? 0;
+  const filled = jobsFilled ? jobsFilled(id) : (popIndexOf(state).filled[id] ?? 0);
   if (filled > 0) {
     const terms = { rates, salesScale: shopSalesScale(state.stats.totals), reachesOutside: roadReaches(state, outsideReachByNode(state), id) };
     businessTaxOf(type, kindsOf(b.type[id] ?? 0, filled) ?? NO_JOBS, terms, out);
   }
-  if ((b.residents[id] ?? 0) > 0) {
+  if ((b.residents[id] ?? 0) > 0 && (livedIn === undefined || livedIn(id) > 0)) {
     const land = buildingValues(state, [id])[0] ?? 0;
     out[RESIDENTIAL] = residentialTaxOf(type, b.residents[id] ?? 0, lotJobs(b, id), land, rates[RESIDENTIAL] ?? 0);
   }
@@ -176,8 +184,8 @@ export function buildingTaxByLine(state: SimState, id: number, out: TaxByLine = 
 }
 
 /** What building `id` pays a year in tax on every line together, in whole dollars (`buildingTaxByLine`). */
-export function buildingTaxPerYear(state: SimState, id: number): number {
-  const by = buildingTaxByLine(state, id);
+export function buildingTaxPerYear(state: SimState, id: number, jobsFilled?: JobsFilledIn, livedIn?: JobsFilledIn): number {
+  const by = buildingTaxByLine(state, id, [0, 0, 0, 0], jobsFilled, livedIn);
   return by[0] + by[1] + by[2] + by[3];
 }
 

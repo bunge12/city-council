@@ -21,6 +21,9 @@
   --stat-line: #1d6fd6;
   --stat-grid: #e3e8ed;
   --stat-surface: #ffffff;
+  /* The budget graph (M4-15): income and expenses, categorical slots 1 and 2, run through the dataviz validator against the panel's white. */
+  --money-income: #257de0;
+  --money-expenses: #f47230;
 }
 
 #ui {
@@ -66,6 +69,13 @@
   cursor: not-allowed;
   opacity: 0.55;
   background: #f4f6f8;
+}
+
+/* Under a locked button's name, the population that opens it (M4-16). */
+#ui button[data-locked="true"] .unlocks-at {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-soft);
 }
 
 #ui button:focus-visible,
@@ -324,17 +334,35 @@
 }
 
 /* The treasury, first in the time card (M4-14). In the warning colour below zero. */
-.game-clock .treasury {
+#ui .game-clock .treasury {
   position: relative;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  cursor: default;
-  padding-right: 10px;
+  padding: 0 10px 0 0;
+  border: none;
   border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+  text-decoration: underline dotted var(--ink-soft);
+  text-underline-offset: 3px;
 }
 
-.game-clock .treasury.overdrawn {
+#ui .game-clock .treasury:hover:not(:disabled),
+#ui .game-clock .treasury[aria-expanded="true"],
+#ui .game-clock .treasury[aria-expanded="true"]:hover:not(:disabled) {
+  background: none;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+#ui .game-clock .treasury[aria-expanded="true"] {
+  text-decoration: underline solid var(--accent) 2px;
+}
+
+#ui .game-clock .treasury.overdrawn,
+#ui .game-clock .treasury.overdrawn:hover:not(:disabled),
+#ui .game-clock .treasury.overdrawn[aria-expanded="true"] {
   color: var(--bad-ink);
 }
 
@@ -997,7 +1025,8 @@ kbd {
 .road-readout .offset,
 .road-readout .bridge,
 .road-readout .junctions,
-.building-readout .detail {
+.building-readout .detail,
+.building-readout .money {
   color: var(--ink-soft);
 }
 
@@ -1103,6 +1132,41 @@ kbd {
 .bulldoze-tag .detail,
 .bulldoze-tag .price {
   color: var(--ink-soft);
+}
+
+/* The price part by part, then the total (M4-16): labels left, amounts right-aligned in figures of one width. */
+.bulldoze-tag .price-lines {
+  border-collapse: collapse;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bulldoze-tag .price-lines th {
+  font-weight: normal;
+  text-align: left;
+  padding: 0 12px 0 0;
+}
+
+.bulldoze-tag .price-lines td {
+  text-align: right;
+  padding: 0;
+}
+
+.bulldoze-tag .price-lines tr.line-total th,
+.bulldoze-tag .price-lines tr.line-total td {
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* A price the treasury cannot pay is in the warning colour, like a treasury below zero (M4-16). */
+.road-readout.refused .price-lines tr.price th,
+.road-readout.refused .price-lines tr.price td,
+.road-readout.refused #road-cost,
+.road-readout.refused #edit-cost,
+.grid-summary.refused #grid-cost {
+  color: var(--bad-ink);
+  font-weight: 600;
 }
 
 .bulldoze-tag .no-undo {
@@ -1220,4 +1284,181 @@ kbd {
   .loading-fill {
     transition: none;
   }
+}
+
+/* The budget panel (M4-15). It scrolls itself, as the statistics panel does, under the same sticky title. */
+.budget-ledger,
+.budget-loans {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin-top: 6px;
+}
+
+.budget-ledger th,
+.budget-loans th {
+  text-align: left;
+  font-weight: 400;
+}
+
+.budget-ledger td,
+.budget-ledger thead th:not(:first-child),
+.budget-loans td,
+.budget-loans thead th:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+  padding-left: 8px;
+}
+
+.budget-ledger thead th,
+.budget-loans thead th {
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.budget-ledger .section th {
+  padding-top: 8px;
+  font-weight: 700;
+}
+
+.budget-ledger .group th {
+  padding-top: 2px;
+  color: var(--ink-soft);
+}
+
+.budget-ledger th.indent {
+  padding-left: 10px;
+}
+
+.budget-ledger tr.quiet td {
+  color: var(--ink-soft);
+}
+
+.budget-ledger .total th,
+.budget-ledger .total td {
+  border-top: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.budget-ledger #budget-net th,
+.budget-ledger #budget-net td {
+  border-top: 2px solid var(--ink-soft);
+  font-weight: 700;
+}
+
+.budget-section {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.budget-section h3 {
+  margin: 0 0 4px;
+}
+
+.budget-section h4 {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.budget-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.budget-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-size: 10px;
+}
+
+.budget-chart text {
+  fill: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-chart .stats-end {
+  fill: var(--ink);
+  font-weight: 600;
+}
+
+.budget-chart .stats-grid.zero line {
+  stroke: var(--ink-soft);
+}
+
+.budget-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.budget-readout {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-slider {
+  margin-top: 8px;
+}
+
+.budget-slider label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.budget-slider output {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-slider input[type="range"] {
+  display: block;
+  width: 100%;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.budget-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.budget-slider .hint {
+  margin: 2px 0 0;
+}
+
+.budget-take {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.budget-take input {
+  width: 110px;
+  margin-left: 2px;
+}
+
+.budget-take select {
+  margin-left: 4px;
+  font: inherit;
+}
+
+#ui .budget-loans button {
+  padding: 0 8px;
+}
+
+.hint.bad {
+  color: var(--bad-ink);
 }

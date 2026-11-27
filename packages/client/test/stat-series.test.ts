@@ -1,7 +1,7 @@
 // The statistics panel's series reader and axis (issue M3-16).
 import { describe, expect, it } from "vitest";
-import { HISTORY_LENGTH, STAT_TOTALS, TIME_BALANCE, createState, createStats, historyOf, sampleCount, step, yearDays, type StatsState } from "@city-council/sim";
-import { STAT_RANGES, STAT_SERIES, axisNumber, lastSamples, newestMonth, niceTicks, rangeMonths, sampleDate, seriesById } from "../src/ui/stat-series";
+import { HISTORY_LENGTH, LINE, MONEY_SERIES, STAT_TOTALS, formatMoneyFull, TIME_BALANCE, createState, createStats, historyOf, sampleCount, step, yearDays, type StatsState } from "@city-council/sim";
+import { STAT_RANGES, STAT_SERIES, axisNumber, lastSamples, moneyTicks, newestMonth, niceTicks, rangeMonths, sampleDate, seriesById } from "../src/ui/stat-series";
 
 /** Statistics whose population history holds `months` samples, sample m being 1000 + m, written as the sim writes them. */
 function statsAfter(months: number): StatsState {
@@ -20,9 +20,11 @@ function statsAfter(months: number): StatsState {
 }
 
 const population = seriesById("population");
+/** A new city's budget, made once: making a state generates its terrain. */
+const BUDGET = createState(1).budget;
 
 function samples(stats: StatsState, months: number): number[] {
-  const ring = population.history({ stats });
+  const ring = population.history({ stats, budget: BUDGET });
   if (!ring) throw new Error("no ring");
   return lastSamples(ring, months);
 }
@@ -76,25 +78,58 @@ describe("the series list", () => {
     expect(new Set(ids).size).toBe(ids.length);
     // The unemployed newcomers are the residential bar's bookkeeping (#361), already among the unemployed workers.
     const internal = ["residentSatisfaction", "workersUnemployedNew"];
-    expect([...ids].sort()).toEqual(STAT_TOTALS.filter((t) => !internal.includes(t)).sort());
+    // And the money (M4-15): the treasury, income and expenses, one entry each. Tax income is the credit limit's, already in income.
+    const money = ["treasury", "income", "expenses"];
+    expect([...ids].sort()).toEqual([...STAT_TOTALS.filter((t) => !internal.includes(t)), ...money].sort());
+    expect(money.every((m) => (MONEY_SERIES as readonly string[]).includes(m))).toBe(true);
+  });
+
+  it("reads the money series' history from the sim's money samples, and their value now from the budget", () => {
+    const stats = statsAfter(3);
+    stats.money = { treasury: Float64Array.of(10, 20, 30), income: Float64Array.of(1, 2, 3), expenses: Float64Array.of(4, 5, 6), taxIncome: Float64Array.of(0, 0, 0) };
+    const budget = { ...BUDGET, lastMonth: BUDGET.lastMonth.slice() };
+    budget.treasury = 1_234_567;
+    budget.lastMonth.fill(0);
+    budget.lastMonth[LINE.taxResidential] = 500;
+    budget.lastMonth[LINE.grants] = 250;
+    budget.lastMonth[LINE.roadUpkeep] = 300;
+    const source = { stats, budget };
+    expect(seriesById("treasury").now(source)).toBe(1_234_567);
+    expect(seriesById("income").now(source)).toBe(750);
+    expect(seriesById("expenses").now(source)).toBe(300);
+    const ring = seriesById("expenses").history(source);
+    expect(ring && lastSamples(ring, 12)).toEqual([4, 5, 6]);
+    expect(seriesById("treasury").group).toBe("Money");
+    expect(seriesById("treasury").short?.(1_234_567)).toBe("$1.2M");
+    expect(seriesById("treasury").format(1_234_567)).toBe(formatMoneyFull(1_234_567));
   });
 
   it("reads each series' value now and its history from the totals of the same name", () => {
     const stats = statsAfter(3);
     stats.totals["workersUnemployed"] = 42;
     const unemployed = seriesById("workersUnemployed");
-    expect(unemployed.now({ stats })).toBe(42);
-    expect(unemployed.history({ stats })?.values).toBe(stats.history["workersUnemployed"]);
+    const budget = BUDGET;
+    expect(unemployed.now({ stats, budget })).toBe(42);
+    expect(unemployed.history({ stats, budget })?.values).toBe(stats.history["workersUnemployed"]);
     expect(unemployed.format(1)).toBe("1 worker");
     expect(population.format(12_345)).toBe("12,345 people");
   });
 
   it("falls back to population for an id it does not know", () => {
-    expect(seriesById("treasury").id).toBe("population");
+    expect(seriesById("no such series").id).toBe("population");
   });
 });
 
 describe("the graph's axis", () => {
+  it.each([
+    [0, 0, [0, 1]],
+    [0, 660, [0, 200, 400, 600, 800]],
+    [-120, 660, [-200, 0, 200, 400, 600, 800]],
+    [-3_000, -1_000, [-3_000, -2_000, -1_000, 0]],
+  ])("ticks money from %d to %d in clean steps through 0", (min, max, ticks) => {
+    expect(moneyTicks(min, max)).toEqual(ticks);
+  });
+
   it.each([
     [0, [0, 1]],
     [3, [0, 1, 2, 3]],

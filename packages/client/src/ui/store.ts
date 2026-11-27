@@ -34,6 +34,8 @@ export interface UiState extends RoadToolState, GridToolState, EditToolState, Bu
   statsOpen: boolean;
   statsSeries: string;
   statsRange: StatRange;
+  /** The budget panel (issue M4-15). */
+  budgetOpen: boolean;
   /** The sim's answer to the last command the page sent, such as "NoOp: ok". */
   lastCommand: string | null;
   /** Notes about city files and switching cities. Null when there is none. */
@@ -67,6 +69,7 @@ export const useUi = create<UiState>(() => ({
   statsOpen: false,
   statsSeries: "population",
   statsRange: 10,
+  budgetOpen: false,
   lastCommand: null,
   fileNote: null,
   fileProblem: null,
@@ -90,6 +93,7 @@ const OPEN_FLAG = {
   settings: "settingsOpen",
   city: "menuOpen",
   stats: "statsOpen",
+  budget: "budgetOpen",
   log: "logOpen",
   debug: "debugOpen",
 } as const satisfies Record<PanelId, keyof UiState>;
@@ -112,6 +116,7 @@ export const toggleDebug = (): void => togglePanel("debug");
 export const toggleLog = (): void => togglePanel("log");
 export const toggleMenu = (): void => togglePanel("city");
 export const toggleStats = (): void => togglePanel("stats");
+export const toggleBudget = (): void => togglePanel("budget");
 export const toggleSettings = (): void => togglePanel("settings");
 
 /** Puts away the overlay the player turned on, as its key would (overlays.ts, `toggledOverlay`). */

@@ -9,7 +9,7 @@
 // saved paused. Stepping is the same on every host (CLAUDE.md rule 3), so
 // the page reaches the milestone at the same tick Node did.
 
-import { MILESTONES, TIME_BALANCE, createState, deserialize, fundCity, previewBuildRoad, serialize, step, submit, type SimState } from "../packages/sim/src/index";
+import { CHARGE_LINES, LINE, MILESTONES, TIME_BALANCE, createState, creditLeft, deserialize, fundCity, isMonthStart, previewBuildRoad, serialize, step, submit, type SimState } from "../packages/sim/src/index";
 import { zoneSides } from "./building-fixtures";
 
 const SEED = 2026;
@@ -97,4 +97,44 @@ export function overdrawnCity(): { bytes: Uint8Array; treasury: number } {
   if (state.budget.treasury >= 0) throw new Error(`the street left the treasury at ${state.budget.treasury}, not below zero`);
   state.speed = 0;
   return { bytes: serialize(state), treasury: state.budget.treasury };
+}
+
+export interface BudgetCity {
+  /** The city file, saved paused a few days into a month, with closed months behind it. */
+  bytes: Uint8Array;
+  /** The city in the file. */
+  state: SimState;
+  /** The treasury the month before the last one opened with, so last month's net is `state.budget.opening` less it. */
+  lastMonthOpening: number;
+  /** What the city may still borrow, as the sim works it out. */
+  creditLeft: number;
+}
+
+/** Closed months the budget panel's city has behind it, so its graph has a line to draw. */
+const BUDGET_MONTHS = 2;
+
+/**
+ * The money spec's town run on for `BUDGET_MONTHS` months' closes and a few
+ * days more (M4-15), so the budget panel has a last month with taxes,
+ * development charges and road upkeep on it, a month in progress and a
+ * graph. Saved paused.
+ */
+export function budgetCity(): BudgetCity {
+  const state = zonedTown();
+  let closes = 0;
+  let lastMonthOpening = state.budget.opening;
+  while (closes < BUDGET_MONTHS) {
+    const before = state.budget.opening;
+    step(state);
+    // The step onto a month's first tick closes the month before it.
+    if (isMonthStart(state.tick)) {
+      closes++;
+      lastMonthOpening = before;
+    }
+  }
+  for (let i = 0; i < 5 * DAY; i++) step(state);
+  state.speed = 0;
+  if (state.budget.lastMonth[LINE.taxResidential] === 0) throw new Error("the budget city's last month has no residential tax");
+  if (CHARGE_LINES.every((line) => state.budget.lastMonth[LINE[line]] === 0)) throw new Error("the budget city's last month has no development charge");
+  return { bytes: serialize(state), state, lastMonthOpening, creditLeft: creditLeft(state) };
 }

@@ -38,7 +38,12 @@ import {
   terrainOf,
   roadEffects,
   roadIndexOf,
+  roadPrice,
+  upgradeClears,
+  buildingTaxPerYear,
   type BuildingGround,
+  type UpgradePlan,
+  type Refusal,
   type BuildingInfo,
   type BuildingsInTheWay,
   type RoadEffects,
@@ -54,11 +59,16 @@ import {
   type SystemTiming,
   checkBudget,
   checkMilestones,
+  creditLeft,
+  creditLimit,
+  loanRefusal,
+  spendingRefusal,
   checkDemand,
   copyBudget,
   copyDemand,
   ZONING_BALANCE,
   CHUNKS_PER_SIDE,
+  cityPopulation,
   countZoneJobsWith,
   holdsHomes,
   reachableRoomWith,
@@ -235,7 +245,7 @@ export class SimMirror {
 
   /**
    * The homes newcomers can reach, as the sim's `reachableRoom` counts them,
-   * when they hold new homes back (#330): `unfilledHomesMax` or more of
+   * when they hold new homes back (#330): `unfilledHomesAllowed` or more of
    * them still filling, so the grower adds no home and redevelopment waits.
    * Null while they do not, and before the first snapshot. Worked out from
    * the copy's buildings and roads and each building's people, with one
@@ -245,7 +255,7 @@ export class SimMirror {
   homesWaiting(): ReachableRoom | null {
     if (!this.current) return null;
     const room = reachableRoomWith(this.current, this.occupancy.people);
-    return holdsHomes(room) ? room : null;
+    return holdsHomes(room, cityPopulation(this.current)) ? room : null;
   }
 
   /**
@@ -263,6 +273,26 @@ export class SimMirror {
     const zone = ZONING_BALANCE.zones.findIndex((z) => z.id === bar) + 1;
     const jobs = countZoneJobsWith(this.current, this.occupancy.filled);
     return workplacesHeldBy(jobs, zone) ? (jobs.open[zone] ?? 0) : null;
+  }
+
+  /**
+   * The credit limit of the copy and what is left of it to borrow, whole
+   * dollars, as the sim works them out (M4-11), for the budget panel
+   * (M4-15). Null before the first snapshot.
+   */
+  credit(): { limit: number; left: number } | null {
+    if (!this.current) return null;
+    return { limit: creditLimit(this.current), left: creditLeft(this.current) };
+  }
+
+  /** Why the sim would refuse a `TakeLoan` of `principal` over `termMonths` on the copy, or null when it would take it (M4-15). */
+  loanRefusal(principal: number, termMonths: number): string | null {
+    return this.current ? loanRefusal(this.current, principal, termMonths) : "No city is open";
+  }
+
+  /** Why the copy's treasury cannot pay `price` whole dollars, or null when it can: a `RepayLoan`'s check (M4-15). */
+  spendingRefusal(price: number): string | null {
+    return this.current ? spendingRefusal(this.current, price) : "No city is open";
   }
 
   /**
@@ -562,6 +592,41 @@ export class SimMirror {
   }
 
   private readonly effects = new WeakMap<object, RoadEffects>();
+
+  /**
+   * The buildings an upgrade the sim has planned would clear, as `roadClears`
+   * finds them for a new road, for the upgrade tool's price (M4-16). Kept
+   * for each plan, like `roadClears`. Empty until the first snapshot.
+   */
+  upgradeClears(plan: UpgradePlan): BuildingsInTheWay {
+    let clears = this.upgrades.get(plan);
+    if (!clears) {
+      clears = this.current ? upgradeClears(this.current, plan, this.peopleIn, this.filledIn) : { ids: [], residents: 0, compensation: { ...NO_COMPENSATION } };
+      this.upgrades.set(plan, clears);
+    }
+    return clears;
+  }
+
+  private readonly upgrades = new WeakMap<object, BuildingsInTheWay>();
+
+  /**
+   * What a road command whose plan costs `cost` and clears `clears` would
+   * charge, and why the treasury cannot pay it, or null: the sim's
+   * `roadPrice` on the copy, the function the command is checked with
+   * (M4-16). With no snapshot yet, the plan's cost and no refusal.
+   */
+  price(cost: number, clears: BuildingsInTheWay | null): { price: number; refusal: Refusal } {
+    return this.current ? roadPrice(this.current, cost, clears) : { price: cost, refusal: null };
+  }
+
+  /**
+   * What building `id` pays a year in tax, the sim's `buildingTaxPerYear`
+   * with the people and jobs filled the copy counts (M4-16), so a home
+   * nobody lives in pays none, as the sweep charges it. 0 before the first snapshot.
+   */
+  buildingTax(id: number): number {
+    return this.current ? buildingTaxPerYear(this.current, id, this.filledIn, this.peopleIn) : 0;
+  }
 
   /** The cells a road the sim has planned would open, as corners, eight numbers a cell. Empty until the first snapshot. */
   roadCells(plan: RoadPlan): Float64Array {

@@ -660,6 +660,24 @@ export function setPopWork(state: SimState, id: number, work: number): void {
     const already = p.work[id] === work ? popWorkers(p, id) : 0;
     checkJobs(state, work, education, popWorkers(p, id), education, already);
   }
+  moveWork(state, index, id, work);
+}
+
+/**
+ * Gives live pop `id` work at `work`, as `setPopWork` does, without its
+ * checks: for job matching, which has read the building's open jobs for
+ * the pop's education just before (`openJobsFrom`, matching.ts) and splits
+ * the pop until its workers fit. On the scale town's first tick of the day
+ * the checks, which work out the same open jobs again, were about a sixth
+ * of matching (issue #439). Anyone else calls `setPopWork`.
+ */
+export function takeCheckedWork(state: SimState, id: number, work: number): void {
+  moveWork(state, livePop(state, id), id, work);
+}
+
+/** Moves pop `id` to workplace `work`, or out of work with NO_WORK, and the running totals with it. Checks nothing. */
+function moveWork(state: SimState, index: PopIndex, id: number, work: number): void {
+  const p = state.pops;
   const before = p.work[id] ?? NO_WORK;
   // Only the jobs filled and whether the pop's workers are employed change,
   // so only those totals move: job matching calls this for a slice of the

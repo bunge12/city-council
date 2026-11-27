@@ -7,7 +7,7 @@
 // samples one range of the graph shows, oldest first. Display only: nothing
 // here writes state.
 
-import { HISTORY_LENGTH, JOB_KINDS, TIME_BALANCE, ZONING_BALANCE, gameDate, type StatsState } from "@city-council/sim";
+import { HISTORY_LENGTH, JOB_KINDS, TIME_BALANCE, ZONING_BALANCE, expensesOf, formatMoneyFull, formatMoneyShort, gameDate, incomeOf, type BudgetState, type MoneySeries, type StatsState } from "@city-council/sim";
 
 /**
  * A history as the sim keeps it: `values` grows by one sample a month until
@@ -20,9 +20,10 @@ export interface HistoryRing {
   capacity: number;
 }
 
-/** What a series reads its numbers from: the copy's statistics, for now the only place a history lives. */
+/** What a series reads its numbers from: the copy's statistics, where every history lives, and its budget, where the money is now (M4-15). */
 export interface SeriesSource {
   stats: Readonly<StatsState>;
+  budget: Pick<BudgetState, "treasury" | "lastMonth">;
 }
 
 export interface StatSeries {
@@ -40,6 +41,8 @@ export interface StatSeries {
   history(source: SeriesSource): HistoryRing | null;
   /** A value in full, with its unit, such as "1,204 people". */
   format(value: number): string;
+  /** A value as the list and the graph's axis show it, such as "$3.2M". Left out, the list writes it in full and the axis compact. */
+  short?(value: number): string;
 }
 
 /** Game years each range of the graph covers. */
@@ -93,8 +96,26 @@ function total(name: string, label: string, group: string, format: (value: numbe
 const LEVELS = ["Low", "Medium", "High"] as const;
 const KIND_NAMES: Record<(typeof JOB_KINDS)[number], string> = { commercial: "Commercial", office: "Office", industrial: "Industrial" };
 
+/**
+ * A money series (M4-15): its monthly history from the sim's money
+ * samples, and its value now from the budget, the treasury today or the
+ * month that closed last, as the sample taken at its close holds it.
+ */
+function money(name: Exclude<MoneySeries, "taxIncome">, label: string, now: (budget: SeriesSource["budget"]) => number): StatSeries {
+  return {
+    id: name,
+    label,
+    group: "Money",
+    color: LINE,
+    now: ({ budget }) => now(budget),
+    history: ({ stats }) => ({ values: stats.money[name], next: stats.next, capacity: HISTORY_LENGTH }),
+    format: formatMoneyFull,
+    short: formatMoneyShort,
+  };
+}
+
 /** Groups, in the order the panel lists them. */
-export const STAT_GROUPS = ["People", "Residents by density", "Residents by education", "Residents by wealth", "Workers", "Jobs", "Buildings"] as const;
+export const STAT_GROUPS = ["People", "Money", "Residents by density", "Residents by education", "Residents by wealth", "Workers", "Jobs", "Buildings"] as const;
 
 /**
  * Every series the panel offers, population first. The names of the totals
@@ -105,6 +126,9 @@ export const STAT_SERIES: readonly StatSeries[] = [
   total("population", "Population", "People", people),
   total("pops", "Households (pops)", "People", counted("pops", "pop")),
   total("popsWithChildren", "Pops with children", "People", counted("pops", "pop")),
+  money("treasury", "Treasury", (budget) => budget.treasury),
+  money("income", "Income last month", (budget) => incomeOf(budget.lastMonth)),
+  money("expenses", "Expenses last month", (budget) => expensesOf(budget.lastMonth)),
   ...ZONING_BALANCE.densities.map((d) => total(`residentsDensity${d.level}`, `${d.name} density homes`, "Residents by density", people)),
   ...LEVELS.map((l) => total(`residentsEducation${l}`, `${l} education`, "Residents by education", people)),
   ...LEVELS.map((l) => total(`residentsWealth${l}`, `${l} wealth`, "Residents by wealth", people)),
@@ -182,5 +206,21 @@ export function niceTicks(max: number, count = 4): number[] {
   const whole = Math.max(1, Math.round(step));
   const ticks: number[] = [];
   for (let v = 0; v < max + whole; v += whole) ticks.push(v);
+  return ticks;
+}
+
+/**
+ * Clean ticks for a money axis from `min` to `max`, 0 among them: steps of
+ * 1, 2 or 5 times a power of ten, as the statistics graph's, reaching below
+ * zero when `min` does, as an overdrawn treasury does.
+ */
+export function moneyTicks(min: number, max: number): number[] {
+  const low = Math.min(0, min);
+  const high = Math.max(0, max);
+  const span = high - low;
+  if (!(span > 0)) return [0, 1];
+  const step = niceTicks(span)[1] ?? 1;
+  const ticks: number[] = [];
+  for (let v = Math.floor(low / step) * step; v < high + step; v += step) ticks.push(v === 0 ? 0 : v);
   return ticks;
 }

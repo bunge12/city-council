@@ -1,7 +1,8 @@
 // A button a population milestone opens (M4-12). Until the city reaches
 // it, the button is greyed, does nothing when clicked, and says on hover
 // which milestone opens it: "Medium density is locked until the Village
-// milestone, at 1,000 residents". The density picks use it now; each later
+// milestone, at 1,000 residents". Under its name it says the population
+// that opens it: "Unlocks at 1,000 residents" (M4-16). The density picks use it now; each later
 // thing a milestone opens, City Hall first, uses it the same way.
 //
 // It stays focusable and keeps its pointer events (`aria-disabled`, not
@@ -9,7 +10,7 @@
 
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { Unlock } from "@city-council/sim";
-import { useLockNote } from "./hooks";
+import { useLockNote, useUnlocksAt } from "./hooks";
 
 interface UnlockButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> {
   /** The unlock the button waits for, or undefined for one that is never locked. */
@@ -21,6 +22,7 @@ interface UnlockButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>
 
 export function UnlockButton({ unlock, title, onClick, children, ...rest }: UnlockButtonProps) {
   const lock = useLockNote(unlock);
+  const at = useUnlocksAt(unlock);
   return (
     <button
       type="button"
@@ -31,6 +33,7 @@ export function UnlockButton({ unlock, title, onClick, children, ...rest }: Unlo
       onClick={lock === null ? onClick : undefined}
     >
       {children}
+      {lock !== null && at !== null && <span className="unlocks-at">{at}</span>}
     </button>
   );
 }

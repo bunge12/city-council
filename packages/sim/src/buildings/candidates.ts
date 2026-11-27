@@ -31,6 +31,8 @@
 // candidate, and every count is kept for each zone and for all of them.
 
 import { WIDEST_LOT } from "./balance";
+import type { LotReads } from "./lots";
+import { blockIndexOf } from "../roads/blocks";
 import type { BuildingState } from "./buildings";
 import { NONE, isNode, nextSegmentAt, type RoadNetwork } from "../roads/network";
 import type { SimState } from "../state";
@@ -42,7 +44,7 @@ import {
   addCandidate,
   bestCandidate as bestInOrder,
   bringBackNear,
-  bringBackThrough,
+  bringBackBlocked,
   createLotOrder,
   dropSegment,
   fileWaiting,
@@ -94,8 +96,6 @@ interface Candidates {
   added: number[];
   /** Columns zoned, or a building was removed from, the same way: the set-aside cells on the runs they touch come back. */
   changed: number[];
-  /** Whether the roads changed, which can join blocks and let a through-lot fit across one. */
-  roadsChanged: boolean;
 }
 
 const live = new WeakMap<BuildingState, Candidates>();
@@ -301,7 +301,6 @@ function build(state: SimState, index: CellIndex, onCell: OnCell): Candidates {
     order: null,
     added: [],
     changed: [],
-    roadsChanged: false,
   };
   for (let seg = 0; seg < limit; seg++) refreshSegment(c, state, onCell, seg);
   return c;
@@ -343,7 +342,6 @@ function candidatesOf(state: SimState, index: CellIndex, ask: OnCell): Candidate
     return c;
   }
   if (watch) {
-    if (watch.segs.size > 0 || watch.nodes.size > 0 || watch.fronts.size > 0 || watch.columns.size > 0) c.roadsChanged = true;
     for (const seg of watch.segs) c.segs.add(seg);
     for (const node of watch.nodes) segmentsNear(c.index, state.roads, node, c.segs);
     for (const key of watch.fronts) noteFront(c, key);
@@ -461,11 +459,11 @@ function capNotes(c: Candidates, state: SimState): Candidates {
 function settleOrder(c: Candidates, state: SimState): Candidates {
   const order = c.order;
   if (order) {
-    if (c.roadsChanged) bringBackThrough(order);
+    // Asked of every road change's faces, wherever it was: `bringBackBlocked` looks only at a count when no face changed.
+    if (order.asideBlocks.length > 0) bringBackBlocked(order, blockIndexOf(state.roads));
     bringBackNear(order, c.index, state.roads, c.changed, false);
     bringBackNear(order, c.index, state.roads, c.added, true);
   }
-  c.roadsChanged = false;
   c.added.length = 0;
   c.changed.length = 0;
   return c;
@@ -501,12 +499,12 @@ export function bestCandidate(state: SimState, index: CellIndex, onCell: OnCell,
 
 /**
  * Sets the candidate `ref` names aside: no lot fits there, and the grower
- * passes over it until its ground changes (lot-order.ts). `through` says
- * whether its zone and density grow through-lots.
+ * passes over it until its ground changes (lot-order.ts). `reads` is what
+ * its try read beyond its strip (lots.ts, `LotReads`).
  */
-export function setAside(state: SimState, ref: CellRef, through: boolean): void {
+export function setAside(state: SimState, ref: CellRef, reads: Readonly<LotReads>): void {
   const order = live.get(state.buildings)?.order;
-  if (order) setAsideIn(order, ref.segment, ref.place * 2 + ref.side, through);
+  if (order) setAsideIn(order, ref.segment, ref.place * 2 + ref.side, reads, blockIndexOf(state.roads));
 }
 
 /** Whether the candidate at column `col` of segment `seg` is set aside. For tests. */

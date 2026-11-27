@@ -24,6 +24,10 @@ import {
   step,
   submit,
   addPop,
+  available,
+  costsReason,
+  fundCity,
+  ECONOMY,
   type SimState,
 } from "@city-council/sim";
 import { PUMP_INTERVAL_MS, SimHost } from "../src/protocol/host";
@@ -34,6 +38,7 @@ import { rayBoxDistance } from "../src/render/building-pick";
 import { BULLDOZE_TARGETS, BulldozeToolController, INITIAL_BULLDOZE_TOOL, type BulldozeKind, type BulldozeToolState } from "../src/tools/bulldoze-tool";
 import { INITIAL_ROAD_TOOL, type RoadToolState } from "../src/tools/road-tool";
 import { NORTH_AMERICAN } from "../src/theme/north-american";
+import { bulldozeLines } from "../src/ui/price-lines";
 
 const SEED = 2026;
 const terrain = generateTerrain(SEED);
@@ -239,6 +244,75 @@ describe("BulldozeToolController", () => {
     expect(copy().expropriations).toEqual(sim.expropriations);
   });
 
+  it("gives the tag's lines from the plan: an occupied house's value, relocation and premium, then the total (M4-16)", () => {
+    const { tool, copy, sim } = setup(houseCity());
+    tool.toggle();
+    const lived = housesWestToEast(copy()).find((id) => popsIn(sim, id) > 0) ?? NONE;
+    const p = tool.preview({ kind: "building", id: lived });
+    if (!p) throw new Error("no preview");
+    const c = p.compensation;
+    expect(bulldozeLines(p)).toEqual([
+      { id: "value", label: "Building value", amount: c.value },
+      { id: "relocation", label: "Relocation, 2 residents", amount: c.relocation },
+      { id: "premium", label: "Premium", amount: c.premium },
+      { id: "total", label: "Total", amount: p.cost },
+    ]);
+    expect(c.value).toBeGreaterThan(0);
+    expect(c.relocation).toBe(2 * ECONOMY.eminentDomain.relocationPerResident);
+    expect(c.premium).toBeGreaterThan(0);
+    // The total is the plan's, which the parts make up.
+    expect(p.cost).toBe(c.value + c.relocation + c.premium);
+  });
+
+  it("gives a vacant house's tag its demolition only, with no total (M4-16)", () => {
+    const { tool, copy, sim } = setup(houseCity());
+    tool.toggle();
+    const empty = housesWestToEast(copy()).find((id) => popsIn(sim, id) === 0) ?? NONE;
+    const p = tool.preview({ kind: "building", id: empty });
+    if (!p) throw new Error("no preview");
+    expect(bulldozeLines(p)).toEqual([{ id: "demolition", label: "Demolition", amount: p.cost }]);
+    expect(p.cost).toBe(p.compensation.demolition);
+    expect(p.cost).toBeGreaterThan(0);
+  });
+
+  it("gives a road's tag its demolition less its refund, the compensation for the houses it takes, then the total (M4-16)", () => {
+    const { tool, copy } = setup(houseCity());
+    tool.toggle();
+    const p = tool.preview({ kind: "road", id: street(copy()) });
+    if (!p) throw new Error("no preview");
+    const c = p.compensation;
+    expect(c.occupied).toBeGreaterThan(0);
+    expect(c.empty).toBeGreaterThan(0);
+    const lines = bulldozeLines(p);
+    expect(lines.map((l) => l.id)).toEqual(["road", "refund", "value", "relocation", "premium", "demolition", "total"]);
+    expect(lines[0]).toEqual({ id: "road", label: `Road demolition, ${p.length.toFixed(0)} m`, amount: p.demolition });
+    expect(lines[1]).toEqual({ id: "refund", label: "Refund", amount: p.refund, minus: true });
+    expect(lines.find((l) => l.id === "relocation")?.label).toBe(`Relocation, ${c.residents} residents`);
+    expect(lines.find((l) => l.id === "demolition")?.label).toBe(`Demolition, ${c.empty} empty buildings`);
+    expect(lines.at(-1)).toEqual({ id: "total", label: "Total", amount: p.cost });
+    expect(p.cost).toBe(p.demolition - p.refund + c.total);
+  });
+
+  it("keeps the price on a refused tag with the sim's reason when the treasury cannot pay, and the click is still sent (M4-16)", async () => {
+    const { tool, copy, sim, apply, sent, ui } = setup(houseCity());
+    fundCity(sim, -ECONOMY.overdraft);
+    await apply();
+    tool.toggle();
+    const lived = housesWestToEast(copy()).find((id) => popsIn(sim, id) > 0) ?? NONE;
+    const p = tool.preview({ kind: "building", id: lived });
+    expect(p?.ok).toBe(true);
+    expect(p?.cost).toBeGreaterThan(0);
+    // What is left as the copy has it: the step that brought the funding also ran the day's taxes.
+    expect(p?.refusal).toBe(costsReason(p?.cost ?? 0, available(copy())));
+    expect(available(copy())).toBeLessThan(p?.cost ?? 0);
+    tool.click({ kind: "building", id: lived });
+    await apply();
+    // The sim refuses it, so the page plays its "rejected" cue, and the tool shows why.
+    expect(sent).toHaveLength(1);
+    expect(isBuilding(copy().buildings, lived)).toBe(true);
+    expect(ui().bulldozeNote).toBe(p?.refusal);
+  });
+
   it("collects the buildings a drag passes over and leaves the road, in one command", async () => {
     const { tool, apply, sent, copy } = setup(houseCity());
     tool.toggle();
@@ -261,6 +335,33 @@ describe("BulldozeToolController", () => {
     expect(liveBuildings(copy())).toEqual(before.filter((id) => id !== a && id !== b && id !== c));
     expect(((copy().roads.segFlags[road] ?? 0) & 1) !== 0).toBe(true);
     expect(copy().log.length).toBe(log + 1);
+  });
+
+  it("checks a split drag's whole price against the treasury, though each part alone would fit (M4-16)", async () => {
+    const was = BUILDINGS_BALANCE.bulldozeMaxBuildings;
+    BUILDINGS_BALANCE.bulldozeMaxBuildings = 1;
+    try {
+      const { tool, apply, copy, sim } = setup(houseCity());
+      tool.toggle();
+      const lived = housesWestToEast(copy()).filter((id) => popsIn(sim, id) > 0);
+      const [a, b] = lived;
+      if (a === undefined || b === undefined) throw new Error("too few lived-in houses");
+      const one = tool.preview({ kind: "building", id: a });
+      if (!one) throw new Error("no preview");
+      // Enough for either house, not both.
+      fundCity(sim, Math.ceil(one.cost * 1.5) - ECONOMY.overdraft);
+      await apply();
+      tool.dragStart();
+      for (const id of [a, b]) tool.dragOver(tool.pick(pickerOf({ building: id })));
+      const both = tool.preview(null);
+      expect(both?.split).toBe(true);
+      expect(both?.ok).toBe(true);
+      expect(available(copy())).toBeGreaterThan(one.cost);
+      expect(both?.refusal).toBe(costsReason(both?.cost ?? 0, available(copy())));
+      tool.dragCancel();
+    } finally {
+      BUILDINGS_BALANCE.bulldozeMaxBuildings = was;
+    }
   });
 
   it("splits a drag over more buildings than one command may name, and the sim applies them a step apart (issue #353)", async () => {
