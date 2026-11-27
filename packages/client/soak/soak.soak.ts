@@ -90,7 +90,7 @@ import {
   ZONING_BALANCE,
   CHARGE_LINES,
   ECONOMY,
-  LINE,
+  LINE as LEDGER,
   TAX_LINES,
   budgetFigure,
   furnishEconomy,
@@ -632,7 +632,7 @@ async function soakHour(): Promise<SoakRun> {
       if (monthKey(host.tick) !== moneyMonth) {
         moneyMonth = monthKey(host.tick);
         const l = budget.lastMonth;
-        const at = (line: keyof typeof LINE): number => l[LINE[line]] ?? 0;
+        const at = (line: keyof typeof LEDGER): number => l[LEDGER[line]] ?? 0;
         money.closes++;
         money.tax += TAX_LINES.reduce((n, line) => n + at(line), 0);
         money.charges += CHARGE_LINES.reduce((n, line) => n + at(line), 0);
