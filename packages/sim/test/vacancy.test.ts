@@ -485,7 +485,7 @@ describe("in the delta and the save", () => {
     runDays(state, 2);
     const delta = drainBuildingDelta(state);
     if (!delta) throw new Error("no building changed");
-    for (const bad of [BUILDING_ALIVE | BUILDING_VACANT | BUILDING_ABANDONED, BUILDING_ALIVE | BUILDING_UNZONED, BUILDING_ALIVE | 16]) {
+    for (const bad of [BUILDING_ALIVE | BUILDING_VACANT | BUILDING_ABANDONED, BUILDING_ALIVE | BUILDING_UNZONED, BUILDING_ALIVE | 32, BUILDING_ALIVE | BUILDING_VACANT | 16]) {
       const broken = { ...delta, rows: { ...delta.rows, flags: delta.rows.flags.map(() => bad) } };
       expect(applyBuildingDelta(cloneState(copy), broken)).toMatch(/unknown flags/);
     }

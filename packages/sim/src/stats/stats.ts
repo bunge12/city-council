@@ -26,7 +26,7 @@
 // counts but written at the same position.
 
 import { BUILDINGS_BALANCE, BUILDING_TYPES, JOB_KINDS, type JobKind } from "../buildings/balance";
-import { BUILDING_ALIVE, OFFERS_JOBS, type BuildingState } from "../buildings/buildings";
+import { BUILDING_ALIVE, BUILDING_LANDMARK, OFFERS_JOBS, type BuildingState } from "../buildings/buildings";
 import { buildingJobs, jobsByKind, type JobsByKind } from "../buildings/jobs";
 import { isMonthStart, isYearStart } from "../calendar";
 import { expensesOf, incomeOf, taxIncomeOf, type BudgetState } from "../economy/budget";
@@ -235,6 +235,8 @@ function addFilled(t: StatTotals, b: BuildingState, id: number, filled: number, 
 
 /** Adds `sign` times live building `id` and the jobs it offers to `t`. */
 function addBuilding(t: StatTotals, b: BuildingState, id: number, sign: number): void {
+  // A landmark counts in no zone's buildings and offers no jobs (M4-13).
+  if (((b.flags[id] ?? 0) & BUILDING_LANDMARK) !== 0) return;
   const zone = b.zone[id] ?? 0;
   const density = b.density[id] ?? 0;
   bump(t, BUILDINGS_BY_ZONE[zone - 1]?.[density - 1], sign);
@@ -321,6 +323,7 @@ export function countBuildings(state: SimState, ids: readonly number[], sign: 1 
   const densities = DENSITIES;
   const byZone = new Int32Array(zones * densities);
   for (const id of ids) {
+    if (((b.flags[id] ?? 0) & BUILDING_LANDMARK) !== 0) continue;
     const zone = (b.zone[id] ?? 0) - 1;
     const density = (b.density[id] ?? 0) - 1;
     if (zone >= 0 && zone < zones && density >= 0 && density < densities) byZone[zone * densities + density] = (byZone[zone * densities + density] as number) + 1;

@@ -55,7 +55,7 @@ import { popIndexOf } from "../pops/where";
 import { countBuilding } from "../stats/stats";
 import { ZONING_BALANCE } from "../zoning/balance";
 import { cellsSettled } from "../zoning/cell-index";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_UNZONED, BUILDING_VACANT } from "./buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_LANDMARK, BUILDING_UNZONED, BUILDING_VACANT } from "./buildings";
 import { noteBuildingChanged } from "./changes";
 import { zoneBar } from "./grower";
 import { lotJobs } from "./jobs";
@@ -143,7 +143,8 @@ export function checkVacancy(state: SimState): void {
   const flags = state.buildings.flags;
   const n = flags.length;
   for (let id = state.tick % perDay; id < n; id += perDay) {
-    if (((flags[id] ?? 0) & BUILDING_ALIVE) !== 0) visit(state, id, newTicks, abandonTicks);
+    // A landmark is the city's own and is never vacant or abandoned (M4-13).
+    if (((flags[id] ?? 0) & (BUILDING_ALIVE | BUILDING_LANDMARK)) === BUILDING_ALIVE) visit(state, id, newTicks, abandonTicks);
   }
 }
 

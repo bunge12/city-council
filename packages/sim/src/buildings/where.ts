@@ -33,7 +33,7 @@
 // and followed across a change of roads from its own first column, so a
 // building whose back road goes is lost like one whose front road goes.
 
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_ARRAYS, BUILDING_VACANT, type BuildingState } from "./buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_ARRAYS, BUILDING_LANDMARK, BUILDING_VACANT, type BuildingState } from "./buildings";
 import { noteColumns, noteFrontColumns, notePollution, segmentsNear } from "./candidates";
 import { noteBuildingChanged } from "./changes";
 import { buildingJobs, lotJobs } from "./jobs";
@@ -301,7 +301,8 @@ function file(bi: BuildingIndex, b: BuildingState, id: number): boolean {
   bi.jobs[id] = jobs;
   bi.room[id] = room;
   addSums(bi.sums, x, z, jobs, room, 1);
-  const source = pollutionSourceOf(b.type[id] ?? 0);
+  // A landmark's type is not a building type, and it gives off nothing (M4-13).
+  const source = ((b.flags[id] ?? 0) & BUILDING_LANDMARK) !== 0 ? 0 : pollutionSourceOf(b.type[id] ?? 0);
   bi.source[id] = source;
   if (source > 0 && bi.pollution) stampPollution(bi.pollution, x, z, source, 1);
   if (source > 0) pollutionMoved(bi, x, z, source);
@@ -553,9 +554,10 @@ export function prepareBuildingIndex(state: SimState): void {
  * Why a building of this zone and density cannot stand on the lot, or null
  * if every one of its cells is there, open, zoned that way and free of
  * buildings. `addBuilding` checks this, so two lots never overlap and the
- * index gives the same answer kept current or built afresh.
+ * index gives the same answer kept current or built afresh. A null zone
+ * takes cells however they are zoned, for a landmark's plan (M4-13).
  */
-export function lotProblem(state: SimState, shape: LotShape, zone: number, density: number): string | null {
+export function lotProblem(state: SimState, shape: LotShape, zone: number | null, density: number | null): string | null {
   const { bi, cellIndex } = indexOf(state);
   const parts = lotParts(cellIndex, shape);
   if (!parts) return "the strip ends before the lot does";
@@ -566,7 +568,7 @@ export function lotProblem(state: SimState, shape: LotShape, zone: number, densi
     const held = bi.segCells[col.seg];
     for (let d = 0; d < depth; d++) {
       if (columnStatus(cellIndex, col, d) !== CELL_OPEN) return `a cell of the lot on segment ${col.seg} is blocked`;
-      if (cells.zone[start + d] !== zone || cells.density[start + d] !== density) return `a cell of the lot on segment ${col.seg} is not zoned for it`;
+      if (zone !== null && (cells.zone[start + d] !== zone || cells.density[start + d] !== density)) return `a cell of the lot on segment ${col.seg} is not zoned for it`;
       if (held && held[local + d] !== NO_BUILDING) return `a cell of the lot on segment ${col.seg} has a building`;
     }
   }
@@ -1107,6 +1109,8 @@ export interface BuildingInfo {
   /** Whether it stands vacant, and whether it is abandoned (M3-24), from its flags. Not columns: the readout and the renderer read them (M3-17). */
   vacant: boolean;
   abandoned: boolean;
+  /** Whether it is a landmark, whose `type` is its place in `ECONOMY.landmarks`, not in `BUILDING_TYPES` (M4-13). */
+  landmark: boolean;
 }
 
 /** Building `id` with its lot's corners, or null if there is no such building. */
@@ -1116,7 +1120,7 @@ export function buildingInfo(state: SimState, id: number): BuildingInfo | null {
   const { bi, cellIndex } = indexOf(state);
   const row = Object.fromEntries(BUILDING_ARRAYS.filter((key) => key !== "flags").map((key) => [key, b[key][id] ?? 0])) as Omit<
     BuildingInfo,
-    "id" | "jobs" | "value" | "corners" | "chunk" | "vacant" | "abandoned"
+    "id" | "jobs" | "value" | "corners" | "chunk" | "vacant" | "abandoned" | "landmark"
   >;
   const flags = b.flags[id] ?? 0;
   return {
@@ -1128,5 +1132,6 @@ export function buildingInfo(state: SimState, id: number): BuildingInfo | null {
     chunk: bi.chunk[id] ?? NO_BUILDING,
     vacant: (flags & BUILDING_VACANT) !== 0,
     abandoned: (flags & BUILDING_ABANDONED) !== 0,
+    landmark: (flags & BUILDING_LANDMARK) !== 0,
   };
 }

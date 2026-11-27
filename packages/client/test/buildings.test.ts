@@ -224,6 +224,7 @@ function fakeSource() {
       chunk: 0,
       vacant: false,
       abandoned: false,
+      landmark: false,
     };
     info.chunk = chunkOf(info);
     rows.set(id, info);

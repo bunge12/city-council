@@ -1628,11 +1628,15 @@ What every landmark does:
 - **Draws trips from the whole city.** Each landmark attracts visits, mostly in the midday and evening periods. That makes placement a real decision. A stadium on a street with no transit jams the district around it.
 - **Costs upkeep.** A yearly cost like any city building.
 
-A landmark needs road frontage and a large lot, and its cells cannot be zoned. It is city-owned, so removing one costs only demolition. In a shared city, placing one shows in the activity log.
+A landmark needs road frontage and a large lot, and its cells cannot be zoned. It is city-owned, so removing one costs only demolition, less a refund share of its price. In a shared city, placing one shows in the activity log.
 
 There is no tourism system. A landmark's visitors are the city's own residents.
 
 The list stays short on purpose. Ordinary buildings share a generator that yields many variants, but each landmark needs a generator of its own. Eight is about what that work justifies in v1. City Hall and the central station come early because other things depend on them. The rest are rewards, so they wait for M11.
+
+How the sim holds them, decided in M4-13. Each kind is an entry of `landmarks` in `economy.json`: the unlock that opens it, its lot in cells, its price with a source year, the floor space its demolition is priced on, and its upkeep as a yearly share of its price. A landmark is a row in the building arrays with a landmark flag, its type its place in that list, so the building index, picking, the bulldozer and the road commands find it as they find any building. It has no zone or density, no room and no jobs, so vacancy, abandonment, redevelopment, the grower, job matching, arrivals, the statistics by zone and density and the tax sweep all pass over it. `PlaceLandmark` names the kind and its lot's first cell along a road, and is refused before the unlock, while one of the kind stands, off a road, or where a cell of the lot is not open and free of buildings: it never clears buildings. The lot's cells leave the zoning as it is placed, and zoning strokes and their undo pass over them while it stands. Its price goes on the construction line and its upkeep on the building upkeep line. Bulldozing it charges its demolition less the refund share of its price on the demolition line, as a road is charged, so a City Hall pays back more than it costs to clear. A landmark's stage is derived from the milestones reached: each milestone lists in `grows` the landmarks that grow a stage there, whenever they were placed. City Hall is 6 by 6 cells and grows at Town, City and Large city.
+
+M4 leaves out what every landmark does to its surroundings. The lift to land value and satisfaction around it arrives with M8's satisfaction work, and the trips it draws with M5's trips. Until then a landmark changes only the treasury and the cells it stands on.
 
 ### Running through every milestone
 

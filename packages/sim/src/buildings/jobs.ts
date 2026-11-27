@@ -5,7 +5,7 @@
 // levels is from `jobMix` and `jobKinds` in buildings.json.
 
 import { BUILDINGS_BALANCE, BUILDING_TYPES, EDUCATION_LEVELS, JOB_KINDS, type BuildingType, type EducationLevel, type JobKind } from "./balance";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, type BuildingState } from "./buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_LANDMARK, type BuildingState } from "./buildings";
 
 /** Whole jobs for each kind. */
 export type JobsByKind = Record<JobKind, number>;
@@ -43,7 +43,8 @@ export function buildingJobs(b: Pick<BuildingState, "flags" | "type" | "width" |
  * abandoned, such as the middle of the city's jobs (where.ts).
  */
 export function lotJobs(b: Pick<BuildingState, "flags" | "type" | "width" | "depth">, id: number): number {
-  if (((b.flags[id] ?? 0) & BUILDING_ALIVE) === 0) return 0;
+  // A landmark's type is not a building type, and it offers no jobs (M4-13).
+  if (((b.flags[id] ?? 0) & (BUILDING_ALIVE | BUILDING_LANDMARK)) !== BUILDING_ALIVE) return 0;
   const type = BUILDING_TYPES[b.type[id] ?? 0];
   return type ? jobsForLot(type, b.width[id] ?? 0, b.depth[id] ?? 0) : 0;
 }

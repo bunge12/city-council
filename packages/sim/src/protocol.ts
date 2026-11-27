@@ -18,7 +18,7 @@ import type { UndoDelta } from "./undo";
 import type { CellDelta } from "./zoning/delta";
 
 /** Version of the message shapes below. Every message carries it as `v`. */
-export const PROTOCOL_VERSION = 31;
+export const PROTOCOL_VERSION = 32;
 
 // ---- Client to sim ----
 

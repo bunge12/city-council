@@ -69,7 +69,7 @@ import { ZONING_BALANCE } from "../zoning/balance";
 import { cellsSettled, syncCells } from "../zoning/cell-index";
 import { segmentOfSlot } from "../zoning/cells";
 import { BUILDING_TYPES, type BuildingType } from "./balance";
-import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_UNZONED, addBuilding, removeBuildings } from "./buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_LANDMARK, BUILDING_UNZONED, addBuilding, removeBuildings } from "./buildings";
 import { cityPopulation, holdsHomes, residentsFor, zoneBar } from "./grower";
 import { reachableRoom, type ReachableRoom } from "../pops/room";
 import { lotOptions, type Lot } from "./lots";
@@ -218,7 +218,8 @@ export function checkRedevelopment(state: SimState): void {
   let room: ReachableRoom | null = null;
   for (let id = first; id < b.flags.length && state.redevelopedToday < allowed; id += perDay) {
     const flags = b.flags[id] ?? 0;
-    if ((flags & BUILDING_ALIVE) === 0) continue;
+    // A landmark has no owner but the city, who never redevelops it (M4-13).
+    if ((flags & (BUILDING_ALIVE | BUILDING_LANDMARK)) !== BUILDING_ALIVE) continue;
     if (flags === unzoned) {
       // On ground zoned up, only where a lot of the new zoning fits, or the ground would stand bare for good.
       if (zonedUpTo(state, id) > 0 && !planRedevelopment(state, id)) continue;

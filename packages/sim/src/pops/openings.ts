@@ -42,7 +42,7 @@
 // the tests.
 
 import { BUILDING_TYPES } from "../buildings/balance";
-import { BUILDING_ABANDONED, BUILDING_ALIVE } from "../buildings/buildings";
+import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_LANDMARK } from "../buildings/buildings";
 import { NO_BUILDING, buildingChunks } from "../buildings/where";
 import { NETWORK_ROAD, observeNetwork, type RoadNetwork } from "../roads/network";
 import { outsideReachByNode } from "../roads/outside";
@@ -275,8 +275,8 @@ function moveGiven(o: Openings, id: number, zone: number, filled: Int32Array): v
 function refile(state: SimState, o: Openings, id: number, reach: Uint8Array, chunks: readonly number[], filled: Int32Array): void {
   fit(o, id + 1);
   const b = state.buildings;
-  // An abandoned workplace offers no jobs (M3-24).
-  if (id >= b.flags.length || ((b.flags[id] as number) & BUILDING_ALIVE) === 0 || ((b.flags[id] as number) & BUILDING_ABANDONED) !== 0) {
+  // An abandoned workplace offers no jobs (M3-24), and a landmark none at all (M4-13).
+  if (id >= b.flags.length || ((b.flags[id] as number) & BUILDING_ALIVE) === 0 || ((b.flags[id] as number) & (BUILDING_ABANDONED | BUILDING_LANDMARK)) !== 0) {
     uncount(o, id);
     return unfile(o, id);
   }

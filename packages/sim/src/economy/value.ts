@@ -16,7 +16,7 @@
 // add, multiply, divide and floor, so every host agrees (rule 6).
 
 import { BUILDING_TYPES, JOB_KINDS, type BuildingType, type JobKind } from "../buildings/balance";
-import { BUILDING_ALIVE, type BuildingState } from "../buildings/buildings";
+import { BUILDING_ALIVE, BUILDING_LANDMARK, type BuildingState } from "../buildings/buildings";
 import { jobsByKind, lotJobs } from "../buildings/jobs";
 import { buildingValues } from "../landvalue/land-value";
 import type { SimState } from "../state";
@@ -90,7 +90,8 @@ export function propertyValues(state: SimState, ids: readonly number[]): Float64
 }
 
 function valueOfRow(b: BuildingState, id: number, landValue: number): number {
-  if (((b.flags[id] ?? 0) & BUILDING_ALIVE) === 0) return 0;
+  // A landmark is the city's and has no property value (M4-13).
+  if (((b.flags[id] ?? 0) & (BUILDING_ALIVE | BUILDING_LANDMARK)) !== BUILDING_ALIVE) return 0;
   const type = BUILDING_TYPES[b.type[id] ?? 0];
   if (!type) return 0;
   return propertyValueOf(type, b.residents[id] ?? 0, lotJobs(b, id), landValue);

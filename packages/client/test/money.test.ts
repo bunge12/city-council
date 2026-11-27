@@ -82,7 +82,7 @@ describe("the milestone notice", () => {
   });
 
   it("says nothing of unlocks for a milestone that opens none", () => {
-    expect(milestoneLines({ name: "Town", population: 2500, grant: 8_000_000, unlocks: [] }).detail).toBe("2,500 residents. Grant of $8M paid.");
+    expect(milestoneLines({ name: "Town", population: 2500, grant: 8_000_000, unlocks: [], grows: [] }).detail).toBe("2,500 residents. Grant of $8M paid.");
   });
 });
 

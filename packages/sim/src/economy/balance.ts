@@ -5,8 +5,9 @@
 
 import balance from "../../balance/economy.json" with { type: "json" };
 import { isRecord, isShare, unknownKeys } from "../balance-fields";
-import { JOB_KINDS, type JobKind } from "../buildings/balance";
+import { BUILDINGS_BALANCE, JOB_KINDS, type JobKind } from "../buildings/balance";
 import { ROAD_BALANCE } from "../roads/balance";
+import { ZONING_BALANCE } from "../zoning/balance";
 
 /** The four tax sliders and price keys (M4.md). Mixed pays the residential and commercial tax rates. */
 export const ECONOMY_SLIDERS = ["residential", "commercial", "office", "industrial"] as const;
@@ -97,6 +98,38 @@ export interface EconomyBalanceFile {
   expropriationRecords: { max: number; source: string; placeholder?: boolean };
   loans: { maxOpen: number; offers: LoanOffer[]; source: string; placeholder?: boolean };
   creditLimit: { perResident: EconomyPrice; lastYearTaxMultiple: number; largerLoansMultiple: number; source: string; placeholder?: boolean };
+  landmarks: LandmarkFile[];
+}
+
+/** One landmark as economy.json writes it (M4-13). */
+export interface LandmarkFile {
+  id: string;
+  name: string;
+  /** The unlock that opens it, one progression's registry knows. Checked there, since progression reads this file. */
+  unlock: string;
+  /** Its lot: columns along the road and cells back from it. */
+  width: number;
+  depth: number;
+  price: EconomyPrice;
+  floorSpace: { squareMetres: number; source: string; sourceUrl?: string; placeholder?: boolean; note?: string };
+  upkeepShare: EconomyShare;
+}
+
+/** One landmark with its price in whole 2026 dollars (M4-13). */
+export interface Landmark {
+  /** Its place in `ECONOMY.landmarks`, which a landmark's building row stores as its type. */
+  index: number;
+  id: string;
+  name: string;
+  unlock: string;
+  width: number;
+  depth: number;
+  /** Whole 2026 dollars, charged on the construction line when it is placed. */
+  price: number;
+  /** Square metres, what its demolition is priced on. */
+  floorSpace: number;
+  /** Whole dollars a year to keep, on the building upkeep line: its price times its upkeep share, rounded. */
+  upkeepPerYear: number;
 }
 
 /** A development charge in 2026 dollars per square metre of floor space added. */
@@ -130,6 +163,8 @@ export interface Economy {
   loans: { maxOpen: number; offers: readonly LoanOffer[] };
   /** The credit limit's weights (economy/loans.ts, M4-11): whole dollars a resident, a multiple of a year's tax income, and the multiple once `largerLoans` is open. */
   creditLimit: { perResident: number; lastYearTaxMultiple: number; largerLoansMultiple: number };
+  /** The landmarks, by their type (M4-13). */
+  landmarks: readonly Landmark[];
 }
 
 const WORDS = ["source", "sourceUrl", "note", "placeholder"] as const;
@@ -222,6 +257,44 @@ function perSlider(value: unknown, where: string, check: (entry: unknown, at: st
 function blockProblems(data: Record<string, unknown>, key: string, check: (block: Record<string, unknown>) => string[]): string[] {
   const block = data[key];
   return isRecord(block) ? check(block) : [`${key} is missing`];
+}
+
+const LANDMARK_KEYS = ["id", "name", "unlock", "width", "depth", "price", "floorSpace", "upkeepShare"];
+
+/**
+ * Problems with the landmark list (M4-13): each with a distinct id and
+ * unlock, a name, a lot of whole cells no wider than a lot may be
+ * (buildings.json) and no deeper than a zoning strip, a price, a floor
+ * space and an upkeep share.
+ */
+function landmarkProblems(value: unknown, toYear: number): string[] {
+  if (!Array.isArray(value)) return ["landmarks must be a list"];
+  const errors: string[] = [];
+  const ids = new Set<unknown>();
+  const unlocks = new Set<unknown>();
+  value.forEach((entry: unknown, i) => {
+    const at = `landmarks[${i}]`;
+    if (!isRecord(entry)) return void errors.push(`${at} is not an object`);
+    if (typeof entry["id"] !== "string" || entry["id"] === "" || ids.has(entry["id"])) errors.push(`${at}.id must be a name no other landmark has`);
+    ids.add(entry["id"]);
+    if (typeof entry["name"] !== "string" || entry["name"].trim() === "") errors.push(`${at}.name is missing`);
+    if (typeof entry["unlock"] !== "string" || unlocks.has(entry["unlock"])) errors.push(`${at}.unlock must be an unlock no other landmark has`);
+    unlocks.add(entry["unlock"]);
+    const width = entry["width"];
+    const depth = entry["depth"];
+    if (!Number.isSafeInteger(width) || (width as number) < 1 || (width as number) > BUILDINGS_BALANCE.maxLotWidth) errors.push(`${at}.width must be a whole number of cells from 1 to ${BUILDINGS_BALANCE.maxLotWidth}`);
+    if (!Number.isSafeInteger(depth) || (depth as number) < 1 || (depth as number) > ZONING_BALANCE.zoneDepthCells) errors.push(`${at}.depth must be a whole number of cells from 1 to ${ZONING_BALANCE.zoneDepthCells}`);
+    errors.push(...priceProblems(entry["price"], `${at}.price`, toYear));
+    const space = entry["floorSpace"];
+    if (!isRecord(space)) errors.push(`${at}.floorSpace is missing`);
+    else {
+      if (!isPositive(space["squareMetres"])) errors.push(`${at}.floorSpace.squareMetres must be a positive number`);
+      errors.push(...sourceProblems(space, `${at}.floorSpace`), ...unknownKeys(space, ["squareMetres", ...WORDS], `${at}.floorSpace`));
+    }
+    errors.push(...shareRecordProblems(entry["upkeepShare"], `${at}.upkeepShare`, toYear));
+    errors.push(...unknownKeys(entry, LANDMARK_KEYS, at));
+  });
+  return errors;
 }
 
 /**
@@ -343,7 +416,8 @@ export function checkEconomyBalance(data: unknown): string[] {
       return out;
     }),
   );
-  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "developmentChargeGrowth", "business", "value", "floorSpace", "eminentDomain", "expropriationRecords", "loans", "creditLimit"], "the file"));
+  errors.push(...landmarkProblems(data["landmarks"], toYear));
+  errors.push(...unknownKeys(data, ["generalEscalation", "startingGrant", "overdraft", "taxRates", "developmentCharges", "developmentChargeGrowth", "business", "value", "floorSpace", "eminentDomain", "expropriationRecords", "loans", "creditLimit", "landmarks"], "the file"));
   return errors;
 }
 
@@ -404,6 +478,20 @@ export function resolveEconomy(data: unknown): Economy {
       lastYearTaxMultiple: file.creditLimit.lastYearTaxMultiple,
       largerLoansMultiple: file.creditLimit.largerLoansMultiple,
     },
+    landmarks: file.landmarks.map((l, index) => {
+      const price = at(l.price);
+      return {
+        index,
+        id: l.id,
+        name: l.name,
+        unlock: l.unlock,
+        width: l.width,
+        depth: l.depth,
+        price,
+        floorSpace: l.floorSpace.squareMetres,
+        upkeepPerYear: Math.round(price * l.upkeepShare.share),
+      };
+    }),
   };
 }
 

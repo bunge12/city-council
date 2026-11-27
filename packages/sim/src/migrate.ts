@@ -199,6 +199,12 @@ const MIGRATIONS: Readonly<Record<number, Migration>> = {
   // Version 38 adds the open loans to the budget (M4-11). A city saved before
   // them borrowed nothing.
   37: (old) => ({ ...old, version: 38, budget: { ...(old["budget"] as object), ...noLoans() } }),
+  // Version 39 lets a building row be a landmark (M4-13): BUILDING_LANDMARK
+  // in its flags, and its type a place in the landmarks rather than the
+  // building types. No city had one before it, so nothing else changes. The
+  // bump keeps a save with City Hall in it from an older build, which would
+  // refuse the flag or read its type as a house.
+  38: (old) => ({ ...old, version: 39 }),
 };
 
 /**
