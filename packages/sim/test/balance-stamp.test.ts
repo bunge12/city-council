@@ -58,7 +58,8 @@ describe("the balance stamp", () => {
     // #386 moved it again: economy.json gained the larger credit limit's multiple, and progression.json the milestone that opens it.
     // #426 moved it again: demand.json gained residentsPerUnfilledHome.
     // #388 moved it again: economy.json gained the landmarks, and progression.json the milestones City Hall grows at.
-    expect(BALANCE_STAMP).toBe("2898fd9a9653d487");
+    // #442 moved it again: demand.json gained buildingsPerDayPer100kResidents, so workplace growth scales with the city.
+    expect(BALANCE_STAMP).toBe("e05a537c97d8b372");
   });
 
   it("is on every new city and every replayed one, and is part of the state hash", () => {

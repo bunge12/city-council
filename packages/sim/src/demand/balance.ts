@@ -9,7 +9,8 @@
 // satisfaction reads to send people away while the residential bar is below
 // zero (M3-10), `vacancy`, which the vacancy check reads (M3-24),
 // `redevelopment`, which redevelopment reads (M3-14),
-// and `buildingsPerDayAtFullDemand`, which the grower reads (M3-07).
+// and `buildingsPerDayAtFullDemand` and `buildingsPerDayPer100kResidents`,
+// which the grower reads (M3-07, scaled with the city since #442).
 
 import balance from "../../balance/demand.json" with { type: "json" };
 import { EDUCATION_LEVELS, type EducationLevel } from "../buildings/balance";
@@ -68,6 +69,12 @@ export interface DemandBalance {
   redevelopment: { chancePerDay: number; valueFrom: number; perDayMax: number };
   /** By zone id: buildings the grower adds a game day with the zone's bar at 100 (M3-07). */
   buildingsPerDayAtFullDemand: Record<string, number>;
+  /**
+   * By zone id: buildings the grower adds a game day with the zone's bar at 100, per 100,000 residents (#442). A
+   * zone's rate at full demand is the larger of this times the city's residents over 100,000 and its
+   * `buildingsPerDayAtFullDemand`. 0 keeps the zone at its flat rate.
+   */
+  buildingsPerDayPer100kResidents: Record<string, number>;
 }
 
 const RAISES: NumberRule = { min: 0, max: 1000 };
@@ -105,7 +112,7 @@ const TOP: Readonly<Record<string, NumberRule>> = {
 export function checkDemandBalance(data: unknown): string[] {
   if (!isRecord(data)) return ["the demand balance is not an object"];
   const errors: string[] = [];
-  const others = ["spendingByWealth", "outsidePull", "jobMatching", "vacancy", "redevelopment", "buildingsPerDayAtFullDemand"];
+  const others = ["spendingByWealth", "outsidePull", "jobMatching", "vacancy", "redevelopment", "buildingsPerDayAtFullDemand", "buildingsPerDayPer100kResidents"];
   for (const key of [...Object.keys(BARS), ...others]) if (!(key in data)) errors.push(`${key} is missing`);
   for (const [key, rule] of Object.entries(TOP)) {
     const problem = numberProblem(data, key, rule, "");
@@ -135,6 +142,10 @@ export function checkDemandBalance(data: unknown): string[] {
   if ("buildingsPerDayAtFullDemand" in data) {
     const rules = Object.fromEntries(ZONING_BALANCE.zones.map((zone) => [zone.id, { min: 0, whole: true }]));
     errors.push(...numberProblems(data["buildingsPerDayAtFullDemand"], rules, "buildingsPerDayAtFullDemand"));
+  }
+  if ("buildingsPerDayPer100kResidents" in data) {
+    const rules = Object.fromEntries(ZONING_BALANCE.zones.map((zone) => [zone.id, { min: 0, max: 1000 }]));
+    errors.push(...numberProblems(data["buildingsPerDayPer100kResidents"], rules, "buildingsPerDayPer100kResidents"));
   }
   return errors;
 }

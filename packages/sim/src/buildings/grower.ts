@@ -30,6 +30,14 @@
 // made up later. Density is whatever the cell is zoned for: an R3 cell
 // gets an R3 building as soon as residential demand is above zero.
 //
+// The full-demand rate grows with the city (#442): it is the larger of the
+// zone's flat rate and `buildingsPerDayPer100kResidents` times the
+// residents over 100,000 (`fullDemandRate`), so a city of 250,000 builds
+// shops and factories at a pace its size needs. The population is the
+// running total as each tick reads it, so a quota can move by a building
+// within a day as people come and go; every tick's work still follows from
+// state, and a city loaded mid-day lands the same buildings.
+//
 // Homes standing fill before more are built (M3-08, PRD "Turnover"; a
 // count since M3-21): the grower adds no building to a zone people live in,
 // residential or mixed, while `unfilledHomesAllowed` or more of the homes
@@ -154,16 +162,29 @@ export function zoneBar(demand: DemandState, id: string): number {
 }
 
 /**
+ * The buildings zone `id` adds a game day with its bar at 100, in a city of
+ * `population` residents (#442): the larger of its flat
+ * `buildingsPerDayAtFullDemand` and `buildingsPerDayPer100kResidents` times
+ * the residents over 100,000.
+ */
+export function fullDemandRate(id: string, population: number): number {
+  const flat = DEMAND_BALANCE.buildingsPerDayAtFullDemand[id] ?? 0;
+  const scaled = ((DEMAND_BALANCE.buildingsPerDayPer100kResidents[id] ?? 0) * population) / 100_000;
+  return scaled > flat ? scaled : flat;
+}
+
+/**
  * The buildings each zone wants today, by zone number, with index 0 unused,
  * before rounding: none while its bar is at or below zero, else its
- * full-demand rate times the bar over 100, at least 1, times its share in
- * `shares`, by zone number, all 1 when left out.
+ * full-demand rate in a city of `population` (`fullDemandRate`, 0 when left
+ * out) times the bar over 100, at least 1, times its share in `shares`, by
+ * zone number, all 1 when left out.
  */
-export function dayWants(demand: DemandState, shares?: Float64Array): number[] {
+export function dayWants(demand: DemandState, shares?: Float64Array, population = 0): number[] {
   const wants = [0];
   for (const [i, zone] of ZONING_BALANCE.zones.entries()) {
     const bar = zoneBar(demand, zone.id);
-    const rate = DEMAND_BALANCE.buildingsPerDayAtFullDemand[zone.id] ?? 0;
+    const rate = fullDemandRate(zone.id, population);
     // At least one a day while the bar is above zero (M3-07), before the charge's share, so a charge still slows a small zone.
     wants.push(bar > 0 ? Math.max(1, (rate * bar) / 100) * (shares?.[i + 1] ?? 1) : 0);
   }
@@ -175,9 +196,9 @@ export function dayWants(demand: DemandState, shares?: Float64Array): number[] {
  * with index 0 unused, as the header says: the whole part of its want
  * (`dayWants`), the zones together held to `growthPerDayMax` in zone order.
  */
-export function dayQuotas(demand: DemandState, shares?: Float64Array): number[] {
+export function dayQuotas(demand: DemandState, shares?: Float64Array, population = 0): number[] {
   const quotas = [0];
-  const wants = dayWants(demand, shares);
+  const wants = dayWants(demand, shares, population);
   let left = BUILDINGS_BALANCE.growthPerDayMax;
   for (let zone = 1; zone < wants.length; zone++) {
     const quota = Math.min(Math.floor(wants[zone] ?? 0), left);
@@ -193,8 +214,8 @@ export function dayQuotas(demand: DemandState, shares?: Float64Array): number[] 
  * its want leaves over, or 0 where `growthPerDayMax` has no room left for
  * it once the zones before it took their quotas and their extra ones.
  */
-export function extraChances(demand: DemandState, shares?: Float64Array): number[] {
-  const wants = dayWants(demand, shares);
+export function extraChances(demand: DemandState, shares?: Float64Array, population = 0): number[] {
+  const wants = dayWants(demand, shares, population);
   const out = [0];
   let left = BUILDINGS_BALANCE.growthPerDayMax;
   for (let zone = 1; zone < wants.length; zone++) {
@@ -215,9 +236,10 @@ export function extraChances(demand: DemandState, shares?: Float64Array): number
  */
 export function dueOnTick(state: SimState): number[] {
   const shares = chargeShares(state.budget.chargeRates);
-  const due = dayQuotas(state.demand, shares).map((quota) => growthOnTick(state.tick, quota));
+  const population = cityPopulation(state);
+  const due = dayQuotas(state.demand, shares, population).map((quota) => growthOnTick(state.tick, quota));
   if (state.tick % TIME_BALANCE.ticksPerDay !== TIME_BALANCE.ticksPerDay - 1) return due;
-  const chances = extraChances(state.demand, shares);
+  const chances = extraChances(state.demand, shares, population);
   for (let zone = 1; zone < due.length; zone++) {
     const chance = chances[zone] ?? 0;
     if (!(chance > 0) || freeFrontCells(state, zone) === 0) continue;
