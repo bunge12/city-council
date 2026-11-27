@@ -517,6 +517,8 @@ async function budgetTab(page: Page, tab: "budget" | "charts" | "loans" | "taxes
 async function closeBudget(page: Page): Promise<void> {
   if (await page.locator("#budget-panel").isVisible()) await page.locator("#treasury").click();
   await expect(page.locator("#budget-panel")).toBeHidden();
+  // The map takes the keys again, and the treasury's tooltip goes with its focus.
+  await page.locator("#view").focus();
 }
 
 /** A ledger row's figure as the budget panel shows it: last month's or this month's. */
