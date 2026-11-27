@@ -1,5 +1,5 @@
 {
-  "_about": "The North American theme's palettes (issue M2-12, PRD \"Art direction\"): soft colours for each family of buildings, as sRGB hex. A building picks its wall, roof and trim colours from its type's family, by its id (render/building-tint.ts), so the same building has the same colours for every player and after every reload. `types` names each building type's family, by its id in the sim's buildings.json. `fixed` holds the colours no building tints: the glass of skylights, the tints a window's glass takes, one per building, the sky the glass reflects, and paving. The glass is kept well lighter and bluer than the roads (issue #137), whose asphalt it was once mistaken for. Presentation, not balance: no prices and no source years.",
+  "_about": "The North American theme's palettes (issue M2-12, PRD \"Art direction\"): soft colours for each family of buildings, as sRGB hex. A building picks its wall, roof and trim colours from its type's family, by its id (render/building-tint.ts), so the same building has the same colours for every player and after every reload. `types` names each building type's family, by its id in the sim's buildings.json, and each landmark's, by `landmark:` and its id in economy.json (M4-17). A landmark's family has one colour of each, since there is only one of it and it should look the same in every city. `fixed` holds the colours no building tints: the glass of skylights, the tints a window's glass takes, one per building, the sky the glass reflects, and paving. The glass is kept well lighter and bluer than the roads (issue #137), whose asphalt it was once mistaken for. Presentation, not balance: no prices and no source years.",
   "fixed": {
     "glass": "#6f8ca6",
     "glassTints": ["#52789c", "#4f817e", "#80705a", "#6488ad"],
@@ -47,6 +47,11 @@
       "roof": ["#6f7473", "#5e6465", "#8a8680", "#4d5759"],
       "trim": ["#c8473a", "#3f6f9a", "#d4a63a", "#5d6a5a", "#e2e0d8"]
     },
+    "civic": {
+      "wall": ["#e4d9c2"],
+      "roof": ["#6f8f80"],
+      "trim": ["#f2ede2"]
+    },
     "mixed": {
       "wall": ["#b8634a", "#c8ae8a", "#9f5544", "#d9cdb6", "#a87d5f", "#cbb9a0"],
       "roof": ["#4e4a46", "#5d544c", "#454b50"],
@@ -54,6 +59,7 @@
     }
   },
   "types": {
+    "landmark:cityHall": "civic",
     "single-family-home": "house",
     "plex": "row",
     "townhomes": "row",

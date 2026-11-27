@@ -10,6 +10,7 @@
 // units, a block, a tower on a podium, a shed and a tank farm.
 
 import { FACADE, ModelBuilder, SURFACE, type Facade, type FacadeKind, type ModelArrays } from "../model";
+import { landmarkTypeId } from "../theme";
 
 /** The lot a model is built for, in metres: x from -w/2 to w/2 along the road, z from -d/2 at the back to d/2 at the road. */
 export interface Lot {
@@ -709,4 +710,92 @@ export const GENERATORS: Readonly<Record<string, { generate: Generator; models: 
   "regional-mall": of(shed, [S(16, "flat", "storefront", "front", { cover: 0.9 }), S(14, "flat", "curtain", "front", { cover: 0.85 }), S(18, "saw", "storefront", "front", { cover: 0.9 })]),
   "distribution-centre": of(shed, [S(13, "flat", "doors", "yard", { cover: 0.85, office: true }), S(12, "flat", "doors", "front", { cover: 0.8, office: true }), S(14, "gable", "doors", "yard", { cover: 0.8 })]),
   "heavy-plant": of(shed, [S(18, "saw", "doors", "yard", { chimneys: 4, office: true }), S(16, "flat", "doors", "yard", { chimneys: 3, office: true }), S(20, "gable", "doors", "none", { chimneys: 5 })]),
+};
+
+// Landmarks (M4-17, PRD "Landmarks"). Each kind has a generator of its own,
+// keyed `landmark:` and its id in economy.json, and one model per stage: the
+// sim's stage, 1 and up, picks model `stage - 1`.
+
+/**
+ * City Hall at stage `stage`, 1 to 4, on its lot of 6 by 6 cells. It reads
+ * as civic from any distance: a wide base of two wings, a taller central
+ * block behind a columned portico and a forecourt with steps and flags, and
+ * on the central block something that rises with each stage, a flat roof,
+ * then a square tower, then a drum and dome, then a taller drum, a dome
+ * with a lantern and a spire.
+ */
+export function cityHall(lot: Lot, stage: number): ModelArrays {
+  const b = new ModelBuilder();
+  const s = Math.max(1, Math.min(4, Math.floor(stage)));
+  const storey = 4.2;
+  const front = lot.d / 2 - Math.max(8, lot.d * 0.3);
+  const back = -lot.d / 2 + Math.max(3, lot.d * 0.1);
+  const half = lot.w / 2 - Math.max(2, lot.w * 0.06);
+  const core = Math.min(9, lot.w * 0.2);
+  const windows = facade(FACADE.windows, 3.6, storey);
+  // The wings, either side of the central block, a floor taller from stage 2.
+  const wingTop = BASE_TOP + (s >= 2 ? 3 : 2) * storey;
+  const wingFront = front - 2;
+  for (const [x0, x1] of [
+    [-half, -core + 0.5],
+    [core - 0.5, half],
+  ] as const) {
+    base(b, x0, x1, back + 2, wingFront);
+    b.box(x0, x1, BASE_TOP, BASE_TOP + storey, back + 2, wingFront, WALL, null, facade(FACADE.windows, 3.6, storey));
+    b.box(x0, x1, BASE_TOP + storey, wingTop, back + 2, wingFront, WALL, null, windows);
+    b.box(x0 - 0.3, x1 + 0.3, wingTop - 0.4, wingTop + 0.6, back + 1.7, wingFront + 0.3, TRIM, TRIM);
+  }
+  // The central block, a floor taller at each of the first three stages.
+  const floors = 2 + Math.min(s, 3);
+  const top = BASE_TOP + floors * storey;
+  base(b, -core, core, back, front);
+  b.box(-core, core, BASE_TOP, top, back, front, WALL, null, windows);
+  b.box(-core - 0.4, core + 0.4, top - 0.5, top + 0.8, back - 0.4, front + 0.4, TRIM, TRIM);
+  // The portico: columns two storeys tall, the beam across them and a pediment, with steps down to the forecourt.
+  const deep = 4.5;
+  const portico = BASE_TOP + 2 * storey;
+  const p0 = -core + 1.5;
+  const p1 = core - 1.5;
+  b.box(p0 - 0.5, p1 + 0.5, -BASE_DEPTH, BASE_TOP + 0.6, front, front + deep, TRIM, TRIM);
+  const columns = 6;
+  for (let k = 0; k < columns; k++) {
+    const x = p0 + ((p1 - p0) * k) / (columns - 1);
+    b.prism(x, front + deep - 0.9, 0.55, BASE_TOP + 0.6, portico, 8, TRIM, null);
+  }
+  b.box(p0 - 0.5, p1 + 0.5, portico, portico + 1.1, front, front + deep, TRIM, TRIM);
+  b.gable(p0 - 0.5, p1 + 0.5, front, front + deep, portico + 1.1, 2.6, false, TRIM, TRIM, 0.2);
+  for (let k = 0; k < 3; k++) b.box(p0 - 0.5 - k * 0.6, p1 + 0.5 + k * 0.6, -BASE_DEPTH, BASE_TOP + 0.4 - k * 0.15, front + deep, front + deep + 0.8 + k * 0.8, TRIM, TRIM);
+  // The forecourt, from the steps to the road, with a flag either side.
+  paving(b, -half, half, front + deep, lot.d / 2);
+  paving(b, -half, half, wingFront, front + deep);
+  for (const x of [-core - 3, core + 3]) b.box(x - 0.12, x + 0.12, 0.12, 13, lot.d / 2 - 3.12, lot.d / 2 - 2.88, TRIM, TRIM);
+  // What rises on the central block.
+  const zm = (back + front) / 2;
+  if (s === 2) {
+    const t = Math.min(4.5, core * 0.5);
+    b.box(-t, t, top + 0.8, top + 0.8 + 2 * storey, zm - t, zm + t, WALL, null, facade(FACADE.windows, 2.4, storey));
+    b.box(-t - 0.3, t + 0.3, top + 0.8 + 2 * storey - 0.3, top + 0.8 + 2 * storey + 0.5, zm - t - 0.3, zm + t + 0.3, TRIM, TRIM);
+    b.hip(-t, t, zm - t, zm + t, top + 0.8 + 2 * storey + 0.5, t * 0.9, ROOF, 0.3);
+  } else if (s >= 3) {
+    const r = Math.min(6.5, core * 0.7);
+    const drum = s === 4 ? 7 : 4.5;
+    b.prism(0, zm, r + 0.6, top + 0.8, top + 1.6, 16, TRIM, TRIM);
+    b.prism(0, zm, r, top + 1.6, top + 1.6 + drum, 16, WALL, null);
+    b.prism(0, zm, r + 0.3, top + 1.6 + drum, top + 2.2 + drum, 16, TRIM, null);
+    const domeY = top + 2.2 + drum;
+    const rise = s === 4 ? r * 1.05 : r * 0.9;
+    b.dome(0, zm, r, domeY, rise, 16, 5, ROOF);
+    if (s === 4) {
+      const lantern = domeY + rise - 0.6;
+      b.prism(0, zm, 1.5, lantern, lantern + 3, 8, TRIM, null);
+      b.dome(0, zm, 1.7, lantern + 3, 1.4, 8, 3, ROOF);
+      b.prism(0, zm, 0.18, lantern + 4.2, lantern + 9, 6, TRIM, TRIM);
+    }
+  }
+  return b.build();
+}
+
+/** Every landmark's generator, by `landmarkTypeId` of its id in economy.json: one model a stage. */
+export const LANDMARK_GENERATORS: Readonly<Record<string, { generate: Generator; models: number }>> = {
+  [landmarkTypeId("cityHall")]: { generate: (lot, k) => cityHall(lot, k + 1), models: 4 },
 };

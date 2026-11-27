@@ -76,7 +76,12 @@ import {
   workplacesHeldBy,
   type DemandBar,
   type ReachableRoom,
+  landmarkIds,
+  planPlaceLandmark,
+  type LandmarkPlanResult,
+  type PlaceLandmarkPayload,
 } from "@city-council/sim";
+import { landmarkLook, type LandmarkLook } from "./landmark-stage";
 import { countRoom, roomAfter, roomBefore } from "./room";
 import { budgetByte } from "../render/cell-geometry";
 import { blockContaining, blockOutlines, cellChunkOf, type BlockOutline } from "./block-at";
@@ -115,7 +120,8 @@ export interface HostStats {
  * `cellChunks` too, and look up where each of `buildingIds` is and was:
  * a building that came in such a delta changed no cell, so its chunk may
  * be in neither list. `buildingIds` names every building the delta
- * carried a row for, ascending, whether or not anything asked.
+ * carried a row for, ascending, whether or not anything asked, and every
+ * landmark a milestone in the delta grew, whose row stays as it was (M4-17).
  * `peopleIds` names every building whose people or jobs filled the delta
  * changed, ascending (M3-05), and `statTotals` the city totals it changed,
  * in the sim's `STAT_TOTALS` order. `statSamples` is how many monthly
@@ -384,6 +390,26 @@ export class SimMirror {
    */
   buildingGround(id: number): BuildingGround | null {
     return this.current ? buildingGround(this.current, id) : null;
+  }
+
+  /**
+   * The stage of a landmark of kind `type` placed on tick `builtAt`, as the
+   * copy's milestones give it, and the tick it last grew on (M4-17,
+   * landmark-stage.ts). Stage 1 before the first snapshot.
+   */
+  landmarkLook(type: number, builtAt: number): LandmarkLook {
+    return landmarkLook(this.current?.milestones ?? [], type, builtAt);
+  }
+
+  /**
+   * What placing a landmark with `payload` would do, by the sim's own
+   * `planPlaceLandmark` on the copy: its footprint, price and the reason the
+   * treasury cannot pay, or why it is refused (M4-17). Changes nothing.
+   */
+  planLandmark(payload: PlaceLandmarkPayload): LandmarkPlanResult {
+    const state = this.current;
+    if (!state) return { ok: false, reason: "the city has not loaded yet" };
+    return planPlaceLandmark(state, payload);
   }
 
   /** The chunk building `id`'s lot's centre is in, or -1 if there is none. */
@@ -791,6 +817,7 @@ export class SimMirror {
     state.redevelopedToday = delta.redevelopedToday;
     if (delta.budget) state.budget = copyBudget(delta.budget);
     if (expropriations) state.expropriations = expropriations;
+    const grew = delta.milestones !== undefined && delta.milestones.length !== state.milestones.length;
     if (delta.milestones) state.milestones = delta.milestones.slice();
     if (undo) state.undo = undo;
     state.rng.set(delta.rng);
@@ -812,6 +839,9 @@ export class SimMirror {
     });
     this.settleDropped(delta);
     const buildingIds = delta.buildings ? [...delta.buildings.ids] : [];
+    // A milestone that grows a landmark changes how it is drawn and described, though its row stays as it was (M4-17).
+    if (grew) for (const id of landmarkIds(state.buildings)) if (!buildingIds.includes(id)) buildingIds.push(id);
+    buildingIds.sort((a, b) => a - b);
     const peopleIds = delta.people ? [...delta.people.ids] : [];
     this.notify({
       kind: "delta",
