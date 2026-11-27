@@ -7,7 +7,7 @@ import { formatTreasury, formatTreasuryTitle } from "./money-figures";
 import { useRoom, useSaveStatus, useServices, useSim } from "./hooks";
 import { tipParts, useTip, useTipState } from "./Tip";
 import { BAR_NAMES, formatDemandTitle, formatPopulationTitle, populationTrend, trendArrow } from "./top-figures";
-import { toggleDebug, toggleLog, toggleMenu, toggleSettings, toggleStats, useGraphics, usePanelOrder, useSound, useUi } from "./store";
+import { toggleBudget, toggleDebug, toggleLog, toggleMenu, toggleSettings, toggleStats, useGraphics, usePanelOrder, useSound, useUi } from "./store";
 
 /** The graphics setting: Low, Balanced or High, kept in this browser. */
 function GraphicsSetting() {
@@ -189,23 +189,29 @@ const SPEED_LABELS: Record<Speed, string> = { 0: "Pause", 1: "1x", 2: "2x", 4: "
  * The city's money in short form, in the warning colour below zero, with
  * the month so far in the tooltip (M4-14). It moves when a command spends
  * and once a day with taxes and upkeep, as the sim's treasury does. The
- * whole dollars are on a data attribute, for tests.
+ * whole dollars are on a data attribute, for tests. A click opens the
+ * budget panel (M4-15).
  */
 function Treasury() {
   const treasury = useSim((s) => s?.budget.treasury ?? null);
   const title = useSim((s) => formatTreasuryTitle(s?.budget ?? null));
-  const { props, tip } = useTip(title);
+  const budgetOpen = useUi((s) => s.budgetOpen);
+  const { props, tip } = useTip(`${title}\nClick for the budget (M)`);
   return (
-    <span
+    <button
+      type="button"
       className={treasury !== null && treasury < 0 ? "treasury overdrawn" : "treasury"}
       id="treasury"
       aria-label="Treasury"
+      aria-expanded={budgetOpen}
+      aria-controls="budget-panel"
       data-treasury={treasury ?? ""}
+      onClick={toggleBudget}
       {...props}
     >
       {formatTreasury(treasury)}
       {tip}
-    </span>
+    </button>
   );
 }
 

@@ -11,6 +11,7 @@ export type ShortcutAction =
   | { kind: "toggleDebug" }
   | { kind: "toggleLog" }
   | { kind: "toggleStats" }
+  | { kind: "toggleBudget" }
   | { kind: "roadTool" }
   | { kind: "gridTool" }
   | { kind: "confirm" }
@@ -41,6 +42,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { codes: ["Backquote"], label: "`", description: "show or hide this panel", action: { kind: "toggleDebug" } },
   { codes: ["KeyL"], label: "L", description: "show or hide the activity log", action: { kind: "toggleLog" } },
   { codes: ["KeyP"], label: "P", description: "show or hide the statistics panel: population and the city's numbers over time", action: { kind: "toggleStats" } },
+  { codes: ["KeyM"], label: "M", description: "show or hide the budget panel: income, expenses, tax rates, development charges and loans", action: { kind: "toggleBudget" } },
   { codes: ["KeyR"], label: "R", description: "road tool on or off", action: { kind: "roadTool" } },
   { codes: ["KeyB"], label: "B", description: "bulldozer on or off: remove roads and buildings", action: { kind: "bulldozeTool" } },
   { codes: ["KeyG"], label: "G", description: "grid tool on or off", action: { kind: "gridTool" } },

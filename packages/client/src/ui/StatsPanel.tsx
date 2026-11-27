@@ -1,7 +1,7 @@
 import { useMemo, useState, type PointerEvent } from "react";
 import { STAT_TOTALS, TIME_BALANCE, YEAR_COUNTS, gameDate, type YearCount } from "@city-council/sim";
 import { useSim, type MirrorState } from "./hooks";
-import { STAT_GROUPS, STAT_RANGES, STAT_SERIES, axisNumber, lastSamples, monthShort, newestMonth, niceTicks, rangeMonths, sampleDate, seriesById, steppedTick, type StatRange, type StatSeries } from "./stat-series";
+import { STAT_GROUPS, STAT_RANGES, STAT_SERIES, axisNumber, lastSamples, moneyTicks, monthShort, newestMonth, niceTicks, rangeMonths, sampleDate, seriesById, steppedTick, type StatRange, type StatSeries } from "./stat-series";
 import { setStatsRange, setStatsSeries, toggleStats, usePanelOrder, useUi } from "./store";
 
 // The statistics panel (issue M3-16, PRD "City statistics"): a graph of one
@@ -32,6 +32,8 @@ function statsKey(s: MirrorState): string {
   const parts: number[] = [st.next, st.history["population"]?.length ?? 0, newestMonth(s.tick)];
   for (const name of STAT_TOTALS) parts.push(st.totals[name] ?? 0);
   for (const what of YEAR_COUNTS) parts.push(st.year[what], st.lastYear[what]);
+  // The money series' values now (M4-15): the treasury moves daily, and the month closed last on each close.
+  parts.push(s.budget.treasury, s.budget.opening);
   return parts.join(",");
 }
 
@@ -55,9 +57,12 @@ function plotOf(samples: number[], newest: number, months: number, range: StatRa
   // Sample k is (n - 1 - k) months before the newest, which sits on the right edge.
   const xOf = (k: number) => PAD.left + PLOT_W * (1 - (n - 1 - k) / slots);
   const max = samples.reduce((m, v) => (v > m ? v : m), 0);
-  const yTicks = niceTicks(max);
+  const min = samples.reduce((m, v) => (v < m ? v : m), 0);
+  // A count never falls below zero; money can, as an overdrawn treasury does (M4-15).
+  const yTicks = min < 0 ? moneyTicks(min, max) : niceTicks(max);
+  const bottom = yTicks[0] ?? 0;
   const top = yTicks.at(-1) ?? 1;
-  const yOf = (v: number) => PAD.top + PLOT_H * (1 - v / top);
+  const yOf = (v: number) => PAD.top + PLOT_H * (1 - (v - bottom) / (top - bottom || 1));
   let path = "";
   for (let k = 0; k < n; k++) path += `${k === 0 ? "M" : "L"}${xOf(k).toFixed(1)},${yOf(samples[k] ?? 0).toFixed(1)}`;
   const step = TICK_MONTHS[range];
@@ -98,7 +103,7 @@ function Graph({ series, plot }: { series: StatSeries; plot: Plot }) {
         {plot.yTicks.map((v) => (
           <g key={v} className="stats-grid">
             <line x1={PAD.left} x2={PAD.left + PLOT_W} y1={plot.yOf(v)} y2={plot.yOf(v)} />
-            <text x={PAD.left - 4} y={plot.yOf(v)} dy="0.32em" textAnchor="end">{axisNumber(v)}</text>
+            <text x={PAD.left - 4} y={plot.yOf(v)} dy="0.32em" textAnchor="end">{series.short ? series.short(v) : axisNumber(v)}</text>
           </g>
         ))}
         {plot.xTicks.map((t) => (
@@ -108,7 +113,7 @@ function Graph({ series, plot }: { series: StatSeries; plot: Plot }) {
         {n > 0 && last !== undefined && (
           <>
             <circle className="stats-dot" cx={plot.xOf(n - 1)} cy={plot.yOf(last)} r={4} fill={series.color} />
-            <text className="stats-end" x={plot.xOf(n - 1) + 7} y={plot.yOf(last)} dy="0.32em">{axisNumber(last)}</text>
+            <text className="stats-end" x={plot.xOf(n - 1) + 7} y={plot.yOf(last)} dy="0.32em">{series.short ? series.short(last) : axisNumber(last)}</text>
           </>
         )}
         {at !== null && atValue !== null && (
@@ -154,13 +159,13 @@ function Pick({ series, value, plotted }: { series: StatSeries; value: number; p
       title={`Graph ${series.label.toLowerCase()} over time`}
       onClick={() => setStatsSeries(series.id)}
     >
-      {value.toLocaleString("en-US")}
+      {series.short ? series.short(value) : value.toLocaleString("en-US")}
     </button>
   );
 }
 
 function Breakdowns({ s, plotted }: { s: NonNullable<MirrorState>; plotted: string }) {
-  const source = { stats: s.stats };
+  const source = { stats: s.stats, budget: s.budget };
   return (
     <>
       {STAT_GROUPS.map((group) => (
@@ -216,7 +221,7 @@ function StatsBody() {
   const seriesId = useUi((u) => u.statsSeries);
   const range = useUi((u) => u.statsRange);
   const series = seriesById(seriesId);
-  const ring = s ? series.history({ stats: s.stats }) : null;
+  const ring = s ? series.history({ stats: s.stats, budget: s.budget }) : null;
   const months = rangeMonths(range);
   const next = s?.stats.next ?? 0;
   const count = ring?.values.length ?? 0;
@@ -238,7 +243,7 @@ function StatsBody() {
         </div>
         <div className="stats-head">
           <h3 id="stats-series-title">{series.label}</h3>
-          <span className="stats-now">{series.format(series.now({ stats: s.stats }))}</span>
+          <span className="stats-now">{series.format(series.now({ stats: s.stats, budget: s.budget }))}</span>
         </div>
         <Graph series={series} plot={plot} />
         <div className="stats-ranges" role="group" aria-label="Range">
