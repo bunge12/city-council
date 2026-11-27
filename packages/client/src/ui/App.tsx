@@ -10,6 +10,7 @@ import { BulldozeTag } from "./BulldozeTag";
 import { BuildingReadout } from "./BuildingReadout";
 import { EditReadout } from "./EditReadout";
 import { ServicesContext, useServices, useSim } from "./hooks";
+import { MilestoneNotice } from "./MilestoneNotice";
 import { Notes } from "./Notes";
 import { RoadReadout } from "./RoadReadout";
 import type { AppServices } from "./services";
@@ -164,6 +165,7 @@ function Shell() {
       <CityStatus />
       <BuildBar />
       <GameClock />
+      <MilestoneNotice />
       <RoadReadout />
       <EditReadout />
       <BulldozeTag />

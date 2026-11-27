@@ -1,4 +1,5 @@
 import { useServices, useSim } from "./hooks";
+import { formatLogAmount } from "./money-figures";
 import { usePanelOrder, useUi } from "./store";
 
 /** How many of the latest entries the log view lists. */
@@ -18,7 +19,9 @@ export function ActivityLog() {
   // The total only grows, so it is the version of the log to re-render on.
   const total = useSim((s) => (s ? s.logOffset + s.log.length : 0));
   const log = mirror.state?.log ?? [];
-  const rows = log.slice(-LOG_VIEW_ROWS).reverse();
+  // What each entry's command moved, beside it and paged with it (M4-03).
+  const spent = mirror.state?.logSpent ?? [];
+  const rows = log.slice(-LOG_VIEW_ROWS).map((entry, i, shown) => ({ entry, spent: spent[log.length - shown.length + i] })).reverse();
 
   const order = usePanelOrder("log");
   return (
@@ -40,16 +43,18 @@ export function ActivityLog() {
               <th scope="col">Tick</th>
               <th scope="col">Player</th>
               <th scope="col">Command</th>
+              <th scope="col" title="What the command took from the treasury, or + for what it paid in">Money</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((entry, i) => (
-              <tr key={total - i}>
+            {rows.map(({ entry, spent }, i) => (
+              <tr key={total - i} data-seq={entry.seq} data-spent={spent ?? ""}>
                 <td className="num">{entry.tick}</td>
                 <td>{entry.playerId}</td>
                 <td>
                   {entry.type} <span className="payload">{payloadText(entry.payload)}</span>
                 </td>
+                <td className="num money">{formatLogAmount(spent)}</td>
               </tr>
             ))}
           </tbody>

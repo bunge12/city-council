@@ -45,6 +45,16 @@ export class CommandCues {
   }
 }
 
+/**
+ * The cue for what a settled command did to the treasury (M4-14): "money"
+ * when it took money out, and none when it cost nothing or paid in, as a
+ * bulldoze with a refund or an undone road does. One per command, so a grid
+ * of many streets is heard once.
+ */
+export function moneyCue(result: { ok: true; spent: number } | { ok: false }): Cue | null {
+  return result.ok && result.spent > 0 ? "money" : null;
+}
+
 function strokeOf(payload: unknown): number | null {
   if (typeof payload !== "object" || payload === null) return null;
   const stroke = (payload as { stroke?: unknown }).stroke;

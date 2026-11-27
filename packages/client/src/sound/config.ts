@@ -45,9 +45,12 @@ export interface CueRecipe {
 export const ATTACK = 0.006;
 
 /**
- * The interface cues, each synthesised from these. All are under a quarter
- * of a second. A road and a zone rise, an undo falls back, a refusal is a
- * low double buzz that never sounds like the others.
+ * The interface cues, each synthesised from these. All but the milestone
+ * are under a quarter of a second. A road and a zone rise, an undo falls
+ * back, a refusal is a low double buzz that never sounds like the others.
+ * Money spent is two bright clinks, a little late so it follows the cue of
+ * the command that spent it (M4-14). A milestone is a rising major chord,
+ * the one cue that is a reward, under half a second.
  */
 export const CUES = {
   road: {
@@ -73,6 +76,20 @@ export const CUES = {
     tones: [
       { wave: "triangle", from: 196, to: 185, at: 0, length: 0.08, peak: 0.6 },
       { wave: "triangle", from: 196, to: 185, at: 0.11, length: 0.08, peak: 0.6 },
+    ],
+  },
+  money: {
+    tones: [
+      { wave: "triangle", from: 1568, to: 1568, at: 0.1, length: 0.05, peak: 0.3 },
+      { wave: "triangle", from: 2093, to: 2093, at: 0.15, length: 0.08, peak: 0.25 },
+    ],
+  },
+  milestone: {
+    tones: [
+      { wave: "sine", from: 523, to: 523, at: 0, length: 0.14, peak: 0.4 },
+      { wave: "sine", from: 659, to: 659, at: 0.1, length: 0.14, peak: 0.4 },
+      { wave: "sine", from: 784, to: 784, at: 0.2, length: 0.14, peak: 0.4 },
+      { wave: "sine", from: 1047, to: 1047, at: 0.3, length: 0.18, peak: 0.45 },
     ],
   },
 } as const satisfies Record<string, CueRecipe>;
