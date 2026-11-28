@@ -4,9 +4,13 @@
 // and development charge at its default and nothing borrowed. Before the
 // close-out measures it, each city is given what a player's city of that
 // size has: a treasury of its own size, tax rates moved off their
-// defaults, a loan and City Hall. Each is a command, sent as the scale
-// player and stepped until it applies, so the city's log replays to it
-// from a funded city, as the generator's does. No game code calls this.
+// defaults, a loan and City Hall. The rates, City Hall and the loan are
+// commands, sent as the scale player and stepped until each applies, so
+// they are in the city's log. The treasury is not: it is set with
+// `fundCity`, as the generator's trillion is, on the grants line of the
+// month in progress, so a replay of the log from a funded start does not
+// reach it, and that month's ledger carries the move. No game code calls
+// this.
 
 import { CHUNKS_PER_SIDE, CHUNK_SIZE } from "./chunks";
 import { submit } from "./commands";

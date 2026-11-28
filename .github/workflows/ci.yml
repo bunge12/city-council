@@ -415,11 +415,14 @@ jobs:
           # 14.5 on CI. Its test limit is 26 minutes, a third of the job's.
           - { id: walkthrough-m3, project: walkthrough, timeout: 80, limit: 68, args: "--no-deps -g \"M3 walkthrough\"" }
           # The M4 walkthrough steps the new city through five game months
-          # at 4x with the clock held, and opens four more cities in contexts
-          # of their own: the copy step 6 compares with, the milestone town of
-          # steps 9 to 12, the budget town of step 13, and two reloads. Its
-          # test limit is 26 minutes, a third of the job's, as M3's is.
-          - { id: walkthrough-m4, project: walkthrough, timeout: 80, limit: 68, args: "--no-deps -g \"M4 walkthrough\"" }
+          # at 4x with the clock held, and opens three more cities in contexts
+          # of their own: the copy step 6 compares with, the budget town of
+          # step 13 and the milestone town of steps 9 to 12, and reloads two.
+          # About 7 minutes on WebGL 2 and 16.5 on software WebGPU on a 4-core
+          # container, so its two variants run on runners of their own, each
+          # with M3's limits: the test limit of 26 minutes is a third of 80.
+          - { id: walkthrough-m4-webgpu, project: walkthrough, timeout: 80, limit: 68, args: "--no-deps -g \"M4 walkthrough on WebGPU\"" }
+          - { id: walkthrough-m4-webgl, project: walkthrough, timeout: 80, limit: 68, args: "--no-deps -g \"M4 walkthrough on WebGL\"" }
     name: e2e (${{ matrix.id }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

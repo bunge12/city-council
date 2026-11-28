@@ -674,11 +674,12 @@ let overlayTownBuilt: ReturnType<typeof overlayTown> | null = null;
 /** Step 13's town, built once per worker. */
 const budgetOverlayTown = (): ReturnType<typeof overlayTown> => (overlayTownBuilt ??= overlayTown());
 
+// Each title is written out, so a CI runner's `-g` picks one variant (ci.yml, scripts/check-e2e-timeouts.mjs).
 for (const variant of [
-  { name: "webgpu", query: "" },
-  { name: "webgl", query: "?webgl" },
+  { name: "webgpu", query: "", title: "M4 walkthrough on WebGPU" },
+  { name: "webgl", query: "?webgl", title: "M4 walkthrough on WebGL" },
 ] as const) {
-  test(`M4 walkthrough (${variant.name})`, async ({ page, browser }, info) => {
+  test(variant.title, async ({ page, browser }, info) => {
     const dir = `m4-${variant.name}`;
 
     await test.step("1. start a new city: the time card in the bottom right shows the treasury at the starting grant", async () => {
@@ -790,14 +791,26 @@ for (const variant of [
 
     await test.step("5. raise the residential tax rate: the residential bar's tooltip shows tax pulling it down, and the next month's residential tax income is higher; at zero the bar rises", async () => {
       const top = ECONOMY.taxRates.residential.max;
+      // A game day's residential tax at the default rate, then one at the top: the sweep charges each home once a day,
+      // and the town barely grows in two days, so the rate is what moves it.
+      const taxSoFar = async () => (await budget(page)).month[LINE.taxResidential] ?? 0;
+      const day0 = await taxSoFar();
+      await runTicks(page, DAY);
+      const atDefault = (await taxSoFar()) - day0;
       await budgetTab(page, "taxes");
       await page.locator("#tax-residential").fill(String(top));
       await expect.poll(async () => (await budget(page)).taxRates[0]).toBe(top);
       await expect(page.locator('label[for="tax-residential"] output')).toHaveText(`${Math.round(top * 100)}%`);
       await shot(page, info, dir, "5-residential-tax-at-the-top", page.locator("#budget-panel"));
       await closeBudget(page);
+      const day1 = await taxSoFar();
+      await runTicks(page, DAY);
+      const atTop = (await taxSoFar()) - day1;
+      expect(atDefault, "a day's residential tax at the default rate").toBeGreaterThan(0);
+      // Three times the rate; a little growth in the day is allowed for.
+      expect(atTop / atDefault, `a day's residential tax at ${top * 100}% against the default`).toBeGreaterThan(2.5);
       // The bar's tax part eases in a day at a time (demand.json `dailyShare`).
-      await runTicks(page, 2 * DAY);
+      await runTicks(page, DAY);
       await page.locator("#demand-residential").hover();
       const tip = page.locator("#demand-residential [role=tooltip]");
       await expect(tip).toContainText(/Residential tax rate -\d+/);
@@ -829,7 +842,7 @@ for (const variant of [
       await page.locator("#tax-residential").fill("0.02");
       await expect.poll(async () => (await budget(page)).taxRates[0]).toBe(0.02);
       await closeBudget(page);
-      info.annotations.push({ type: "step 5", description: `residential tax ${formatMoneyShort(firstMonthResidentialTax)} in the first month, ${formatMoneyShort(higher)} at ${top * 100}%; bar ${before.toFixed(1)} then ${after.toFixed(1)} at zero, its tax part ${pullBefore} then ${pullAfter}` });
+      info.annotations.push({ type: "step 5", description: `residential tax ${formatMoneyShort(atDefault)} a day at the default and ${formatMoneyShort(atTop)} at ${top * 100}%, ${formatMoneyShort(firstMonthResidentialTax)} in the first month and ${formatMoneyShort(higher)} in the month at ${top * 100}%; bar ${before.toFixed(1)} then ${after.toFixed(1)} at zero, its tax part ${pullBefore} then ${pullAfter}` });
     });
 
     await test.step("6. raise the commercial development charge to its top: commercial building slows; at zero the commercial charge line shows nothing the next month", async () => {
@@ -839,6 +852,8 @@ for (const variant of [
       const other = await otherPage(browser, info);
       await openOn(other.page, info, copy, variant, "M4 walkthrough, default charge", SECOND_PAGE_TIMEOUT);
       expect(await tickOf(other.page)).toBe(await tickOf(page));
+      // The same city: both hash the same before the charge moves.
+      expect((await other.page.evaluate(() => window.cityCouncil.downloadCity())).hash).toBe((await page.evaluate(() => window.cityCouncil.downloadCity())).hash);
       const top = ECONOMY.developmentCharges.commercial.max;
       await budgetTab(page, "charges");
       await page.locator("#charge-commercial").fill(String(top));
@@ -880,6 +895,8 @@ for (const variant of [
       expect((await budget(page)).lastMonth[LINE.chargeCommercial], "the commercial charge line at the close: nothing added after the charge went to zero").toBe(atZero.charged);
       const before = new Set(atZero.shops);
       const builtAtZero = (await buildings(page)).filter((b) => b.zone === COMMERCIAL && !before.has(keyOf(b))).length;
+      // Shops did go up at the zero rate, so the line that did not move was tested.
+      expect(builtAtZero, "shops built after the charge went to zero").toBeGreaterThan(0);
       await runToClose(page);
       await budgetTab(page, "budget");
       expect(await ledgerRow(page, "chargeCommercial", "last")).toBe(0);
@@ -1278,6 +1295,8 @@ for (const variant of [
       const rebuilt = replayFrom(newCityStart(), fullLog, header.tick);
       const hash = hashState(rebuilt);
       expect(hash).toBe(hashState(state));
+      // And the city as it stood before the reload.
+      expect(hash).toBe(saved.hash);
       expect(rebuilt.budget.treasury).toBe(state.budget.treasury);
       info.annotations.push({ type: "replay", description: `seed ${header.seed}, ${fullLog.length} commands, tick ${header.tick}, treasury ${formatMoneyShort(state.budget.treasury)}, hash ${hash}` });
     });

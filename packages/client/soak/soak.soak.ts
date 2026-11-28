@@ -350,6 +350,8 @@ interface Money {
   upkeep: number;
   otherSpending: number;
   repayments: number;
+  /** Closes that charged the loan a repayment. */
+  repaidCloses: number;
 }
 
 /** A game month's place in time, rising month on month. */
@@ -395,7 +397,7 @@ async function soakHour(): Promise<SoakRun> {
   const startPeople = { population: scale.totals.population, pops: scale.totals.pops, buildings: scale.totals.buildings };
   const host = new SimHost(scale.state, transport, clock);
   const startLogLength = host.fullLog.length;
-  const money: Money = { loan: economy.loan, start: scale.state.budget.treasury, lowest: scale.state.budget.treasury, end: 0, closes: 0, tax: 0, charges: 0, construction: 0, compensation: 0, upkeep: 0, otherSpending: 0, repayments: 0 };
+  const money: Money = { loan: economy.loan, start: scale.state.budget.treasury, lowest: scale.state.budget.treasury, end: 0, closes: 0, tax: 0, charges: 0, construction: 0, compensation: 0, upkeep: 0, otherSpending: 0, repayments: 0, repaidCloses: 0 };
   let moneyMonth = monthKey(scale.state.tick);
   // The page asks for a snapshot as it starts; wait until it has one.
   let ready = false;
@@ -641,6 +643,7 @@ async function soakHour(): Promise<SoakRun> {
         money.upkeep += at("roadUpkeep") + at("buildingUpkeep");
         money.otherSpending += at("otherSpending");
         money.repayments += at("loanRepayments") + at("interest");
+        if (at("loanRepayments") + at("interest") > 0) money.repaidCloses++;
       }
       const sample = await ask<{ room: number; counted: number; buildings: number } | null>({ q: "room" });
       if (sample) {
@@ -880,7 +883,9 @@ describe("soak: one hour of game time at 4x", () => {
     expect(m.upkeep, "upkeep").toBeGreaterThan(0);
     expect(m.otherSpending, "the other city spending").toBeGreaterThan(0);
     expect(m.repayments, "the loan's repayments").toBeGreaterThan(0);
-    // Above zero at every sample: the sim refuses no command for money, so the soak measures the work it sends.
+    // Every close charged the loan, but perhaps the first, which closes the month it was taken in.
+    expect(m.repaidCloses, "closes that charged the loan").toBeGreaterThanOrEqual(m.closes - 1);
+    // Above zero at every sample, once a game minute, and by far more than any one command of the soak costs.
     expect(m.lowest, "the lowest treasury sampled").toBeGreaterThan(0);
     expect(m.lowest).toBeGreaterThan(-ECONOMY.overdraft);
   });
