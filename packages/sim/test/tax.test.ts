@@ -30,6 +30,8 @@ import {
 import { isMonthStart, yearDays } from "../src/calendar";
 import { buildingIdLimit } from "../src/buildings/buildings";
 import { popIndexOf } from "../src/pops/where";
+import { jobsByKind } from "../src/buildings/jobs";
+import { homesAndValue, valueOfSpace } from "../src/economy/value";
 import { holdDemand, type HeldBars } from "./demand-helper";
 import jobsJson from "./fixtures/replay/jobs.json";
 import { replayFixture, type ReplayFixture } from "./replay-helper";
@@ -112,6 +114,26 @@ describe("a building's yearly tax", () => {
   it("is nothing for a workplace", () => {
     const store = type("corner-store");
     expect(residentialTaxOf(store, 0, jobsForLot(store, 1, 1), LV, RATE)).toBe(0);
+  });
+
+  it("comes to what the floor space and its value give, worked out without making objects (issue #454)", () => {
+    for (const t of BUILDING_TYPES) {
+      for (const [w, d] of [[1, 1], [2, 3], [4, 6], [6, 6]] as const) {
+        const jobs = jobsForLot(t, w, d);
+        for (const residents of [0, 1, 4, 37, 1000]) {
+          for (const lv of [0, 13, LV, 100]) {
+            const space = floorSpaceOf(t, residents, jobs);
+            const value = valueOfSpace(space, lv);
+            const into = homesAndValue(jobsByKind(t, jobs), residents, lv, { homes: -1, total: -1, value: -1 });
+            expect(into).toEqual({ homes: space.homes, total: space.total, value });
+            for (const rate of [RATE, 0.0137]) {
+              const before = space.homes <= 0 || space.total <= 0 ? 0 : Math.max(0, Math.floor(((value * space.homes) / space.total) * rate));
+              expect(residentialTaxOf(t, residents, jobs, lv, rate)).toBe(before);
+            }
+          }
+        }
+      }
+    }
   });
 
   it("is read for a building in state at the city's rate, and is nothing for one abandoned or gone", () => {

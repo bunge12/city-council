@@ -59,9 +59,49 @@ export function valueOfSpace(space: FloorSpace, landValue: number): number {
   const v = ECONOMY.value;
   let dollars = space.homes * v.perSquareMetre.residential;
   for (const kind of JOB_KINDS) dollars += space.jobs[kind] * v.perSquareMetre[JOB_PRICE[kind]];
+  return valueOfDollars(dollars, landValue);
+}
+
+/** Floor space priced at `dollars` on land of value `landValue`, in whole dollars. */
+function valueOfDollars(dollars: number, landValue: number): number {
+  const v = ECONOMY.value;
   const ref = v.landValueReference;
   const factor = ref - v.landValueWeight * ref + v.landValueWeight * landValue;
   return Math.max(0, Math.floor((dollars * factor) / ref));
+}
+
+/** A building's homes' floor space, its whole floor space and its value: what `homesAndValue` writes. */
+export interface HomesAndValue {
+  homes: number;
+  total: number;
+  value: number;
+}
+
+/**
+ * `floorSpaceOf` and then `valueOfSpace`, the same sums in the same order,
+ * for a building with room for `residents` and jobs split `byKind`, on land
+ * of value `landValue`, written into `out`. No object is made, because the
+ * tax sweep (economy/tax.ts) calls it for every home it visits, a slice of
+ * the city every tick. When it made several objects for each home, the
+ * young-generation collections they set off landed inside the sweep's tick
+ * and took it past its share (issue #454).
+ */
+export function homesAndValue(byKind: Readonly<Record<JobKind, number>>, residents: number, landValue: number, out: HomesAndValue): HomesAndValue {
+  const per = ECONOMY.floorSpace;
+  const price = ECONOMY.value.perSquareMetre;
+  const homes = residents * per.perResident;
+  let total = homes;
+  let dollars = homes * price.residential;
+  for (let k = 0; k < JOB_KINDS.length; k++) {
+    const kind = JOB_KINDS[k] as JobKind;
+    const space = byKind[kind] * per.perJob[kind];
+    total += space;
+    dollars += space * price[JOB_PRICE[kind]];
+  }
+  out.homes = homes;
+  out.total = total;
+  out.value = valueOfDollars(dollars, landValue);
+  return out;
 }
 
 /**
