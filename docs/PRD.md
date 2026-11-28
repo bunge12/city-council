@@ -1313,7 +1313,7 @@ Changed in M3-21 (#192): 17,000 a game year is no longer a ceiling. A healthy to
 
 #### M4 exit numbers
 
-**M4 exit numbers** (issue M4-20, #395). Measured on the three scale cities of M3-20, each given money as a player's city of that size would have it (`furnishEconomy` in `packages/sim/src/scale-economy.ts`): a treasury of $20,000 a resident ($1.05B, $4.2B and $10.5B), tax rates a little above their defaults (2%, 4%, 2% and 2%), City Hall on a lot near the middle of the map, and a loan of half the city's credit on the 30-year term ($50M, $200M and $500M). Each is a command, so the city's log replays to it. The generator still funds a city at a trillion dollars to lay it out; the treasury is set once it is built. The cities hold 50,034 residents in 15,090 pops and 7,791 buildings, 200,114 in 51,113 and 29,140, and 500,296 in 94,971 and 49,940. Every figure names the machine it came from: the development container, a 4-core Intel Xeon at 2.1 GHz with no GPU, drawing in software. The sim's figures are two runs of `pnpm bench` (`packages/client/test/scale-cities.bench.ts`) on the close-out branch at 6f2b93a, the browser's one run of `e2e/scale-checkpoints.spec.ts` in the perf project. A system's worst tick is one sample of 200 and moves from run to run.
+**M4 exit numbers** (issue M4-20, #395). Measured on the three scale cities of M3-20, each given money as a player's city of that size would have it (`furnishEconomy` in `packages/sim/src/scale-economy.ts`): a treasury of $20,000 a resident ($1.05B, $4.2B and $10.5B), tax rates a little above their defaults (2%, 4%, 2% and 2%), City Hall on a lot near the middle of the map, and a loan of half the city's credit on the 30-year term ($50M, $200M and $500M). Each is a command, so the city's log replays to it. The generator still funds a city at a trillion dollars to lay it out; the treasury is set once it is built. The cities hold 50,034 residents in 15,090 pops and 7,791 buildings, 200,114 in 51,113 and 29,140, and 500,296 in 94,971 and 49,940. Every figure names the machine it came from: the development container, a 4-core Intel Xeon at 2.1 GHz with no GPU, drawing in software. The sim's figures are two runs of `pnpm bench` (`packages/client/test/scale-cities.bench.ts`) on the close-out branch at 6f2b93a, the browser's from `e2e/scale-checkpoints.spec.ts` in the perf project, one run, with two for the budget overlay, the budget panel and the opening. A system's worst tick is one sample of 200 and moves from run to run.
 
 | Measurement | 50,000 | 200,000 | 500,000 | Budget |
 | --- | --- | --- | --- | --- |
@@ -1329,13 +1329,13 @@ Changed in M3-21 (#192): 17,000 a game year is no longer a ceiling. A healthy to
 | The travel table's rebuild after one `BuildRoad`, worst tick | 16.7 to 25.4 ms | 17.2 to 25.7 ms | 18.4 to 19.8 ms. **Over** in two of six (#453) | 20 ms tick |
 | Clearing the occupied house farthest from the centre, and the occupied tower nearest it | $549K, $47.1M | $503K, $62.4M | $283K, $131.2M | none |
 | The budget overlay's figures for every block and chunk, in Node | 14.5 to 31.2 ms | 28.7 to 52.6 ms | 44.5 to 50.7 ms | aim 50 ms on the 500,000 city (M4-18) |
-| The budget overlay's figures in the page, the first time it is turned on and the second | 33.1 ms, 8.6 ms | 35.9 ms, 21.6 ms | 42.7 ms, 21.5 ms | aim 50 ms |
-| The budget panel's opening, until laid out and until painted, drawing the city stopped | PANEL50 | PANEL200 | PANEL500 | aim 100 ms (M4-15) |
+| The budget overlay's figures in the page, the first time it is turned on and the second | 33 to 37 ms, 9 to 14 ms | 36 to 49 ms, 16 to 22 ms | 43 to 49 ms, 22 ms | aim 50 ms |
+| The budget panel's opening, until laid out and until painted, drawing the city stopped | 7 to 11 ms, 12 to 18 ms | 7 to 9 ms, 9 to 24 ms | 8 ms, 9 to 11 ms | aim 100 ms (M4-15) |
 | A game day's deltas | 282 KB, the largest 3 KB | 300 KB, 3 KB | 309 KB, 3 KB | none |
 | Snapshot | 11.2 MB | 13.2 MB | 15.4 MB | none |
 | An autosave in the worker: the capture on its tick, the worst part between ticks, all parts | 4.9 to 7.3 ms, 6.0 to 6.3 ms, 33 to 34 ms | 4.1 to 4.7 ms, 4.8 to 6.2 ms, 30 to 35 ms | 4.9 to 5.3 ms, 6.3 to 7.1 ms, 30 to 36 ms | 20 ms tick, each part |
 | A save from the page, the snapshot and the write to IndexedDB, three in a row | 304, 337, 332 ms | 306, 288, 350 ms | 380, 479, 357 ms | off the tick |
-| Opening the city file, until the city is drawn and the worker has loaded it | 11.5 s | 11.5 s | 12.6 s | 30 s on the Low class |
+| Opening the city file, until the city is drawn and the worker has loaded it | 11.5 to 14.7 s | 11.5 to 14.4 s | 12.2 to 12.6 s | 30 s on the Low class |
 | The step's systems in the browser at 4x for 20 s, as the deltas carry them | 0.59 ms mean, 3.3 ms worst | 1.36 ms, 3.3 ms | 2.38 ms, 11.1 ms | 20 ms tick |
 | Tab memory in the city band at Low: the page's heap, the worker's heap, merged building meshes | 93 + 60 + 2 MB | 109 + 63 + 14 MB | 126 + 67 + 28 MB, 221 MB in all | 500 MB |
 | Frame time at Low in the street, district and city bands, software WebGL 2 | 251, 252, 182 ms | 214, 231, 191 ms | 219, 248, 216 ms | 60 fps on the reference classes, not measured |
@@ -1350,7 +1350,7 @@ Three things are over their budgets, each with an issue:
 - **The travel table's rebuild** (#453). Its worst tick, 12 to 19 ms after #363 and #367, is 17 to 26 ms again. As in #364, the travel system's own part is under 6 ms, so most of the tick is something else.
 - **The tax sweep's worst tick** (#454). `tax.tick` holds its mean to 1 ms, and the mean is 0.4 ms or less. A slice of large workplaces costs three to five times the mean, and that passed the share in three of four runs on the larger cities.
 
-The budget overlay's figures are at the aim of 50 ms on the 500,000 city in Node, 44 to 51 ms, and inside it in the page, 43 ms the first time and 22 the second. They are worked out once a game day while the overlay shows, on the main thread.
+The budget overlay's figures are at the aim of 50 ms on the 500,000 city in Node, 44 to 51 ms, and inside it in the page, 43 to 49 ms the first time and 22 ms the second. The budget panel opens in under 25 ms on every city, against an aim of 100. They are worked out once a game day while the overlay shows, on the main thread.
 
 The soak run (`pnpm soak`) on the city of 200,000 has money in it since M4-20, given the same way. Over its game hour on the development container it took in $1.48B of tax and $5.43B of development charges, paid $4.14B of compensation for the buildings it cleared, $231M for its roads and $280M of upkeep, and repaid its loan every month; its lowest treasury was $3.07B, so the overdraft refused none of its commands. It passed, with 4 steps of its 36,000 over 20 ms, inside each source's allowance.
 
