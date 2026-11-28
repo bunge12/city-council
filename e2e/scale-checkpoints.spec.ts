@@ -29,6 +29,7 @@ interface SystemTiming {
 declare const window: {
   cityCouncil: {
     mirror: { state: { tick: number } | null; stats: { timings: readonly SystemTiming[] } };
+    view: Promise<{ renderer: unknown }>;
     sendCommand(type: string, payload: unknown): { ok: boolean };
     saveNow(): Promise<{ lastSave: { tick: number } | null; saveError: string | null }>;
   };
@@ -128,25 +129,40 @@ for (const residents of SCALE_CITY_RESIDENTS) {
       await expect(page.locator("#overlay-budget")).toHaveAttribute("aria-pressed", "false");
     }
 
-    // The budget panel's opening, from the click on the treasury until the next frame paints it, as budget-panel-scale.spec.ts times it on the 500,000 city.
-    const panelMs: number[] = [];
-    for (let run = 0; run < 3; run++) {
-      panelMs.push(
-        await page.evaluate(async () => {
-          const button = document.querySelector("#treasury");
-          if (!button) throw new Error("no treasury");
-          const t0 = performance.now();
-          button.click();
-          for (let i = 0; i < 10 && !document.querySelector("#budget-ledger"); i++) await Promise.resolve();
-          if (!document.querySelector("#budget-ledger")) throw new Error("the panel did not draw");
-          await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
-          const painted = Math.round(performance.now() - t0);
-          button.click();
-          return painted;
-        }),
-      );
+    // The budget panel's opening, as budget-panel-scale.spec.ts times it on the 500,000 city: from the click on the
+    // treasury until the panel is laid out, and until the next frame paints it, with drawing the city stopped meanwhile,
+    // since in software WebGL one frame of the city is a task of its own, the map's cost and not the panel's.
+    await page.evaluate(async () => {
+      const view = await window.cityCouncil.view;
+      const r = view.renderer as unknown as { render: (...args: unknown[]) => void; kept?: (...args: unknown[]) => void };
+      r.kept = r.render;
+      r.render = () => undefined;
+    });
+    const panelMs: { laidOut: number; painted: number }[] = [];
+    for (let run = 0; run < 4; run++) {
+      const t = await page.evaluate(async () => {
+        const button = document.querySelector("#treasury");
+        if (!button) throw new Error("no treasury");
+        const t0 = performance.now();
+        button.click();
+        for (let i = 0; i < 10 && !document.querySelector("#budget-ledger"); i++) await Promise.resolve();
+        if (!document.querySelector("#budget-ledger")) throw new Error("the panel did not draw");
+        document.querySelector("#budget-panel")?.getBoundingClientRect();
+        const laidOut = Math.round((performance.now() - t0) * 10) / 10;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        const painted = Math.round((performance.now() - t0) * 10) / 10;
+        button.click();
+        return { laidOut, painted };
+      });
       await expect(page.locator("#budget-panel")).toBeHidden();
+      // The first is the page's first look at the panel's code.
+      if (run > 0) panelMs.push(t);
     }
+    await page.evaluate(async () => {
+      const view = await window.cityCouncil.view;
+      const r = view.renderer as unknown as { render: (...args: unknown[]) => void; kept?: (...args: unknown[]) => void };
+      if (r.kept) r.render = r.kept;
+    });
 
     const name = `scale city of ${label}`;
     const low: Record<string, BandReport> = await measureBands(page, testInfo, "low", bands, name);
