@@ -156,6 +156,13 @@ describe("the sliders", () => {
     expect(taxRateOfSlider(0.0149999)).toBe(0.015);
     expect(Object.is(taxRateOfSlider(-0), 0)).toBe(true);
     expect(taxRateOfSlider(0.03)).toBe(0.03);
+    expect(taxRateOfSlider(0.0165)).toBe(0.0165);
+  });
+
+  it("have every default and end of the balance file's ranges on the slider's step (M4 review, #456)", () => {
+    // A range input snaps to its step: a default off it could not be set again once the slider moved.
+    for (const s of TAX_SLIDERS) for (const v of [s.min, s.max, s.default]) expect(taxRateOfSlider(v), `${s.zone} ${v}`).toBe(v);
+    for (const s of CHARGE_SLIDERS) for (const v of [s.min, s.max, s.default]) expect(Number.isInteger(v), `${s.zone} ${v}`).toBe(true);
   });
 
   it("write rates and charges as the panel shows them", () => {

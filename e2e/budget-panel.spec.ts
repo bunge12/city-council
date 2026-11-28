@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { ECONOMY, LEDGER_LINES, formatMoneyShort } from "../packages/sim/src/index";
-import { formatRate } from "../packages/client/src/ui/budget-table";
+import { TAX_STEP, formatRate } from "../packages/client/src/ui/budget-table";
 import { openCity } from "./helpers";
 import { budgetCity } from "./money-fixtures";
 
@@ -23,6 +23,7 @@ declare const window: {
   cityCouncil: {
     mirror: { state: { budget: Budget } | null };
     advance(steps: number): Promise<number>;
+    sendCommand(type: string, payload: unknown): Promise<{ ok: boolean }>;
   };
 };
 
@@ -143,13 +144,29 @@ test("the budget panel shows the sim's ledger, moves a tax rate, and takes and r
   await expect.poll(async () => (await budget(page)).taxRates[0]).toBe(0.02);
   await expect(residential).toHaveAttribute("data-value", "0.02");
   await expect(panel.locator('label[for="tax-residential"] output')).toHaveText("2%");
+  // Another change to the rate landing in the same step as the slider's own, as another player's would:
+  // the slider shows where the sim ended, not where it was let go (M4 review, #456).
+  await residential.fill("0.025");
+  await page.evaluate(() => void window.cityCouncil.sendCommand("SetTaxRate", { zone: "residential", rate: 0.03 }));
+  await stepOnce(page);
+  await expect.poll(async () => (await budget(page)).taxRates[0]).toBe(0.03);
+  await expect(panel.locator('label[for="tax-residential"] output')).toHaveText("3%");
+  await expect(residential).toHaveValue("0.03");
+  // The default is on the slider's step, so a player can set it back (M4 review, #456).
+  const residentialDefault = ECONOMY.taxRates.residential.default;
+  await residential.fill(String(residentialDefault));
+  await stepOnce(page);
+  await expect.poll(async () => (await budget(page)).taxRates[0]).toBe(residentialDefault);
+  await expect(panel.locator('label[for="tax-residential"] output')).toHaveText(formatRate(residentialDefault));
+  await expect(residential).toHaveValue(String(residentialDefault));
   // The keyboard moves a slider a step at a time, and each step is one command.
   const commercial = page.locator("#tax-commercial");
+  const stepped = Math.round((ECONOMY.taxRates.commercial.default + TAX_STEP) / TAX_STEP) / Math.round(1 / TAX_STEP);
   await commercial.focus();
   await commercial.press("ArrowRight");
-  await expect(panel.locator('label[for="tax-commercial"] output')).toHaveText(formatRate(ECONOMY.taxRates.commercial.default + 0.001));
+  await expect(panel.locator('label[for="tax-commercial"] output')).toHaveText(formatRate(stepped));
   await stepOnce(page);
-  await expect.poll(async () => (await budget(page)).taxRates[1]).toBe(Math.round((ECONOMY.taxRates.commercial.default + 0.001) * 1000) / 1000);
+  await expect.poll(async () => (await budget(page)).taxRates[1]).toBe(stepped);
   await expect(commercial).toHaveAttribute("data-value", String((await budget(page)).taxRates[1]));
 
   await attach(page, testInfo, "budget-panel-taxes", panel);

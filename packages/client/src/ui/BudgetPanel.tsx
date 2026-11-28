@@ -328,8 +328,11 @@ function Slider({
         pending.current -= 1;
         setProblem(ok ? null : (reason ?? "Refused"));
         if (pending.current > 0 || dragging.current) return;
-        // Refused, or applied with its delta already in: show the sim's value.
-        if (!ok || Math.abs(valueRef.current - sent) < 1e-9) setDraft(null);
+        // Refused or applied, the copy already holds the delta that settled it (the mirror updates the
+        // store before it settles), so show the sim's value. It need not be the value sent: another
+        // player's change may have landed in the same delta, and the [value] effect ran while this
+        // command was still pending (M4 review, #456).
+        setDraft(null);
       };
       sendRef.current(sent).then(
         (result) => settle(result.ok, result.ok ? undefined : result.reason),
@@ -358,8 +361,16 @@ function Slider({
         aria-describedby={noteId}
         aria-valuetext={format(shown)}
         onChange={(e) => {
+          const at = Number(e.target.value);
+          // Dragged back onto the sim's value with nothing in flight: the input fires no change event
+          // on release, so nothing would clear the drag and the sim's later values would never show.
+          if (pending.current === 0 && Math.abs(at - valueRef.current) < step / 2) {
+            dragging.current = false;
+            setDraft(null);
+            return;
+          }
           dragging.current = true;
-          setDraft(Number(e.target.value));
+          setDraft(at);
         }}
       />
       <div className="budget-ends" aria-hidden="true">
