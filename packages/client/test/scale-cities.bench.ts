@@ -19,8 +19,11 @@
 // The mean step is held to the tick (`cities.step` in the sim's
 // budgets.json). A system's worst tick is one sample of 200, so it is
 // shown against that system's share of the tick from its own figure and
-// not held: the system's own bench holds it, on many runs. One over its
-// share gets an issue (M3-20).
+// not held: the system's own bench holds it, on many runs. The table
+// marks a system over when more than one of its ticks passes its share,
+// since the runner stops the thread for a few ms in most runs and one such
+// stall lands in whichever system is running (#460). One marked over gets
+// an issue (M3-20).
 
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -98,7 +101,24 @@ interface SystemTimes {
   worst: number;
   /** The tick its worst time was on. */
   worstTick: number;
+  /** How many of its ticks passed its share, 0 for a system with none. */
+  pastShare: number;
 }
+
+/**
+ * Ticks past its share a system may have and not be marked over. The
+ * runner stops the main thread for 2 to 6 ms in most runs, with no
+ * collection or compile in the tick, and the stall lands on whichever
+ * system is running, in proportion to how long it runs (#460). The soak
+ * allows runner pauses the same way (`soak.*-steps` in budgets.json).
+ */
+const STALLS_ALLOWED = 1;
+
+/** Each system's share in ms, where it has one. */
+const shareMs = (name: string): number | null => {
+  const figure = SHARES[name];
+  return figure ? budgetFigure(figure).budget : null;
+};
 
 interface CityRun {
   residents: ScaleCityResidents;
@@ -177,6 +197,7 @@ function runCity(city: Generated, ticks = TICKS): CityRun {
   collect();
 
   const systems = new Map<string, SystemTimes>();
+  const shares = new Map(Object.keys(SHARES).map((name) => [name, shareMs(name)]));
   let started = 0;
   let stepMs = 0;
   const timer: SystemTimer = {
@@ -184,8 +205,10 @@ function runCity(city: Generated, ticks = TICKS): CityRun {
     end: (name) => {
       const ms = performance.now() - started;
       stepMs += ms;
-      const s = systems.get(name) ?? { total: 0, worst: 0, worstTick: 0 };
+      const s = systems.get(name) ?? { total: 0, worst: 0, worstTick: 0, pastShare: 0 };
       s.total += ms;
+      const share = shares.get(name);
+      if (share != null && ms > share) s.pastShare++;
       if (ms > s.worst) {
         s.worst = ms;
         s.worstTick = state.tick;
@@ -561,18 +584,19 @@ function table(runs: readonly CityRun[]): string {
     row("Step, mean ms", runs.map((r) => `${round(r.stepMeanMs)}`)),
     row("Worst tick, ms", runs.map((r) => `${round(r.worstStepMs)} (tick ${r.worstStepTick})`)),
     "",
-    "Each system's mean / worst ms over the two days, and the tick of its worst, against its share of the 20 ms tick where it has one. **Over** marks a worst past its share.",
+    `Each system's mean / worst ms over the two days, and the tick of its worst, against its share of the 20 ms tick where it has one, with how many of its ticks passed the share. **Over** marks more than ${STALLS_ALLOWED} tick past its share: the runner stalls the thread for a few ms in most runs, and one stall lands in whichever system is running (#460).`,
     "",
     row("System", [...runs.map((r) => `${r.residents.toLocaleString("en")}`), "Share, ms"]),
     `|---|${runs.map(() => "---:").join("|")}|---:|`,
   ];
   for (const name of names) {
-    const share = SHARES[name] ? budgetFigure(SHARES[name]).budget : null;
+    const share = shareMs(name);
     const cells = runs.map((r) => {
       const s = r.systems.get(name);
       if (!s) return "";
-      const over = share !== null && s.worst > share ? " **over**" : "";
-      return `${round(s.total / TICKS, 3)} / ${round(s.worst)} (tick ${s.worstTick})${over}`;
+      const past = s.pastShare === 0 ? "" : `, ${s.pastShare} past`;
+      const over = s.pastShare > STALLS_ALLOWED ? " **over**" : "";
+      return `${round(s.total / TICKS, 3)} / ${round(s.worst)} (tick ${s.worstTick}${past})${over}`;
     });
     lines.push(row(name, [...cells, share === null ? "" : `${share}`]));
   }
