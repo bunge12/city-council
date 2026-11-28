@@ -431,5 +431,6 @@ export {
 export type { ConnectionBalance, ConnectionSite } from "./roads/connections";
 export { SCALE_BUILDINGS, SCALE_CITY_RESIDENTS, SCALE_PLAYER, SCALE_SEED, SCALE_SEGMENTS, SCALE_TREASURY, buildScaleCity, createScaleState, generateScaleCity, growScaleCity } from "./scale";
 export type { GeneratedScaleCity, ScaleCity, ScaleCityResidents, ScaleCityTotals, ScaleCounts, ScaleTown } from "./scale";
+export { SCALE_TAX_RATES, SCALE_TREASURY_PER_RESIDENT, furnishEconomy, placeCityHallNear, type ScaleEconomy } from "./scale-economy";
 export { BLOCK_MIN_AREA, blockById, blockIndexOf, blockOnSide, boundsBlocks, buildBlockIndex, listBlocks, sameBlocks } from "./roads/blocks";
 export type { Block, BlockIndex } from "./roads/blocks";
