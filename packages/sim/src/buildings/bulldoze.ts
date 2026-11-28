@@ -103,20 +103,24 @@ export function planBulldozeBuildings(
   const most = BUILDINGS_BALANCE.bulldozeMaxBuildings;
   if (list.length > most) return { ok: false, reason: `BulldozeBuilding takes at most ${most} buildings at once, and this names ${list.length}` };
   const b = state.buildings;
-  const ids = new Set<number>();
+  // By building id, 1 once named. Only a live building gets this far, so
+  // its id is within the rows: a list naming one twice has passed it once.
+  const named = new Uint8Array(b.flags.length);
+  const ids: number[] = [];
   for (const item of list) {
     if (!isRecord(item)) return { ok: false, reason: need };
     const { id, segment, side, place, builtAt } = item;
     if (![id, segment, side, place, builtAt].every((v) => Number.isSafeInteger(v))) return { ok: false, reason: need };
-    if (ids.has(id as number)) return { ok: false, reason: `Building ${id} is named twice` };
-    ids.add(id as number);
-    if (!isBuilding(b, id as number)) return { ok: false, reason: BUILDING_CHANGED };
     const i = id as number;
+    if (!isBuilding(b, i)) return { ok: false, reason: BUILDING_CHANGED };
+    if (named[i] === 1) return { ok: false, reason: `Building ${id} is named twice` };
+    named[i] = 1;
+    ids.push(i);
     if (b.firstSeg[i] !== segment || b.firstSide[i] !== side || b.firstPlace[i] !== place || b.builtAt[i] !== builtAt) {
       return { ok: false, reason: BUILDING_CHANGED };
     }
   }
-  const sorted = [...ids].sort((p, q) => p - q);
+  const sorted = ids.sort((p, q) => p - q);
   let residents = 0;
   for (const id of sorted) residents += people(id);
   const compensation = compensationFor(state, sorted, people, filled);

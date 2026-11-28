@@ -130,10 +130,8 @@ function emptyNear(n: number): NearCache {
   return { people: new Float64Array(n), ticks: new Float64Array(n), at: new Float64Array(n).fill(-1), x: new Float64Array(n), z: new Float64Array(n) };
 }
 
-/** Adds `by` to the records counted around the cell of `r` and its eight neighbours, dropping a count that reaches 0. */
-function countAround(grid: ExpropriationGrid, r: Expropriation, by: number): void {
-  const cx = cellOf(r.x, grid.size);
-  const cz = cellOf(r.z, grid.size);
+/** Adds `by` to the records counted around cell (cx, cz) and its eight neighbours, dropping a count that reaches 0. */
+function countAround(grid: ExpropriationGrid, cx: number, cz: number, by: number): void {
   for (let i = cx - 1; i <= cx + 1; i++) {
     for (let j = cz - 1; j <= cz + 1; j++) {
       const key = keyOf(i, j);
@@ -148,25 +146,50 @@ function countAround(grid: ExpropriationGrid, r: Expropriation, by: number): voi
   }
 }
 
-function file(grid: ExpropriationGrid, r: Expropriation): void {
-  countAround(grid, r, 1);
-  const key = recordKey(r, grid.size);
-  let cell = grid.cells.get(key);
-  if (!cell) {
-    cell = { records: [], x: [], z: [], people: [], tick: [] };
-    grid.cells.set(key, cell);
+/**
+ * Files records `from` to `to` of `list` in their cells, in list order,
+ * and counts them around each cell once a cell, not once a record: a
+ * clear of 1,000 buildings lands in a few dozen cells, and the nine
+ * look-ups of `countAround` for each record were most of filing them
+ * (#452). The counts and stamps come out as filing one at a time leaves
+ * them, since every count it adds on one version is a sum.
+ */
+function fileRecords(grid: ExpropriationGrid, list: readonly Expropriation[], from: number, to: number): void {
+  const size = grid.size;
+  // By cell key: the records filed there in this call. Records of one clear come in runs of a cell.
+  const filed = new Map<number, number>();
+  let lastKey = -1;
+  let cell: GridCell | undefined;
+  let run = 0;
+  for (let i = from; i < to; i++) {
+    const r = list[i] as Expropriation;
+    const key = recordKey(r, size);
+    if (key !== lastKey) {
+      if (run > 0) filed.set(lastKey, (filed.get(lastKey) ?? 0) + run);
+      run = 0;
+      lastKey = key;
+      cell = grid.cells.get(key);
+      if (!cell) {
+        cell = { records: [], x: [], z: [], people: [], tick: [] };
+        grid.cells.set(key, cell);
+      }
+    }
+    const c = cell as GridCell;
+    c.records.push(r);
+    c.x.push(r.x);
+    c.z.push(r.z);
+    c.people.push(r.people);
+    c.tick.push(r.tick);
+    run++;
   }
-  cell.records.push(r);
-  cell.x.push(r.x);
-  cell.z.push(r.z);
-  cell.people.push(r.people);
-  cell.tick.push(r.tick);
-  grid.count++;
+  if (run > 0) filed.set(lastKey, (filed.get(lastKey) ?? 0) + run);
+  grid.count += to - from;
+  for (const [key, n] of filed) countAround(grid, Math.floor(key / SPAN) - OFFSET, (key % SPAN) - OFFSET, n);
 }
 
 function buildGrid(list: readonly Expropriation[], size: number): ExpropriationGrid {
   const grid: ExpropriationGrid = { list, size, cells: new Map(), count: 0, version: 1, around: new Map(), near: emptyNear(0) };
-  for (const r of list) file(grid, r);
+  fileRecords(grid, list, 0, list.length);
   return grid;
 }
 
@@ -196,9 +219,9 @@ function keepUp(grid: ExpropriationGrid, now: readonly Expropriation[]): boolean
     cell.people.shift();
     cell.tick.shift();
     grid.count--;
-    countAround(grid, r, -1);
+    countAround(grid, cellOf(r.x, grid.size), cellOf(r.z, grid.size), -1);
   }
-  for (let i = kept; i < now.length; i++) file(grid, now[i] as Expropriation);
+  fileRecords(grid, now, kept, now.length);
   grid.list = now;
   return true;
 }
