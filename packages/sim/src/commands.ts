@@ -7,6 +7,7 @@ import {
   previewBuildRoadGrid,
   previewBulldozeRoad,
   previewUpgradeRoad,
+  type RoadPreview,
 } from "./buildings/bulldoze";
 import { moveMoney } from "./economy/budget";
 import { chargePayload, setDevelopmentCharge } from "./economy/charges";
@@ -134,6 +135,37 @@ function undoable(state: SimState, command: Command, price: number, took: number
   if (price !== 0) moveMoney(state, undoLine(command.type), price);
 }
 
+/** A road command's preview: its plan, what it clears and why the treasury cannot pay, or why it cannot apply at all. */
+type PreviewOf<P> = (state: SimState, payload: unknown) => RoadPreview<P> | { ok: false; reason: string };
+
+/**
+ * A road command checked and applied from one preview, `preview`, whose
+ * plan `build` carries out: the clears charged, then the road built with
+ * the journal open (`undoable`). A new road's or a wider one's preview
+ * rehearses the build to find the buildings on its ground, which on the
+ * scale cities is 2.5 to 5 ms, so the step previews once, through
+ * `applyIfValid`, rather than once in `validate` and again in `apply`
+ * (#453). Nothing changes between the two, so both give the same preview.
+ */
+function roadCommand<P extends { cost: number }>(preview: PreviewOf<P>, build: (state: SimState, plan: P) => void): CommandDef {
+  const applyIfValid = (state: SimState, command: Command): string | null => {
+    const p = preview(state, command.payload);
+    if (!p.ok) return p.reason;
+    if (p.refusal !== null) return p.refusal;
+    chargeClears(state, command.playerId, p.clears);
+    undoable(state, command, p.plan.cost, p.clears.ids.length, () => build(state, p.plan));
+    return null;
+  };
+  return {
+    validate: (state, command) => {
+      const p = preview(state, command.payload);
+      return p.ok ? p.refusal : p.reason;
+    },
+    apply: (state, command) => void applyIfValid(state, command),
+    applyIfValid,
+  };
+}
+
 /**
  * A road from `payload.from` to `payload.to` of road type `payload.type`,
  * straight or, with `payload.control`, one quadratic curve through it. See
@@ -143,19 +175,7 @@ function undoable(state: SimState, command: Command, price: number, took: number
  * buildings it clears on the compensation line, and it is refused when the
  * treasury cannot pay both (`previewBuildRoad`, economy/spend.ts).
  */
-const BuildRoad: CommandDef = {
-  validate: (state, command) => {
-    const preview = previewBuildRoad(state, command.payload);
-    return preview.ok ? preview.refusal : preview.reason;
-  },
-  apply: (state, command) => {
-    const terrain = terrainOf(state.seed);
-    const preview = previewBuildRoad(state, command.payload);
-    if (!preview.ok) return;
-    chargeClears(state, command.playerId, preview.clears);
-    undoable(state, command, preview.plan.cost, preview.clears.ids.length, () => buildRoad(state.roads, terrain, preview.plan));
-  },
-};
+const BuildRoad = roadCommand(previewBuildRoad, (state, plan) => buildRoad(state.roads, terrainOf(state.seed), plan));
 
 /**
  * A whole street grid: the rectangle from `payload.origin` along to
@@ -202,18 +222,7 @@ function buildGrid(state: SimState, command: Command): string | null {
  * demolition line; a bulldoze whose refund is the larger pays in. The
  * buildings on the road's cells go with it, at their compensation.
  */
-const BulldozeRoad: CommandDef = {
-  validate: (state, command) => {
-    const preview = previewBulldozeRoad(state, command.payload);
-    return preview.ok ? preview.refusal : preview.reason;
-  },
-  apply: (state, command) => {
-    const preview = previewBulldozeRoad(state, command.payload);
-    if (!preview.ok) return;
-    chargeClears(state, command.playerId, preview.clears);
-    undoable(state, command, preview.plan.cost, preview.clears.ids.length, () => bulldozeRoad(state.roads, terrainOf(state.seed), preview.plan));
-  },
-};
+const BulldozeRoad = roadCommand(previewBulldozeRoad, (state, plan) => bulldozeRoad(state.roads, terrainOf(state.seed), plan));
 
 /**
  * Changes the segments in `payload.segments` to road type `payload.type` in
@@ -221,19 +230,7 @@ const BulldozeRoad: CommandDef = {
  * plan's cost goes on the construction line, and the compensation for the
  * buildings a wider road takes on the compensation line.
  */
-const UpgradeRoad: CommandDef = {
-  validate: (state, command) => {
-    const preview = previewUpgradeRoad(state, command.payload);
-    return preview.ok ? preview.refusal : preview.reason;
-  },
-  apply: (state, command) => {
-    const terrain = terrainOf(state.seed);
-    const preview = previewUpgradeRoad(state, command.payload);
-    if (!preview.ok) return;
-    chargeClears(state, command.playerId, preview.clears);
-    undoable(state, command, preview.plan.cost, preview.clears.ids.length, () => upgradeRoad(state.roads, terrain, preview.plan));
-  },
-};
+const UpgradeRoad = roadCommand(previewUpgradeRoad, (state, plan) => upgradeRoad(state.roads, terrainOf(state.seed), plan));
 
 /**
  * Takes back the sender's newest road or zoning command that has not been

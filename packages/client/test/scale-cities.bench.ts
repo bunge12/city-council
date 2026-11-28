@@ -277,6 +277,8 @@ interface Checkpoints {
   travelTotalMs: number;
   travelWorstMs: number;
   travelWorstStepMs: number;
+  /** Which step of the rebuild the worst tick was, the step that applies the command being 0, and its slowest system (#453). */
+  travelWorstWhere: string;
 }
 
 /** A street a quarter of the way into a row of one of the city's grids, crossing several of its streets. */
@@ -329,6 +331,13 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
   };
   const systemMs = (t: { system: string; ms: number }[], name: string): number => t.filter((x) => x.system === name).reduce((n, x) => n + x.ms, 0);
 
+  /** Where a tick's time went: its slowest system and all it stepped. */
+  const where = (t: { timings: { system: string; ms: number }[] }): string => {
+    const top = [...t.timings].sort((p, q) => q.ms - p.ms)[0];
+    const stepped = t.timings.reduce((n, x) => n + x.ms, 0);
+    return `${top?.system ?? "-"} ${round(top?.ms ?? 0)} ms of ${round(stepped)} ms stepped`;
+  };
+
   // A game day as the worker runs it, after a tick that compiles the host's code.
   tick();
   deltaBytes = 0;
@@ -342,9 +351,7 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
     workerTotal += t.ms;
     if (t.ms > workerWorst) {
       workerWorst = t.ms;
-      const top = [...t.timings].sort((p, q) => q.ms - p.ms)[0];
-      const stepped = t.timings.reduce((n, x) => n + x.ms, 0);
-      workerWorstWhere = `tick ${at}: ${top?.system ?? "-"} ${round(top?.ms ?? 0)} ms of ${round(stepped)} ms stepped`;
+      workerWorstWhere = `tick ${at}: ${where(t)}`;
     }
   }
   const dayDeltaBytes = deltaBytes;
@@ -449,13 +456,17 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
   let travelTotalMs = 0;
   let travelWorstMs = 0;
   let travelWorstStepMs = 0;
+  let travelWorstWhere = "";
   do {
     const t = tick();
     const ms = systemMs(t.timings, TRAVEL_SYSTEM);
-    travelSteps++;
     travelTotalMs += ms;
     travelWorstMs = Math.max(travelWorstMs, ms);
-    travelWorstStepMs = Math.max(travelWorstStepMs, t.ms);
+    if (t.ms > travelWorstStepMs) {
+      travelWorstStepMs = t.ms;
+      travelWorstWhere = `step ${travelSteps}: ${where(t)}`;
+    }
+    travelSteps++;
   } while (!travelTimesReady(state));
 
   return {
@@ -487,6 +498,7 @@ function checkpoints(city: Generated, grids: ScaleCity["grids"]): Checkpoints {
     travelTotalMs,
     travelWorstMs,
     travelWorstStepMs,
+    travelWorstWhere,
   };
 }
 
@@ -526,6 +538,7 @@ function checkpointTable(rows: readonly Checkpoints[]): string {
     row("Travel rebuild: all steps, ms", rows.map((r) => ms(r.travelTotalMs))),
     row("Travel rebuild: worst step's travel, ms", rows.map((r) => ms(r.travelWorstMs))),
     row("Travel rebuild: worst tick, ms", rows.map((r) => ms(r.travelWorstStepMs))),
+    row("Travel rebuild: the worst tick's step, 0 the one that applies the BuildRoad, and its slowest system", rows.map((r) => r.travelWorstWhere)),
   ].join("\n")}\n`;
 }
 
