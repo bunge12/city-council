@@ -49,7 +49,7 @@
 import { TIME_BALANCE, yearDays } from "../calendar";
 import { BUILDING_TYPES, type BuildingType } from "../buildings/balance";
 import { BUILDING_ABANDONED, BUILDING_ALIVE, BUILDING_LANDMARK } from "../buildings/buildings";
-import { lotJobs } from "../buildings/jobs";
+import { jobsByKind, lotJobs, type JobsByKind } from "../buildings/jobs";
 import { DEMAND_BALANCE } from "../demand/balance";
 import { spendingPower } from "../demand/demand";
 import { buildingValues } from "../landvalue/land-value";
@@ -61,7 +61,7 @@ import { kindsOf, type StatTotals } from "../stats/stats";
 import type { System } from "../step";
 import { ECONOMY, ECONOMY_SLIDERS } from "./balance";
 import { TAX_LINES, dailyShare, moveMoney } from "./budget";
-import { floorSpaceOf, valueOfSpace } from "./value";
+import { homesAndValue, type HomesAndValue } from "./value";
 
 /** Each rate's place in `BudgetState.taxRates`. */
 const RESIDENTIAL = ECONOMY_SLIDERS.indexOf("residential");
@@ -96,10 +96,16 @@ export interface BusinessTaxTerms {
  * is homes. 0 for a building with no homes.
  */
 export function residentialTaxOf(type: Pick<BuildingType, "zone" | "density">, residents: number, jobs: number, landValue: number, rate: number): number {
-  const space = floorSpaceOf(type, residents, jobs);
+  return residentialTaxOfKinds(jobsByKind(type, jobs), residents, landValue, rate);
+}
+
+const space: HomesAndValue = { homes: 0, total: 0, value: 0 };
+
+/** `residentialTaxOf` with the building's jobs already split by kind, making no object, for the sweep (issue #454). */
+function residentialTaxOfKinds(byKind: Readonly<JobsByKind>, residents: number, landValue: number, rate: number): number {
+  homesAndValue(byKind, residents, landValue, space);
   if (space.homes <= 0 || space.total <= 0) return 0;
-  const value = valueOfSpace(space, landValue);
-  return Math.max(0, Math.floor(((value * space.homes) / space.total) * rate));
+  return Math.max(0, Math.floor(((space.value * space.homes) / space.total) * rate));
 }
 
 /**
@@ -213,7 +219,8 @@ export function yearlyTaxDue(
     terms.reachesOutside = roadReaches(state, reach, id);
     businessTaxOf(type, kindsOf(b.type[id] ?? 0, workers) ?? NO_JOBS, terms, out);
   }
-  if (land !== null) out[RESIDENTIAL] = residentialTaxOf(type, b.residents[id] ?? 0, lotJobs(b, id), land, terms.rates[RESIDENTIAL] ?? 0);
+  // The split of its jobs by kind from the cache stats keeps, so the visit makes no object (issue #454).
+  if (land !== null) out[RESIDENTIAL] = residentialTaxOfKinds(kindsOf(b.type[id] ?? 0, lotJobs(b, id)) ?? NO_JOBS, b.residents[id] ?? 0, land, terms.rates[RESIDENTIAL] ?? 0);
   return out;
 }
 
@@ -228,7 +235,9 @@ const sweepTerms: BusinessTaxTerms = { rates: [], salesScale: 1, reachesOutside:
 /**
  * The tax system's work for one tick: each building of the day's slice
  * pays the day's share of its yearly tax, line by line: residential tax if
- * people live in it, business tax if people work in it.
+ * people live in it, business tax if people work in it. A visit makes no
+ * object: a young-generation collection starts on an allocation, and one set
+ * off inside the sweep's tick took 2 ms, twice the sweep's share (issue #454).
  */
 export function collectTax(state: SimState): void {
   const perDay = TIME_BALANCE.ticksPerDay;

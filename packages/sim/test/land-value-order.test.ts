@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BUILDING_ALIVE,
   BUILDING_TYPES,
   CONNECTION_BALANCE,
   DEMAND_BALANCE,
@@ -378,6 +379,31 @@ describe("land value orders the lots", () => {
       expect(setAsideCount(loaded)).toBe(tried);
       runDays(state, 1);
       expect(hashState(loaded)).toBe(hashState(state));
+    });
+  });
+
+  it("works out every building's value at load when the host prepares a loaded city, the same values, and grows the same (issue #454)", () => {
+    const l = layout();
+    zoneFactories(l);
+    zoneWaterStrip(l);
+    zoneFactoryStrip(l);
+    holdDemand({ residential: 100, industrial: 100, commercial: -1, office: -1 }, () => {
+      runDays(l.state, 8);
+      const ids = [...Array(l.state.buildings.flags.length).keys()].filter((id) => ((l.state.buildings.flags[id] ?? 0) & BUILDING_ALIVE) !== 0);
+      expect(ids.length).toBeGreaterThan(10);
+      const bytes = serialize(l.state);
+      const loaded = deserialize(bytes).state;
+      prepareDerived(loaded);
+      const { value, water } = lotCentres(loaded);
+      const placed = ids.filter((id) => (water[id] ?? -1) >= 0);
+      expect(placed.length).toBeGreaterThan(10);
+      for (const id of placed) expect(value[id], `building ${id}`).toBeGreaterThanOrEqual(0);
+      const fresh = deserialize(bytes).state;
+      expect([...buildingValues(loaded, ids)]).toEqual([...buildingValues(fresh, ids)]);
+      expect([...buildingValues(loaded, ids)]).toEqual([...buildingValues(l.state, ids)]);
+      runDays(loaded, 2);
+      runDays(l.state, 2);
+      expect(hashState(loaded)).toBe(hashState(l.state));
     });
   });
 
