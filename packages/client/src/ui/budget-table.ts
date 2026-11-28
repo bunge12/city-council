@@ -130,8 +130,13 @@ export function formatCharge(rate: number): string {
   return `$${rate.toLocaleString("en-US")}/m²`;
 }
 
-/** The step of a tax slider: a tenth of a percent. */
-export const TAX_STEP = 0.001;
+/**
+ * The step of a tax slider: a twentieth of a percent, so every default in
+ * economy.json lies on it (the residential default is 1.65% since M4-19).
+ * A range input snaps its value to its step, so a default off the step
+ * could never be set again once the slider moved (M4 review, #456).
+ */
+export const TAX_STEP = 0.0005;
 
 /** A tax slider's value as a rate the sim takes, on the slider's step, clear of float noise. */
 export function taxRateOfSlider(value: number): number {

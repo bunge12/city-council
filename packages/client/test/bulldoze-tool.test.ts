@@ -341,7 +341,7 @@ describe("BulldozeToolController", () => {
     const was = BUILDINGS_BALANCE.bulldozeMaxBuildings;
     BUILDINGS_BALANCE.bulldozeMaxBuildings = 1;
     try {
-      const { tool, apply, copy, sim } = setup(houseCity());
+      const { tool, apply, copy, sim, sent, ui } = setup(houseCity());
       tool.toggle();
       const lived = housesWestToEast(copy()).filter((id) => popsIn(sim, id) > 0);
       const [a, b] = lived;
@@ -358,7 +358,16 @@ describe("BulldozeToolController", () => {
       expect(both?.ok).toBe(true);
       expect(available(copy())).toBeGreaterThan(one.cost);
       expect(both?.refusal).toBe(costsReason(both?.cost ?? 0, available(copy())));
-      tool.dragCancel();
+      // Let go, it sends nothing: each part alone would apply, and the drag would stop part way, its
+      // first owners paid (M4 review, #456).
+      const standing = liveBuildings(copy());
+      const treasury = copy().budget.treasury;
+      tool.dragEnd();
+      await apply();
+      expect(sent).toEqual([]);
+      expect(ui().bulldozeNote).toBe(both?.refusal);
+      expect(liveBuildings(copy())).toEqual(standing);
+      expect(copy().budget.treasury).toBe(treasury);
     } finally {
       BUILDINGS_BALANCE.bulldozeMaxBuildings = was;
     }

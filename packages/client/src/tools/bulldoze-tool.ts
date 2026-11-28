@@ -105,7 +105,7 @@ export interface BulldozePreview {
   /** For roads, their demolition and the refund it pays back, from the road's plan (M4-03). Zero for buildings. */
   demolition: number;
   refund: number;
-  /** Why the treasury cannot pay `cost`, as the sim would refuse it, or null. A click is still sent, so the sim's "rejected" cue plays. */
+  /** Why the treasury cannot pay `cost`, as the sim would refuse it, or null. A click of one command is still sent, so the sim's "rejected" cue plays; a split drag sends nothing. */
   refusal: string | null;
   /**
    * A drag over more than `bulldozeMaxBuildings` buildings, sent as several
@@ -484,6 +484,13 @@ export class BulldozeToolController {
   private sendIfOk(preview: BulldozePreview): void {
     if (!preview.ok) {
       this.host.set({ bulldozeNote: preview.reason });
+      return;
+    }
+    // A drag split into several commands is checked against the treasury one part at a time when they
+    // apply, so a drag it cannot pay for would clear its first parts, pay their owners and stop part way.
+    // So it sends none and shows why; a drag of one command is still sent, for the sim to refuse (M4 review, #456).
+    if (preview.split && preview.refusal) {
+      this.host.set({ bulldozeNote: preview.refusal });
       return;
     }
     const pending: PendingBulldoze = { id: this.nextId++, preview };

@@ -13,8 +13,10 @@ import {
   ZONING_BALANCE,
   areaBudget,
   blockBudgets,
+  buildingPeople,
   budgetAreasOfSlots,
   cellAt,
+  compensationFor,
   deserialize,
   floorSpaceOf,
   formatMoneyShort,
@@ -22,6 +24,7 @@ import {
   generateTerrain,
   hashState,
   heightAt,
+  jobsFilled,
   replayFrom,
   serialize,
   unlockMilestone,
@@ -1124,7 +1127,8 @@ for (const variant of [
         const c = m.cellAt(x, z);
         return c ? (m.state?.cells["zone"]?.[c.index] ?? -1) : -1;
       }, [mid.x, mid.z] as const);
-      expect(cellZone, "the zone of the cell under City Hall's middle, or -1 for no cell").toBeLessThanOrEqual(0);
+      // A cell, unzoned: -1 would be no cell at all, which would prove nothing (M4 review, #456; as city-hall.spec.ts holds it).
+      expect(cellZone, "the zone of the cell under City Hall's middle, or -1 for no cell").toBe(0);
       await noTool(tp);
       // A game day on, its upkeep is on the budget's building upkeep line.
       await runTicks(tp, DAY, 10);
@@ -1156,7 +1160,19 @@ for (const variant of [
       await shot(tp, info, dir, "11-occupied-house-tag");
       // Its pops and their satisfaction, from the city as the menu downloads it: pop rows do not travel in deltas, so the page's copy of them is its last snapshot's (pops/delta.ts).
       const popsOf = async (name: string) => deserialize(await download(tp, info, name)).state.pops;
-      const was = await popsOf("step-11-before");
+      const city = deserialize(await download(tp, info, "step-11-before")).state;
+      const was = city.pops;
+      // Each part is the sim's own price for the house, worked out on the city as the tag saw it, paused (M4 review, #456).
+      const priced = compensationFor(city, [house], (id) => buildingPeople(city, id), (id) => jobsFilled(city, id));
+      expect(priced.value, "value").toBeGreaterThan(0);
+      expect(priced.relocation, "relocation").toBeGreaterThan(0);
+      expect(priced.premium, "premium").toBeGreaterThan(0);
+      expect(lines).toEqual([
+        { line: "value", amount: priced.value },
+        { line: "relocation", amount: priced.relocation },
+        { line: "premium", amount: priced.premium },
+        { line: "total", amount: priced.total },
+      ]);
       const moved: { pop: number; satisfaction: number }[] = [];
       for (let i = 0; i < was.home.length; i++) if ((was.size[i] ?? 0) > 0 && was.home[i] === house) moved.push({ pop: i, satisfaction: was.satisfaction[i] ?? 0 });
       expect(await bulldozerOn(tp, [house]), "the bulldozer back on the house").toBe(house);
