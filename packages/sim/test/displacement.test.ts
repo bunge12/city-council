@@ -416,6 +416,34 @@ describe("clearing a block (scenario test)", () => {
     });
   });
 
+  it("counts the records around each cell as a count record by record does, for a clear filed at once and for one kept up with (#452)", () => {
+    const state = createState(SEED);
+    const size = D.radius;
+    // Each cell's records and its eight neighbours', counted one record at a time.
+    const counted = (list: readonly Expropriation[]): [number, number][] => {
+      const around = new Map<number, number>();
+      for (const r of list) {
+        const cx = Math.floor(r.x / size);
+        const cz = Math.floor(r.z / size);
+        for (let i = cx - 1; i <= cx + 1; i++) for (let j = cz - 1; j <= cz + 1; j++) {
+          const key = (i + (1 << 14)) * (1 << 15) + (j + (1 << 14));
+          around.set(key, (around.get(key) ?? 0) + 1);
+        }
+      }
+      return [...around.entries()].sort((a, b) => a[0] - b[0]);
+    };
+    const at = (tick: number, x: number, z: number): Expropriation => ({ tick, x, z, people: 3, jobs: 0, playerId: "p1" });
+    // Runs of one cell, a cell met again after another, cells either side of 0 and two cells apart.
+    const first = [at(0, 10, 10), at(0, 20, 15), at(0, 3 * size + 1, 10), at(0, 10, 12), at(0, -5, -5), at(0, -size - 1, 2 * size), at(0, 3 * size + 2, 11)];
+    state.expropriations = first;
+    expect(expropriationGridAround(expropriationGridOf(state))).toEqual(counted(first));
+    // Three drop from the head and a clear of four lands, two of them where a dropped one was.
+    const later = [...first.slice(3), at(1, 10, 10), at(1, 11, 10), at(1, 5 * size, -size), at(1, 20, 15)];
+    state.expropriations = later;
+    expect(expropriationGridAround(expropriationGridOf(state))).toEqual(counted(later));
+    expect(expropriationGridCells(expropriationGridOf(state))).toEqual(expropriationGridCells(expropriationGridOf(cloneState(state))));
+  });
+
   it("replays to the same state hash", () => {
     noTurnover(() => {
       const { state, houses } = fresh();

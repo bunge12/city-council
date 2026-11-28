@@ -42,7 +42,7 @@
 import { BUILDING_TYPES } from "../buildings/balance";
 import { isBuilding, isLandmark, type BuildingState } from "../buildings/buildings";
 import { landmarkClearing } from "../buildings/landmarks";
-import { noteBuildingChanged } from "../buildings/changes";
+import { noteBuildingsChanged } from "../buildings/changes";
 import { lotJobs } from "../buildings/jobs";
 import { lotCentres } from "../buildings/where";
 import { TIME_BALANCE, yearDays } from "../calendar";
@@ -180,18 +180,26 @@ export function chargeCompensation(state: SimState, playerId: string, ids: reado
   if (compensation.total - owned !== 0) moveMoney(state, "compensation", compensation.total - owned);
   if (owned !== 0) moveMoney(state, "demolition", owned);
   const b = state.buildings;
-  const sorted = [...ids].sort((p, q) => p - q);
+  // The commands' plans hand the ids over ascending already (#452).
+  const sorted = isAscending(ids) ? ids : [...ids].sort((p, q) => p - q);
   const added: Expropriation[] = [];
+  const marked: number[] = [];
   const centres = compensation.occupied > 0 ? lotCentres(state) : null;
   for (const id of sorted) {
     if (!isBuilding(b, id) || (b.paid[id] ?? 0) !== 0) continue;
     b.paid[id] = 1;
-    noteBuildingChanged(b, id);
+    marked.push(id);
     const residents = people(id);
     const jobs = filled(id);
     if (centres && (residents > 0 || jobs > 0)) added.push({ tick: state.tick, x: centres.x[id] ?? 0, z: centres.z[id] ?? 0, people: residents, jobs, playerId });
   }
-  if (added.length > 0) keepExpropriations(state, [...state.expropriations, ...added]);
+  noteBuildingsChanged(b, marked);
+  if (added.length > 0) keepExpropriations(state, state.expropriations.concat(added));
+}
+
+function isAscending(ids: readonly number[]): boolean {
+  for (let i = 1; i < ids.length; i++) if ((ids[i] as number) <= (ids[i - 1] as number)) return false;
+  return true;
 }
 
 /** Sets the list to `list`, less what is past the cap, the oldest first. Replaced, never changed in place. */
