@@ -201,6 +201,20 @@ export function buildingValues(state: SimState, ids: readonly number[], into?: F
   return out;
 }
 
+/**
+ * Works out and keeps the land value of every live building, so a host's
+ * load pays for them and not the first game day after it. A load starts
+ * with none kept, and the tax sweep's ticks each worked out their whole
+ * slice afresh that day: on the scale city of 500,000 the first was its
+ * heaviest tick (issue #454). Derived: it changes no state.
+ */
+export function prepareLandValues(state: SimState): void {
+  const b = state.buildings;
+  const ids: number[] = [];
+  for (let id = 0; id < b.flags.length; id++) if (isBuilding(b, id)) ids.push(id);
+  if (ids.length > 0) buildingValues(state, ids);
+}
+
 /** The land value of building `id`, as `buildingValues` gives it. */
 export function buildingValue(state: SimState, id: number): number {
   return buildingValues(state, [id])[0] ?? 0;

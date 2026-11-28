@@ -27,6 +27,7 @@ import type { SimState } from "./state";
 import { prepareTravelTimes } from "./travel-times";
 import { terrainOf } from "./terrain/cache";
 import { prepareWaterMap } from "./landvalue/water";
+import { prepareLandValues } from "./landvalue/land-value";
 import { cellsLaidOut, reserveCellSpare, syncCells } from "./zoning/cell-index";
 import { reserveRoadRoom } from "./roads/network";
 import { roadUpkeepPerYear } from "./economy/upkeep";
@@ -68,6 +69,7 @@ export function prepareDerived(state: SimState, onStage: (stage: DerivedStage) =
   prepareBuildingIndex(state);
   prepareWaterMap(terrainOf(state.seed));
   pollutionGrid(state);
+  prepareLandValues(state);
   prepareCandidates(state, index, () => segmentBuildings(state));
   popIndexOf(state);
   expropriationGridOf(state);
