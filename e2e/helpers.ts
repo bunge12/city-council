@@ -20,6 +20,7 @@ declare const window: {
     view: Promise<{ flush?: () => void }>;
     mirror?: { state: { tick: number; seed: number } | null };
     loading?: () => unknown;
+    readSteps?: () => unknown;
   };
 };
 declare const document: {
@@ -39,6 +40,9 @@ export function withFlush(url: string): string {
   const rest = query.split("&").filter((p) => p !== "" && p !== "flush");
   return `${path}?${["flush", ...rest].join("&")}`;
 }
+
+/** What became of the city file `openCity` last served each page: when Playwright was asked for it and answered (#450). */
+const fixtureNotes = new WeakMap<Page, string[]>();
 
 /** Errors and console errors each page has had since `watchErrors` was first called on it, the last few. */
 const pageErrors = new WeakMap<Page, string[]>();
@@ -63,7 +67,8 @@ function watchErrors(page: Page): void {
  * What the page says about its load: the body's data flags (the loading
  * stages it passed, whether the worker reported on saves, whether the city
  * is open in another tab, buildings pending), the save status, the mirror's
- * tick and the errors it had. For a `ready` that timed out, so the CI log
+ * tick, the steps of reading the save, whether the fixture was served,
+ * and the errors it had. For a `ready` that timed out, so the CI log
  * shows where the load stopped without the trace, which the artifact store
  * may not let a session download (issues #432 and #447). A page whose main
  * thread is stuck cannot answer, and says so after a few seconds.
@@ -79,9 +84,10 @@ export async function loadReport(page: Page): Promise<string> {
         saves: status,
         mirror: council?.mirror?.state ? { tick: council.mirror.state.tick, seed: council.mirror.state.seed } : null,
         loading: council?.loading?.() ?? null,
+        readSteps: council?.readSteps?.() ?? null,
       };
     })
-    .then((found) => JSON.stringify(found))
+    .then((found) => JSON.stringify({ ...found, fixture: fixtureNotes.get(page) ?? null }))
     .catch((error: unknown) => `the page could not be asked (${error instanceof Error ? error.message : String(error)})`);
   const stuck = new Promise<string>((resolve) => {
     const timer = setTimeout(() => resolve("the page did not answer within 10 s, so its main thread is stuck"), 10_000);
@@ -164,7 +170,24 @@ export async function openCity(page: Page, city: SimState | Uint8Array, options:
   const bytes = city instanceof Uint8Array ? city : serialize(city);
   // Relative to the page, so it works under a base path such as GitHub Pages'.
   const address = `e2e-fixture/${++served}/${encodeURIComponent(name)}.city`;
-  await page.route(`**/${address}`, (route) => route.fulfill({ body: Buffer.from(bytes), contentType: "application/octet-stream" }), { times: 1 });
+  const answers: string[] = [];
+  fixtureNotes.set(page, answers);
+  const started = Date.now();
+  const note = (what: string) => answers.push(`${what} at ${Date.now() - started} ms`);
+  await page.route(
+    `**/${address}`,
+    async (route) => {
+      note(`${bytes.byteLength} bytes asked for`);
+      try {
+        await route.fulfill({ body: Buffer.from(bytes), contentType: "application/octet-stream" });
+        note("answered");
+      } catch (error) {
+        note(`not answered (${error instanceof Error ? error.message : String(error)})`);
+        throw error;
+      }
+    },
+    { times: 1 },
+  );
   const flags = query.replace(/^\/?\??/, "");
   watchErrors(page);
   await page.goto(withFlush(`./?${flags ? `${flags}&` : ""}load=${encodeURIComponent(address)}`));

@@ -238,6 +238,21 @@ describe("SaveClient", () => {
     saves.worker.send({ channel: SAVES_CHANNEL, type: "loading", stage: "nonsense", requestId: null } as unknown as FromSaver);
     expect(stages).toEqual([...DERIVED_STAGES]);
   });
+
+  it("hands each step of reading the save to its listeners, and takes none for a status or a stage (#450)", () => {
+    const saves = pair<FromSaver>();
+    const client = new SaveClient(saves.page);
+    const steps: string[] = [];
+    const stages: string[] = [];
+    client.onReading((step) => steps.push(step));
+    client.onLoading((stage) => stages.push(stage));
+    saves.worker.send({ channel: SAVES_CHANNEL, type: "reading", step: "store opened", requestId: null });
+    saves.worker.send({ channel: SAVES_CHANNEL, type: "reading", step: 3, requestId: null } as unknown as FromSaver);
+    saves.worker.send({ channel: SAVES_CHANNEL, type: "reading", step: "lock held", requestId: null });
+    expect(steps).toEqual(["store opened", "lock held"]);
+    expect(stages).toEqual([]);
+    expect(client.status).toBeNull();
+  });
 });
 
 /** A host and saver wired as the worker wires them, with a fake clock. */

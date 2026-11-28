@@ -185,12 +185,23 @@ export interface LoadingMessage {
   requestId: null;
 }
 
+/**
+ * Worker to page: a step of reading the save before `opening`, for the
+ * report a stalled e2e load prints (#450). Nothing on the page acts on it.
+ */
+export interface ReadingMessage {
+  channel: typeof SAVES_CHANNEL;
+  type: "reading";
+  step: string;
+  requestId: null;
+}
+
 /** True for a stage `prepareDerived` names. */
 export function isDerivedStage(stage: unknown): stage is DerivedStage {
   return (DERIVED_STAGES as readonly unknown[]).includes(stage);
 }
 
-export type FromSaver = StatusMessage | ExportReply | ImportReply | SwitchReply | OpeningMessage | LoadingMessage;
+export type FromSaver = StatusMessage | ExportReply | ImportReply | SwitchReply | OpeningMessage | LoadingMessage | ReadingMessage;
 
 export type PageSaveTransport = SimTransport<ToSaver | LoadFileMessage, FromSaver>;
 export type WorkerSaveTransport = SimTransport<FromSaver, unknown>;

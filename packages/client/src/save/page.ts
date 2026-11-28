@@ -19,6 +19,7 @@ import {
 type Listener = (status: SaveStatus) => void;
 type OpeningListener = (seed: number, saved: boolean) => void;
 type LoadingListener = (stage: DerivedStage) => void;
+type ReadingListener = (step: string) => void;
 
 export class SaveClient {
   private readonly transport: PageSaveTransport;
@@ -28,6 +29,7 @@ export class SaveClient {
   private readonly listeners = new Set<Listener>();
   private readonly openingListeners = new Set<OpeningListener>();
   private readonly loadingListeners = new Set<LoadingListener>();
+  private readonly readingListeners = new Set<ReadingListener>();
 
   constructor(transport: PageSaveTransport) {
     this.transport = transport;
@@ -38,6 +40,7 @@ export class SaveClient {
       }
       if (message.type === "opening") for (const listener of this.openingListeners) listener(message.seed, message.saved === true);
       if (message.type === "loading" && isDerivedStage(message.stage)) for (const listener of this.loadingListeners) listener(message.stage);
+      if (message.type === "reading" && typeof message.step === "string") for (const listener of this.readingListeners) listener(message.step);
       if (message.requestId !== null) {
         this.waiting.get(message.requestId)?.(message);
         this.waiting.delete(message.requestId);
@@ -65,6 +68,12 @@ export class SaveClient {
   onLoading(listener: LoadingListener): () => void {
     this.loadingListeners.add(listener);
     return () => void this.loadingListeners.delete(listener);
+  }
+
+  /** Called as the worker passes each step of reading the save, before `onOpening` (#450). */
+  onReading(listener: ReadingListener): () => void {
+    this.readingListeners.add(listener);
+    return () => void this.readingListeners.delete(listener);
   }
 
   /** Asks the worker to save now. Resolves with the status after the write. */
